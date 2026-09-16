@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { Badge, Box, Button, Callout, Code, Flex, Heading, ScrollArea, Separator, Tabs, Text, TextField, Card } from '@radix-ui/themes'
 import { Play, CheckCircle, Warning, ArrowCounterClockwise, Trash, Robot, Flask, GitDiff, ChatCircleText, Terminal, HourglassMedium } from '@phosphor-icons/react'
 
-const STEP_LABEL = { prepare: 'Preparar', test: 'Claude escreve o teste', red: 'Prova vermelha', fix: 'Claude corrige', tests: 'Testes verdes', checker: 'Codex revisa' }
+const STEP_LABEL = { prepare: 'Preparar', test: 'Claude escreve o teste', red: 'Teste falha antes (prova)', fix: 'Claude corrige o código', tests: 'Teste passa depois', checker: 'Codex revisa' }
+const STEP_HELP = { prepare: 'Roda os testes que já existem para saber o ponto de partida.', test: 'A IA escreve só um teste novo que descreve o que você pediu.', red: 'O teste novo tem de FALHAR no código atual. Se já passasse, não estaria testando nada de novo.', fix: 'Só agora a IA mexe no código, o mínimo para o teste passar.', tests: 'Todos os testes, o novo e os antigos, precisam passar.', checker: 'Outra IA (Codex, da OpenAI) lê a alteração e aprova ou pede mudanças.' }
 const STATE_LABEL = { running: 'Em andamento', awaiting_operator: 'Aguardando você', complete: 'Pronta', discarded: 'Descartada' }
 const REASON_LABEL = {
   tests_red: 'Algum teste ficou vermelho.',
   no_new_test: 'A IA não escreveu um teste novo que prove a correção.',
-  no_red_test: 'O teste novo não ficou vermelho no código atual, então não prova nada.',
+  no_red_test: 'O teste novo não falhou no código antigo (ou não foi criado). Um teste que já passava antes da correção não prova que a correção funciona. Veja a aba Testes.',
   review_changes: 'O revisor (Codex) pediu mudanças.',
   no_changes: 'A IA não alterou nenhum arquivo.',
   engine_error: 'O engine falhou. Veja o log.',
@@ -15,7 +16,7 @@ const REASON_LABEL = {
 }
 
 export default function App() {
-  const [state, setState] = useState({ mission: null, log: [] })
+  const [state, setState] = useState({ mission: null, log: [], live: null })
   const [request, setRequest] = useState('O botão Entrar tem de ficar desabilitado enquanto o envio está em curso, para evitar duplo clique.')
   const [tab, setTab] = useState('activity')
   const [connected, setConnected] = useState(false)
@@ -81,11 +82,18 @@ export default function App() {
                 <StateBadge state={m.state} />
                 <Text size="1" color="gray">rodada {m.round || 1}</Text>
               </Flex>
+              <Flex gap="1" style={{ height: 5 }}>
+                {['prepare', 'test', 'red', 'fix', 'tests', 'checker'].map((name) => {
+                  const st = m.steps.find((x) => x.name === name)?.status || 'pending'
+                  const bg = { pending: 'var(--gray-a4)', running: 'var(--teal-9)', done: 'var(--green-9)', failed: 'var(--amber-9)', skipped: 'var(--gray-a6)' }[st]
+                  return <Box key={name} style={{ flex: 1, borderRadius: 2, background: bg, opacity: st === 'running' ? 0.9 : 1 }} />
+                })}
+              </Flex>
               <Separator size="4" />
               <Flex direction="column" gap="2">
                 {['prepare', 'test', 'red', 'fix', 'tests', 'checker'].map((name) => {
                   const s = m.steps.find((x) => x.name === name)
-                  return <StepRow key={name} label={STEP_LABEL[name]} status={s?.status || 'pending'} />
+                  return <StepRow key={name} label={STEP_LABEL[name]} step={s} help={STEP_HELP[name]} />
                 })}
               </Flex>
               <Separator size="4" />
@@ -118,7 +126,7 @@ export default function App() {
             </Tabs.List>
             <Box pt="3" style={{ flex: 1, minHeight: 0 }}>
               <ScrollArea style={{ height: '100%' }}>
-                {tab === 'activity' && <Activity log={state.log} running={running} />}
+                {tab === 'activity' && <Activity log={state.log} running={running} live={state.live} />}
                 {tab === 'diff' && <Diff diff={m?.diff} />}
                 {tab === 'tests' && <Tests m={m} />}
                 {tab === 'review' && <Review review={m?.review} />}
@@ -132,7 +140,7 @@ export default function App() {
           {!m ? <Text size="2" color="gray">Aparece aqui quando a missão começar.</Text> : (
             <Flex direction="column" gap="3">
               {m.state === 'running' && <Callout.Root color="teal"><Callout.Icon><HourglassMedium /></Callout.Icon><Callout.Text>Trabalhando. Nada para você fazer agora.</Callout.Text></Callout.Root>}
-              {m.state === 'complete' && <Callout.Root color="green"><Callout.Icon><CheckCircle /></Callout.Icon><Callout.Text>{m.reason === 'accepted_by_operator' ? 'Aceita por você. ' : 'Testes verdes, teste novo presente e revisor de outra família aprovou. '}As alterações estão em <Code>proto/example</Code>.</Callout.Text></Callout.Root>}
+              {m.state === 'complete' && <Callout.Root color="green"><Callout.Icon><CheckCircle /></Callout.Icon><Callout.Text>{m.reason === 'accepted_by_operator' ? 'Aceita por você. ' : 'O teste novo falhou antes e passou depois; o Codex aprovou. '}As alterações estão em <Code>proto/example</Code>.</Callout.Text></Callout.Root>}
               {m.state === 'discarded' && <Callout.Root color="gray"><Callout.Text>Descartada. Os arquivos voltaram ao estado original.</Callout.Text></Callout.Root>}
               {m.state === 'awaiting_operator' && (
                 <>
@@ -169,13 +177,17 @@ function StateBadge({ state }) {
   return <Badge color={color} variant="solid">{STATE_LABEL[state] || state}</Badge>
 }
 
-function StepRow({ label, status }) {
+function StepRow({ label, step, help }) {
+  const status = step?.status || 'pending'
+  const [, tick] = useState(0)
+  useEffect(() => { if (status !== 'running') return; const id = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(id) }, [status])
   const color = { pending: 'var(--gray-7)', running: 'var(--teal-9)', done: 'var(--green-9)', failed: 'var(--amber-9)', skipped: 'var(--gray-7)' }[status]
-  const text = { pending: 'na fila', running: 'agora', done: 'ok', failed: 'atenção', skipped: 'pulado' }[status]
+  const secs = step?.started_at ? Math.max(0, Math.round(((step.finished_at ? new Date(step.finished_at) : new Date()) - new Date(step.started_at)) / 1000)) : null
+  const text = { pending: 'na fila', running: `${secs ?? 0} s`, done: `${secs ?? 0} s`, failed: 'atenção', skipped: 'pulado' }[status]
   return (
     <Flex align="center" gap="2">
       <Box style={{ width: 8, height: 8, borderRadius: 4, background: color, boxShadow: status === 'running' ? `0 0 8px ${color}` : 'none' }} />
-      <Text size="2" style={{ flex: 1 }} color={status === 'pending' ? 'gray' : undefined}>{label}</Text>
+      <Text size="2" style={{ flex: 1 }} color={status === 'pending' ? 'gray' : undefined} title={help}>{label}</Text>
       <Text size="1" color="gray">{text}</Text>
     </Flex>
   )
@@ -185,21 +197,30 @@ function KV({ k, v }) {
   return <Flex justify="between" gap="3"><Text size="1" color="gray">{k}</Text><Text size="1">{v}</Text></Flex>
 }
 
-function Activity({ log, running }) {
+function Activity({ log, running, live }) {
   const end = useRef(null)
-  useEffect(() => { end.current?.scrollIntoView({ block: 'end' }) }, [log.length])
-  if (!log.length) return <Text size="2" color="gray">O que a IA faz aparece aqui, linha a linha.</Text>
+  const [showThinking, setShowThinking] = useState(true)
+  useEffect(() => { end.current?.scrollIntoView({ block: 'end' }) }, [log.length, live?.text?.length])
+  if (!log.length) return <Text size="2" color="gray">O que a IA faz aparece aqui, linha a linha: pensamento, ferramentas, resultado.</Text>
   const color = { engine: 'gray', claude: 'teal', codex: 'violet', operador: 'amber' }
+  const rows = showThinking ? log : log.filter((l) => l.kind !== 'thinking')
   return (
     <Box>
-      {log.map((l, i) => (
-        <div className="log-line" key={i}>
+      <Flex justify="end" mb="2"><Button size="1" variant="ghost" color="gray" onClick={() => setShowThinking((v) => !v)}>{showThinking ? 'Esconder pensamento' : 'Mostrar pensamento'}</Button></Flex>
+      {rows.map((l, i) => (
+        <div className={`log-line kind-${l.kind}`} key={i}>
           <time>{l.ts.slice(11, 19)}</time>
-          <Badge size="1" variant="soft" color={l.kind === 'error' ? 'red' : color[l.source] || 'gray'} style={{ justifySelf: 'start' }}>{l.source}</Badge>
-          <Text size="1" style={{ whiteSpace: 'pre-wrap', color: l.kind === 'tool' ? 'var(--gray-11)' : undefined }}>{l.text}</Text>
+          <Badge size="1" variant="soft" color={l.kind === 'error' ? 'red' : color[l.source] || 'gray'} style={{ justifySelf: 'start' }}>{l.kind === 'thinking' ? 'pensando' : l.kind === 'tool' ? 'ferramenta' : l.kind === 'result' ? 'resultado' : l.source}</Badge>
+          <Text size="1" className="log-text">{l.text}</Text>
         </div>
       ))}
-      {running && <Text size="1" color="gray" mt="2" as="p">…</Text>}
+      {running && (
+        <div className={`log-line live kind-${live?.kind || 'text'}`}>
+          <time>agora</time>
+          <Badge size="1" variant="solid" color={live?.source === 'codex' ? 'violet' : 'teal'} style={{ justifySelf: 'start' }}>{live ? (live.kind === 'thinking' ? 'pensando' : live.kind === 'tool' ? 'ferramenta' : 'escrevendo') : 'trabalhando'}</Badge>
+          <Text size="1" className="log-text">{live?.text || '…'}<span className="cursor" /></Text>
+        </div>
+      )}
       <div ref={end} />
     </Box>
   )
@@ -218,10 +239,12 @@ function Diff({ diff }) {
 }
 
 function Tests({ m }) {
-  if (!m?.tests_after) return <Text size="2" color="gray">{m?.tests_before ? `Linha de base: ${m.tests_before.total} testes, ${m.tests_before.failed} vermelhos. Esperando a IA terminar.` : 'Os testes rodam antes e depois da alteração.'}</Text>
+  const explain = <Callout.Root color="gray" variant="surface" mb="3"><Callout.Text><b>Como a ADE prova que a mudança funciona:</b> a IA escreve primeiro um teste novo. Esse teste tem de <b>falhar</b> no código antigo (prova que ele pega o problema) e <b>passar</b> depois da correção (prova que a correção resolve). Sem esse antes/depois, um teste verde não diz nada.</Callout.Text></Callout.Root>
+  if (!m?.tests_after) return <Box>{explain}<Text size="2" color="gray">{m?.tests_before ? `Ponto de partida: ${m.tests_before.total} testes, ${m.tests_before.failed} falhando. Esperando a IA terminar.` : 'Os testes rodam antes e depois da alteração.'}</Text></Box>
   const before = new Map(m.tests_before.tests.map((t) => [t.name, t.status]))
   return (
     <Box>
+      {explain}
       {m.tests_after.error && <Callout.Root color="red" mb="3"><Callout.Text><Code>{m.tests_after.error}</Code></Callout.Text></Callout.Root>}
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead><tr>{['Teste', 'Antes', 'Depois'].map((h) => <th key={h} style={{ textAlign: 'left', padding: '6px 8px', borderBottom: '1px solid var(--gray-a5)' }}><Text size="1" color="gray">{h}</Text></th>)}</tr></thead>

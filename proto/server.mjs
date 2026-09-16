@@ -16,7 +16,10 @@ const PORT = 4317
 const IS_WIN = process.platform === 'win32'
 
 // ---------- estado ----------
-const state = { mission: null, log: [], history: [] }
+const state = { mission: null, log: [], history: [], live: null }
+let pending = null
+function broadcastSoon() { if (pending) return; pending = setTimeout(() => { pending = null; broadcast() }, 150) }
+function setLive(live) { state.live = live; broadcastSoon() }
 const clients = new Set()
 
 function now() { return new Date().toISOString() }
@@ -27,7 +30,7 @@ async function journal(event) {
 }
 
 function log(source, text, kind = 'info') {
-  const line = { ts: now(), source, text: String(text).slice(0, 2000), kind }
+  const line = { ts: now(), source, text: String(text).slice(0, 4000), kind }
   state.log.push(line)
   if (state.log.length > 400) state.log.shift()
   journal({ type: 'log', ...line }).catch(() => {})
@@ -37,8 +40,9 @@ function log(source, text, kind = 'info') {
 function setStep(name, status, extra = {}) {
   const m = state.mission
   const step = m.steps.find((s) => s.name === name)
-  if (step) Object.assign(step, { status, ...extra })
-  else m.steps.push({ name, status, ...extra })
+  const stamp = status === 'running' ? { started_at: now() } : { finished_at: now() }
+  if (step) Object.assign(step, { status, ...stamp, ...extra })
+  else m.steps.push({ name, status, ...stamp, ...extra })
   journal({ type: 'step', name, status }).catch(() => {})
   broadcast()
 }
@@ -94,32 +98,62 @@ async function gitDiscard() {
   await run('git', ['clean', '-fd', '.'], { cwd: EXAMPLE })
 }
 
+function describeTool(c) {
+  const i = c.input || {}
+  const f = i.file_path ? path.relative(EXAMPLE, i.file_path) || path.basename(i.file_path) : ''
+  if (c.name === 'Edit') return `Edit ${f}\n- ${(i.old_string || '').split('\n')[0].slice(0, 100)}\n+ ${(i.new_string || '').split('\n')[0].slice(0, 100)}`
+  if (c.name === 'MultiEdit') return `MultiEdit ${f} (${(i.edits || []).length} edições)`
+  if (c.name === 'Write') return `Write ${f} (${(i.content || '').length} caracteres)`
+  if (c.name === 'Read') return `Read ${f}`
+  if (c.name === 'Glob') return `Glob ${i.pattern || ''}`
+  if (c.name === 'Grep') return `Grep ${i.pattern || ''}`
+  return `${c.name} ${f || i.command || ''}`.trim()
+}
+
 // ---------- maker: Claude Code ----------
 async function maker(prompt) {
   const m = state.mission
   // --safe-mode: sem CLAUDE.md/hooks/skills/MCP do usuário (isolamento, architecture.md E15).
   // --tools: só leitura e edição; o harness roda os testes. Prompt vai por stdin, então nada
   // é engolido pela flag variádica (E24).
-  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--safe-mode', '--permission-mode', 'acceptEdits', '--max-turns', '25', '--model', 'sonnet', '--tools', 'Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep']
+  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--safe-mode', '--permission-mode', 'acceptEdits', '--max-turns', '25', '--model', 'sonnet', '--tools', 'Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep']
   log('engine', `claude ${args.join(' ')}`)
-  let result = null
+  let result = null, liveBuf = null
   const r = await run('claude', args, {
     cwd: EXAMPLE, stdin: prompt,
     onLine: (line) => {
       let ev; try { ev = JSON.parse(line) } catch { return }
       if (ev.type === 'system' && ev.subtype === 'init') log('claude', `sessão iniciada · modelo ${ev.model}`)
+      if (ev.type === 'stream_event') {
+        const e = ev.event
+        if (e?.type === 'content_block_start') liveBuf = { kind: e.content_block?.type === 'thinking' ? 'thinking' : e.content_block?.type === 'tool_use' ? 'tool' : 'text', text: e.content_block?.name ? `${e.content_block.name} ` : '' }
+        if (e?.type === 'content_block_delta' && liveBuf) {
+          const d = e.delta || {}
+          liveBuf.text += d.thinking_delta ?? d.thinking ?? d.text ?? d.partial_json ?? ''
+          setLive({ source: 'claude', kind: liveBuf.kind, text: liveBuf.text.slice(-1200) })
+        }
+        if (e?.type === 'content_block_stop') { liveBuf = null; setLive(null) }
+      }
       if (ev.type === 'assistant') {
         for (const c of ev.message?.content || []) {
+          if (c.type === 'thinking' && c.thinking?.trim()) log('claude', c.thinking.trim(), 'thinking')
           if (c.type === 'text' && c.text.trim()) log('claude', c.text.trim(), 'text')
-          if (c.type === 'tool_use') {
-            const target = c.input?.file_path || c.input?.command || c.input?.pattern || ''
-            log('claude', `${c.name} ${path.basename(String(target))}`.trim(), 'tool')
+          if (c.type === 'tool_use') log('claude', describeTool(c), 'tool')
+        }
+      }
+      if (ev.type === 'user') {
+        for (const c of ev.message?.content || []) {
+          if (c.type === 'tool_result') {
+            const body = typeof c.content === 'string' ? c.content : (c.content || []).map((x) => x.text || '').join('\n')
+            const first = body.trim().split('\n').slice(0, 3).join('\n')
+            if (first) log('claude', first.slice(0, 240), c.is_error ? 'error' : 'result')
           }
         }
       }
       if (ev.type === 'result') result = ev
     },
   })
+  setLive(null)
   if (result) {
     m.cost.usd += result.total_cost_usd || 0
     m.cost.calls += 1
@@ -154,10 +188,14 @@ async function checker(diff, tests) {
     onLine: (line) => {
       let ev; try { ev = JSON.parse(line) } catch { return }
       if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') lastMessage = ev.item.text
-      if (ev.type === 'item.completed' && ev.item?.type === 'reasoning' && ev.item.text) log('codex', ev.item.text.slice(0, 300), 'text')
+      if (ev.type === 'item.started' && ev.item?.type === 'command_execution') setLive({ source: 'codex', kind: 'tool', text: ev.item.command || '' })
+      if (ev.type === 'item.completed' && ev.item?.type === 'command_execution') { setLive(null); log('codex', `$ ${ev.item.command}`.slice(0, 200), 'tool') }
+      if (ev.type === 'item.completed' && ev.item?.type === 'reasoning' && ev.item.text) log('codex', ev.item.text.slice(0, 600), 'thinking')
+      if (ev.type === 'item.started' && ev.item?.type === 'reasoning') setLive({ source: 'codex', kind: 'thinking', text: 'raciocinando…' })
       if (ev.type === 'turn.completed') usage = ev.usage
     },
   })
+  setLive(null)
   let review = null
   try { review = JSON.parse(lastMessage) } catch {
     log('engine', `codex não devolveu JSON válido (código ${r.code}): ${(lastMessage || r.err || r.out).slice(0, 300)}`, 'error')
@@ -180,7 +218,7 @@ const COMMON = [
 function testPrompt() {
   return [
     `Pedido do usuário: ${state.mission.request}`, ...COMMON,
-    'FASE 1 de 2: escreva APENAS um teste novo em src/login-form.test.js que reproduza o problema e que FALHE no código atual. Não altere nenhum outro arquivo e não corrija o código ainda.',
+    'FASE 1 de 2: escreva APENAS um teste novo (em um arquivo src/*.test.js existente ou novo) que descreva o comportamento pedido e que FALHE no código atual, porque o comportamento ainda não existe ou está errado. Não altere nenhum outro arquivo e não implemente nada ainda.',
     'Ao terminar, escreva uma frase com o nome exato do teste novo.',
   ].join('\n')
 }
@@ -191,7 +229,7 @@ function fixPrompt(round, review) {
   const base = [
     `Pedido do usuário: ${m.request}`, ...COMMON,
     `FASE 2 de 2: o harness rodou os testes e o teste novo está vermelho, como esperado:\n${red}`,
-    'Agora altere o código mínimo em src/login-form.js para o teste passar. Não modifique os testes. Não toque em nada fora do escopo do pedido.',
+    'Agora escreva o código mínimo em src/ para o teste passar (altere arquivo existente ou crie um novo). Não modifique os testes. Não toque em nada fora do escopo do pedido.',
     'Ao terminar, escreva uma frase dizendo o que mudou.',
   ]
   if (round > 1 && review) {
