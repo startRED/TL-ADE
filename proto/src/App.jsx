@@ -1,89 +1,138 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Badge, Button, Code, Heading, ScrollArea, Switch, TextField } from '@radix-ui/themes'
+import { Switch } from '@radix-ui/themes'
 import {
-  ArrowSquareOut, Play, CheckCircle, Warning, ArrowCounterClockwise, Trash, GitDiff,
-  FolderSimple, ClockCounterClockwise, GearSix, Pulse, Circle, CheckFat, X, Sparkle, Cpu, ListChecks, SkipForward, MagnifyingGlass,
-  Plus, Paperclip, FolderOpen, File as FileIcon,
+  ArrowSquareOut, ArrowLeft, ArrowCounterClockwise, Play, Trash, SkipForward, CheckCircle, XCircle, Warning,
+  Circle, CircleDashed, CaretRight, GitDiff, GitCommit, FolderSimple, FolderOpen, ClockCounterClockwise, GearSix,
+  Sparkle, UserCircle, Cpu, MagnifyingGlass, Plus, Paperclip, File as FileIcon, X, NotePencil, ListChecks,
+  TestTube, Wrench, Eye, ShieldCheck, ListBullets, Terminal, ImageSquare, Compass, Table, Storefront, List,
 } from '@phosphor-icons/react'
 
-const MISSION_STEPS = ['intent', 'plan', 'research', 'prepare', 'assets']
+/* ========================= textos e mapas ========================= */
 const ROLES_PT = { planner: 'planejador', maker: 'maker', checker: 'revisor', research: 'pesquisador' }
 const skillsByRole = (m) => !m?.skills ? {} : Array.isArray(m.skills) ? { maker: m.skills } : m.skills
 const allSkills = (m) => Object.entries(skillsByRole(m)).flatMap(([role, list]) => (Array.isArray(list) ? list : []).map((x) => ({ ...x, role })))
-const STORY_STEPS = ['test', 'red', 'fix', 'tests', 'visual', 'checker']
+
 const STEP = {
   intent: { title: 'Entender o pedido', help: 'Uma IA lê o seu pedido, decide o tamanho, os domínios e quais skills cada papel (planejador, maker, revisor, pesquisador) vai receber.' },
-  plan: { title: 'Montar o plano', help: 'O planejador, já com as skills dele, explora o projeto e divide o trabalho em partes (stories), cada uma com critérios de aceite e como provar.' },
-  research: { title: 'Pesquisar fatos', help: 'Só quando o plano depende de algo externo (versão de API, regra pública). O Google (agy) responde com fontes.' },
+  plan: { title: 'Montar o plano', help: 'O planejador, já com as skills dele, explora o projeto e divide o trabalho em partes, cada uma com critérios de aceite e como provar.' },
+  research: { title: 'Pesquisar fatos', help: 'Só quando o plano depende de algo externo, como a versão de uma API ou uma regra pública. A busca responde com fontes.' },
   prepare: { title: 'Conferir o projeto', help: 'Roda o que o projeto já tem de verificação, para saber o ponto de partida.' },
-  assets: { title: 'Gerar imagens', help: 'Quando o plano pede fotos ou ilustrações, o Codex gera as imagens ($imagegen) e salva em assets/img antes de qualquer parte começar.' },
-  test: { title: 'Escrever a prova', help: 'Uma "prova" é um mini-programa que checa se o que você pediu funciona. A IA escreve só isso, sem mexer no código ainda.' },
-  red: { title: 'Prova falha no código antigo', help: 'A ADE roda a prova ANTES de qualquer mudança. Ela tem de falhar, porque o que você pediu ainda não existe. Se passasse agora, a prova estaria checando a coisa errada.' },
+  assets: { title: 'Gerar imagens', help: 'Quando o plano pede fotos ou ilustrações, a segunda IA gera as imagens e salva no projeto antes de qualquer parte começar.' },
+  test: { title: 'Prova', help: 'Uma "prova" é um mini-programa que checa se o que você pediu funciona. A IA escreve só isso, sem mexer no código ainda.' },
+  red: { title: 'Falha antes', help: 'A ADE roda a prova ANTES de qualquer mudança. Ela tem de falhar, porque o que você pediu ainda não existe. Se passasse agora, a prova estaria checando a coisa errada.' },
   fix: { title: 'Implementar', help: 'Só agora a IA muda o código, seguindo as skills ativas, o mínimo para a prova passar e os critérios valerem.' },
-  tests: { title: 'Prova passa no código novo', help: 'Roda a prova de novo. Agora tem de passar. Falhou antes e passou depois: é isso que garante que funciona.' },
-  visual: { title: 'Portão visual', help: 'Quando há interface, o Impeccable varre o código atrás de cara de template (cores gritantes, fontes batidas, layout genérico). Se achar algo, a IA faz uma rodada de retoque.' },
-  checker: { title: 'Segunda IA revisa', help: 'Uma IA de outra empresa (Codex) lê a mudança e aprova ou aponta problemas. Quem escreve nunca é quem aprova.' },
+  tests: { title: 'Passa depois', help: 'Roda a prova de novo. Agora ela tem de passar. Falhou antes e passou depois: é isso que garante que funciona.' },
+  visual: { title: 'Visual', help: 'Quando há interface, um detector varre o código atrás de cara de template: cores gritantes, fontes batidas, layout genérico. Se achar algo, a IA faz uma rodada de retoque.' },
+  checker: { title: 'Revisão', help: 'Uma IA de outra empresa lê a mudança e aprova ou aponta problemas. Quem escreve nunca é quem aprova.' },
+  commit: { title: 'Commit', help: 'Com a prova verde e o revisor de acordo, a ADE grava a mudança no histórico da sua pasta. Dá para voltar atrás depois.' },
 }
+const STORY_FLOW = [
+  { name: 'test', icon: TestTube }, { name: 'red', icon: XCircle }, { name: 'fix', icon: Wrench },
+  { name: 'tests', icon: CheckCircle }, { name: 'visual', icon: Eye }, { name: 'checker', icon: ShieldCheck },
+  { name: 'commit', icon: GitCommit },
+]
+const STATUS_PT = { pending: 'ainda não', running: 'fazendo agora', done: 'feito', failed: 'deu problema', warn: 'com avisos', skipped: 'pulado' }
 const STATE = {
-  planning: { label: 'Entendendo o pedido', color: 'teal' },
-  awaiting_plan: { label: 'Plano pronto', color: 'amber' },
-  running: { label: 'Em andamento', color: 'teal' },
-  awaiting_operator: { label: 'Precisa de você', color: 'amber' },
-  complete: { label: 'Pronta', color: 'green' },
-  discarded: { label: 'Descartada', color: 'gray' },
-}
-const fmtTok = (n) => n >= 1e6 ? `${(n / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n || 0)
-const fmtUsd = (n) => `US$ ${(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-const fmtWhen = (iso) => iso ? new Date(iso).toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : ''
-function Quota({ q }) {
-  const c = q?.claude, x = q?.codex
-  const win = (w, name) => w ? <span className="quota-win"><b>{w.used}%</b> {name}{w.resets_at ? <small> · zera {fmtWhen(w.resets_at)}</small> : null}</span> : null
-  return (
-    <div className="quota">
-      <div className="quota-row"><span className="quota-vendor">Claude</span>{c ? <>{win(c.five_hour, 'da sessão de 5 h')}{win(c.seven_day, 'da semana')}<small className="dim">lido {fmtWhen(c.at)}</small></> : <small className="dim">sem leitura ainda: abra o Claude Code uma vez (a linha de status grava a cota)</small>}</div>
-      <div className="quota-row"><span className="quota-vendor">Codex</span>{x ? <>{win(x.five_hour, 'da sessão de 5 h')}{win(x.seven_day, 'da semana')}<small className="dim">lido {fmtWhen(x.at)}</small></> : <small className="dim">sem sessão do Codex ainda</small>}</div>
-      <div className="quota-row"><span className="quota-vendor">Antigravity</span><small className="dim">não expõe: abra o agy → Models &amp; Quota</small></div>
-    </div>
-  )
+  planning: { label: 'Entendendo o pedido', tone: 'accent' },
+  awaiting_plan: { label: 'Plano pronto', tone: 'warn' },
+  running: { label: 'Em andamento', tone: 'accent' },
+  awaiting_operator: { label: 'Precisa de você', tone: 'warn' },
+  complete: { label: 'Pronta', tone: 'good' },
+  discarded: { label: 'Descartada', tone: 'mute' },
 }
 const REASON = {
   tests_red: 'Alguma prova ficou vermelha depois da implementação.',
-  no_red_test: 'A prova que a IA escreveu já passava no código antigo (ou ela não escreveu prova). Então não serve para provar a mudança.',
-  review_changes: 'A segunda IA (Codex) pediu mudanças e a IA não convergiu em 4 rodadas.',
-  review_failed: 'O revisor (Codex) não respondeu. Veja o erro na atividade; "Mais uma rodada" tenta de novo.',
+  no_red_test: 'A prova que a IA escreveu já passava no código antigo, ou ela não escreveu prova. Assim a prova não serve para garantir a mudança.',
+  review_changes: 'A segunda IA pediu mudanças e quem escreve não conseguiu fechar em 4 rodadas.',
+  review_failed: 'O revisor não respondeu. Veja o erro na atividade completa; "Mais uma rodada" tenta de novo.',
   no_changes: 'A IA não alterou nenhum arquivo.',
-  engine_error: 'O motor falhou. Veja a atividade.',
+  engine_error: 'O motor falhou. Veja a atividade completa.',
   plan_failed: 'Não deu para transformar o pedido em plano. Reescreva o pedido com mais contexto.',
   approve_plan: 'O plano tem várias partes. Confira e aprove.',
   questions: 'A IA precisa de uma resposta sua antes de começar.',
 }
-const VIEW_TITLE = { mission: 'Missão', skills: 'Skills', models: 'Modelos', history: 'Histórico', projects: 'Projetos', options: 'Opções' }
-const ROLE_LABEL = { intent: 'Entender o pedido e escolher skills', planner: 'Planejar (entender o pedido)', maker: 'Escrever código e provas', checker: 'Revisar (outra empresa)', research: 'Pesquisar fatos' }
+const COMPLEXITY_PT = { trivial: 'pedido pequeno', bounded: 'pedido curto', feature: 'funcionalidade', subsystem: 'trabalho grande' }
+const ROLE_CARD = {
+  intent: { label: 'Entender o pedido', icon: Compass, note: 'Lê o que você escreveu, mede o tamanho e escolhe as skills de cada papel.' },
+  planner: { label: 'Planejar', icon: ListChecks, note: 'Divide o trabalho em partes, com critérios de aceite e como provar cada uma.' },
+  maker: { label: 'Escrever código e provas', icon: Wrench, note: 'Escreve a prova primeiro e depois o código que faz a prova passar.' },
+  checker: { label: 'Revisar', icon: ShieldCheck, note: 'De outra empresa. Lê a mudança e aprova ou aponta problemas. Quem escreve nunca aprova.' },
+  research: { label: 'Pesquisar fatos', icon: MagnifyingGlass, note: 'Busca na internet quando o plano depende de uma informação de fora.' },
+}
+const PAGE_TITLE = { skills: 'Skills', models: 'Modelos', history: 'Pedidos anteriores', projects: 'Projetos', options: 'Opções' }
 const SUGGESTIONS = [
-  'Crie uma planilha financeira de gastos pessoais, com categorias, total por mês e visual profissional.',
-  'Crie a página inicial de um site de uma cafeteria, com cardápio, horário e um formulário de reserva.',
-  'Crie uma lista de tarefas com prioridade e filtro, salvando no navegador.',
+  { icon: Table, text: 'Crie uma planilha financeira de gastos pessoais, com categorias, total por mês e visual profissional.' },
+  { icon: Storefront, text: 'Crie a página inicial de um site de uma cafeteria, com cardápio, horário e um formulário de reserva.' },
+  { icon: ListBullets, text: 'Crie uma lista de tarefas com prioridade e filtro, salvando no navegador.' },
 ]
+
+/* ========================= helpers ========================= */
+const fmtTok = (n) => n >= 1e6 ? `${(n / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n || 0)
+const fmtUsd = (n) => `US$ ${(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const fmtWhen = (iso) => iso ? new Date(iso).toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : ''
+const fmtHour = (iso) => iso ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''
 const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 const secsBetween = (a, b) => Math.max(0, Math.round(((b ? new Date(b) : new Date()) - new Date(a)) / 1000))
+const missionStep = (m, name) => (m?.steps || []).find((x) => x.name === name)
+const tail = (text, n = 2) => (text || '').trim().split('\n').filter(Boolean).slice(-n).join(' ').slice(-200)
+const cur = (m) => m && m.current != null ? m.stories[m.current] : (m?.stories?.find((s) => s.state === 'blocked') || null)
 
+function storyStepStatus(st, name, m) {
+  if (name === 'commit') return st.state === 'done' ? 'done' : st.state === 'skipped' ? 'skipped' : st.state === 'blocked' ? 'failed' : 'pending'
+  if (name === 'visual' && !m?.plan?.needs_ui) return 'skipped'
+  const hits = (st.steps || []).filter((x) => x.name === name)
+  return hits.length ? hits[hits.length - 1].status : 'pending'
+}
+function storyStatusLine(st, m) {
+  const r = st.round || 1
+  if (st.state === 'queued') return 'Na fila. Começa assim que a parte anterior terminar.'
+  if (st.state === 'skipped') return 'Você pulou esta parte. O que ela tinha mexido foi desfeito.'
+  if (st.state === 'blocked') return REASON[m.reason] || 'Esta parte parou e precisa de você.'
+  if (st.state === 'done') {
+    const t = st.tests_after ? `${st.tests_after.total - st.tests_after.failed} de ${st.tests_after.total} provas passando` : 'provas verdes'
+    const v = st.review?.verdict === 'approve' ? 'o revisor aprovou' : st.review ? 'o revisor pediu ajustes e a IA atendeu' : 'revisada'
+    return `Pronta em ${r} rodada${r > 1 ? 's' : ''}: ${t}, ${v} e a mudança foi gravada na sua pasta.`
+  }
+  const doing = [...(st.steps || [])].reverse().find((x) => x.status === 'running')
+  const busy = {
+    test: 'a IA está escrevendo a prova',
+    red: 'a ADE está rodando a prova no código antigo, ela tem de falhar agora',
+    fix: 'a IA está mudando o código',
+    tests: 'a ADE está rodando as provas outra vez',
+    visual: 'o detector está conferindo o visual',
+    checker: 'a segunda IA está revisando a mudança',
+  }[doing?.name] || 'preparando esta parte'
+  return r > 1 ? `Rodada ${r} de 4: o revisor pediu mudanças e ${busy}.` : `${busy[0].toUpperCase()}${busy.slice(1)}.`
+}
+function storySummary(st) {
+  const bits = []
+  bits.push(`${st.round || 1} rodada${(st.round || 1) > 1 ? 's' : ''}`)
+  if (st.tests_after) bits.push(`${st.tests_after.total - st.tests_after.failed}/${st.tests_after.total} provas`)
+  if (st.review) bits.push(st.review.verdict === 'approve' ? 'aprovada' : 'com ajustes')
+  if (st.state === 'skipped') bits.push('pulada')
+  return bits.join(' · ')
+}
+
+const pendingDecision = (m) => !m ? null : m.state === 'awaiting_plan' ? (m.reason === 'questions' ? 'questions' : 'plan') : m.state === 'awaiting_operator' ? 'operator' : null
+const PENDING_WHY = {
+  questions: 'A IA quer saber como você prefere o programa antes de montar o plano.',
+  plan: 'O plano está pronto. Confira as partes e diga se pode começar.',
+}
+
+/* ========================= app ========================= */
 export default function App() {
   const [state, setState] = useState({ project: null, mission: null, log: [], history: [], live: null, recent: [], settings: null, catalog: [], registry: {}, attachments: [] })
+  const [request, setRequest] = useState('')
   const [menu, setMenu] = useState(false)
   const [attachErr, setAttachErr] = useState(null)
-  async function attachFiles(payload) { setAttachErr(null); const r = await post('/api/attach', payload); if (!r.ok) { const j = await r.json().catch(() => ({})); setAttachErr(j.error || 'Não anexou.') } }
-  async function pick(kind) { setMenu(false); const r = await post('/api/pick', { kind }); const j = await r.json().catch(() => ({})); const paths = j.paths || []; if (!paths.length) return; if (kind === 'folder') { const pr = await post('/api/project', { dir: paths[0] }); if (!pr.ok) { const e = await pr.json().catch(() => ({})); setError(e.error || 'Não abriu a pasta.') } else { setView('mission'); setError(null) } } else await attachFiles({ paths }) }
-  async function onPaste(e) {
-    const files = [...(e.clipboardData?.files || [])]; if (!files.length) return
-    e.preventDefault()
-    const encoded = await Promise.all(files.map((f) => new Promise((res) => { const rd = new FileReader(); rd.onload = () => res({ name: f.name && f.name !== 'image.png' ? f.name : `colado-${Date.now().toString(36)}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`, data: rd.result }); rd.readAsDataURL(f) })))
-    await attachFiles({ files: encoded })
-  }
-  const [request, setRequest] = useState('')
-  const [tab, setTab] = useState('plan')
   const [connected, setConnected] = useState(false)
-  const [view, setView] = useState('mission')
+  const [page, setPage] = useState(null)
   const [error, setError] = useState(null)
+  const [drawer, setDrawer] = useState(false)
+  const [nav, setNav] = useState(false)
+  const [side, setSide] = useState(false)
+  const [cleared, setCleared] = useState(null)
+  const ask = useRef(null)
 
   useEffect(() => {
     const es = new EventSource('/api/events')
@@ -93,170 +142,545 @@ export default function App() {
   }, [])
 
   const m = state.mission, p = state.project, s = state.settings
-  const busy = m && ['running', 'planning'].includes(m.state)
-  useEffect(() => { if (m?.state === 'planning') setTab('activity'); if (m?.state === 'awaiting_plan') setTab('plan') }, [m?.state])
+  const busy = !!m && ['running', 'planning'].includes(m.state)
+  const live = !!m && !['complete', 'discarded'].includes(m.state)
+  const shown = m && m.id !== cleared ? m : null
+  const need = pendingDecision(shown)
 
+  useEffect(() => { if (m?.id && m.id !== cleared) setCleared(null) }, [m?.id])
+  useEffect(() => { document.title = need ? '● TL-ADE' : 'TL-ADE' }, [need])
+  useEffect(() => { if (need) setSide(true) }, [need])
+
+  async function attachFiles(payload) { setAttachErr(null); const r = await post('/api/attach', payload); if (!r.ok) { const j = await r.json().catch(() => ({})); setAttachErr(j.error || 'Não anexou.') } }
+  async function pick(kind) {
+    setMenu(false)
+    const r = await post('/api/pick', { kind }); const j = await r.json().catch(() => ({})); const paths = j.paths || []
+    if (!paths.length) return
+    if (kind === 'folder') { const pr = await post('/api/project', { dir: paths[0] }); if (!pr.ok) { const e = await pr.json().catch(() => ({})); setError(e.error || 'Não abriu a pasta.') } else { setPage(null); setError(null) } }
+    else await attachFiles({ paths })
+  }
+  async function onPaste(e) {
+    const files = [...(e.clipboardData?.files || [])]; if (!files.length) return
+    e.preventDefault()
+    const encoded = await Promise.all(files.map((f) => new Promise((res) => {
+      const rd = new FileReader()
+      rd.onload = () => res({ name: f.name && f.name !== 'image.png' ? f.name : `colado-${Date.now().toString(36)}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`, data: rd.result })
+      rd.readAsDataURL(f)
+    })))
+    await attachFiles({ files: encoded })
+  }
   async function run(text) {
     const req = (text ?? request).trim()
     if (!req || busy) return
-    setView('mission'); setError(null)
+    setPage(null); setError(null); setCleared(null); setRequest('')
     const r = await post('/api/run', { request: req })
-    if (!r.ok) { const j = await r.json().catch(() => ({})); setError(j.error || 'Não deu para começar.'); if (/git|pasta/i.test(j.error || '')) setView('projects'); if (/Modelos/.test(j.error || '')) setView('models') }
+    if (!r.ok) { const j = await r.json().catch(() => ({})); setRequest(req); setError(j.error || 'Não deu para começar.'); if (/git|pasta/i.test(j.error || '')) setPage('projects'); if (/Modelos/.test(j.error || '')) setPage('models') }
   }
-  const decide = (option, text) => post('/api/decide', typeof text === 'object' ? { option, ...text } : { option, text })
-  const saveSettings = (patch) => post('/api/settings', patch)
+  const decide = (option, extra) => post('/api/decide', typeof extra === 'object' ? { option, ...extra } : { option, text: extra })
+  const save = (patch) => post('/api/settings', patch)
+  const go = (name) => { setPage(name); setNav(false); setDrawer(false) }
+  function novoPedido() {
+    setPage(null); setNav(false); setError(null)
+    if (m) setCleared(m.id)
+    setTimeout(() => ask.current?.focus(), 30)
+  }
 
-  const showReport = view === 'mission' && !!m
-
+  const showSide = !page && !!shown
   return (
-    <div className="shell">
-      <div className={`body${showReport ? '' : ' wide'}`}>
-        <nav className="sidebar" aria-label="Seções">
-          <div className="brand"><span className="logo" />TL-ADE<span className="dim small">demonstração</span></div>
-          <button className="proj-btn" onClick={() => setView('projects')} title={p?.dir || ''}>
-            <FolderSimple size={15} />
+    <div className={`shell${showSide ? ' has-side' : ''}`}>
+      {nav && <button className="scrim" aria-label="Fechar o menu" onClick={() => setNav(false)} />}
+      <nav className={`sidebar${nav ? ' open' : ''}`} aria-label="Navegação">
+        <div className="brand"><span className="brand-mark" aria-hidden="true"><Sparkle weight="fill" /></span><span className="brand-name">TL-ADE</span><span className="brand-tag">demonstração</span></div>
+
+        <button className="new-req" onClick={novoPedido} disabled={live}><NotePencil weight="bold" /> Novo pedido</button>
+        {need && <button className="need-badge" onClick={() => { setPage(null); setSide(true); setNav(false) }}><Warning weight="fill" /> 1 decisão esperando você</button>}
+
+        <div className="side-block">
+          <span className="side-lbl">Projeto</span>
+          <button className="proj-card" onClick={() => go('projects')} title={p?.dir || 'escolha uma pasta'}>
+            <span className="proj-ico"><FolderSimple weight="fill" /></span>
             <span className="proj-txt">
               <b>{p?.name || 'Nenhuma pasta'}</b>
-              <small>{p ? `${p.branch || 'sem git'} · ${p.runner === 'none' ? 'sem provas' : p.runner}${p.files === 0 ? ' · vazia' : ''}` : 'escolha uma pasta'}</small>
+              <small>{p ? `${p.branch || 'sem histórico'} · ${p.runner === 'none' ? 'sem provas' : p.runner}` : 'escolha uma pasta'}</small>
             </span>
             <span className="proj-swap">trocar</span>
           </button>
-          <ul className="nav">
-            <NavItem icon={<Pulse />} label="Missão" active={view === 'mission'} onClick={() => setView('mission')} badge={m && ['awaiting_operator', 'awaiting_plan'].includes(m.state)} />
-            <NavItem icon={<Sparkle />} label="Skills" active={view === 'skills'} onClick={() => setView('skills')} />
-            <NavItem icon={<Cpu />} label="Modelos" active={view === 'models'} onClick={() => setView('models')} />
-            <NavItem icon={<ClockCounterClockwise />} label="Histórico" active={view === 'history'} onClick={() => setView('history')} />
-            <NavItem icon={<FolderSimple />} label="Projetos" active={view === 'projects'} onClick={() => setView('projects')} />
-            <NavItem icon={<GearSix />} label="Opções" active={view === 'options'} onClick={() => setView('options')} />
-          </ul>
-          {view === 'mission' && <div className="side-scroll"><Progress m={m} quota={state.quota} /></div>}
-        </nav>
+        </div>
 
-        <main className="main">
-          <header className="head">
-            <span className="head-title">{VIEW_TITLE[view]}</span>
-            <span className="grow" />
-            {showReport && <MissionChip m={m} />}
-            {p?.has_index && <a className="open-app" href="/api/app/" target="_blank" rel="noreferrer"><ArrowSquareOut /> Abrir o app</a>}
-          </header>
+        <div className="side-block grow-block">
+          <span className="side-lbl">Pedidos anteriores</span>
+          <div className="side-hist">
+            {state.history?.length ? state.history.slice(0, 7).map((h) => (
+              <button key={h.id} className={`hist-item${h.id === m?.id ? ' now' : ''}`} onClick={() => go('history')} title={h.request}>
+                <span className="hist-top"><span className="hist-title">{h.title || h.request}</span><span className={`dot-${STATE[h.state]?.tone || 'mute'}`} aria-hidden="true">●</span></span>
+                <span className="hist-sub"><span>{h.project?.split(/[\\/]/).pop()}</span><span className="mono">{fmtHour(h.finished_at)} · {fmtUsd(h.usd)}</span></span>
+              </button>
+            )) : <p className="side-none">Os pedidos que terminarem aparecem aqui.</p>}
+            {state.history?.length > 7 && <button className="link side-more" onClick={() => go('history')}>ver todos os {state.history.length}</button>}
+          </div>
+        </div>
 
-          {error && <div className="errbar"><Warning weight="fill" /> {error}</div>}
+        <div className="side-foot">
+          <div className="side-links">
+            <button className={page === 'skills' ? 'on' : ''} onClick={() => go('skills')}><Sparkle /> Skills</button>
+            <button className={page === 'models' ? 'on' : ''} onClick={() => go('models')}><Cpu /> Modelos</button>
+            <button className={page === 'options' ? 'on' : ''} onClick={() => go('options')}><GearSix /> Opções</button>
+          </div>
+          <Quota q={state.quota} />
+          <p className="side-status"><span className={connected ? 'ok' : 'bad'}>●</span> {connected ? 'servidor ligado' : 'sem servidor'}</p>
+        </div>
+      </nav>
 
-          {view !== 'mission' ? (
-            <div className="page">
-              {view === 'skills' && <SkillsPanel state={state} save={saveSettings} />}
-              {view === 'models' && <ModelsPanel state={state} save={saveSettings} />}
-              {view === 'history' && <History history={state.history} current={m} />}
-              {view === 'projects' && <Projects p={p} recent={state.recent} busy={busy} onChanged={() => { setView('mission'); setError(null) }} />}
-              {view === 'options' && <Options s={s} save={saveSettings} />}
-            </div>
+      <main className="main">
+        <header className="head">
+          <button className="icon-btn only-narrow" onClick={() => setNav(true)} aria-label="Abrir o menu"><List /></button>
+          {page ? (
+            <><button className="ghost-btn" onClick={() => setPage(null)}><ArrowLeft /> Voltar</button><span className="head-title">{PAGE_TITLE[page]}</span></>
           ) : (
-            <>
-              <div className="center">
-                {!m ? <Empty onPick={(t) => { setRequest(t); run(t) }} busy={busy} p={p} /> : (
-                  <>
-                    <div className="main-head reading">
-                      <Heading size="5" style={{ letterSpacing: '-0.02em' }}>{m.plan?.title || m.request}</Heading>
-                      <p className="dim small">{m.plan ? m.request : `${m.id} · começou às ${m.started_at.slice(11, 16)}`}</p>
-                    </div>
-                    <div className="tabs">
-                      <div className="tabs-inner reading" role="tablist">
-                        <Tab active={tab === 'plan'} onClick={() => setTab('plan')} count={m.stories.length || null}>Plano</Tab>
-                        <Tab active={tab === 'activity'} onClick={() => setTab('activity')}>Atividade</Tab>
-                        <Tab active={tab === 'diff'} onClick={() => setTab('diff')}>Alterações</Tab>
-                        <Tab active={tab === 'tests'} onClick={() => setTab('tests')} {...testsBadge(m)}>Provas</Tab>
-                        <Tab active={tab === 'visual'} onClick={() => setTab('visual')} {...visualBadge(m)}>Visual</Tab>
-                        <Tab active={tab === 'review'} onClick={() => setTab('review')} {...reviewBadge(m)}>Revisão</Tab>
-                      </div>
-                    </div>
-                    <ScrollArea className="main-body" scrollbars="vertical">
-                      {tab === 'plan' && <Plan m={m} catalog={state.catalog} />}
-                      {tab === 'activity' && <Console log={state.log} busy={busy} live={state.live} />}
-                      {tab === 'diff' && <Diff m={m} />}
-                      {tab === 'tests' && <Tests m={m} />}
-                      {tab === 'visual' && <Visual m={m} />}
-                      {tab === 'review' && <Review m={m} />}
-                    </ScrollArea>
-                  </>
-                )}
-              </div>
-
-              <form className="composer" onSubmit={(e) => { e.preventDefault(); run() }} onDrop={(e) => { e.preventDefault(); onPaste({ clipboardData: e.dataTransfer, preventDefault() {} }) }} onDragOver={(e) => e.preventDefault()}>
-                <div className="composer-inner">
-                  <div className="composer-box">
-                    {(state.attachments?.length > 0 || attachErr) && (
-                      <div className="attachments">
-                        {state.attachments.map((a) => (
-                          <span className="chip" key={a.name} title={a.path}>
-                            {a.image ? <img src={`/api/app/${a.path}`} alt="" /> : <FileIcon />}
-                            <span>{a.name}</span>
-                            <button type="button" onClick={() => post('/api/attach/remove', { name: a.name })} title="Remover"><X /></button>
-                          </span>
-                        ))}
-                        {attachErr && <span className="chip bad">{attachErr}</span>}
-                      </div>
-                    )}
-                    <div className="composer-row">
-                      <div className="plus-wrap">
-                        <button type="button" className="plus" title="Anexar" onClick={() => setMenu((v) => !v)} disabled={busy}><Plus weight="bold" /></button>
-                        {menu && (
-                          <div className="menu" onMouseLeave={() => setMenu(false)}>
-                            <button type="button" onClick={() => pick('files')}><Paperclip /> Adicionar arquivos ou fotos <kbd>Ctrl+V</kbd></button>
-                            <button type="button" onClick={() => pick('folder')}><FolderOpen /> Escolher a pasta do projeto</button>
-                          </div>
-                        )}
-                      </div>
-                      <textarea
-                        className="ask" rows={1} value={request} disabled={busy}
-                        onChange={(e) => setRequest(e.target.value)} onPaste={onPaste}
-                        onInput={(e) => { e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 176)}px` }}
-                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run() } }}
-                        placeholder={p ? `O que construir em ${p.name}? Escreva do seu jeito; cole imagens com Ctrl+V.` : 'Escolha uma pasta primeiro (botão +)'}
-                      />
-                      <button className="run" type="submit" disabled={busy || !request.trim()}>{busy ? 'Rodando' : 'Rodar'}</button>
-                    </div>
-                  </div>
-                  {s && <p className="composer-hint">{s.roles.planner.model} planeja · {s.roles.maker.model} escreve · {s.roles.checker.model} revisa · comandos {s.allow_commands ? 'liberados' : 'bloqueados'}</p>}
-                </div>
-              </form>
-            </>
+            <><span className="head-title">{shown ? (shown.plan?.title || 'Seu pedido') : 'Conversa'}</span>{shown && <MissionChip m={shown} />}</>
           )}
-        </main>
+          <span className="grow" />
+          {showSide && <button className={`ghost-btn only-mid${need ? ' warn' : ''}`} onClick={() => setSide(true)}><ListChecks /> Sua vez</button>}
+          {!page && <button className={`ghost-btn${drawer ? ' on' : ''}`} onClick={() => setDrawer((v) => !v)}><Terminal /> Atividade completa</button>}
+        </header>
 
-        {showReport && <aside className="right"><Report m={m} decide={decide} /></aside>}
-      </div>
+        {error && <div className="errbar"><Warning weight="fill" /><span>{error}</span><button onClick={() => setError(null)} aria-label="Fechar"><X /></button></div>}
 
-      <footer className="status">
-        <span className={connected ? 'ok' : 'bad'}>{connected ? '● servidor ligado' : '○ sem servidor'}</span>
-        <span title={p?.dir}>{p ? p.dir : 'sem pasta'}</span>
-        <span className="grow" />
-        {m && <span>{m.cost.calls} chamadas · {fmtTok(m.cost.tokens_in + m.cost.tokens_out)} tokens · {fmtUsd(m.cost.usd)} no Claude</span>}
-      </footer>
+        {page ? (
+          <div className="page">
+            {page === 'skills' && <SkillsPage state={state} save={save} />}
+            {page === 'models' && <ModelsPage state={state} save={save} />}
+            {page === 'history' && <HistoryPage history={state.history} current={m} />}
+            {page === 'projects' && <ProjectsPage p={p} recent={state.recent} busy={busy} onChanged={() => { setPage(null); setError(null) }} />}
+            {page === 'options' && <OptionsPage s={s} save={save} />}
+          </div>
+        ) : (
+          <>
+            {shown
+              ? <Conversation state={state} m={shown} />
+              : <Empty p={p} busy={busy} onPick={(t) => run(t)} />}
+
+            <form className="composer" onSubmit={(e) => { e.preventDefault(); run() }} onDrop={(e) => { e.preventDefault(); onPaste({ clipboardData: e.dataTransfer, preventDefault() {} }) }} onDragOver={(e) => e.preventDefault()}>
+              <div className="composer-inner">
+                <div className="composer-box">
+                  {(state.attachments?.length > 0 || attachErr) && (
+                    <div className="attachments">
+                      {state.attachments.map((a) => (
+                        <span className="att-chip" key={a.name} title={a.path}>
+                          {a.image ? <img src={`/api/app/${a.path}`} alt="" /> : <FileIcon />}
+                          <span>{a.name}</span>
+                          <button type="button" onClick={() => post('/api/attach/remove', { name: a.name })} aria-label={`Remover ${a.name}`}><X /></button>
+                        </span>
+                      ))}
+                      {attachErr && <span className="att-chip bad">{attachErr}</span>}
+                    </div>
+                  )}
+                  <div className="composer-row">
+                    <div className="plus-wrap">
+                      <button type="button" className="plus" aria-label="Anexar" onClick={() => setMenu((v) => !v)} disabled={live}><Plus weight="bold" /></button>
+                      {menu && (
+                        <div className="menu" onMouseLeave={() => setMenu(false)}>
+                          <button type="button" onClick={() => pick('files')}><Paperclip /> Adicionar arquivos ou fotos <kbd>Ctrl+V</kbd></button>
+                          <button type="button" onClick={() => pick('folder')}><FolderOpen /> Escolher a pasta do projeto</button>
+                        </div>
+                      )}
+                    </div>
+                    <textarea
+                      ref={ask} className="ask" rows={1} value={request} disabled={live}
+                      onChange={(e) => setRequest(e.target.value)} onPaste={onPaste}
+                      onInput={(e) => { e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 176)}px` }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run() } }}
+                      placeholder={live ? 'Rodando… espere terminar ou decida ao lado' : p ? `O que construir em ${p.name}? Escreva do seu jeito; cole imagens com Ctrl+V.` : 'Escolha uma pasta primeiro, no botão +'}
+                    />
+                    <button className="run" type="submit" disabled={live || !request.trim()}>{busy ? 'Rodando' : 'Rodar'}</button>
+                  </div>
+                </div>
+                {s && <p className="composer-hint"><span className="mono">{s.roles.planner.model}</span> planeja · <span className="mono">{s.roles.maker.model}</span> escreve · <span className="mono">{s.roles.checker.model}</span> revisa · comandos {s.allow_commands ? 'liberados' : 'bloqueados'}</p>}
+              </div>
+            </form>
+          </>
+        )}
+      </main>
+
+      {showSide && (
+        <>
+          {side && <button className="scrim side-scrim" aria-label="Fechar" onClick={() => setSide(false)} />}
+          <aside className={`turn${side ? ' open' : ''}`} aria-label="Sua vez">
+            <TurnPanel m={shown} state={state} decide={decide} need={need} onNew={novoPedido} onClose={() => setSide(false)} />
+          </aside>
+        </>
+      )}
+
+      {drawer && !page && (
+        <aside className="drawer" aria-label="Atividade completa">
+          <div className="drawer-head"><Terminal /><b>Atividade completa</b><span className="grow" /><button className="icon-btn" onClick={() => setDrawer(false)} aria-label="Fechar"><X /></button></div>
+          <div className="drawer-body"><Console log={state.log} busy={busy} live={state.live} /></div>
+        </aside>
+      )}
     </div>
   )
 }
 
-const cur = (m) => m && m.current != null ? m.stories[m.current] : (m?.stories?.find((s) => s.state === 'blocked') || null)
-function testsBadge(m) { const st = cur(m); if (!st?.tests_after) return {}; return { count: `${st.tests_after.total - st.tests_after.failed}/${st.tests_after.total}`, tone: st.tests_after.ok ? 'green' : 'red' } }
-function visualBadge(m) { const st = cur(m); if (!st?.visual?.available) return {}; return { count: st.visual.findings.length, tone: st.visual.findings.length ? 'amber' : 'green' } }
-function reviewBadge(m) { const st = cur(m); if (!st?.review) return {}; return { count: st.review.verdict === 'approve' ? 'ok' : st.review.findings.length, tone: st.review.verdict === 'approve' ? 'green' : 'amber' } }
+/* ========================= painel "Sua vez" ========================= */
+function TurnPanel({ m, state, decide, need, onNew, onClose }) {
+  const [text, setText] = useState('')
+  const st = cur(m)
+  const why = need === 'operator' ? (REASON[m.reason] || m.reason) : PENDING_WHY[need]
+  return (
+    <>
+      <div className={`turn-head${need ? ' hot' : ''}`}>
+        <div className="turn-head-top">
+          <span className="turn-ico" aria-hidden="true">{need ? <Warning weight="fill" /> : <ListChecks />}</span>
+          <b>{need ? 'Precisa de você' : 'Sua vez'}</b>
+          <span className="grow" />
+          <button className="icon-btn only-mid" onClick={onClose} aria-label="Fechar"><X /></button>
+        </div>
+        <p>{need ? why : 'Nada para decidir agora.'}</p>
+      </div>
 
-/* ---------- topo ---------- */
+      <div className="turn-body">
+        {need === 'questions' && <Interview questions={m.plan.questions} onAnswer={(answers) => decide('answer', { answers })} onSkip={() => decide('start')} />}
+
+        {need === 'plan' && (
+          <>
+            <p className="turn-note">São {m.stories.length} parte{m.stories.length > 1 ? 's' : ''}, feitas uma de cada vez. Cada uma só é gravada depois de passar na prova e na revisão.</p>
+            <div className="decide">
+              <button className="act primary" onClick={() => decide('start')}><Play weight="fill" /><span><b>Começar</b><small>{m.stories.length} parte{m.stories.length > 1 ? 's' : ''}, uma de cada vez.</small></span></button>
+            </div>
+            <label className="field">
+              <span className="field-lbl">Quer mudar algo?</span>
+              <textarea className="ta" rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder="Escreva do seu jeito: tirar uma parte, juntar duas, trocar as cores, adicionar…" />
+            </label>
+            <div className="decide">
+              <button className="act" disabled={!text.trim()} onClick={() => { decide('revise', text); setText('') }}><ArrowCounterClockwise /><span><b>Pedir mudanças</b><small>O planejador refaz e você confere de novo.</small></span></button>
+              <button className="act danger" onClick={() => decide('discard')}><Trash /><span><b>Descartar</b><small>Nada é alterado no projeto.</small></span></button>
+            </div>
+          </>
+        )}
+
+        {need === 'operator' && (
+          <>
+            {st && <p className="turn-note">Parada na parte {(m.stories.indexOf(st) + 1) || 1}: {st.title}.</p>}
+            <div className="decide">
+              <button className="act primary" onClick={() => decide('accept')}><CheckCircle weight="fill" /><span><b>Aceitar como está</b><small>Grava esta parte e segue para a próxima.</small></span></button>
+              <button className="act" onClick={() => decide('retry')}><ArrowCounterClockwise /><span><b>Mais uma rodada</b><small>A IA recebe os problemas e tenta de novo.</small></span></button>
+              <button className="act" onClick={() => decide('skip')}><SkipForward /><span><b>Pular esta parte</b><small>Desfaz só ela e segue.</small></span></button>
+              <button className="act danger" onClick={() => decide('discard')}><Trash /><span><b>Descartar tudo</b><small>Volta os arquivos ao que eram antes.</small></span></button>
+            </div>
+          </>
+        )}
+
+        {!need && m.state === 'complete' && (
+          <>
+            <p className="turn-done"><CheckCircle weight="fill" /> Tudo pronto e gravado na sua pasta.</p>
+            <div className="decide">
+              {state.project?.has_index && <a className="act primary" href="/api/app/" target="_blank" rel="noreferrer"><ArrowSquareOut /><span><b>Abrir o app</b><small>Vê o resultado no navegador.</small></span></a>}
+              <button className="act" onClick={onNew}><NotePencil /><span><b>Novo pedido</b><small>Começa outra coisa nesta pasta.</small></span></button>
+            </div>
+          </>
+        )}
+
+        {!need && m.state === 'discarded' && (
+          <div className="decide"><button className="act" onClick={onNew}><NotePencil /><span><b>Novo pedido</b><small>Os arquivos voltaram ao que eram.</small></span></button></div>
+        )}
+
+        {!need && ['running', 'planning'].includes(m.state) && (
+          <>
+            <span className="side-lbl">O que a IA está fazendo</span>
+            <p className="turn-live">{tail(state.live?.text, 3) || 'Começando…'}</p>
+            {st && <p className="turn-note">Parte {m.current + 1} de {m.stories.length}: {st.title}.</p>}
+          </>
+        )}
+
+        <div className="turn-nums">
+          <div><span>Chamadas de IA</span><b className="mono">{m.cost.calls}</b></div>
+          <div><span>Custo</span><b className="mono">{fmtUsd(m.cost.usd)}</b></div>
+          <div><span>Tokens</span><b className="mono">{fmtTok(m.cost.tokens_in + m.cost.tokens_out)}</b></div>
+          <div><span>Cache lido</span><b className="mono">{fmtTok(m.cost.cache_read || 0)}</b></div>
+        </div>
+      </div>
+    </>
+  )
+}
+
+/* ========================= peças de conversa ========================= */
+function Ade({ time, children, kind = '' }) {
+  return (
+    <article className={`msg ade ${kind}`}>
+      <div className="msg-who"><span className="av ade-av" aria-hidden="true"><Sparkle weight="fill" /></span><span className="who-name">TL-ADE</span>{time && <time className="mono">{fmtHour(time)}</time>}</div>
+      <div className="msg-card">{children}</div>
+    </article>
+  )
+}
+function You({ time, children }) {
+  return (
+    <article className="msg you">
+      <div className="msg-who"><span className="who-name">Você</span>{time && <time className="mono">{fmtHour(time)}</time>}<span className="av you-av" aria-hidden="true"><UserCircle weight="fill" /></span></div>
+      <div className="msg-card">{children}</div>
+    </article>
+  )
+}
+const Typing = ({ live }) => (
+  <div className="typing">
+    <span className="dots" aria-hidden="true"><i /><i /><i /></span>
+    <span className="typing-txt">{tail(live?.text) || 'trabalhando…'}</span>
+  </div>
+)
+const Skeleton = ({ lines = 3 }) => <div className="skel" aria-hidden="true">{Array.from({ length: lines }, (_, i) => <span key={i} style={{ width: `${[92, 78, 64, 84][i % 4]}%` }} />)}</div>
+const Chip = ({ children, tone = 'mute' }) => <span className={`chip tone-${tone}`}>{children}</span>
+const STORY_CHIP = { done: 'pronta', running: 'em andamento', blocked: 'parou', skipped: 'pulada', queued: 'na fila' }
+const STORY_TONE = { done: 'good', running: 'accent', blocked: 'warn', skipped: 'mute', queued: 'mute' }
+
+function Fold({ title, icon, meta, tone, children, open: initial = false }) {
+  const [open, setOpen] = useState(initial)
+  return (
+    <div className={`fold${open ? ' open' : ''}`}>
+      <button type="button" className="fold-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <CaretRight className="fold-caret" aria-hidden="true" />
+        <span className="fold-ico" aria-hidden="true">{icon}</span>
+        <span className="fold-title">{title}</span>
+        {meta && <span className={`fold-meta tone-${tone || 'mute'}`}>{meta}</span>}
+      </button>
+      {open && <div className="fold-body">{children}</div>}
+    </div>
+  )
+}
+
 function MissionChip({ m }) {
-  const s = STATE[m.state] || { label: m.state, color: 'gray' }
+  const s = STATE[m.state] || { label: m.state, tone: 'mute' }
   const [, tick] = useState(0)
   useEffect(() => { if (!['running', 'planning'].includes(m.state)) return; const id = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(id) }, [m.state])
   const secs = secsBetween(m.started_at, m.finished_at)
-  return <div className="chip"><Badge color={s.color} variant={m.state.startsWith('awaiting') ? 'solid' : 'soft'} size="2">{s.label}</Badge><span className="dim small">{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}</span></div>
-}
-function NavItem({ icon, label, active, onClick, badge }) {
-  return <li><button className={`nav-btn ${active ? 'active' : ''}`} onClick={onClick} aria-current={active ? 'page' : undefined}>{icon}<span>{label}</span>{badge && <span className="nav-dot" />}</button></li>
-}
-function Tab({ active, onClick, children, count, tone }) {
-  return <button role="tab" aria-selected={active} className={`tab ${active ? 'active' : ''}`} onClick={onClick}><span>{children}</span>{count != null && <span className={`tab-count ${tone || ''}`}>{count}</span>}</button>
+  return <span className="head-chip"><Chip tone={s.tone}>{s.label}</Chip><span className="mono dim small">{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}</span></span>
 }
 
-/* ---------- lateral: progresso (épicos = stories) ---------- */
+/* ========================= a conversa ========================= */
+function Conversation({ state, m }) {
+  const end = useRef(null)
+  const busy = ['running', 'planning'].includes(m.state)
+  useEffect(() => { if (busy) end.current?.scrollIntoView({ block: 'end', behavior: 'smooth' }) }, [m.state, m.current, state.log.length, busy])
+  const intentStep = missionStep(m, 'intent')
+  const assetsStep = missionStep(m, 'assets')
+  const started = m.state !== 'awaiting_plan'
+  const done = m.stories.filter((s) => s.state === 'done').length
+
+  return (
+    <div className="talk">
+      <div className="talk-inner">
+        <You time={m.started_at}>
+          <p className="you-text">{m.request}</p>
+          {m.attachments?.length > 0 && (
+            <div className="thumbs">
+              {m.attachments.map((a) => a.image
+                ? <img key={a.name} src={`/api/app/${a.path}`} alt={a.name} title={a.name} />
+                : <span key={a.name} className="thumb-file"><FileIcon /> {a.name}</span>)}
+            </div>
+          )}
+        </You>
+
+        {(m.intent || intentStep) && (
+          <Ade>
+            <h3 className="msg-h">Entendi o pedido</h3>
+            {m.intent ? <>
+              <p className="msg-p">{m.intent.summary}</p>
+              <div className="chip-row">
+                <Chip tone="accent">{COMPLEXITY_PT[m.intent.complexity] || m.intent.complexity}</Chip>
+                {m.intent.needs_ui && <Chip>tem interface</Chip>}
+                {(m.intent.domains || []).map((d) => <Chip key={d}>{d}</Chip>)}
+              </div>
+            </> : intentStep.status === 'running' ? <Skeleton lines={2} /> : null}
+            {allSkills(m).length > 0 && (
+              <Fold title="Ver as skills escolhidas" icon={<Sparkle />} meta={`${allSkills(m).length} manuais`}>
+                {Object.entries(skillsByRole(m)).map(([role, list]) => (
+                  <div key={role} className="role-line">
+                    <span className="role-name">{ROLES_PT[role]}</span>
+                    {list?.length ? <div className="chip-row">{list.map((x) => <span key={x.id} className="skill-chip" title={x.reason}>{x.id}<small>{x.reason}</small></span>)}</div> : <span className="dim small">nenhuma</span>}
+                  </div>
+                ))}
+              </Fold>
+            )}
+            {intentStep?.status === 'running' && <Typing live={state.live} />}
+          </Ade>
+        )}
+
+        {m.state === 'awaiting_plan' && m.reason === 'questions' && (
+          <Ade kind="ask"><h3 className="msg-h">Tenho uma dúvida</h3><p className="msg-p">Antes de montar o plano, responda ao lado, no painel "Precisa de você". São perguntas de múltipla escolha e a primeira opção já é a recomendada.</p></Ade>
+        )}
+
+        {m.answers?.length > 0 && <You><p className="you-text">{m.answers.map((a) => a.answer).join(' · ')}</p></You>}
+        {(m.plan_feedback || []).map((f, i) => <You key={i}><p className="you-text">{f}</p></You>)}
+
+        {m.state === 'planning' && !m.plan && (
+          <Ade><h3 className="msg-h">Montando o plano</h3><p className="msg-p">Estou lendo o projeto para dividir o trabalho em partes pequenas, cada uma com o que precisa valer no fim.</p><Skeleton /><Typing live={state.live} /></Ade>
+        )}
+
+        {m.plan && m.stories.length > 0 && (
+          <Ade>
+            <h3 className="msg-h">O plano</h3>
+            {m.plan.explanation && <p className="msg-lead">{m.plan.explanation}</p>}
+            {!started && (
+              <ol className="plan-lines">
+                {m.stories.map((s, i) => (
+                  <li key={s.id}><span className="pl-n mono">{i + 1}</span><span className="pl-t">{s.title}</span><Chip tone={STORY_TONE[s.state]}>{STORY_CHIP[s.state]}</Chip></li>
+                ))}
+              </ol>
+            )}
+            {m.plan.assets?.length > 0 && !started && <Assets m={m} />}
+          </Ade>
+        )}
+
+        {assetsStep && (
+          <Ade>
+            <h3 className="msg-h">Gerando as imagens</h3>
+            <p className="msg-p">{(m.assets_done || []).length} de {m.plan?.assets?.length || 0} prontas. As imagens entram no projeto antes das partes começarem.</p>
+            <Assets m={m} />
+            {assetsStep.status === 'running' && <Typing live={state.live} />}
+          </Ade>
+        )}
+
+        {started && m.stories.length > 0 && (
+          <div className="story-stack">
+            <span className="side-lbl">Partes · {done} de {m.stories.length} prontas</span>
+            {m.stories.map((st, i) => ['running', 'blocked'].includes(st.state)
+              ? <StoryCard key={st.id} st={st} i={i} m={m} state={state} />
+              : <StoryRow key={st.id} st={st} i={i} m={m} state={state} />)}
+          </div>
+        )}
+
+        {m.state === 'complete' && (
+          <Ade kind="good" time={m.finished_at}>
+            <h3 className="msg-h">Pronta</h3>
+            <p className="msg-lead">{done} de {m.stories.length} parte{m.stories.length > 1 ? 's' : ''} provada{m.stories.length > 1 ? 's' : ''}, revisada{m.stories.length > 1 ? 's' : ''} e gravada{m.stories.length > 1 ? 's' : ''} na sua pasta.</p>
+            <div className="final-grid">
+              <div><span>Custo</span><b className="mono">{fmtUsd(m.cost.usd)}</b></div>
+              <div><span>Chamadas de IA</span><b className="mono">{m.cost.calls}</b></div>
+              <div><span>Tokens</span><b className="mono">{fmtTok(m.cost.tokens_in + m.cost.tokens_out)}</b></div>
+              <div><span>Tempo</span><b className="mono">{Math.max(1, Math.round(secsBetween(m.started_at, m.finished_at) / 60))} min</b></div>
+            </div>
+            <p className="dim small">O que fazer agora está no painel ao lado.</p>
+          </Ade>
+        )}
+
+        {m.state === 'discarded' && (
+          <Ade kind="mute"><h3 className="msg-h">Descartada</h3><p className="msg-p">Os arquivos voltaram ao que eram antes do pedido. Nada ficou pela metade.</p></Ade>
+        )}
+
+        <div ref={end} className="talk-end" />
+      </div>
+    </div>
+  )
+}
+
+function Assets({ m }) {
+  const list = m.plan?.assets || []
+  if (!list.length) return null
+  return (
+    <>
+      {m.plan.assets_style && <p className="dim small">Direção de arte: {m.plan.assets_style}</p>}
+      <div className="assets-grid">
+        {list.map((a) => {
+          const ok = (m.assets_done || []).some((d) => d.file === a.file)
+          return (
+            <figure key={a.file} className={ok ? 'done' : ''}>
+              {ok ? <img src={`/api/app/${a.file}?t=${m.assets_done.length}`} alt={a.purpose} /> : <div className="ph"><ImageSquare />{m.state === 'running' ? 'gerando…' : 'ainda não'}</div>}
+              <figcaption><b className="mono">{a.file.replace('assets/img/', '')}</b><small>{a.purpose}</small></figcaption>
+            </figure>
+          )
+        })}
+      </div>
+    </>
+  )
+}
+
+/* ========================= uma parte do trabalho ========================= */
+const STEP_ICON = {
+  done: <CheckCircle weight="fill" />, failed: <XCircle weight="fill" />, warn: <Warning weight="fill" />,
+  running: <Circle weight="fill" />, skipped: <CircleDashed />, pending: <Circle />,
+}
+function Stepper({ st, m }) {
+  const [help, setHelp] = useState(null)
+  return (
+    <div className="stepper-wrap">
+      <ol className="stepper">
+        {STORY_FLOW.map((f) => {
+          const status = storyStepStatus(st, f.name, m)
+          const on = help === f.name
+          return (
+            <li key={f.name} className={`sp ${status}${on ? ' open' : ''}`}>
+              <button type="button" className="sp-dot" onClick={() => setHelp(on ? null : f.name)} onMouseEnter={() => setHelp(f.name)} onMouseLeave={() => setHelp((h) => h === f.name ? null : h)} aria-label={`${STEP[f.name].title}: ${STATUS_PT[status]}`}>
+                {STEP_ICON[status]}
+              </button>
+              <span className="sp-label">{STEP[f.name].title}</span>
+            </li>
+          )
+        })}
+      </ol>
+      {help && <p className="sp-help"><b>{STEP[help].title}.</b> {STEP[help].help}</p>}
+    </div>
+  )
+}
+function StoryFolds({ st, m, state, i, open }) {
+  const logs = useMemo(() => state.log.filter((l) => l.story === i), [state.log, i])
+  return (
+    <div className="story-folds">
+      <Fold title="Provas" icon={<TestTube />} meta={st.tests_after ? `${st.tests_after.total - st.tests_after.failed}/${st.tests_after.total}` : null} tone={st.tests_after?.ok ? 'good' : st.tests_after ? 'bad' : 'mute'} open={open}>
+        <Tests st={st} m={m} />
+      </Fold>
+      <Fold title="Alterações" icon={<GitDiff />} meta={st.diff ? `${(st.diff.match(/^diff --git/gm) || []).length} arquivo(s)` : null}>
+        <Diff st={st} />
+      </Fold>
+      {m.plan?.needs_ui && (
+        <Fold title="Visual" icon={<Eye />} meta={st.visual?.available ? `${st.visual.findings.length} achado(s)` : null} tone={st.visual?.findings?.length ? 'warn' : 'good'}>
+          <Visual st={st} m={m} />
+        </Fold>
+      )}
+      <Fold title="Revisão" icon={<ShieldCheck />} meta={st.review ? (st.review.verdict === 'approve' ? 'aprovado' : `${st.review.findings.length} ponto(s)`) : null} tone={st.review?.verdict === 'approve' ? 'good' : 'warn'} open={st.state === 'blocked'}>
+        <Review st={st} />
+      </Fold>
+      <Fold title="Atividade desta parte" icon={<Terminal />} meta={logs.length ? `${logs.length} linhas` : null}>
+        {logs.length ? <Console log={logs} busy={false} live={null} bare /> : <p className="hint">Ainda não há registro desta parte.</p>}
+      </Fold>
+    </div>
+  )
+}
+function StoryCard({ st, i, m, state }) {
+  return (
+    <Ade kind={`story ${st.state}`}>
+      <div className="story-head">
+        <h3 className="msg-h">Parte {i + 1} · {st.title}</h3>
+        <Chip tone={STORY_TONE[st.state]}>{STORY_CHIP[st.state]}</Chip>
+      </div>
+      <Stepper st={st} m={m} />
+      <p className="story-line">{storyStatusLine(st, m)}</p>
+      {st.state === 'running' && <Typing live={state.live} />}
+      <StoryFolds st={st} m={m} state={state} i={i} open={st.state === 'running'} />
+    </Ade>
+  )
+}
+function StoryRow({ st, i, m, state }) {
+  const [open, setOpen] = useState(false)
+  const can = st.state !== 'queued'
+  return (
+    <div className={`st-row ${st.state}${open ? ' open' : ''}`}>
+      <button className="st-row-head" onClick={() => can && setOpen((v) => !v)} aria-expanded={open} disabled={!can}>
+        <span className="st-mark" aria-hidden="true">{st.state === 'done' ? <CheckCircle weight="fill" /> : st.state === 'skipped' ? <SkipForward /> : <Circle />}</span>
+        <span className="st-n mono">{i + 1}</span>
+        <span className="st-txt"><b>{st.title}</b>{can && <small>{storySummary(st)}</small>}</span>
+        <Chip tone={STORY_TONE[st.state]}>{STORY_CHIP[st.state]}</Chip>
+        {can && <CaretRight className="st-caret" aria-hidden="true" />}
+      </button>
+      {open && (
+        <div className="st-row-body">
+          <Stepper st={st} m={m} />
+          <p className="story-line">{storyStatusLine(st, m)}</p>
+          <StoryFolds st={st} m={m} state={state} i={i} open={false} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ========================= entrevista ========================= */
 function Interview({ questions, onAnswer, onSkip }) {
   const qs = (questions || []).map((q, i) => typeof q === 'string' ? { id: `q${i + 1}`, question: q, why: '', options: [], allow_other: true } : q)
   const [picked, setPicked] = useState(() => Object.fromEntries(qs.map((q) => [q.id, q.options?.[0]?.label || ''])))
@@ -265,88 +689,281 @@ function Interview({ questions, onAnswer, onSkip }) {
   const ready = answers.every((a) => a.answer)
   return (
     <>
-      <p className="dim small" style={{ margin: '0 0 8px' }}>A primeira opção é sempre a recomendada. Não sabe? Deixe como está.</p>
+      <p className="dim small">A primeira opção é sempre a recomendada. Não sabe? Deixe como está.</p>
       {qs.map((q) => (
         <div className="q-card" key={q.id}>
           <b>{q.question}</b>{q.why && <small className="dim"> {q.why}</small>}
           {q.options.map((o, i) => (
             <label className={'q-opt' + (picked[q.id] === o.label ? ' on' : '')} key={o.label}>
               <input type="radio" name={q.id} checked={picked[q.id] === o.label} onChange={() => setPicked({ ...picked, [q.id]: o.label })} />
-              <span><b>{o.label}</b>{i === 0 && <em> recomendado</em>}<small>{o.hint}</small></span>
+              <span><b>{o.label}{i === 0 && <em>recomendado</em>}</b><small>{o.hint}</small></span>
             </label>
           ))}
           {q.allow_other && (
             <label className={'q-opt' + (picked[q.id] === '__other' ? ' on' : '')}>
               <input type="radio" name={q.id} checked={picked[q.id] === '__other'} onChange={() => setPicked({ ...picked, [q.id]: '__other' })} />
-              <span><b>Outro</b><input className="ta" style={{ marginTop: 6 }} value={other[q.id] || ''} onFocus={() => setPicked({ ...picked, [q.id]: '__other' })} onChange={(e) => setOther({ ...other, [q.id]: e.target.value })} placeholder="Escreva do seu jeito" /></span>
+              <span><b>Outro</b><input className="ta" value={other[q.id] || ''} onFocus={() => setPicked({ ...picked, [q.id]: '__other' })} onChange={(e) => setOther({ ...other, [q.id]: e.target.value })} placeholder="Escreva do seu jeito" /></span>
             </label>
           )}
         </div>
       ))}
-      <div className="decide">
+      <div className="decide two">
         <button className="act primary" disabled={!ready} onClick={() => onAnswer(answers)}><CheckCircle weight="fill" /><span><b>Responder e montar o plano</b><small>O planejador usa as suas escolhas.</small></span></button>
-        <button className="act" onClick={onSkip}><Play weight="fill" /><span><b>Seguir com as recomendações</b></span></button>
+        <button className="act" onClick={onSkip}><Play weight="fill" /><span><b>Seguir com as recomendações</b><small>A IA escolhe por você.</small></span></button>
       </div>
     </>
   )
 }
-function Progress({ m, quota }) {
-  const [showAll, setShowAll] = useState(false)
-  const [, tick] = useState(0)
-  useEffect(() => { if (!m || !['running', 'planning'].includes(m.state)) return; const id = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(id) }, [m?.state])
-  if (!m) return (
-    <div className="steps">
-      <span className="lbl">Como a ADE trabalha</span>
-      <ol className="timeline">{[...MISSION_STEPS, ...STORY_STEPS].filter((n) => n !== 'research').map((n, i) => <StepRow key={n} i={i} s={{ name: n, status: 'pending', ...STEP[n] }} open />)}</ol>
-    </div>
-  )
-  const done = m.stories.filter((s) => s.state === 'done').length
-  const st = cur(m)
-  return (
-    <div className="steps">
-      <div className="steps-head"><span className="lbl" style={{ margin: 0 }}>{m.plan ? `Partes · ${done} de ${m.stories.length}` : 'Missão'}</span><button className="link" onClick={() => setShowAll((v) => !v)}>{showAll ? 'menos' : 'explicar tudo'}</button></div>
-      <div className="progress"><span style={{ '--p': m.stories.length ? done / m.stories.length : 0 }} /></div>
-      <ol className="timeline">
-        {MISSION_STEPS.filter((n) => n !== 'research' || m.steps.find((x) => x.name === 'research')).map((n, i) => <StepRow key={n} i={i} s={{ ...STEP[n], ...(m.steps.find((x) => x.name === n) || { status: 'pending' }), name: n }} open={showAll} />)}
-      </ol>
-      {m.stories.length > 0 && <span className="lbl" style={{ marginTop: 12 }}>Partes do trabalho</span>}
-      <ol className="stories">
-        {m.stories.map((s, i) => (
-          <li key={s.id} className={`story ${s.state} ${st === s ? 'cur' : ''}`}>
-            <span className="story-dot">{s.state === 'done' ? <CheckFat weight="fill" /> : s.state === 'blocked' ? <X weight="bold" /> : s.state === 'skipped' ? <SkipForward /> : s.state === 'running' ? <Circle weight="fill" /> : i + 1}</span>
-            <div className="story-body">
-              <div className="story-title"><span>{s.title}</span><span className="step-meta">{s.state === 'running' ? `rodada ${s.round}` : s.state === 'done' ? 'pronta' : s.state === 'blocked' ? 'parou' : s.state === 'skipped' ? 'pulada' : ''}</span></div>
-              {(st === s) && <ol className="timeline inner">{STORY_STEPS.filter((n) => n !== 'visual' || m.plan?.needs_ui).map((n, j) => <StepRow key={n} i={j} s={{ ...STEP[n], ...(s.steps.find((x) => x.name === n) || { status: 'pending' }), name: n }} open={showAll} />)}</ol>}
-            </div>
-          </li>
-        ))}
-      </ol>
-      <div className="stats">
-        <Stat k="Chamadas de IA" v={m.cost.calls} />
-        <Stat k="Tokens" v={`${fmtTok(m.cost.tokens_in)} novos · ${fmtTok(m.cost.cache_read || 0)} cache`} />
-        <Stat k="Custo no Claude" v={fmtUsd(m.cost.usd)} />
-      </div>
-      <span className="lbl">Cota do plano</span>
-      <Quota q={quota} />
-    </div>
-  )
-}
-function StepRow({ s, i, open }) {
-  const status = s.status || 'pending'
-  const secs = s.started_at ? secsBetween(s.started_at, s.finished_at) : null
-  const meta = { pending: '', running: `${secs ?? 0} s`, done: `ok · ${secs ?? 0} s`, failed: 'atenção', warn: 'avisos', skipped: 'pulado' }[status]
-  const show = open || status === 'running' || status === 'failed'
-  return (
-    <li className={`step ${status}`}>
-      <span className="step-dot">{status === 'done' ? <CheckFat weight="fill" /> : status === 'failed' ? <X weight="bold" /> : status === 'warn' ? <Warning weight="fill" /> : status === 'running' ? <Circle weight="fill" /> : <span>{i + 1}</span>}</span>
-      <div className="step-body"><div className="step-title"><span>{s.title}</span><span className="step-meta">{meta}</span></div>{show && <p className="step-help">{s.help}</p>}</div>
-    </li>
-  )
-}
-const Stat = ({ k, v }) => <div className="stat"><span>{k}</span><b>{v}</b></div>
 
-/* ---------- lateral: skills ---------- */
-function SkillsPanel({ state, save }) {
+/* ========================= provas, alterações, visual, revisão ========================= */
+const Hint = ({ children }) => <p className="hint">{children}</p>
+const Result = ({ s }) => !s ? <span className="dim small">não existia</span> : <span className={`res ${s === 'passed' ? 'ok' : 'bad'}`}>{s === 'passed' ? 'passou' : 'falhou'}</span>
+
+function Tests({ st, m }) {
+  if (!st?.tests_after) return <Hint>{m.tests_before ? `Ponto de partida: ${m.tests_before.total} provas, ${m.tests_before.failed} falhando. As provas desta parte rodam antes e depois da mudança.` : 'As provas rodam antes e depois da mudança.'}</Hint>
+  const before = new Map((m.tests_before?.tests || []).map((t) => [t.name, t.status]))
+  return (
+    <>
+      <p className="msg-p">A IA escreve a prova primeiro. Ela tem de falhar no código antigo e passar no código novo.</p>
+      {st.tests_after.error && <p className="bad-box mono">{st.tests_after.error}</p>}
+      <table className="tbl"><thead><tr><th>Prova</th><th>Antes</th><th>Depois</th></tr></thead><tbody>
+        {st.tests_after.tests.map((t) => { const b = before.get(t.name); return (
+          <tr key={t.name}><td><span className="mono">{t.name}</span>{!b && <span className="new">nova</span>}{t.message && <span className="dim small block">{t.message}</span>}</td><td><Result s={b} /></td><td><Result s={t.status} /></td></tr>
+        ) })}
+      </tbody></table>
+      <Hint>{st.red_tests?.length ? `Prova que falhou antes e serve de evidência: ${st.red_tests.map((t) => t.name).join(', ')}.` : 'Nenhuma prova nova falhou antes da mudança.'}</Hint>
+    </>
+  )
+}
+function Diff({ st }) {
+  const diff = st?.diff
+  if (!diff) return <Hint>Sem alterações nesta parte. Elas aparecem aqui assim que a IA mexer em algum arquivo.</Hint>
+  const files = []
+  for (const l of diff.split('\n')) { if (l.startsWith('diff --git')) files.push({ name: l.split(' b/')[1] || l, lines: [] }); else if (files.length) files[files.length - 1].lines.push(l) }
+  return <>{files.map((f) => (
+    <section key={f.name} className="file">
+      <div className="file-head"><GitDiff size={14} /><span className="mono">{f.name}</span><span className="grow" /><span className="mono add">+{f.lines.filter((l) => l.startsWith('+') && !l.startsWith('+++')).length}</span><span className="mono del">-{f.lines.filter((l) => l.startsWith('-') && !l.startsWith('---')).length}</span></div>
+      <pre>{f.lines.filter((l) => !/^(index|---|\+\+\+)/.test(l)).slice(0, 400).map((l, i) => <span key={i} className={l.startsWith('@@') ? 'h' : l.startsWith('+') ? 'a' : l.startsWith('-') ? 'd' : 'c'}>{l || ' '}</span>)}</pre>
+    </section>
+  ))}</>
+}
+function Visual({ st, m }) {
+  if (!m.plan?.needs_ui) return <Hint>Este pedido não tem interface, então o detector visual não roda.</Hint>
+  if (!st?.visual) return <Hint>O detector roda depois que as provas passam. Ele varre o código atrás de cara de template: fontes batidas, cores gritantes, três cards iguais.</Hint>
+  if (!st.visual.available) return <Hint>O detector visual não foi encontrado nesta máquina.</Hint>
+  return (
+    <>
+      <p className="dim small">{st.visual.findings.length} achado(s){st.visual.error ? ` · ${st.visual.error}` : ''}</p>
+      {st.visual.findings.length === 0
+        ? <p className="good-box">Nenhum sinal de template. O visual passou.</p>
+        : st.visual.findings.map((f, i) => <div key={i} className="finding medium"><div className="finding-head"><span className="sev">{f.rule}</span><span className="mono small">{f.file}{f.line ? `:${f.line}` : ''}</span></div><p>{f.message}</p></div>)}
+    </>
+  )
+}
+function Review({ st }) {
+  const review = st?.review
+  if (!review) return <Hint>A revisão pela segunda IA roda depois que a prova passa e o visual é conferido.</Hint>
+  return (
+    <>
+      <div className="verdict"><Chip tone={review.verdict === 'approve' ? 'good' : 'warn'}>{review.verdict === 'approve' ? 'Aprovado' : 'Pediu mudanças'}</Chip><span className="dim small">segunda IA, só leitura</span></div>
+      <p className="msg-p">{review.summary}</p>
+      {review.findings.length === 0 ? <Hint>Nenhum problema apontado.</Hint> : review.findings.map((f, i) => (
+        <div key={i} className={`finding ${f.severity}`}><div className="finding-head"><span className="sev">{({ high: 'grave', medium: 'médio', low: 'leve' })[f.severity] || f.severity}</span><span className="mono small">{f.file}</span></div><p>{f.problem}</p><p className="dim">Sugestão: {f.fix}</p></div>
+      ))}
+    </>
+  )
+}
+
+function Console({ log, busy, live, bare }) {
+  const end = useRef(null)
+  const [thinking, setThinking] = useState(false)
+  useEffect(() => { if (!bare) end.current?.scrollIntoView({ block: 'end' }) }, [log.length, live?.text?.length, bare])
+  const groups = useMemo(() => {
+    const out = []
+    for (const l of log) { if (!thinking && l.kind === 'thinking') continue; const g = out[out.length - 1]; const key = `${l.phase}|${l.story}`; if (g && g.key === key) g.lines.push(l); else out.push({ key, phase: l.phase, story: l.story, lines: [l] }) }
+    return out
+  }, [log, thinking])
+  const thoughts = log.filter((l) => l.kind === 'thinking').length
+  return (
+    <div className="console">
+      <div className="console-bar"><span className="dim small">{bare ? 'O que as IAs fizeram nesta parte.' : 'Tudo que as IAs fazem, na ordem.'}</span><button className="link" onClick={() => setThinking((v) => !v)}>{thinking ? 'esconder pensamento' : `mostrar pensamento${thoughts ? ` (${thoughts})` : ''}`}</button></div>
+      {groups.length === 0 && !busy && <p className="hint">Nada registrado ainda.</p>}
+      {groups.map((g, gi) => (
+        <section key={gi} className="phase">
+          <div className="phase-head">{g.story != null && <span className="phase-n mono">P{g.story + 1}</span>}{STEP[g.phase]?.title || 'Motor'}</div>
+          {g.lines.map((l, i) => <Line key={i} l={l} />)}
+        </section>
+      ))}
+      {busy && <div className={`line live ${live?.kind || ''}`}><span className="who" data-src={live?.source || 'claude'}>{live ? ({ thinking: 'pensando', tool: 'ferramenta', text: 'escrevendo' })[live.kind] || 'fazendo' : 'trabalhando'}</span><span className="txt">{live?.text || '…'}<span className="cursor" /></span></div>}
+      <div ref={end} />
+    </div>
+  )
+}
+function Line({ l }) {
+  const who = l.kind === 'thinking' ? 'pensou' : l.kind === 'tool' ? 'fez' : l.kind === 'result' ? 'viu' : l.kind === 'error' ? 'erro' : l.source === 'engine' ? 'motor' : l.source
+  return <div className={`line ${l.kind}`}><span className="who" data-src={l.source}>{who}</span><span className="txt">{l.text}</span><time>{l.ts.slice(11, 19)}</time></div>
+}
+
+/* ========================= vazio e cota ========================= */
+function Empty({ p, busy, onPick }) {
+  return (
+    <div className="talk empty">
+      <div className="empty-inner">
+        <h1 className="empty-h">O que você quer construir{p ? <> em <span className="accent">{p.name}</span></> : ''}?</h1>
+        <p className="empty-p">Escreva em português, do seu jeito: uma correção, uma tela, um app inteiro. A ADE entende o pedido, escolhe as skills, escreve as provas, implementa, confere o visual e manda outra IA revisar. Você só decide no fim.</p>
+        <span className="side-lbl center-lbl">Experimente</span>
+        <div className="sugs">
+          {SUGGESTIONS.map(({ icon: Ico, text }) => (
+            <button key={text} className="sug" onClick={() => onPick(text)} disabled={busy || !p}>
+              <span className="sug-ico"><Ico weight="fill" /></span>
+              <span className="sug-txt">{text}</span>
+              <CaretRight className="sug-go" />
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+function Bar({ pct }) { return <span className="bar"><span style={{ width: `${Math.min(100, pct)}%` }} /></span> }
+function Quota({ q }) {
+  const rows = [['Claude', q?.claude], ['Codex', q?.codex]]
+  return (
+    <div className="quota">
+      <span className="side-lbl">Cota do plano</span>
+      {rows.map(([name, v]) => (
+        <div className="quota-row" key={name}>
+          <span className="quota-top"><span>{name}</span>{v ? <span className="mono">{(v.five_hour || v.seven_day)?.used ?? 0}%</span> : <span className="dim small">sem leitura</span>}</span>
+          {v && <Bar pct={(v.five_hour || v.seven_day)?.used ?? 0} />}
+          {v && <span className="quota-note">{v.five_hour ? 'sessão de 5 h' : 'semana'} · lido {fmtWhen(v.at)}</span>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/* ========================= páginas ========================= */
+const Page = ({ title, note, children }) => (
+  <div className="page-inner">
+    <header className="page-head"><h1>{title}</h1>{note && <p>{note}</p>}</header>
+    {children}
+  </div>
+)
+const Card = ({ title, note, children, className = '' }) => (
+  <section className={`card ${className}`}>
+    {title && <header className="card-head"><h2>{title}</h2>{note && <p>{note}</p>}</header>}
+    {children}
+  </section>
+)
+
+function ModelsPage({ state, save }) {
+  const { settings: s, registry } = state
+  if (!s) return null
+  return (
+    <Page title="Modelos" note="Cada papel tem um modelo. Quem escreve e quem revisa têm de ser de empresas diferentes: é a regra que faz a revisão valer alguma coisa.">
+      <div className="role-cards">
+        {Object.entries(ROLE_CARD).map(([role, { label, icon: Ico, note }]) => (
+          <Card key={role} className="role-card">
+            <div className="role-card-top"><span className="role-ico"><Ico weight="fill" /></span><div><b>{label}</b><p>{note}</p></div></div>
+            <select className="sel" aria-label={label} value={`${(s.roles[role] || {}).family || 'claude'}|${(s.roles[role] || {}).model || ''}`} onChange={(e) => { const [f, mo] = e.target.value.split('|'); save({ roles: { [role]: { family: f, model: mo } } }) }}>
+              {Object.entries(registry).map(([fam, fr]) => <optgroup key={fam} label={fr.label}>{fr.models.map((mo) => <option key={mo.id} value={`${fam}|${mo.id}`}>{mo.label}{mo.note ? ` · ${mo.note}` : ''}</option>)}</optgroup>)}
+            </select>
+          </Card>
+        ))}
+      </div>
+      <p className="page-foot">Fable é o mais forte e o mais caro, cerca de US$ 0,60 só de abertura por chamada. Use para planejar pedidos grandes, não para escrever código linha a linha.</p>
+    </Page>
+  )
+}
+
+function OptionsPage({ s, save }) {
+  if (!s) return null
+  const Row = ({ title, note, control }) => <div className="opt-row"><div className="opt-txt"><b>{title}</b><small>{note}</small></div><div className="opt-ctl">{control}</div></div>
+  return (
+    <Page title="Opções" note="Como a ADE se comporta enquanto trabalha por você.">
+      <div className="opt-cards">
+        <Card title="Autonomia" note="Quanto ela faz sozinha antes de te chamar.">
+          <Row title="Deixar a IA rodar comandos" note="Instalar dependências, criar projeto. Desligue para ela só ler e editar arquivos." control={<Switch checked={s.allow_commands} onCheckedChange={(v) => save({ allow_commands: v })} />} />
+          <Row title="Depois de 4 rodadas de revisão" note="Segue sozinha: com as provas verdes e nada grave, aceita e vai para a próxima parte. Para e pergunta: você decide." control={<select className="sel" value={s.autonomy || 'auto'} onChange={(e) => save({ autonomy: e.target.value })}><option value="auto">segue sozinha</option><option value="ask">para e pergunta</option></select>} />
+          <Row title="Faixa rápida para correções pequenas" note="Pedido curto do tipo corrija, ajuste, troque, em projeto existente: pula a entrevista e o plano e vai direto para prova, correção e revisão." control={<Switch checked={s.fast_lane !== false} onCheckedChange={(v) => save({ fast_lane: v })} />} />
+        </Card>
+        <Card title="Custo" note="O teto de gasto por parte do trabalho.">
+          <Row title="Orçamento por parte" note="Estourou: sem novas rodadas. Com as provas verdes e nada grave, aceita e segue; senão para e pergunta." control={<label className="num"><span className="mono">US$</span><input className="ta" type="number" min={1} step={1} value={s.max_usd_per_story ?? 4} onChange={(e) => save({ max_usd_per_story: Number(e.target.value) || 4 })} /></label>} />
+        </Card>
+        <Card title="Entrevista e imagens" note="O que a ADE faz antes de começar a escrever código.">
+          <Row title="Entrevista antes do plano" note="Perguntas fáceis de múltipla escolha para escolher o jeito do programa. Automática: só em pedidos médios e grandes." control={<select className="sel" value={s.interview || 'auto'} onChange={(e) => save({ interview: e.target.value })}><option value="auto">automática</option><option value="always">sempre</option><option value="never">nunca</option></select>} />
+          <Row title="Conferência do visual" note="Varre a interface atrás de cara de template e força uma rodada de retoque." control={<Switch checked={s.visual_gate} onCheckedChange={(v) => save({ visual_gate: v })} />} />
+          <Row title="Imagens geradas por IA" note="Quando o plano pede fotos ou ilustrações, a segunda IA gera antes das partes começarem. Consome cota dela." control={<Switch checked={s.assets_enabled !== false} onCheckedChange={(v) => save({ assets_enabled: v })} />} />
+          <Row title="Pesquisa na internet" note="Só quando o plano depende de um fato de fora, como a versão de uma biblioteca." control={<Switch checked={s.research_enabled} onCheckedChange={(v) => save({ research_enabled: v })} />} />
+        </Card>
+      </div>
+    </Page>
+  )
+}
+
+function ProjectsPage({ p, recent, busy, onChanged }) {
+  const [dir, setDir] = useState(p?.dir || '')
+  const [msg, setMsg] = useState(null)
+  async function choose(d) { setMsg(null); const r = await post('/api/project', { dir: d }); const j = await r.json().catch(() => ({})); if (!r.ok) return setMsg(j.error || 'Não abriu.'); setDir(j.dir); onChanged() }
+  return (
+    <Page title="Projetos" note="A ADE trabalha dentro de uma pasta do seu PC. Pasta vazia: a IA monta o projeto do zero.">
+      {p && (
+        <Card title={p.name} note={p.dir}>
+          <div className="proj-grid">
+            <div><span>Histórico</span><b>{p.git ? (p.dirty ? 'com alterações pendentes' : 'limpo') : 'ainda não iniciado'}</b></div>
+            <div><span>Provas</span><b className="mono">{p.runner === 'none' ? 'nenhuma ainda' : p.test_cmd}</b></div>
+            <div><span>Página</span><b>{p.has_index ? 'tem página inicial' : 'sem página'}</b></div>
+          </div>
+          {p.nested && <p className="dim small">Fica dentro de {p.root}; o histórico vai para lá, só com arquivos desta pasta.</p>}
+          {!p.git && <button className="btn" disabled={busy} onClick={async () => { const r = await post('/api/project/git-init', {}); if (r.ok) setMsg('Histórico iniciado com um ponto de partida.') }}>Iniciar o histórico nesta pasta</button>}
+        </Card>
+      )}
+      <Card title="Trocar de pasta">
+        <button className="btn primary big" type="button" disabled={busy} onClick={async () => { const r = await post('/api/pick', { kind: 'folder' }); const j = await r.json().catch(() => ({})); if (j.paths?.[0]) choose(j.paths[0]) }}><FolderOpen weight="fill" /> Procurar no Explorer, ou criar uma pasta nova</button>
+        <form className="dir-form" onSubmit={(e) => { e.preventDefault(); choose(dir) }}>
+          <input className="ta" value={dir} onChange={(e) => setDir(e.target.value)} placeholder="E:\meus-projetos\minha-app" disabled={busy} aria-label="Caminho da pasta" />
+          <button className="btn" type="submit" disabled={busy || !dir.trim()}>Usar</button>
+        </form>
+        <p className="dim small">Cole o caminho de qualquer pasta do seu PC. Se ela não existir, a ADE cria.</p>
+        {msg && <p className="warn-box">{msg}</p>}
+      </Card>
+      {recent?.length > 0 && (
+        <Card title="Recentes">
+          <div className="rows">
+            {recent.map((d) => (
+              <button key={d} className="row" onClick={() => choose(d)} disabled={busy || d === p?.dir}>
+                <span className="row-ico"><FolderSimple weight="fill" /></span>
+                <span className="row-txt"><b>{d.split(/[\\/]/).pop()}</b><small className="mono">{d}</small></span>
+                {d === p?.dir ? <Chip tone="accent">atual</Chip> : <CaretRight className="row-go" />}
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
+    </Page>
+  )
+}
+
+function HistoryPage({ history, current }) {
+  if (!history?.length) return <Page title="Pedidos anteriores"><Card><p className="hint">Os pedidos que terminarem aparecem aqui, com o custo e o resultado.</p></Card></Page>
+  return (
+    <Page title="Pedidos anteriores" note={`${history.length} no total.`}>
+      <Card>
+        <div className="rows">
+          {history.map((h) => (
+            <div key={h.id} className={`row static${h.id === current?.id ? ' now' : ''}`}>
+              <span className={`row-dot dot-${STATE[h.state]?.tone || 'mute'}`} aria-hidden="true" />
+              <span className="row-txt"><b>{h.title || h.request}</b><small>{h.project?.split(/[\\/]/).pop()} · {h.stories || 0} parte(s) · {fmtWhen(h.finished_at)}</small></span>
+              <span className="row-end"><Chip tone={STATE[h.state]?.tone || 'mute'}>{STATE[h.state]?.label || h.state}</Chip><span className="mono small dim">{fmtUsd(h.usd)}</span></span>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </Page>
+  )
+}
+
+function SkillsPage({ state, save }) {
   const { catalog, settings: s, mission: m } = state
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(null)
@@ -358,298 +975,32 @@ function SkillsPanel({ state, save }) {
   const toggleExclude = (id) => save({ skills: { excluded: s.skills.excluded.includes(id) ? s.skills.excluded.filter((x) => x !== id) : [...s.skills.excluded, id], forced: s.skills.forced.filter((x) => x !== id) } })
   async function show(id) { if (open === id) return setOpen(null); const r = await fetch(`/api/skill?id=${id}`); const j = await r.json(); setBody(j.body || ''); setOpen(id) }
   return (
-    <div className="panel">
-      <div className="steps-head"><span className="lbl" style={{ margin: 0 }}>Skills · {catalog.length} no catálogo</span><label className="sw"><Switch size="1" checked={s.skills.auto} onCheckedChange={(v) => save({ skills: { auto: v } })} /> automático</label></div>
-      <p className="dim small">Skills são manuais de qualidade que cada papel recebe junto com o pedido. A IA que entende o pedido escolhe as skills do planejador, do maker, do revisor e do pesquisador; o motor garante as regras fixas (interface ou design: sempre <b>design-taste-frontend</b> + <b>impeccable</b> no maker). Até {s.skills.max} no maker, 3 nos outros, entregues inteiras (sem corte, por decisão sua).</p>
-      {allSkills(m).length > 0 && <div className="chips">{allSkills(m).map((x) => <span key={x.role + x.id} className="chip-skill on" title={x.reason}>{x.id}<small>{ROLES_PT[x.role]} · {x.reason}</small></span>)}</div>}
-      <TextField.Root size="1" value={q} onChange={(e) => setQ(e.target.value)} placeholder="filtrar…" style={{ marginTop: 8 }}><TextField.Slot><MagnifyingGlass /></TextField.Slot></TextField.Root>
-      <ul className="skill-list">
-        {list.map((c) => {
-          const forced = s.skills.forced.includes(c.id), excluded = s.skills.excluded.includes(c.id)
-          return (
-            <li key={c.id} className={`skill ${active.has(c.id) ? 'active' : ''} ${excluded ? 'off' : ''}`}>
-              <button className="skill-name" onClick={() => show(c.id)}><span>{c.id}</span><span className="dim small">{c.source} · {(c.bytes / 4 / 1000).toFixed(1)}k tok</span></button>
-              <p className="dim small">{c.description || 'sem descrição'}</p>
-              <div className="skill-actions">
-                {c.tags.map((t) => <span key={t} className="tag">{t}</span>)}
-                <span className="grow" />
-                <button className={`mini ${forced ? 'on' : ''}`} onClick={() => toggleForce(c.id)}>{forced ? 'fixada' : 'fixar'}</button>
-                <button className={`mini ${excluded ? 'on' : ''}`} onClick={() => toggleExclude(c.id)}>{excluded ? 'excluída' : 'excluir'}</button>
-              </div>
-              {open === c.id && <pre className="skill-body">{body.slice(0, 6000)}{body.length > 6000 ? '\n…' : ''}</pre>}
-            </li>
-          )
-        })}
-      </ul>
-    </div>
-  )
-}
-
-/* ---------- lateral: modelos ---------- */
-function ModelsPanel({ state, save }) {
-  const { settings: s, registry } = state
-  if (!s) return null
-  const setRole = (role, family, model) => save({ roles: { [role]: { family, model } } })
-  return (
-    <div className="panel">
-      <span className="lbl">Quem faz o quê</span>
-      <p className="dim small">Cada papel tem um modelo. Quem escreve e quem revisa têm de ser de empresas diferentes: é a regra que faz a revisão valer alguma coisa.</p>
-      {Object.entries(ROLE_LABEL).map(([role, label]) => (
-        <div key={role} className="role">
-          <span className="role-label">{label}</span>
-          <select className="sel" value={`${(s.roles[role] || {}).family || 'claude'}|${(s.roles[role] || {}).model || ''}`} onChange={(e) => { const [f, mo] = e.target.value.split('|'); setRole(role, f, mo) }}>
-            {Object.entries(registry).map(([fam, fr]) => <optgroup key={fam} label={fr.label}>{fr.models.map((mo) => <option key={mo.id} value={`${fam}|${mo.id}`}>{mo.label}{mo.note ? ` · ${mo.note}` : ''}</option>)}</optgroup>)}
-          </select>
-        </div>
-      ))}
-      <p className="dim small" style={{ marginTop: 10 }}>Fable é o mais forte e o mais caro (~US$ 0,60 só de abertura por chamada). Use para planejar pedidos grandes, não para escrever código linha a linha.</p>
-    </div>
-  )
-}
-
-function Options({ s, save }) {
-  if (!s) return null
-  return (
-    <div className="panel">
-      <span className="lbl">Opções</span>
-      <label className="opt"><Switch checked={s.allow_commands} onCheckedChange={(v) => save({ allow_commands: v })} /><span><b>Deixar a IA rodar comandos</b><small>Instalar dependências, criar projeto. Desligue para ela só ler e editar arquivos.</small></span></label>
-      <label className="opt"><Switch checked={s.visual_gate} onCheckedChange={(v) => save({ visual_gate: v })} /><span><b>Portão visual (Impeccable)</b><small>Varre a interface atrás de cara de template e força uma rodada de retoque.</small></span></label>
-      <label className="opt"><Switch checked={s.research_enabled} onCheckedChange={(v) => save({ research_enabled: v })} /><span><b>Pesquisa com Google (agy)</b><small>Só quando o plano depende de um fato externo.</small></span></label>
-      <label className="opt"><Switch checked={s.assets_enabled !== false} onCheckedChange={(v) => save({ assets_enabled: v })} /><span><b>Imagens geradas pelo Codex</b><small>Quando o plano pede fotos ou ilustrações, o Codex gera ($imagegen) antes das partes começarem. Consome cota do Codex.</small></span></label>
-      <label className="opt"><Switch checked={s.fast_lane !== false} onCheckedChange={(v) => save({ fast_lane: v })} /><span><b>Faixa rápida para correções pequenas</b><small>Pedido curto com "corrija, ajuste, troque, mude…" num projeto existente pula a entrevista e o plano: vai direto para prova, correção e revisão.</small></span></label>
-      <label className="opt"><input className="ta" style={{ width: 80 }} type="number" min={1} step={1} value={s.max_usd_per_story ?? 4} onChange={(e) => save({ max_usd_per_story: Number(e.target.value) || 4 })} /><span><b>Orçamento por parte (US$ no Claude)</b><small>Estourou: sem novas rodadas. Com provas verdes e nada grave, aceita e segue; senão para e pergunta.</small></span></label>
-      <label className="opt"><select className="ta" style={{ width: 'auto' }} value={s.autonomy || 'auto'} onChange={(e) => save({ autonomy: e.target.value })}><option value="auto">segue sozinha</option><option value="ask">para e pergunta</option></select><span><b>Depois de 4 rodadas de revisão</b><small>Segue sozinha: se as provas estão verdes e o revisor não apontou nada grave, aceita e vai para a próxima parte. Para e pergunta: você decide.</small></span></label>
-      <label className="opt"><select className="ta" style={{ width: 'auto' }} value={s.interview || 'auto'} onChange={(e) => save({ interview: e.target.value })}><option value="auto">automática</option><option value="always">sempre</option><option value="never">nunca</option></select><span><b>Entrevista antes do plano</b><small>Perguntas fáceis de múltipla escolha para escolher o jeito do programa. Automática: só em pedidos médios e grandes.</small></span></label>
-    </div>
-  )
-}
-
-function History({ history, current }) {
-  if (!history?.length) return <div className="side-empty"><p className="dim">As missões que terminarem aparecem aqui.</p></div>
-  return <div className="hist">{history.map((h) => (
-    <div key={h.id} className={`hist-row ${h.id === current?.id ? 'now' : ''}`}>
-      <Badge size="1" color={STATE[h.state]?.color || 'gray'} variant="soft">{STATE[h.state]?.label || h.state}</Badge>
-      <p style={{ marginTop: 4 }}>{h.title || h.request}</p>
-      <p className="dim small">{h.project?.split(/[\\/]/).pop()} · {h.stories || 0} partes · {h.finished_at?.slice(11, 16)} · {fmtUsd(h.usd)}</p>
-    </div>
-  ))}</div>
-}
-
-function Projects({ p, recent, busy, onChanged }) {
-  const [dir, setDir] = useState(p?.dir || '')
-  const [msg, setMsg] = useState(null)
-  async function choose(d) { setMsg(null); const r = await post('/api/project', { dir: d }); const j = await r.json().catch(() => ({})); if (!r.ok) return setMsg(j.error || 'Não abriu.'); setDir(j.dir); onChanged() }
-  async function gitInit() { const r = await post('/api/project/git-init', {}); if (r.ok) setMsg('git iniciado com um commit de base.') }
-  return (
-    <div className="panel">
-      <span className="lbl">Pasta do projeto</span>
-      <form onSubmit={(e) => { e.preventDefault(); choose(dir) }}>
-        <TextField.Root size="2" value={dir} onChange={(e) => setDir(e.target.value)} placeholder="E:\meus-projetos\minha-app" disabled={busy} />
-        <Button size="2" type="submit" disabled={busy || !dir.trim()} style={{ marginTop: 6, width: '100%' }}>Usar esta pasta</Button>
-      </form>
-      <Button size="2" variant="soft" type="button" disabled={busy} style={{ marginTop: 8, width: '100%' }} onClick={async () => { const r = await post('/api/pick', { kind: 'folder' }); const j = await r.json().catch(() => ({})); if (j.paths?.[0]) choose(j.paths[0]) }}><FolderOpen /> Procurar no Explorer (ou criar pasta nova)</Button>
-      <p className="dim small">Ou cole o caminho de qualquer pasta do seu PC. Se não existir, a ADE cria. Pasta vazia: a IA monta o projeto do zero.</p>
-      {msg && <p className="small" style={{ color: 'var(--amber-11)' }}>{msg}</p>}
-      {p && (
-        <div className="proj-info">
-          <div><span>git</span><b>{p.git ? (p.dirty ? 'com alterações pendentes' : 'limpo') : 'não é repositório'}</b></div>
-          <div><span>provas</span><b>{p.runner === 'none' ? 'nenhum runner (a IA cria)' : p.test_cmd}</b></div>
-          <div><span>página</span><b>{p.has_index ? 'index.html na raiz' : 'sem página'}</b></div>
-          {p.nested && <p className="dim small" style={{ margin: '4px 0 0' }}>Fica dentro do repositório {p.root}; os commits da ADE vão para lá, só com arquivos desta pasta.</p>}
-          {!p.git && <Button size="1" variant="soft" onClick={gitInit} disabled={busy}>Iniciar git nesta pasta</Button>}
-        </div>
-      )}
-      {recent?.length > 0 && <div style={{ marginTop: 16 }}><span className="lbl">Recentes</span>{recent.map((d) => <button key={d} className="recent" onClick={() => choose(d)} disabled={busy || d === p?.dir} title={d}><FolderSimple size={14} />{d.split(/[\\/]/).pop()}<span className="dim small">{d}</span></button>)}</div>}
-    </div>
-  )
-}
-
-/* ---------- centro ---------- */
-function Empty({ onPick, busy, p }) {
-  return (
-    <div className="empty"><div className="empty-inner">
-      <Heading size="7" style={{ letterSpacing: '-0.03em' }}>O que você quer construir{p ? ` em ${p.name}` : ''}?</Heading>
-      <p className="dim">Escreva em português, do seu jeito: uma correção, uma tela, um app inteiro. A ADE entende o pedido, escolhe as skills, escreve as provas, implementa, confere o visual e manda outra IA revisar. Você só decide no fim.</p>
-      <span className="lbl" style={{ marginTop: 26 }}>Experimente</span>
-      <div className="sugs">{SUGGESTIONS.map((t) => <button key={t} className="sug" onClick={() => onPick(t)} disabled={busy || !p}><Play weight="fill" />{t}</button>)}</div>
-    </div></div>
-  )
-}
-
-function Plan({ m, catalog }) {
-  if (!m.plan) return <Hint>{m.state === 'planning' ? 'A IA está lendo o pedido e o projeto para montar o plano. Acompanhe na Atividade.' : 'Sem plano.'}</Hint>
-  const pl = m.plan
-  return (
-    <div className="plan">
-      <div className="plan-head">
-        <Badge variant="soft" color="gray">{({ trivial: 'trivial', bounded: 'pequeno', feature: 'funcionalidade', subsystem: 'grande' })[pl.complexity] || pl.complexity}</Badge>
-        {pl.needs_ui && <Badge variant="outline" color="gray">interface</Badge>}{pl.needs_backend && <Badge variant="outline" color="gray">backend</Badge>}
-        {pl.domains.map((d) => <Badge key={d} variant="outline" color="gray">{d}</Badge>)}
-      </div>
-      {pl.explanation && <div className="explain"><b>Em palavras simples</b><p style={{ whiteSpace: 'pre-line', margin: '6px 0 0' }}>{pl.explanation}</p></div>}
-      <p className="plan-summary">{pl.summary}</p>
-      {pl.questions?.length > 0 && m.state === 'awaiting_plan' && m.reason === 'questions' && <div className="explain"><b>A IA quer saber como você prefere:</b><ul>{pl.questions.map((q) => <li key={q.id || q}>{q.question || q}</li>)}</ul><small className="dim">Responda no painel da direita.</small></div>}
-      {m.answers?.length > 0 && <div className="explain"><b>Suas escolhas</b><ul>{m.answers.map((a) => <li key={a.id}>{a.question} <b>→ {a.answer}</b></li>)}</ul></div>}
-      {pl.assets?.length > 0 && (
-        <>
-          <span className="lbl">Imagens do plano</span>
-          {pl.assets_style && <p className="dim small" style={{ margin: '0 0 8px' }}>Direção de arte: {pl.assets_style}</p>}
-          <div className="assets-grid">
-            {pl.assets.map((a) => { const done = (m.assets_done || []).some((d) => d.file === a.file); return (
-              <figure key={a.file} className={done ? 'done' : ''}>
-                {done ? <img src={`/api/app/${a.file}?t=${m.assets_done.length}`} alt={a.purpose} /> : <div className="ph">{m.state === 'running' ? 'gerando…' : 'ainda não gerada'}</div>}
-                <figcaption><b>{a.file.replace('assets/img/', '')}</b><small>{a.purpose}</small></figcaption>
-              </figure>
-            ) })}
-          </div>
-        </>
-      )}
-      <span className="lbl">Partes do trabalho</span>
-      <ol className="plan-stories">
-        {m.stories.map((s, i) => (
-          <li key={s.id} className={s.state}>
-            <div className="ps-head"><span className="ps-n">{i + 1}</span><b>{s.title}</b><Badge size="1" variant="soft" color={{ done: 'green', running: 'teal', blocked: 'amber', skipped: 'gray', queued: 'gray' }[s.state]}>{{ done: 'pronta', running: 'em andamento', blocked: 'parou', skipped: 'pulada', queued: 'na fila' }[s.state]}</Badge></div>
-            <p className="dim">{s.request}</p>
-            <ul className="acc">{s.acceptance.map((a) => <li key={a}>{a}</li>)}</ul>
-            <p className="dim small">Prova: {s.test_hint}</p>
-          </li>
-        ))}
-      </ol>
-      <span className="lbl">Skills por papel</span>
-      {Object.entries(skillsByRole(m)).map(([role, list]) => <div key={role} className="role-skills"><span className="role-name">{ROLES_PT[role]}</span>{list?.length ? <div className="chips">{list.map((x) => <span key={x.id} className="chip-skill on">{x.id}<small>{x.reason} · {Math.round(x.bytes / 4 / 1000)}k tok</small></span>)}</div> : <span className="dim small">nenhuma</span>}</div>)}
-      {m.research?.findings?.length > 0 && <><span className="lbl">Pesquisa</span>{m.research.findings.map((f) => <div key={f.question} className="explain"><b>{f.question}</b><p>{f.answer}</p>{f.sources?.length > 0 && <p className="dim small">{f.sources.join(' · ')}</p>}</div>)}</>}
-    </div>
-  )
-}
-
-function Console({ log, busy, live }) {
-  const end = useRef(null)
-  const [thinking, setThinking] = useState(false)
-  useEffect(() => { end.current?.scrollIntoView({ block: 'end' }) }, [log.length, live?.text?.length])
-  const groups = useMemo(() => {
-    const out = []
-    for (const l of log) { if (!thinking && l.kind === 'thinking') continue; const g = out[out.length - 1]; const key = `${l.phase}|${l.story}`; if (g && g.key === key) g.lines.push(l); else out.push({ key, phase: l.phase, story: l.story, lines: [l] }) }
-    return out
-  }, [log, thinking])
-  const thoughtCount = log.filter((l) => l.kind === 'thinking').length
-  return (
-    <div className="console">
-      <div className="console-bar"><span className="dim small">Tudo que as IAs fazem, na ordem.</span><button className="link" onClick={() => setThinking((v) => !v)}>{thinking ? 'esconder pensamento' : `mostrar pensamento${thoughtCount ? ` (${thoughtCount})` : ''}`}</button></div>
-      {groups.map((g, gi) => (
-        <section key={gi} className="phase">
-          <div className="phase-head">{g.story != null && <span className="phase-n">P{g.story + 1}</span>}{STEP[g.phase]?.title || 'Motor'}</div>
-          {g.lines.map((l, i) => <Line key={i} l={l} />)}
-        </section>
-      ))}
-      {busy && <div className={`line live ${live?.kind || ''}`}><span className="who" data-src={live?.source || 'claude'}>{live ? ({ thinking: 'pensando', tool: 'ferramenta', text: 'escrevendo' })[live.kind] : 'trabalhando'}</span><span className="txt">{live?.text || '…'}<span className="cursor" /></span></div>}
-      <div ref={end} />
-    </div>
-  )
-}
-function Line({ l }) {
-  const who = l.kind === 'thinking' ? 'pensou' : l.kind === 'tool' ? 'fez' : l.kind === 'result' ? 'viu' : l.kind === 'error' ? 'erro' : l.source === 'engine' ? 'motor' : l.source
-  return <div className={`line ${l.kind}`}><span className="who" data-src={l.source}>{who}</span><span className="txt">{l.text}</span><time>{l.ts.slice(11, 19)}</time></div>
-}
-
-function Diff({ m }) {
-  const st = cur(m); const diff = st?.diff
-  if (!diff) return <Hint>Sem alterações na parte atual. Aparecem aqui assim que a IA mexer em algum arquivo.</Hint>
-  const files = []
-  for (const l of diff.split('\n')) { if (l.startsWith('diff --git')) files.push({ name: l.split(' b/')[1] || l, lines: [] }); else if (files.length) files[files.length - 1].lines.push(l) }
-  return <div className="diff">{files.map((f) => (
-    <section key={f.name} className="file">
-      <div className="file-head"><GitDiff size={14} />{f.name}<span className="dim">+{f.lines.filter((l) => l.startsWith('+') && !l.startsWith('+++')).length} −{f.lines.filter((l) => l.startsWith('-') && !l.startsWith('---')).length}</span></div>
-      <pre>{f.lines.filter((l) => !/^(index|---|\+\+\+)/.test(l)).slice(0, 400).map((l, i) => <span key={i} className={l.startsWith('@@') ? 'h' : l.startsWith('+') ? 'a' : l.startsWith('-') ? 'd' : 'c'}>{l || ' '}</span>)}</pre>
-    </section>
-  ))}</div>
-}
-
-function Tests({ m }) {
-  const st = cur(m)
-  const explain = <div className="explain"><b>Como a ADE prova que a mudança funciona:</b> a IA escreve primeiro uma prova (um mini-programa que checa o que você pediu). A prova tem de <b>falhar</b> no código antigo e <b>passar</b> no código novo.</div>
-  if (!st?.tests_after) return <div>{explain}<Hint>{m.tests_before ? `Ponto de partida: ${m.tests_before.total} provas, ${m.tests_before.failed} falhando.` : 'As provas rodam antes e depois da mudança.'}</Hint></div>
-  const before = new Map((m.tests_before?.tests || []).map((t) => [t.name, t.status]))
-  return (
-    <div>{explain}
-      {st.tests_after.error && <div className="explain bad"><Code>{st.tests_after.error}</Code></div>}
-      <table className="tbl"><thead><tr><th>Prova</th><th>Antes</th><th>Depois</th></tr></thead><tbody>
-        {st.tests_after.tests.map((t) => { const b = before.get(t.name); return <tr key={t.name}><td>{t.name}{!b && <span className="new">nova</span>}{t.message && <div className="dim small">{t.message}</div>}</td><td><Result s={b} /></td><td><Result s={t.status} /></td></tr> })}
-      </tbody></table>
-      <Hint>{st.red_tests?.length ? `Prova que falhou antes e serve de evidência: ${st.red_tests.map((t) => t.name).join(', ')}.` : 'Nenhuma prova nova falhou antes da mudança.'}</Hint>
-    </div>
-  )
-}
-const Result = ({ s }) => !s ? <span className="dim">não existia</span> : <span className={`res ${s === 'passed' ? 'ok' : 'bad'}`}>{s === 'passed' ? 'passou' : 'falhou'}</span>
-
-function Visual({ m }) {
-  const st = cur(m)
-  if (!m.plan?.needs_ui) return <Hint>Este pedido não tem interface; o portão visual não roda.</Hint>
-  if (!st?.visual) return <Hint>O portão visual roda depois que as provas passam. Ele varre o código atrás de cara de template (fontes batidas, cores gritantes, gradiente roxo, três cards iguais).</Hint>
-  if (!st.visual.available) return <Hint>Impeccable não encontrado nesta máquina.</Hint>
-  return (
-    <div>
-      <p className="small dim">Impeccable detect · {st.visual.findings.length} achado(s){st.visual.error ? ` · ${st.visual.error}` : ''}</p>
-      {st.visual.findings.length === 0 ? <div className="explain"><b>Nenhum sinal de template.</b> O visual passou no detector.</div> : st.visual.findings.map((f, i) => <div key={i} className="finding medium"><div className="finding-head"><span className="sev">{f.rule}</span><Code size="1">{f.file}{f.line ? `:${f.line}` : ''}</Code></div><p>{f.message}</p></div>)}
-      {p2(st)}
-    </div>
-  )
-}
-const p2 = (st) => st.review ? null : null
-
-function Review({ m }) {
-  const st = cur(m); const review = st?.review
-  if (!review) return <Hint>A revisão pelo Codex roda depois que a prova passa e o visual é conferido.</Hint>
-  return (
-    <div className="review">
-      <div className="verdict"><Badge size="2" color={review.verdict === 'approve' ? 'green' : 'amber'} variant="solid">{review.verdict === 'approve' ? 'Aprovado' : 'Pediu mudanças'}</Badge><span className="dim">Codex · leitura apenas</span></div>
-      <p>{review.summary}</p>
-      {review.findings.length === 0 ? <Hint>Nenhum problema apontado.</Hint> : review.findings.map((f, i) => <div key={i} className={`finding ${f.severity}`}><div className="finding-head"><span className="sev">{({ high: 'grave', medium: 'médio', low: 'leve' })[f.severity]}</span><Code size="1">{f.file}</Code></div><p>{f.problem}</p><p className="dim">Sugestão: {f.fix}</p></div>)}
-    </div>
-  )
-}
-const Hint = ({ children }) => <p className="hint">{children}</p>
-
-/* ---------- direita ---------- */
-function Report({ m, decide }) {
-  const [answer, setAnswer] = useState('')
-  if (!m) return <div className="rpt"><span className="lbl">Sua parte</span><p className="dim">Você só entra quando a ADE precisar: aprovar um plano grande, responder uma dúvida, ou decidir no fim. Enquanto isso, nada para fazer.</p></div>
-  const st = cur(m)
-  return (
-    <div className="rpt">
-      <span className="lbl">Sua parte</span>
-      {m.state === 'planning' && <div className="card calm"><Pulse /><div><b>Entendendo o pedido</b><p>Primeiro uma IA entende o pedido e escolhe as skills de cada papel; depois o planejador monta as partes. Uns dois minutos.</p></div></div>}
-      {m.state === 'running' && <div className="card calm"><Pulse /><div><b>Trabalhando</b><p>{st ? `Parte ${m.current + 1} de ${m.stories.length}: ${st.title}.` : 'Preparando.'} Nada para fazer agora.</p></div></div>}
-      {m.state === 'complete' && <div className="card good"><CheckCircle weight="fill" /><div><b>Pronta</b><p>{m.stories.length} parte(s) provadas, revisadas e commitadas na sua pasta.{m.plan?.needs_ui ? ' Abra o app pelo botão no topo.' : ''}</p></div></div>}
-      {m.state === 'discarded' && <div className="card"><Trash /><div><b>Descartada</b><p>Os arquivos voltaram ao que eram.</p></div></div>}
-      {m.state === 'awaiting_plan' && (
-        <>
-          <div className="card warn"><ListChecks weight="fill" /><div><b>{m.reason === 'questions' ? 'A IA tem uma dúvida' : 'Plano pronto para aprovar'}</b><p>{REASON[m.reason]} Veja a aba Plano.</p></div></div>
-          {m.reason === 'questions' ? (
-            <Interview questions={m.plan.questions} onAnswer={(answers) => decide('answer', { answers })} onSkip={() => decide('start')} />
-          ) : (
-            <>
-              {m.plan.explanation && <div className="explain"><b>Em palavras simples</b><p style={{ whiteSpace: 'pre-line', margin: '6px 0 0' }}>{m.plan.explanation}</p></div>}
-              <div className="decide"><button className="act primary" onClick={() => decide('start')}><Play weight="fill" /><span><b>Começar</b><small>{m.stories.length} parte(s), uma de cada vez.</small></span></button></div>
-              <textarea className="ta" rows={3} value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Quer mudar algo? Escreva do seu jeito: tirar uma parte, juntar, trocar cores, adicionar…" />
-              <div className="decide"><button className="act" disabled={!answer.trim()} onClick={() => { decide('revise', answer); setAnswer('') }}><ArrowCounterClockwise /><span><b>Pedir mudanças</b><small>O planejador refaz o plano com o seu pedido e você confere de novo.</small></span></button><button className="act danger" onClick={() => decide('discard')}><Trash /><span><b>Descartar plano</b></span></button></div>
-            </>
-          )}
-        </>
-      )}
-      {m.state === 'awaiting_operator' && (
-        <>
-          <div className="card warn"><Warning weight="fill" /><div><b>Precisa de você</b><p>{REASON[m.reason] || m.reason}</p></div></div>
-          <div className="decide">
-            <button className="act primary" onClick={() => decide('accept')}><CheckCircle weight="fill" /><span><b>Aceitar como está</b><small>Commita esta parte e segue para a próxima.</small></span></button>
-            <button className="act" onClick={() => decide('retry')}><ArrowCounterClockwise /><span><b>Mais uma rodada</b><small>A IA recebe os problemas e tenta de novo.</small></span></button>
-            <button className="act" onClick={() => decide('skip')}><SkipForward /><span><b>Pular esta parte</b><small>Desfaz só ela e segue.</small></span></button>
-            <button className="act danger" onClick={() => decide('discard')}><Trash /><span><b>Descartar tudo</b><small>Volta os arquivos ao que eram.</small></span></button>
-          </div>
-        </>
-      )}
-      {st?.review && <div className="block"><span className="lbl">O revisor disse</span><p>{st.review.summary}</p></div>}
-      {allSkills(m).length > 0 && <div className="block"><span className="lbl">Skills nesta missão</span><div className="chips">{allSkills(m).map((x) => <span key={x.role + x.id} className="chip-skill on" title={x.reason}>{x.id}<small>{ROLES_PT[x.role]}</small></span>)}</div></div>}
-      {m.roles && <div className="block"><span className="lbl">Quem fez</span><p className="small">{m.roles.intent?.model || m.roles.planner.model} entendeu · {m.roles.planner.model} planejou · {m.roles.maker.model} escreveu · {m.roles.checker.model} revisou</p></div>}
-    </div>
+    <Page title="Skills" note="Skills são manuais de qualidade que cada papel recebe junto com o pedido. A IA que entende o pedido escolhe as do planejador, do maker, do revisor e do pesquisador; o motor garante as regras fixas.">
+      <Card title="Como são escolhidas">
+        <div className="opt-row"><div className="opt-txt"><b>Escolha automática</b><small>Até {s.skills.max} no maker e 3 nos outros papéis, entregues inteiras. Desligue para usar só as que você fixar.</small></div><div className="opt-ctl"><Switch checked={s.skills.auto} onCheckedChange={(v) => save({ skills: { auto: v } })} /></div></div>
+        {allSkills(m).length > 0 && <div className="chip-row">{allSkills(m).map((x) => <span key={x.role + x.id} className="skill-chip on" title={x.reason}>{x.id}<small>{ROLES_PT[x.role]} · {x.reason}</small></span>)}</div>}
+      </Card>
+      <Card title={`Catálogo · ${catalog.length}`}>
+        <label className="search"><MagnifyingGlass /><input className="ta" value={q} onChange={(e) => setQ(e.target.value)} placeholder="filtrar pelo nome ou pela descrição" aria-label="Filtrar skills" /></label>
+        <ul className="skill-list">
+          {list.map((c) => {
+            const forced = s.skills.forced.includes(c.id), excluded = s.skills.excluded.includes(c.id)
+            return (
+              <li key={c.id} className={`skill ${active.has(c.id) ? 'active' : ''} ${excluded ? 'off' : ''}`}>
+                <button className="skill-name" onClick={() => show(c.id)}><span className="mono">{c.id}</span><span className="dim small mono">{c.source} · {(c.bytes / 4 / 1000).toFixed(1)}k tok</span></button>
+                <p className="dim small">{c.description || 'sem descrição'}</p>
+                <div className="skill-actions">
+                  {c.tags.map((t) => <span key={t} className="tag">{t}</span>)}
+                  <span className="grow" />
+                  <button className={`mini ${forced ? 'on' : ''}`} onClick={() => toggleForce(c.id)}>{forced ? 'fixada' : 'fixar'}</button>
+                  <button className={`mini ${excluded ? 'on' : ''}`} onClick={() => toggleExclude(c.id)}>{excluded ? 'excluída' : 'excluir'}</button>
+                </div>
+                {open === c.id && <pre className="skill-body">{body.slice(0, 6000)}{body.length > 6000 ? '\n…' : ''}</pre>}
+              </li>
+            )
+          })}
+        </ul>
+      </Card>
+    </Page>
   )
 }

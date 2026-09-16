@@ -6,7 +6,7 @@ import App from './App.jsx'
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <Theme appearance="dark" accentColor="teal" grayColor="slate" radius="medium" scaling="95%">
+    <Theme appearance="dark" accentColor="teal" grayColor="slate" radius="medium" scaling="100%">
       <App />
     </Theme>
   </React.StrictMode>,
