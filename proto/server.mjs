@@ -84,14 +84,18 @@ async function saveRecent(dir) {
 
 // Descobre como o projeto roda provas. Só o suficiente para o protótipo.
 async function discover(dir) {
-  const info = { dir, name: path.basename(dir), git: false, dirty: false, branch: null, runner: 'none', test_cmd: null, has_index: false, language: null }
+  const info = { dir, name: path.basename(dir), git: false, dirty: false, branch: null, root: null, nested: false, runner: 'none', test_cmd: null, has_index: false, language: null }
   const st = await stat(dir).catch(() => null)
   if (!st?.isDirectory()) return { ...info, error: 'A pasta não existe.' }
   const g = await run('git', ['rev-parse', '--is-inside-work-tree'], { cwd: dir })
   info.git = g.code === 0 && g.out.trim() === 'true'
   if (info.git) {
-    info.dirty = (await run('git', ['status', '--porcelain'], { cwd: dir })).out.trim().length > 0
+    // Só o que está dentro da pasta escolhida conta: ela pode ser uma subpasta de um repositório maior.
+    info.dirty = (await run('git', ['status', '--porcelain', '--', '.'], { cwd: dir })).out.trim().length > 0
     info.branch = (await run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir })).out.trim() || null
+    const root = (await run('git', ['rev-parse', '--show-toplevel'], { cwd: dir })).out.trim()
+    info.root = root ? path.resolve(root) : null
+    info.nested = !!info.root && path.resolve(dir) !== info.root
   }
   info.has_index = await exists(path.join(dir, 'index.html'))
   const pkgPath = path.join(dir, 'package.json')
@@ -267,6 +271,7 @@ function common() {
   else lines.push('Você só tem ferramentas de leitura e edição; o harness roda as provas e te devolve o resultado.')
   if (p.runner === 'none') lines.push('Não há runner de provas. Na fase 1, crie o mínimo para rodar provas (em JS: package.json com vitest e `"test": "vitest run"`; em Python: pytest) antes de escrever a prova.')
   if (p.has_index) lines.push('Há um index.html na raiz; se criar algo visual, ligue nele para aparecer na página.')
+  else lines.push('Se o pedido envolve interface, crie um index.html na raiz que funcione servido como arquivos estáticos (ES modules, sem build), para o usuário abrir no navegador.')
   return lines
 }
 
@@ -370,8 +375,8 @@ async function finish() {
   m.finished_at = now()
   if (m.state === 'complete') {
     // Missão pronta vira um commit no projeto (E64): a árvore volta a ficar limpa para a próxima.
-    await run('git', ['add', '-A'], { cwd: state.project.dir })
-    const c = await run('git', ['-c', 'user.name=TL-ADE', '-c', 'user.email=ade@local', 'commit', '-q', '-m', 'ade: ' + m.request.slice(0, 72)], { cwd: state.project.dir })
+    await run('git', ['add', '-A', '--', '.'], { cwd: state.project.dir })
+    const c = await run('git', ['-c', 'user.name=TL-ADE', '-c', 'user.email=ade@local', 'commit', '-q', '-m', 'ade: ' + m.request.slice(0, 72), '--', '.'], { cwd: state.project.dir })
     log('engine', c.code === 0 ? 'commit feito no projeto com as alterações da missão' : 'nada a commitar')
     state.project = await discover(state.project.dir)
   }
