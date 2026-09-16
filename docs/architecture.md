@@ -297,7 +297,7 @@ só como asset final. Impeccable = `pbakaus/impeccable` (4.3.1 instalado como pl
 Apache-2.0), pinado por `ENGINE_VERSION`, nunca por versão npm.
 
 **Contexto, Firewall e telemetria.** Pack em ordem de volatilidade: ferramentas → papel → invariantes
-do repo (≤1,5k) → skills por id (≤15k) → contexto recuperado (≤6k) → contrato → rodada (achados,
+do repo (≤1,5k) → skills por id (≤20k) → contexto recuperado (≤6k) → contrato → rodada (achados,
 falhas de gate, checkpoint) → tarefa; teto 40k (hipótese a medir). Isolamento: `--safe-mode` +
 `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (nunca `--bare`). Firewall no executor: bruto em `artifacts/`,
 extrato ao modelo (falha íntegra mas cercada como dado; sucesso resumido), `ade show <ref>` para
@@ -411,7 +411,7 @@ propaga. "E" = evidência principal.
 
 **Limites e contexto**
 - E13 Corte do pack em bytes (`limits.max_pack_bytes`, default 120 000 [hipótese], calibrar por p90); "40k tokens" é alvo de projeto por estimativa. Teto próprio da seção de rodada (achados, falhas de gate, checkpoint): 24 000 bytes com ponteiro. Diff do Checker: `review.max_diff_bytes` default 60 000 chars, por arquivo em ordem de relevância de escopo, ponteiro `ade show diff:<story>#<arquivo>`. E: context D2, D3; engine D1; operations 9.6; judgment-J3.
-- E14 Skills: ≤7,5k tokens por skill e soma ≤15k (elevado de 5k/7,5k para 7,5k/15k por E70; não 2,5k fixo); o filtro duro não elimina por tamanho antes do BM25. Braço de controle "BM25@3 puro" medido antes de manter o seletor barato. E: skill-fabric D1; adr-1.
+- E14 Skills: ≤7,5k tokens por skill e soma ≤20k (elevado de 5k/7,5k para 7,5k/20k por E70; não 2,5k fixo); o filtro duro não elimina por tamanho antes do BM25. Braço de controle "BM25@3 puro" medido antes de manter o seletor barato. E: skill-fabric D1; adr-1.
 - E15 O engine tem de suprimir o listing nativo de skills/plugins do usuário na chamada despachada (a supressão é `--safe-mode`, que já desliga todas as customizações — CLAUDE.md, skills, plugins, hooks, MCP, comandos, agentes; `--setting-sources` e `--plugin-dir` saem da receita até a sonda mostrar necessidade, e `--plugin-dir` é flag de carga por sessão, não de supressão) e a prova é a contagem de skills no evento `system/init` da chamada despachada; `skills_injected[]` só é verdadeiro sob essa supressão. E: skill-fabric D2 [hipótese até a sonda].
 - E16 Receita de chamada curta no Codex: `--ignore-user-config --ignore-rules --ephemeral` + `AGENTS.md` escrito pelo engine no worktree, ≤2 KB como escolha de projeto [hipótese] (o número **medido** é ≤8 KB: acima disso o Codex omite skills silenciosamente; truncagem dura em 32 KiB). `-c skills.max_context_tokens=0` vira **sonda do doctor** (o valor 0 nunca foi exercitado; default medido é 2 % da janela, teto explícito 10 000): se o binário recusar 0, usar o menor valor aceito e gravar no `CapabilitySet` — com `--ignore-user-config` o `-c` é em boa parte redundante. o pack do Checker inclui obrigatoriamente a seção "invariantes do repo". Chamadas de `$imagegen` usam a configuração completa (sonda do doctor confirma). E: adapters D5; adr-1; skill-fabric D4.
 - E17 Benefício de cache é [hipótese]; `cache_read / (tokens_in + cache_read)` por papel é a primeira métrica do harness doctor. E: context D6.
@@ -491,6 +491,6 @@ e sobre os derivados; a propagação é feita pela mesma revisão. ADO = adotado
 - E69 REJ Contadores de cota por família no doctor. Subsistema de medição novo; fora da v1.
 
 **Decisão de Erick (2026-09-17)**
-- E70 ADO Teto por skill sobe de 5k para **7,5k tokens** e a soma do bloco de skills de 7,5k para **15k** (≤3 skills). Justificativa: skills só entram na chamada do Maker, o bloco vai no prefixo estável do pack e é servido pelo cache de prompt (`cache_read` na telemetria), então o custo marginal por chamada é ~10 %. Continua [hipótese]: se `cache_read` ficar abaixo de 80 % do bloco ou a obediência cair (achados do Checker por regra de skill ignorada), o teto volta a 5k. Permite `taste-skill` com recorte; `img2threejs` (8,2k) continua precisando de poda.
+- E70 ADO Teto por skill sobe de 5k para **7,5k tokens** e a soma do bloco de skills de 7,5k para **20k** (≤3 skills). Justificativa: skills só entram na chamada do Maker, o bloco vai no prefixo estável do pack e é servido pelo cache de prompt (`cache_read` na telemetria), então o custo marginal por chamada é ~10 %. Continua [hipótese]: se `cache_read` ficar abaixo de 80 % do bloco ou a obediência cair (achados do Checker por regra de skill ignorada), o teto volta a 5k. Permite `taste-skill` com recorte; `img2threejs` (8,2k) continua precisando de poda.
 
 **Pendências que continuam com Erick**: itens de §9; defaults numéricos marcados [hipótese] (lease, pack, orçamentos E4/E65, `max_parked_units`).

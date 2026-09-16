@@ -27,7 +27,7 @@ congela o conjunto elegível da missão (união do top-8 por story) e só skill 
 (E33); skills locais do repositório vencem por nome. Seleção: filtro duro
 (domínio/linguagem/família — **nunca por tamanho**) → **BM25 top-8** local (~80 linhas, $0) → seletor
 barato fecha **≤3** → bloco fixo do pack ordenado por id estável, com **≤7,5k tokens por skill e soma
-≤15k** (E14, E70). Um braço de controle "BM25@3 puro" é medido antes de manter o seletor barato. O engine
+≤20k** (E14, E70). Um braço de controle "BM25@3 puro" é medido antes de manter o seletor barato. O engine
 suprime o listing nativo de skills/plugins do usuário na chamada despachada (`--safe-mode`,
 `--setting-sources`, `--plugin-dir` vazio — flags exatas medidas pelo doctor, que prova a supressão por
 contagem em `system/init`); `skills_injected[]` só é verdadeiro sob essa supressão (E15) **[hipótese
@@ -75,7 +75,7 @@ ficam degradadas na v1 — preço do controle 7 levado ao limite.
 | Embeddings na v1 | chave de API obrigatória; ganho de ~11 pontos não paga o princípio |
 | Engine executando scripts do catálogo | controle 7; o agente pode, sob `contain` |
 | Repassar `allowed-tools` do catálogo | controle 8; a skill se autoconcede ferramentas |
-| Teto fixo de 2,5k tokens por skill | poda skill legítima antes do BM25; o limite real é ≤7,5k por skill e ≤15k de soma (E14) |
+| Teto fixo de 2,5k tokens por skill | poda skill legítima antes do BM25; o limite real é ≤7,5k por skill e ≤20k de soma (E14) |
 | ECC (ou qualquer fonte) ingerido inteiro | `hooks/` e instaladores fora; só `skills/`, pinado por commit (A13) |
 
 ## Como reverter
@@ -87,7 +87,7 @@ braço "BM25@3 puro" empatar com o seletor barato, o seletor sai e economiza uma
 ## Consequências para outros documentos
 
 `docs/catalog-sources.md`, `~/.ade/catalog/index.json`, `docs/specs/` (Skill Fabric, SkillGuard),
-ADR 0008 (skills decididas no `prepare`), ADR 0011 (teto de 15k e `cited`), ADR 0017, ADR 0019.
+ADR 0008 (skills decididas no `prepare`), ADR 0011 (teto de 20k e `cited`), ADR 0017, ADR 0019.
 
 ## Emendas (2026-09-17)
 
