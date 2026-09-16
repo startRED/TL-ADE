@@ -16,8 +16,8 @@ Três camadas, nesta ordem:
 
 | Versão | Entrega |
 | :--- | :--- |
-| v1 | `ade report`, `ade status`, `ade journal`, `ade show <ref>`; `ade takeover <story>` **imprime o comando exato** (`claude --resume <uuid>` + `--add-dir`/`--settings`) e grava `human_takeover`; `ade release <story>` grava checkpoint e `human_release`, e o ciclo retoma |
-| v0.4 | painel web **somente-leitura** como projeção do journal via índice SQLite reconstruível (`better-sqlite3`) + WebSocket; toda ação do operador vira `step` antes de virar efeito |
+| v1 | `ade report`, `ade status`, `ade journal`, `ade show <ref> --open`, `ade decide <unit> --option retry\|skip\|discard\|pick`, `ade steer <missão> "<nota>"`, `ade plan <pedido> --from <missão>` (§11 E32); `ade takeover <story>` **imprime o comando exato** (`claude --resume <uuid>` + `--add-dir`/`--settings`), grava `human_takeover` e escreve `.ade/missions/<id>/takeover-<story>.cmd` e `.ps1`; `ade release <story>` grava checkpoint e `human_release`, e o ciclo retoma |
+| v0.4b | painel web **somente-leitura** como projeção do journal via índice SQLite reconstruível (`better-sqlite3`) + WebSocket, no mesmo commit que cria `packages/web` e liga npm workspaces (§11 E29, E37); toda ação do operador vira `step` antes de virar efeito; `ade serve` imprime no terminal um token aleatório por sessão e checa `Origin` (§11 E34) |
 | v0.5+ | PTY embutido (`node-pty` pinado, kill por `taskkill /T /F`), se e só se o item vencer o backlog |
 
 Invariante que atravessa as três: **o painel nunca é fonte de verdade**. O índice é derivado e pode ser
@@ -45,8 +45,8 @@ apagado e reconstruído do `journal.jsonl`; navegador fechado não perde nada (C
 
 ## Trade-offs
 
-A v1 exige um copiar-colar do operador para assumir o terminal, e a leitura da missão é por comando, não
-por tela. Em troca: zero dependências de terminal e de servidor antes da v1, superfície de ataque menor
+A v1 exige que o operador dispare o `.cmd`/`.ps1` gravado (ou copie a linha impressa) para assumir o
+terminal, e a leitura da missão é por comando, não por tela. Em troca: zero dependências de terminal e de servidor antes da v1, superfície de ataque menor
 (J3 §3) e nenhuma classe de crash nova. `ade takeover` continua sendo o mesmo evento de journal nas três
 camadas — a UI muda, o contrato não.
 
@@ -63,7 +63,7 @@ camadas — a UI muda, o contrato não.
 ## Como reverter
 
 **Gatilho:** `node-pty` publicar 1.2.0 estável com #967 e #965 fechados, **ou** o dogfood mostrar que o
-copiar-colar do takeover é o atrito dominante da jornada 4. **Custo:** `node-pty` + `@xterm/xterm`
+takeover por comando gravado é o atrito dominante da jornada 4. **Custo:** `node-pty` + `@xterm/xterm`
 pinados, canal de bytes no WebSocket já existente, encerramento por `taskkill /T /F` (nunca
 `pty.kill()`) e a regra de posse do worktree do ADR 0012 — o evento `human_takeover`/`human_release` e
 o checkpoint não mudam, então não há migração de journal.
@@ -71,6 +71,8 @@ o checkpoint não mudam, então não há migração de journal.
 ## Consequências para outros documentos
 
 `schemas/journal-event.schema.json` (`human_takeover`, `human_release`), `docs/specs/operator-surface.md`
-(`ade report`, `ade takeover`, `ade release`, painel como projeção), `docs/roadmap.md` (`better-sqlite3`
-e `ade serve` só na v0.4 — nunca no slice 1, defeito apontado em J3 §6), `docs/journeys.md` (jornadas 4
-e 6), ADR 0012, ADR 0015 (durante o takeover só sobra o `contain`), ADR 0019.
+(`ade report`, `ade takeover`, `ade release`, os verbos de §11 E32, painel como projeção),
+`docs/roadmap.md` (`better-sqlite3`, `ade serve` e npm workspaces só na v0.4b — nunca no slice 1,
+defeito apontado em J3 §6), `docs/security/README.md` (token de sessão e `Origin` do `ade serve`),
+`docs/journeys.md` (jornadas 4 e 6), ADR 0012, ADR 0015 (durante o takeover só sobra o `contain`),
+ADR 0019.

@@ -19,13 +19,16 @@ Node v24.16.0), não inferida da documentação.
 | W4 | `MAX_PATH` = 260 e dependências nativas quebram em raiz longa | worktrees em caminho curto (`.ade/wt/<id>`); `core.longpaths=true` e `LongPathsEnabled` verificados pelo `ade doctor` |
 | W5 | Sandbox de SO do Claude Code **não existe** em Windows nativo e falha aberta | `contain` pós-fato é a fronteira (ADR 0015) |
 | W6 | `node-pty` `kill()` pode matar PID alheio (#967) | encerramento por `taskkill /T /F /PID`, nunca `pty.kill()` |
-| W7 | libuv cria Job Object com `KILL_ON_JOB_CLOSE` para filho **não-detached** | worker não-detached na v1; contenção da árvore vem de graça (ADR 0012) |
-| W8 | `fs` do Node não expõe `flock`/`LockFileEx` | lease próprio: `mkdir` + heartbeat 2 s + TTL 6 s + fingerprint (pid, start time), exit 5 em conflito |
+| W7 | libuv cria Job Object com `KILL_ON_JOB_CLOSE` para filho **não-detached** | worker não-detached na v1; contenção da árvore vem de graça; a branch de attach de I09 fica dormente e o teste é v0.5+ (ADR 0012, §11 E21) |
+| W8 | `fs` do Node não expõe `flock`/`LockFileEx` | lease próprio: `mkdir` + heartbeat em `worker_thread` a cada 2 s + TTL **15 s [hipótese, medir no slice 1]** + fingerprint (pid, start time), exit 5 em conflito; nenhuma chamada externa síncrona no engine |
 | W9 | PID é reciclado em minutos numa máquina de desenvolvimento | todo recibo e todo lease carregam fingerprint; `isAlive(pid)` sozinho nunca adota processo |
 | W10 | `tmux` exige WSL ou MSYS2 | fora da v1; o terminal, quando vier, é ConPTY (ADR 0013) |
 
-Paridade: os 93 testes do runtime de referência passam **93/93 nos dois SOs**, com tabela de mapeamento
-de nomes onde o schema mudou (ADR 0003). Testes Windows-específicos do porte estão nomeados em
+Paridade: os 93 testes do runtime de referência passam **93/93 nos dois SOs**, com a tabela de
+mapeamento de nomes onde o schema mudou (`parity-name-map.json`, artefato de entrada da v0.2) — 44 casos
+no slice 1, 93/93 como critério da v0.2 (ADR 0003, §11 E26). O alvo `parity` roda sem credencial no CI
+Windows + Linux; as chamadas reais ficam no alvo `probes`, local e opt-in. Testes Windows-específicos do
+porte estão nomeados em
 `addendum-durable-receipt-process-containment-windows.md` §6.
 
 ## Evidência

@@ -1,6 +1,7 @@
 # ADR 0012 — O engine é dono do worktree e do processo
 
-**Status:** aceito 2026-09-17
+**Status:** aceito 2026-09-17, pendente de confirmação do Erick quanto ao worker não-detached (item 5 de
+`architecture.md` §9: uma chamada paga perdida por crash do engine em troca de contenção de graça).
 
 ## Contexto
 
@@ -19,7 +20,8 @@ O engine é dono **exclusivo** de worktree e de processo, nas três famílias.
 | :--- | :--- |
 | Worktree | criado e destruído pelo engine em `<repo>/.ade/wt/<story>`; `GitPort` é uma instância por worktree, nunca singleton (C4) |
 | Spawn | `spawn(..., {shell:false})` no `.exe` real resolvido pelo `BinaryResolver` (C6), `cwd` no worktree, `env` explícito filtrado (I49) |
-| Sobrevivência | worker **não-detached** na v1: morre com o engine, a chamada vira `ambiguous`, a árvore suja vira checkpoint |
+| Sobrevivência | worker **não-detached** na v1: morre com o engine, a chamada vira `ambiguous`, a árvore suja vira checkpoint. A branch "anexa e espera" de I09 fica **dormente** e o teste de attach é v0.5+ (§11 E21) |
+| Vigilância | heartbeat do worker + dead-man switch: sem heartbeat por N s o engine mata o grupo de processos e põe a unidade em `awaiting_operator` com o log em quarentena (§10 A3) |
 | Encerramento | `taskkill /T /F /PID`, nunca `pty.kill()` |
 | Rastro | recibo durável em `.ade/missions/<id>/jobs/<step>.json` com fingerprint (unit, authorization, cwd, argv, timeout, result_file, pid, start_time) |
 | Efeito externo | git/gh só do engine; o worker nunca os roda (C22) |
@@ -46,8 +48,9 @@ headless única (C12).
 ## Trade-offs
 
 Perde-se uma chamada paga a cada crash do engine no meio de um `model_call` (a branch "anexa" de I09
-fica dormente). Ganha-se contenção da árvore de processos de graça, um único modo de falha e nenhuma
-dependência de ciclo de vida por família. Custo do porte: `BinaryResolver` ~40–60 linhas, recibo
+fica dormente; o recibo com fingerprint serve para decidir `ambiguous` com honestidade e para o
+`taskkill` seguro, não para reanexar — §11 E21). Ganha-se contenção da árvore de processos de graça, um
+único modo de falha e nenhuma dependência de ciclo de vida por família. Custo do porte: `BinaryResolver` ~40–60 linhas, recibo
 ~100–150, fingerprint ~30–50 — zero dependência nova.
 
 ## Alternativas rejeitadas

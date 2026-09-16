@@ -25,6 +25,9 @@ abre o documento específico só quando precisar da evidência.
 | `addendum-autonomia-permissoes-por-repositorio.md` | Flags de modo desatendido por família; auto-mode; execpolicy; sandbox |
 | `addendum-durable-receipt-process-containment-windows.md` | Job Object via libuv; lease; JCS; shims do npm no Windows |
 | `addendum-video-claims.md` | Verificação das dicas de vídeo (cache, advisor, /doctor) |
+| `design-panel/proposal-A-minimal.md`, `proposal-B-durable.md`, `proposal-C-intent.md`, `judgment-J1-implementability.md`, `judgment-J2-journeys.md`, `judgment-J3-durability-security-cost.md` | Painel de arquiteturas: as três propostas e os três julgamentos que `architecture.md` §1 usa como base (A com enxertos de B e C) e que §11 cita na arbitragem (E8 ← J3) |
+| `ref-affaan-mustafa-ecc.md` | Everything Claude Code: fonte dos 14 adendos A1–A14 de `architecture.md` §10 |
+| `ref-addyosmani-agent-skills.md` | `addyosmani/agent-skills`: framework de evals de skills adotado como método (evals §10, skill-fabric §9) |
 
 ## Premissas do PROMPT.md e da spec v2 que a pesquisa derrubou
 

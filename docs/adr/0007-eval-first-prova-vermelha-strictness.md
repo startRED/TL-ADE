@@ -14,10 +14,15 @@ mudança puramente aditiva.
 O eval nasce no Task Contract com `author` (`intent_compiler` | `maker` | `operator`) e é obrigatório:
 ≥1 por cenário. `eval_run` é classe de efeito no journal, com `phase: 'red' | 'green' | 'strictness'`.
 O modo padrão é `must_fail_before`: o eval roda contra `tree_before` e **tem de falhar**; depois roda
-contra `tree_after` e tem de passar. `additive` dispensa o vermelho e grava **aviso registrado**
-(mudança puramente aditiva); `mutate` fica reservado. Eval que nasce verde devolve a story ao **Intent
-Compiler**, não ao Maker. `eval` é o 8º schema publicado, e o `strictness` é validado na ingestão do
-plano. O relato textual do agente nunca conta como evidência.
+contra `tree_after` e tem de passar. O vermelho só vale quando `EvalRecord.red_reason = 'assertion'`;
+`missing_target`, `compile_error` e `environment` rebaixam o eval para `additive` com aviso, e em classe
+≥ `feature` levam a `awaiting_operator` (E12). `additive` dispensa o vermelho, grava **aviso
+registrado** (mudança puramente aditiva) e exige no mesmo cenário um eval `negative` ou um spot-check
+`mutate` — condição validada por ajv. Eval que nasce verde devolve a story ao **Intent Compiler**, não
+ao Maker. `eval` é o 8º schema publicado, e o `strictness` é validado na ingestão do plano. O veredito
+da story vive no `unit-result` (que ganha `sources: string[]` obrigatório, E8) e no `unit_state` do
+journal, nunca num campo do contrato: `passes` **não existe** no Task Contract (E1). `ade eval <story>`
+roda os evals do contrato sob o mesmo runner. O relato textual do agente nunca conta como evidência.
 
 ## Evidência
 
@@ -36,8 +41,10 @@ plano. O relato textual do agente nunca conta como evidência.
 ## Trade-offs
 
 Uma execução extra por eval por story (barata e determinística, sem token) em troca da única evidência
-que não depende do modelo. `additive` é escapatória e pode ser abusada: o `ade report` mostra a
-contagem por missão, e a fração aceitável de `additive` é **[hipótese]** até o dogfood dar um p90.
+que não depende do modelo. `additive` é escapatória e pode ser abusada: a exigência de `negative` ou `mutate` no mesmo cenário
+fecha a saída mais barata, o `ade report` mostra a contagem por missão, e a fração aceitável de
+`additive` é **[hipótese]** até o dogfood dar um p90. Classificar `red_reason` custa parsing frágil de
+saída de runner por linguagem; errar para `environment` é o lado seguro (rebaixa, não aprova).
 Eval escrito por modelo pode ser não-discriminativo; as fixtures de recusa cobrem a forma, não a
 semântica — vigilância continua necessária.
 
@@ -48,7 +55,8 @@ semântica — vigilância continua necessária.
 | Checker atesta o rigor do eval (spec v2) | atestação por LLM é mais cara e menos confiável que uma execução gravada |
 | `must_fail: true` literal no tipo | bloqueia story aditiva (J1, falha fatal 3 de A/B) |
 | Prova de rigor por inspeção estática do teste | não distingue teste que falha por motivo errado |
-| Eval opcional em `trivial` | a faixa rápida delega a autoria ao Maker, mas mantém o portão `tree_before` |
+| Eval opcional em `trivial` | a faixa rápida delega a autoria ao Maker (única exceção de mutabilidade do contrato, E2: `evals: []` na aprovação, preenchido uma vez como `local_write` com `eval_authored_by`), mas mantém o portão `tree_before` como vermelho diferido |
+| Vermelho por qualquer motivo de falha | falha de compilação ou de ambiente não prova discriminação (E12) |
 
 ## Como reverter
 
@@ -58,6 +66,7 @@ remover a fase vermelha exige ADR novo, porque destrói a evidência central.
 
 ## Consequências para outros documentos
 
-`schemas/eval.schema.json`, `schemas/task-contract.schema.json`, `schemas/journal-event.schema.json`
-(classe `eval_run`), `docs/specs/` (eval runner, ciclo por story), ADR 0008 (quem escreve o eval por
+`schemas/eval.schema.json`, `schemas/task-contract.schema.json` (sem `passes`),
+`schemas/unit-result.schema.json` (`sources[]`), `schemas/journal-event.schema.json` (classe
+`eval_run`), `docs/specs/` (eval runner, ciclo por story, `ade eval`), ADR 0008 (quem escreve o eval por
 classe), ADR 0010 (evals visuais), ADR 0017 (correlação eval/rework na telemetria).

@@ -1,8 +1,8 @@
 # Spec — Intent Compiler (C15)
 
 Data: 2026-09-17. Escopo: o caminho `pedido → Plan de Task Contracts aprovado`. Depois da aprovação o
-documento acaba: execução em `docs/specs/engine-core.md`, montagem do prompt em
-`docs/specs/context-pack.md`, seleção de skills em `docs/specs/skill-fabric.md`, UI em
+documento acaba: execução em `docs/specs/engine-durability.md`, montagem do prompt em
+`docs/specs/context-firewall-telemetry.md`, seleção de skills em `docs/specs/skill-fabric.md`, UI em
 `docs/specs/frontend-quality-engine.md`. Decisões fixas em `architecture.md` §3 (C15, C18), §4, §5 e
 ADR `0008-intent-compiler-task-contract-classes-faixa-rapida`, `0007-eval-first-prova-vermelha-strictness`,
 `0016-pesquisa-como-subsistema`. Entrega na v0.3 (`docs/roadmap.md`); o Slice 1 consome `plan.json`
@@ -29,6 +29,10 @@ e o que alimenta o fallback do classificador.
 | `ui` | rotas por convenção (`app/`, `pages/`, `routes/`, `src/routes`), `index.html`, dependências de framework | 300 rotas | liga `has_ui` → DesignBrief obrigatório |
 | `symbols` | `rg --json` com os termos do pedido (lemas ≥4 chars, stopwords PT/EN removidas) | 40 hits | ancoragem: arquivo provável, símbolo provável |
 | `ade` | `.ade/config.json`, últimas 5 missões (`status.json`, `report.md`), skills locais do repo | — | autonomia default, orçamentos, reincidência |
+
+A v1 assume repositórios do próprio operador: `catalog.sources` fica no `.ade/config.json` do
+repositório e as skills de `<repo>/.claude/skills/` são inventário do discovery, nunca entram no pack
+(só o catálogo curado) e não são carregadas pela CLI despachada (E56).
 
 Graft, quando instalado, substitui o coletor `symbols` por consulta a grafo com fallback silencioso
 para `rg` (ADR `0018-graft-opcional`); o mapa não muda de forma.
@@ -59,8 +63,11 @@ coletor `symbols` degrada primeiro (é o único com custo linear no pedido).
 
 ## 2. Classificador de complexidade
 
-Uma chamada barata com schema (`architecture.md` §5.3). Saída (JSON Schema inline; vira publicado só
-se ganhar um segundo consumidor):
+**Regra determinística primeiro** (`architecture.md` §11 E18): a regra dos itens 1–5 abaixo roda
+sempre, com custo zero, e decide sozinha em candidatos a `trivial` (1 arquivo tocado no discovery +
+verbo de correção). A chamada barata com schema (`architecture.md` §5.3) é escalada — só com
+`confidence < 0,6` ou classe ≥ `feature` — nunca o caminho default. Saída (JSON Schema inline; vira
+publicado só se ganhar um segundo consumidor):
 
 ```ts
 interface Classification {
@@ -85,16 +92,21 @@ interface Classification {
 | `subsystem` | vários fluxos, migração de dados, mudança de arquitetura | 26–80 | várias | ≥1 `external_fact` |
 | `project` | repositório novo ou reescrita; sem baseline no discovery | >80 ou repo vazio | tudo | estrutural |
 
-**Medição de custo por chamada.** Obrigatória, por evento `telemetry` (`architecture.md` §4), porque
-`claude -p --model haiku` já faturou como `claude-sonnet-5` — US$ 0,37 para ecoar 200 bytes (digest
-#26). Regra dura: o engine mantém média móvel de 20 chamadas do papel `classifier` em
-`~/.ade/routing.jsonl`; se `p50(cost_usd) > 0,02` **ou** `p50(duration_ms) > 4000`, o classificador
-cai para `source: 'deterministic'` e grava `decision{kind:'classifier_demoted'}`. Promoção de volta só
-por `ade doctor` com sondagem real. Codex nunca é classificador: piso de ~19,4k tokens de entrada
-(digest #27).
+**Medição de custo por chamada.** Obrigatória, por evento `telemetry` (`architecture.md` §4), porque o
+custo de uma chamada "barata" não é observável a priori: duas medições na mesma máquina divergem —
+`capabilities-claude-code.md` §7 mediu US$ 0,06284 com `canonicalModel: claude-haiku-4-5`, e
+`addendum-checker-contract-review-result.md` §3 mediu US$ 0,3736 faturado como `claude-sonnet-5`
+(digest #26). Anomalia não explicada, não fato estabelecido: a própria §9 do addendum a lista como
+pergunta aberta, e a reconciliação é sonda obrigatória do `ade doctor` (grava `bootstrap_cost_tokens`
+e `canonicalModel` por chamada). E18 se sustenta sem ela — a regra determinística cobre o candidato a
+`trivial` a custo zero. Regra dura: o engine mantém média móvel de 20 chamadas do papel `classifier` em
+`~/.ade/routing.jsonl`; se `p50(cost_usd) > 0,02` **ou** `p50(duration_ms) > 4000`, a escalada é
+desligada (`source: 'deterministic'` sempre) e grava `decision{kind:'classifier_demoted'}`. Promoção
+de volta só por `ade doctor` com sondagem real. Codex nunca é classificador: piso de ~19,4k tokens de
+entrada (digest #27).
 
-**Fallback determinístico** (também usado quando não há família disponível, quando a classificação do
-modelo tem `confidence < 0,6`, e como controle nas fixtures do §12):
+**Regra determinística** (primeiro passo, sempre; também é o único caminho quando não há família
+disponível e o controle nas fixtures do §12):
 
 1. `anchors` ≥1 **e** pedido com verbo de correção (`corrig|conserta|quebrad|não funciona|fix|broken`)
    **e** ≤2 arquivos candidatos → `trivial`.
@@ -105,7 +117,8 @@ modelo tem `confidence < 0,6`, e como controle nas fixtures do §12):
    `unknown{kind:'external_fact'}`.
 5. `has_ui` vem do discovery, nunca do modelo.
 
-Desacordo entre modelo e regra de **duas ou mais classes** não escolhe em silêncio: vale a classe
+Escalada para o modelo só quando a regra devolve `confidence < 0,6` ou classe ≥ `feature` — onde o
+custo relativo da chamada é irrelevante. Desacordo entre modelo e regra de **duas ou mais classes** não escolhe em silêncio: vale a classe
 **maior** e grava `note{kind:'classifier_disagreement'}` com os dois valores — degradação segura, o
 custo de processo a mais é menor que o de contrato a menos.
 
@@ -113,36 +126,49 @@ custo de processo a mais é menor que o de contrato a menos.
 
 ## 3. Faixa rápida `trivial`
 
-Requisito com eval próprio no Slice 1/v0.3 (`architecture.md` §5.4, judgment-J2 §6): **≤30 s até a
-primeira edição de arquivo-fonte, 0 perguntas, ≤2 chamadas de modelo**. "Começar" = primeiro
-`Write`/`Edit` do Maker em arquivo de código-fonte, medido pelo mtime no worktree contra o `at` do
-`batch_open` — a definição que J2 §1 mostrou ser incomparável entre as propostas.
+Requisito com eval próprio: **≤30 s até a primeira edição de arquivo-fonte, 0 perguntas, ≤2 chamadas
+de modelo** (`architecture.md` §5.4, judgment-J2 §6). O teste
+`fast_lane_trivial_starts_within_30s_zero_questions` é critério de saída da **v0.3**; o Slice 1 grava
+só `first_source_edit_ms` como baseline (`architecture.md` §11 E40). "Começar" não é redefinido aqui:
+U1 (`first_source_edit_ms`) tem definição operacional única em `vision.md` §3, citada por referência
+(E54) — a métrica que J2 §1 mostrou ser incomparável entre as propostas.
 
-Orçamento das 2 chamadas: classificador (1) + Maker (1). Sobra zero, e é por isso que o rebaixamento
-do §2 importa: com o classificador determinístico a faixa rápida gasta **uma** chamada e ganha folga
-para um retry.
+Orçamento das 2 chamadas: Maker (1) + classificador (1) **quando ele escala**. Com a regra
+determinística decidindo — o default depois de E18 — a faixa rápida gasta **uma** chamada e sobra
+folga para um retry dentro do orçamento default da classe (3 chamadas / 1 rework, `architecture.md`
+§11 E4 [hipótese]).
 
 **Quem escreve o eval.** O Maker, na mesma chamada da correção, com `author: 'maker'` gravado no
-contrato e no journal (enxerto de judgment-J2 §4). O portão `must_fail_before` é mantido por um
-**vermelho diferido**, executado pelo engine, não pelo modelo:
+contrato e no journal (enxerto de judgment-J2 §4). É a **exceção única de mutabilidade** do contrato
+(`architecture.md` §11 E2): em `trivial` com `evals: []` na aprovação, `evals` é preenchido uma só
+vez, gravado como step `local_write` com `eval_authored_by: 'maker'`. O portão `must_fail_before` é
+mantido por um **vermelho diferido**, executado pelo engine, não pelo modelo:
 
 | # | Ator | Ação |
 | :-- | :--- | :--- |
 | 1 | engine | `prepare`: worktree, contrato mínimo, pack sem skills; grava `tree_before` |
 | 2 | Maker | uma chamada: escreve o(s) arquivo(s) de eval **e** a correção |
 | 3 | engine | checkpoint de `tree_after` em `refs/ade/…` |
-| 4 | engine | restaura `tree_before` ∪ `{arquivos declarados como eval}` → `eval_run{phase:'red'}`; exige `exit != 0` |
+| 4 | engine | restaura `tree_before` ∪ `{arquivos declarados como eval}` → `eval_run{phase:'red'}`; exige `exit != 0` com `red_reason: 'assertion'`. Em `trivial` os demais motivos (`missing_target`/`compile_error`/`environment`) **não** rebaixam para `additive`, que exigiria `negative`/`mutate` inexistentes na classe: a story para em `awaiting_operator{reason:'red_unproven'}` com o diff pronto e `ade decide --option accept_unproven` fecha como `complete` com `decision` gravada (E51, emenda a E12) |
 | 5 | engine | restaura `tree_after` → `eval_run{phase:'green'}`; exige `exit == 0` |
 | 6 | engine | vermelho que não falha ⇒ `eval_born_green` ⇒ story volta ao compilador (ADR 0007), nunca ao Maker |
+
+Os dois `eval_run` exigem reporter estruturado (`--reporter=json` no Vitest/Jest, equivalente por
+runner) e `numTotalTests ≥ 1`: zero testes executados é `red_reason: 'missing_target'`, nunca verde
+(E58).
 
 O passo 4 é o único ponto onde a faixa rápida difere do ciclo normal; custa duas restaurações de
 árvore e zero chamadas de modelo. `eval_author: 'maker'` na telemetria é o que permite medir se a
 concessão custa defeitos escapados (judgment-J2 §4).
 
-**Quando o Checker entra**, na `trivial`: (a) diff toca > N arquivos (`N = 3`, configurável em
-`ade-config`); (b) diff toca `sensitive_paths`; (c) segundo `eval_run{phase:'green'}` falho na mesma
+**Quando o Checker entra**, na `trivial`: (a) diff toca > N arquivos-fonte (**`N = 1`**, chave
+`fast_lane.checker_threshold_files` em `ade-config` — valor canônico em `architecture.md` §5, tabela
+de classes); (b) diff toca `sensitive_paths`; (c) segundo `eval_run{phase:'green'}` falho na mesma
 story; (d) `contain` disparou qualquer violação. Fora disso, `trivial` fecha sem Checker LLM, com
-commit local e sem PR. Auto-aprovação só com `autonomy: 'safe'`, registrada como
+commit local e sem PR; em `autonomy: 'safe'` o engine ainda faz o `local_merge` fast-forward da branch
+da story na base quando a base não mudou desde o `prepare` (ff-only, ref de origem em `refs/ade/`), e
+se a base mudou o `report.md` imprime o comando de merge (E64). Auto-aprovação só com
+`autonomy: 'safe'`, registrada como
 `decision{kind:'auto_approved', class:'trivial'}`.
 
 ---
@@ -159,7 +185,7 @@ de forma. A ordem importa porque cada camada é validável contra a anterior:
 | 3 | restrições | `scope_paths`, `do_not_touch`, `sensitive_paths`, invariantes citáveis | vêm do discovery e da config; modelo só **seleciona**, não inventa caminho inexistente |
 | 4 | requisitos EARS | `requirements[]` | forma validada por regra (§5) |
 | 5 | cenários | `scenarios[]` given/when/then | ≥1 por requisito; cobertura 1:1 verificada por id |
-| 6 | evals | `evals[]` | ≥1 por cenário; `cmd` existe nos `scripts` do discovery ou é comando do runner detectado |
+| 6 | evals | `evals[]` | ≥1 por cenário; no plano valida-se só a **forma** de `cmd` — a existência de `cmd[0]` nos `scripts` é conferida no `prepare` de cada story, com re-discovery no worktree (E63) |
 | 7 | DesignBrief | 4 camadas | obrigatório sse `has_ui`; `direction.self_critique` não vazio |
 
 Camada que não fecha não volta ao modelo em texto livre: volta com o **erro de ajv mais o item
@@ -232,9 +258,10 @@ Regras:
 - **"Não sei"** é opção obrigatória em toda pergunta. Escolhida: grava o default em
   `decision{kind:'default_assumed'}`, registra a incógnita em `TaskContract.unknowns[]` (campo do
   contrato, não do plano) e o resumo de aprovação a lista explicitamente.
-- **Incógnita vira pesquisa** quando: `kind: 'external_fact'` **e** classe ≥ `feature` **e** o default
-  assumido tem efeito externo (rede, dinheiro, dado de terceiro) ou contradiz o discovery. Caso
-  contrário permanece como default registrado, visível no `ade report`.
+- **Incógnita vira pesquisa** quando: `kind: 'external_fact'` **e** o default assumido tem efeito
+  externo (rede, dinheiro, dado de terceiro) ou contradiz o discovery — gatilho por incógnita, não por
+  classe (`architecture.md` §11 E19). A classe fixa só o teto de custo (§7). Caso contrário permanece
+  como default registrado, visível no `ade report`.
 - Duas perguntas com a mesma `unknown_ref` são fundidas. Orçamento estourado (>5) ⇒ as perguntas
   restantes viram defaults registrados, nunca perguntas extras.
 
@@ -242,8 +269,13 @@ Regras:
 
 ## 7. Pesquisa como subsistema (C18)
 
-Gatilho, não default de classe: **incógnita declarada** com `kind: 'external_fact'` e classe ≥
-`feature` (`architecture.md` §5.6). Uma chamada com schema por incógnita; `agy --json-schema`
+Gatilho, não default de classe: **incógnita declarada** com `kind: 'external_fact'`
+(`architecture.md` §11 E19). A classe define apenas o teto: `bounded` no máximo **uma** consulta e sem
+time paralelo; `feature`+ até **três**. O time paralelo tem **papéis distintos**, lista fechada em
+`research.roles[]` do `ade-config`: `official_docs`, `existing_solutions`, `comparison`,
+`adversarial` — o papel é gravado em cada claim (`claims[].role`), senão quatro agentes devolvem a
+mesma leitura quatro vezes. Antes do ranking por tier roda **dedupe** por `(source,
+normalize(text))`; só claims sobreviventes de fontes distintas podem produzir `disagreement: true`. Uma chamada com schema por incógnita; `agy --json-schema`
 primeiro, `claude` como fallback (digest #10, #2). Time paralelo 2–4 somente-leitura é **opt-in** por
 `ade-config`, e só para leitura independente e comprimível — o único paralelismo com evidência a favor
 (+90 % por ~15× tokens, README §Confirmações).
@@ -254,6 +286,7 @@ primeiro, `claude` como fallback (digest #10, #2). Time paralelo 2–4 somente-l
 interface ResearchFinding {
   id: string; unknown_ref: string; question: string
   claims: { text: string; tier: 1|2|3|4|5|6; source: string; retrieved_at: string
+            role: 'official_docs' | 'existing_solutions' | 'comparison' | 'adversarial'
             grade: 'fact' | 'inference' | 'hypothesis' | 'preference' }[]
   synthesis: string; disagreement: boolean; escalated_question_id?: string
 }
@@ -279,9 +312,20 @@ Uma chamada forte com schema produz `plan.json`: `phases[] → epics[] → stori
 partir de `feature`; `bounded` tem lista plana de 1–3 stories). Por story o compilador decide:
 `depends_on` (só com dependência real de artefato, nunca ordem estética — digest #22),
 `skills` candidatas (ids do catálogo; o fecho ≤3 acontece no `prepare`, `architecture.md` §7),
-`roles` (do Capability Registry, com `Maker ≠ Checker` por `model_id`), `budget`
-(`max_model_calls`, `max_rework_rounds`, `max_usd`) e `permitted_effects` (subconjunto das classes de
-efeito autorizadas na aprovação).
+`roles` (do Capability Registry, com `Maker ≠ Checker` por `model_id` e por vendor valendo para **todo**
+papel da chamada — executor e advisor, medidos em `telemetry.models[]`; `--advisor` só entra na receita
+quando o modelo do advisor é observável em `modelUsage`, E66), `budget`
+(`max_model_calls`, `max_rework_rounds`, `max_usd`; defaults por classe em `architecture.md` §11 E4 —
+trivial 3/1, bounded 6/2, feature 10/3, subsystem e project 12/3 [hipótese]). Com UI o orçamento sai da
+fórmula `max_model_calls = 2 + 2·visual_rounds + 2·(max_rework_rounds + 1)` [hipótese]: `bounded` com UI
+= 8 chamadas/3 rework, `feature` com UI = 12/3; sem UI os defaults acima valem (E65, emenda a E4).
+`permitted_effects`
+(só **efeitos externos** autorizados na aprovação; `model_call`, `eval_run`, `local_write`, `gate` e
+`prepare` são implícitos — E3) **não é campo do Task Contract**: mora em `plan.authorization`, fora do
+`task-contract.schema.json` (que tem `additionalProperties: false`). O `plan` carrega ainda
+`mission_budget: { max_wall_clock_seconds, max_parked_units, max_usd }`, gravado no `batch_open` — sem
+teto de tokens: `max_usd` mais `prices.json` cobrem as famílias que reportam custo e nas demais o teto
+é `max_model_calls` (E61).
 
 **Recusas do validador** (ajv + regras próprias; cada uma com código, mensagem acionável e o item
 culpado). Recusa é do plano inteiro, não parcial:
@@ -296,10 +340,10 @@ culpado). Recusa é do plano inteiro, não parcial:
 | `missing_complexity` | story sem `complexity` |
 | `missing_design_brief` | `has_ui` e sem `design_brief` (ou brief sem `direction.self_critique`) |
 | `scope_outside_repo` | `scope_paths` fora do worktree ou casando `sensitive_paths` |
-| `eval_cmd_unknown` | `cmd[0]` não está nos `scripts` do discovery nem no runner detectado |
-| `strictness_default_abused` | `mode: 'additive'` sem `note` justificando (ADR 0007) |
+| `eval_cmd_unknown` | `cmd` mal formado (vetor vazio, `cmd[0]` vazio ou com shell embutido). A conferência contra os `scripts` é do `prepare`, não do plano (E63); `story.provides_runner` não existe |
+| `strictness_default_abused` | `mode: 'additive'` sem `note` justificando (ADR 0007), ou sem um eval `negative` / spot-check `mutate` no mesmo cenário (E12) |
 | `cyclic_depends_on` | ciclo no DAG |
-| `role_same_model` | `maker.model_id == checker_round.model_id` |
+| `role_same_model` | `maker.model_id == checker_round.model_id`, ou `vendor` igual entre os dois (E10); vale para todo papel da chamada, inclusive advisor (E66) |
 | `budget_missing` | story sem `budget.max_model_calls` |
 | `story_pack_overflow` | §9 |
 | `unknown_unresolved` | incógnita `external_fact` sem `research_refs` nem `default_assumed` |
@@ -310,20 +354,27 @@ Plano recusado volta ao modelo **uma vez** com os códigos; segunda recusa ⇒ `
 
 ## 9. Teto de pack por story e divisão
 
-O pack tem teto global de 40k tokens com seções de teto fixo (`architecture.md` §7). As seções não
+O corte efetivo do pack é em **bytes** (`limits.max_pack_bytes`, default 120 000 [hipótese], calibrar
+por p90 — `architecture.md` §11 E13); "40k tokens" é alvo de projeto por estimativa. As seções não
 pertencentes à story consomem um piso previsível; o que sobra é o orçamento da story:
 
 | Seção | Teto | Dono |
 | :--- | :--- | :--- |
 | ferramentas + papel | ~1,0k | engine |
-| invariantes do repo | 1,5k | repo |
-| skills (≤3) | 7,5k | Skill Fabric |
+| invariantes do repo | 1,5k ("Must Always / Must Never") | repo |
+| skills (≤3) | ≤5k por skill, soma ≤7,5k (E14) | Skill Fabric |
 | contexto recuperado | 6,0k | prepare |
-| rodada (achados, falhas, checkpoint) | 6,0k reservados | ciclo |
-| **contrato + tarefa** | **≤18k** | **story** |
+| rodada (achados, falhas, checkpoint) | teto próprio de 24 000 bytes com ponteiro (E13) | ciclo |
+| **contrato + tarefa** | **32 000 bytes** (≈8k tokens) [hipótese] — `limits.max_contract_bytes` (E50) | **story** |
+
+A divergência está arbitrada: o teto da seção `contract` do pack é **32 000 bytes** (≈8k tokens)
+[hipótese], dentro de `max_pack_bytes`, e substitui os dois valores que circularam — os 2 000 tokens da
+tabela de seções de `context-firewall-telemetry.md` §1.1 e os "≤18k tokens" desta spec (E50). Estouro é
+`story_pack_overflow` e reabre a divisão da story. As chaves de configuração citadas aqui são derivadas
+de `schemas/ade-config.schema.json`, única fonte normativa das chaves (E55).
 
 `estimate_story_tokens = bytes(contract JSON)/3,6 + Σ evals + brief + Σ(anchors citados)`. Acima de
-18k ⇒ `story_pack_overflow`, e o compilador **divide**: quebra por cenário em stories com `depends_on`
+`limits.max_contract_bytes` ⇒ `story_pack_overflow`, e o compilador **divide**: quebra por cenário em stories com `depends_on`
 em cadeia, mantendo cada requisito inteiro (requisito nunca é dividido). Divisão que ainda estoura
 ⇒ `awaiting_operator` com a sugestão de recortar escopo. Segunda verificação, agora com números reais,
 acontece no `prepare` (o pack só é montável lá); estouro nesse ponto poda o contexto recuperado antes
@@ -342,13 +393,17 @@ Uma tela, uma decisão (`architecture.md` §5.9). Ordem fixa, campos obrigatóri
 5. **Como será provado**: número de evals por tipo e os comandos distintos que serão executados.
 6. **Perguntas e defaults**: cada resposta, e cada "não sei" com o default assumido, marcado.
 7. **Incógnitas abertas**: as que viraram pesquisa (com fonte e tier) e as que ficaram como default.
-8. **Skills novas neste projeto**: nome, origem, commit, `trust` — primeira aparição exige aprovação
-   (em lote desatendido: `awaiting_operator`).
+8. **Skills novas neste projeto**: nome, origem, commit, `trust` — cada injeção posterior grava
+   `sha256` do conteúdo e `source` (`catalog@<commit>` ou `local`) em `skills_injected[]` (E59);
+   primeira aparição exige aprovação
+   (em lote desatendido: `awaiting_operator`). A aprovação **congela o conjunto elegível da missão**
+   (união do top-8 por story); só skill fora do conjunto parqueia em lote desatendido (E33).
 9. **Efeitos externos autorizados**: subconjunto de `push`, `pull_request`, `pull_request_merge`,
-   `ci_rerun`, instalação de dependência. Ausente = proibido.
-10. **Custo estimado**: USD por família com `cost_source` explícito (`reported` | `estimated` |
-    `unknown` — Codex não reporta USD, digest #28) e teto `max_usd` do lote.
-11. **Autonomia**: `safe` | `controlled` | `restricted`; `restricted` exibe "nunca roda desatendido".
+   `ci_rerun`, instalação de dependência. Ausente = proibido. Classes internas não entram na lista (E3).
+10. **Custo estimado**: USD por família com `cost_source` explícito (`reported` | `unknown`, sem
+    `estimated` — `architecture.md` §4; Codex não reporta USD, digest #28) e teto `max_usd` do lote.
+11. **Autonomia**: `safe` | `controlled` | `restricted`; `restricted` exibe "nunca roda desatendido"
+    (`dispatch: never`, motivo `autonomy_requires_operator` — E5).
 12. **Digest do plano** (JCS + sha256, 16 hex) — é o que a aprovação assina e o que o engine confere
     antes de cada story (divergência ⇒ `stale_plan`).
 
@@ -365,23 +420,27 @@ Forma normativa em `architecture.md` §4. Aqui o que cada campo significa para q
 | :--- | :--- | :--- | :--- |
 | `id`, `title` | compilador | plano | `id` estável; ordena o journal |
 | `complexity` | classificador | plano | herda da missão, pode ser menor na story |
-| `task` | compilador | plano | o quê e por quê; nunca o como; ≤600 chars |
+| `task` | compilador | plano | o quê e por quê; nunca o como; ≤600 chars. A seção `task` do pack recebe ainda os `operator_notes` do `ade steer` (≤600 bytes, mais recente primeiro, fila drenada no `prepare` da story seguinte): nota é contexto, não requisito, e o contrato segue imutável (E53) |
 | `guardrails.scope_paths` | discovery + compilador | plano | globs existentes; base do `contain` |
 | `guardrails.do_not_touch` | config + compilador | plano | obrigatório não-vazio |
 | `guardrails.sensitive_paths` | config | plano | segredos, migrations, infra |
-| `guardrails.autonomy` | operador/config | aprovação | `restricted` ⇒ `ask_operator: ['*']` |
+| `guardrails.autonomy` | operador/config | aprovação | `ask_operator` é enum fechado (E5); `restricted` ⇒ `dispatch: never` (`autonomy_requires_operator`) |
 | `requirements[]` | compilador | plano | EARS §5; 1:1 com cenário |
 | `scenarios[]` | compilador | plano | given/when/then; cita `evals[]` |
-| `evals[]` | compilador (`author`) ou Maker na faixa rápida | plano / implement | `strictness.mode` default `must_fail_before` |
+| `evals[]` | compilador (`author`) ou Maker na faixa rápida | plano / implement | `strictness.mode` default `must_fail_before`; preenchimento pelo Maker é a exceção única de mutabilidade (E2) |
 | `skills[]` | compilador propõe; `prepare` fecha | prepare | ≤3, ids do catálogo |
 | `roles` | Capability Registry | plano | `Maker ≠ Checker` por `model_id` |
 | `design_brief` | compilador | plano | obrigatório sse `has_ui` |
 | `research_refs[]` | pesquisa | plano | ids de `research-finding` |
-| `unknowns[]` | entrevista | plano | default assumido + origem |
+| `unknowns[]` | entrevista | plano | campo do contrato, não do plano (E48): `id`, `question`, `kind ∈ {product_choice, external_fact, repo_fact}`, `resolved_by?` ∈ `{operator, research, discovery}`; o default assumido vive na `decision{kind:'default_assumed'}` |
 | `depends_on[]` | compilador | plano | só dependência real |
-| `budget` | compilador | plano | reservado pelo scheduler |
-| `permitted_effects[]` | aprovação | aprovação | ausente = proibido |
-| `passes` | **Maker** | execução | único campo gravável pelo agente; por evidência (digest #22) |
+| `budget` | compilador | plano | reservado pelo scheduler; defaults por classe (E4) |
+
+`permitted_effects` também não é campo do contrato (mora em `plan.authorization`, §8). `passes`
+**não existe mais no contrato** (`architecture.md` §11 E1): o contrato é imutável após a
+aprovação (coberto por `immutable_digest`), o estado da story vive no journal (`unit_state`) e na
+projeção `status.json`, e o veredito é carregado pelo `unit-result` — que traz `sources[]`
+obrigatório (E8).
 
 **Exemplo — jornada 1 (`trivial`)**
 
@@ -398,8 +457,8 @@ Forma normativa em `architecture.md` §4. Aqui o que cada campo significa para q
               "evidence": ["src/ui/__tests__/LoginButton.test.tsx"],
               "strictness": { "mode": "must_fail_before" }, "author": "maker" }],
   "skills": [], "roles": { "maker": { "family": "claude", "model_id": "claude-sonnet-5" },
-                           "checker_round": { "family": "codex", "model_id": "gpt-5.5-codex", "conditional": "diff_files>3" } },
-  "budget": { "max_model_calls": 2, "max_rework_rounds": 1 }, "passes": false }
+                           "checker_round": { "family": "codex", "model_id": "gpt-5.5-codex", "conditional": "diff_files>1" } },
+  "budget": { "max_model_calls": 3, "max_rework_rounds": 1 } }
 ```
 
 **Exemplo — jornada 4 (`feature` com pesquisa), 1 de 4 stories**
@@ -427,10 +486,10 @@ Forma normativa em `architecture.md` §4. Aqui o que cada campo significa para q
   "roles": { "maker": { "family": "claude", "model_id": "claude-sonnet-5" },
              "checker_round": { "family": "codex", "model_id": "gpt-5.5-codex" },
              "checker_gate": { "family": "claude", "model_id": "claude-opus-5" } },
-  "research_refs": ["RF1"], "unknowns": [{ "id": "U2", "question": "moeda", "default_assumed": "BRL" }],
+  "research_refs": ["RF1"],
+  "unknowns": [{ "id": "U2", "question": "moeda do checkout", "kind": "product_choice", "resolved_by": "operator" }],
   "depends_on": ["S1"],
-  "budget": { "max_model_calls": 14, "max_rework_rounds": 2, "max_usd": 4.0 },
-  "permitted_effects": ["local_write","local_commit","eval_run","push","pull_request"], "passes": false }
+  "budget": { "max_model_calls": 10, "max_rework_rounds": 3, "max_usd": 4.0 } }
 ```
 
 ---
@@ -451,7 +510,7 @@ Cada fixture é `pedido + repo → asserções sobre o plano`, não comparação
 | `F7-overflow` | "reescreva o app inteiro" | 400 arquivos | ≥1 `story_pack_overflow` seguido de divisão; nenhum requisito partido |
 | `F8-dont-know` | entrevista respondida com "não sei" ×3 | — | 3 `default_assumed`; 3 `unknowns[]`; resumo de aprovação lista os 3 |
 | `F9-tie` | pesquisa com 2 achados tier 1 opostos | fixtures de finding | `disagreement=true` e pergunta gerada; nenhum desempate silencioso |
-| `F10-degraded` | classificador indisponível | — | `source='deterministic'`; plano válido; `classifier_demoted` no journal |
+| `F10-degraded` | escalada do classificador indisponível | — | `source='deterministic'`; plano válido; `classifier_demoted` no journal |
 | `F11-disagree` | regra diz `feature`, modelo diz `trivial` | — | vence `feature`; `classifier_disagreement` gravado |
 | `F12-same-model` | registry com uma só família | — | `role_same_model` recusado; `no_checker_family_available` ⇒ `parked` |
 
@@ -480,7 +539,26 @@ classe ⇒ `note{kind:'planner_over_budget'}` e rebaixamento do classificador (�
 
 ---
 
-## Divergências propostas
+## Divergências resolvidas
+
+Arbitragem em `architecture.md` §11 (2026-09-17); o corpo deste documento já reflete as decisões.
+
+- **D1 → aceita**, `architecture.md` §11 E18: regra determinística primeiro em candidatos a `trivial`;
+  chamada de modelo só com `confidence < 0,6` ou classe ≥ `feature`. As ≤2 chamadas da faixa rápida
+  incluem o classificador quando ele escala. Aplicado no §2 e no §3.
+- **D2 → aceita**, `architecture.md` §11 E2: exceção única de mutabilidade — em `trivial` com
+  `evals: []` na aprovação o Maker preenche `evals` uma vez (`author: 'maker'`), gravado como step
+  `local_write` com `eval_authored_by`, e o vermelho diferido é condição de validade. Aplicado no §3 e
+  no §11. Nota: E1 remove `passes` do contrato, então a formulação original de D2 ("`passes` é o único
+  campo gravável") não vale mais.
+- **D3 → aceita**, `architecture.md` §11 E19: gatilho de pesquisa é a incógnita `external_fact`, não a
+  classe; a classe fixa só o teto (`bounded` ≤1 consulta sem time, `feature`+ até 3). Aplicado no §6 e
+  no §7.
+- **D4 → aceita**, `architecture.md` §11 E20: duas verificações nomeadas — estimativa no plano (divide
+  por cenário) e medição no `prepare` (poda contexto recuperado, nunca o contrato; reabre divisão se o
+  contrato sozinho estourar). Aplicado no §9; o ADR 0008 registra a mesma dupla.
+
+O texto original das objeções fica abaixo como registro.
 
 **D1 — O classificador deveria ser determinístico por padrão, com o modelo como escalada.**
 `architecture.md` §5.3 fixa "uma chamada barata com `--json-schema` … fallback para regra
@@ -523,12 +601,16 @@ sozinho estourar) — para que a recusa não seja lida como garantia dura onde e
 
 ## Referências cruzadas
 
-`architecture.md` §3 (C15, C18), §4, §5, §7 · ADR 0007, 0008, 0016, 0018, 0019 ·
-`docs/specs/engine-core.md` (ciclo, journal, reconciliação) · `docs/specs/context-pack.md` (tetos,
-ordem, manifesto) · `docs/specs/skill-fabric.md` (fecho ≤3 no `prepare`) ·
-`docs/specs/frontend-quality-engine.md` (DesignBrief, D1–D7) · `docs/specs/capability-registry.md`
+`architecture.md` §3 (C15, C18), §4, §5, §7, §12 (E48, E50, E51, E53–E56, E58, E59, E61, E63–E66) ·
+ADR 0007, 0008, 0016, 0018, 0019 ·
+`docs/specs/engine-durability.md` (ciclo, journal, reconciliação) ·
+`docs/specs/context-firewall-telemetry.md` (tetos, ordem, manifesto) ·
+`docs/specs/skill-fabric.md` (fecho ≤3 no `prepare`) ·
+`docs/specs/frontend-quality-engine.md` (DesignBrief, D1–D6) ·
+`docs/specs/adapters-capability-registry.md`
 (roles, fallbacks) · `schemas/plan.schema.json`, `schemas/task-contract.schema.json`,
-`schemas/eval.schema.json` · `docs/evals/intent-fixtures.md` (F1–F12) · `docs/roadmap.md` (v0.3).
+`schemas/eval.schema.json`, `schemas/ade-config.schema.json` · §12 deste documento (F1–F12) ·
+`docs/roadmap.md` (v0.3).
 Evidência: digest #10, #22, #26, #27, #28, #2 · `landscape-harnesses.md` §3–4 ·
 `landscape-dev-workflows.md` (a1, c2) · `design-panel/proposal-C-intent.md` §4, §7, §11 ·
 `design-panel/judgment-J2-journeys.md` §1, §4, §5.

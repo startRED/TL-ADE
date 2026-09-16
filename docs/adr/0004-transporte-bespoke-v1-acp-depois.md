@@ -1,6 +1,7 @@
 # ADR 0004 — Transporte bespoke headless na v1; ACP como migração por família
 
-**Status:** aceito 2026-09-17
+**Status:** aceito 2026-09-17, pendente de confirmação do Erick (o gatilho "4º provider" depende de
+`architecture.md` §9.3: sem chave de API obrigatória, logo sem 4º provider)
 
 ## Contexto
 
@@ -12,11 +13,16 @@ concretas antes do spawn, e o ACP v1 não fornece nenhuma delas.
 
 Na v1 os adapters falam com as CLIs em modo headless, por flags nativas: `claude -p --json-schema
 --session-id --max-budget-usd --safe-mode` e `codex exec --json --output-schema --sandbox
---ignore-user-config`. O adapter é casca fina: flags + parser tolerante a campos desconhecidos + CLI
-falsa por família para teste. O `CapabilitySet` carrega `transport: 'cli' | 'acp'` e o `JournalEvent`
-carrega `session_ref: string | null` (`null` quando o transporte não pré-cunha id), de modo que a
-migração seja por família e honesta no journal. Gatilho declarado para ACP: steering no meio do turno
-(RFD `session/inject` estável) ou entrada de um 4º provider.
+--ignore-user-config`. Chamada curta no Codex usa a receita completa `--ignore-user-config
+--ignore-rules --ephemeral -c skills.max_context_tokens=0`, com `AGENTS.md` ≤2 KB escrito pelo engine
+no worktree (E16). O adapter é casca fina: flags + parser tolerante a campos desconhecidos + CLI falsa
+por família para teste. O `CapabilitySet` carrega `transport: 'cli' | 'acp'`, `probe_ok: boolean |
+null`, `probe_mode: 'real' | 'help_only' | 'fixture'`, `bootstrap_cost_tokens` e `models[].vendor`
+(E10); o `JournalEvent` carrega `session_ref: string | null` (`null` quando o transporte não pré-cunha
+id), de modo que a migração seja por família e honesta no journal. `ade doctor --offline` é o default
+em CI; `probe_ok: null` fora de CI **recusa despacho**, nunca degrada. Gatilho declarado para ACP:
+steering no meio do turno (RFD `session/inject` estável) ou entrada de um 4º provider — que hoje está
+descartado pelo princípio "sem chave de API obrigatória" (§9.3).
 
 ## Evidência
 
@@ -36,7 +42,8 @@ migração seja por família e honesta no journal. Gatilho declarado para ACP: s
 ## Trade-offs
 
 Uma casca por família significa que atualização de CLI é risco recorrente; mitigação é o parser
-tolerante, fixtures gravadas por versão e `ade doctor` com chamada real. Perde-se de graça o que o ACP
+tolerante, fixtures gravadas por versão, `ade doctor` com chamada real e o `capabilities_digest` do
+`runtime_stamp` (E7), que faz upgrade silencioso de CLI aparecer no journal. Perde-se de graça o que o ACP
 já resolve (resume/fork uniforme, imagens, permissões roteadas) e paga-se isso em código próprio por
 família. O `session_ref: null` documenta a assimetria em vez de escondê-la.
 
@@ -51,7 +58,8 @@ família. O `session_ref: null` documenta a assimetria em vez de escondê-la.
 
 ## Como reverter
 
-Gatilho: `session/inject` estável a montante, ou 4º provider que só fale ACP. Custo: um adapter novo por
+Gatilho: `session/inject` estável a montante, ou 4º provider que só fale ACP (hoje bloqueado por §9.3).
+Custo: um adapter novo por
 família mais preenchimento de `transport: 'acp'` e `session_ref`; nenhum schema publicado muda, porque
 os campos já existem desde a v1.
 

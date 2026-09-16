@@ -3,7 +3,8 @@
 Data: 2026-09-17. Componente C16 de `architecture.md` §3; decisão em
 `docs/adr/0009-skill-fabric-catalogo-curado-selecao-12-controles.md`. Detalha o que
 `architecture.md` §7 declara; não repete as decisões, as implementa. Registro de fontes:
-`docs/catalog-sources.md`. Entrega: **v0.4** (`docs/roadmap.md`), com `~/.ade/catalog/` e
+`docs/catalog-sources.md`. Entrega: **v0.4a** (`docs/roadmap.md` — a v0.4 divide-se em v0.4a, Skill
+Fabric + FQE + juiz, e v0.4b, painel de projeção + SQLite + workspaces; `architecture.md` §11 E37), com `~/.ade/catalog/` e
 `ade catalog sync` já existindo como diretório vazio e comando no-op desde a v0.2, para que o schema
 do journal (`catalog_sync`) não mude depois.
 
@@ -15,10 +16,14 @@ agente com permissão de escrita**. Tratado como supply chain, não como conteú
 ## 1. Fontes e licenças
 
 O catálogo é **allowlist fechada**: só sincroniza o que está em `catalog.sources` de
-`~/.ade/config.json`, e cada entrada declara `repo`, `commit`, `paths` (glob de ingestão) e
-`license_policy`. Sem descoberta automática, sem ingestão por link de lista "awesome", sem
-`npx skills add`, sem ClawHub. Matriz completa por fonte em `docs/catalog-sources.md` §1; aqui só o que
-muda o comportamento do `sync`:
+`<repo>/.ade/config.json` (chave `catalog` do `ade-config.schema.json`, `2026-09-17-master-spec.md` §3
+— a allowlist é **por repositório**; não existe `~/.ade/config.json` no layout de disco publicado, e a
+v1 assume repositórios do próprio operador, com "modo repositório de terceiros" em backlog da v0.5,
+`architecture.md` §12 E56), e cada entrada declara `repo`, `commit`, `paths` (glob de ingestão) e
+`license_policy`. `schemas/ade-config.schema.json` é a única fonte normativa dessas chaves; as tabelas
+em prosa desta spec são derivadas do schema (E55). Sem descoberta automática, sem ingestão por link de
+lista "awesome", sem `npx skills add`, sem ClawHub. Matriz completa por fonte em
+`docs/catalog-sources.md` §1; aqui só o que muda o comportamento do `sync`:
 
 | Fonte | Licença | Decisão | `paths` de ingestão | Regra específica do ingest |
 | :--- | :--- | :--- | :--- | :--- |
@@ -31,7 +36,7 @@ muda o comportamento do `sync`:
 | `img2threejs/img2threejs` | Apache-2.0 | ADAPT, dormente | `skills/**` | Corpo de 8,2k tokens estoura o teto por skill (§7): fora do índice até haver domínio 3D |
 | `FloWritesCode/fwc-swiftui-skills` | MIT | ADOPT, dormente | `skills/**` | Zero scripts, a fonte mais limpa medida. Fora do índice até existir projeto Apple |
 | `agentskills/agentskills` | Apache-2.0 | ADOPT como **ferramenta** | — | Fornece `skills-ref validate` (controle 4). Não vira skill do catálogo |
-| `superpowers` + skills locais de Erick | local | **trust: local** | — | Lidas in-place em `~/.claude/skills/**` e `<repo>/.claude/skills/**`; não sincronizam, não têm sha256 de pin. Precedência acima do catálogo (§6) |
+| `superpowers` + skills locais de Erick | local | **trust: local** | — | Registradas in-place em `~/.claude/skills/**` e `<repo>/.claude/skills/**`; não sincronizam, não têm sha256 de pin e, na v1, **não entram no pack nem são carregadas pela CLI despachada**, que roda sob `--safe-mode` (E56). Precedência de identidade em §6 |
 | `openai/skills` | **ausente** | REFERENCE | — | Sem licença declarada = mesmo bloqueio legal do Composio (digest #12). **Não sincroniza até resolver** |
 | `ComposioHQ/awesome-claude-skills` | **ausente** | REJECT | — | 864 `SKILL.md` vendorizados, 832 wrappers do Rube MCP, e `document-skills/` redistribui as 4 proprietárias num repo sem LICENSE. ADR 0019 |
 | `vercel-labs/skills` | MIT | REFERENCE | — | Instalador de registry aberto: proibido pelo controle 1 |
@@ -39,7 +44,10 @@ muda o comportamento do `sync`:
 **Contradição aparente que não é.** O FQE usa `$imagegen`, que vem de `openai/skills` em
 `~/.codex/skills/.system/` (digest #20). A ADE não **copia** a skill para `~/.ade/catalog/`: invoca
 `codex exec` num ambiente onde o fornecedor já a instalou. A denylist é sobre redistribuição, não sobre
-uso in-place da instalação oficial.
+uso in-place da instalação oficial. Consequência operacional (`architecture.md` §11 E16): a receita de
+chamada curta do Codex (`--ignore-user-config --ignore-rules --ephemeral -c skills.max_context_tokens=0`)
+**não** se aplica às chamadas de `$imagegen`, que usam a configuração completa do `CODEX_HOME`; a sonda
+do `ade doctor` confirma as duas formas e grava o resultado no CapabilitySet.
 
 **Alvo do catálogo**: 60–80 skills relevantes para a stack, de ~320 nomes de qualidade em ~1.188
 `SKILL.md` brutos (digest #13). ~75 % do volume bruto é ruído: espelho, template e cópia.
@@ -85,8 +93,11 @@ interrompido é `released` — a árvore é endereçada por commit, refazer é i
 | 7 `classify` | Domínios/linguagens/famílias/tags por regra determinística sobre caminho + frontmatter; chamada barata só para skill nova sem domínio inferível | custo medido, nunca assumido (digest #26) |
 | 8 `index` | Escreve `index.json` com `engine_stamp`; `body_tokens` medido | — |
 
-Sync nunca roda automático: é comando do operador ou resultado explícito de `ade doctor --fix`. Missão
-em andamento com `runtime_stamp` divergente do índice é `stale_workflow_version` (ADR 0021).
+Sync nunca roda automático: é comando do operador ou resultado explícito de `ade doctor --fix`. O
+digest do índice **não** entra no `runtime_stamp`, que é `<core_version>:<config_digest>:<capabilities_digest>`
+e só bloqueia por `core_version` (`architecture.md` §11 E7): sync durante missão aberta grava um evento
+`decision` e o conjunto elegível congelado na aprovação (§5, controle 10) continua valendo até o fim da
+missão.
 
 ---
 
@@ -109,26 +120,27 @@ nomeadas: malware, exfiltração em base64, desativação de gates por jailbreak
 `judgment-J3-durability-security-cost.md` §4 registrou que cinco destes (2 por commit, 3, 4, 8, 12)
 não apareciam em nenhuma das três propostas do painel.
 
-| # | Controle | Ataque documentado que bloqueia | Onde é implementado |
-| :-- | :--- | :--- | :--- |
-| 1 | **Allowlist de fontes**; nunca ClawHub, nunca registry aberto, nunca seguir link de lista "awesome" | Campanha coordenada no ClawHub (30+ skills maliciosas, conta GitHub de uma semana, sem assinatura nem revisão); 8 payloads ainda no ar na publicação da Snyk | `sync` fase 0; `catalog.sources` no `ade-config.schema.json`. Nenhum caminho de código escreve em `sources/` fora do `sync` |
-| 2 | **Pin por commit + sha256 por arquivo**; fetch + checkout do SHA, nunca `pull` | **Rug pull**: repositório legítimo comprometido ou reescrito depois do consentimento. O ECC empurrou commits em 2026-09-12 e 09-15, dentro da janela da própria pesquisa | `sync` fases 1–3; campos `commit`/`sha256` do índice. Hash novo em skill aprovada reabre a aprovação do controle 10 |
-| 3 | **Licença por skill, não por repositório**; sem licença ou proprietária não entra | `anthropics/skills` sem LICENSE de repo com 4 skills proprietárias; Composio sem licença nenhuma redistribuindo essas 4; `openai/skills` sem licença (digest #12) | `sync` fase 4. Gate legal: falha dura, sem override por flag |
-| 4 | **Validação estrutural** (`skills-ref validate`, Apache-2.0, pinado) | Campo de topo inventado (`requires:` do Composio) quebra validador estrito e vira canal de metadado não previsto; `name` divergente do diretório é vetor de typosquat | `sync` fase 5, subprocesso pelo Runner sob o mesmo firewall de saída (C11) |
-| 5 | **Sanitização estática (SkillGuard)**: NFKC, rejeita invisíveis e tags Unicode, decodifica e sinaliza base64, marca `curl\|bash`/`Invoke-WebRequest`, URL fora da allowlist, referência a `~/.ssh`, `~/.aws`, `.env`, `credentials`, `keychain`, e instrução para desabilitar gate | **A defesa com melhor número medido**: ASR 36,0 % → **7,2 %** em build time, contra 12,9 % de interceptação em runtime e 26,6 % de defesa só por system prompt (arXiv 2606.01567v2; digest #34). Cobre Unicode smuggling e base64-exfil da Snyk | `sync` fase 6; `packages/core/src/skills/skillguard.ts` (~200 linhas de regex + normalização). Achado → `quarantine/` |
-| 6 | **Quarentena por padrão para skill com `scripts/`**; `trust` sobe só por revisão humana | 124 scripts dentro de `skills/` no ECC; 13,4 % de skills com issue crítica; MalSkillBench mostra que scanner estático não pega tudo | `has_scripts` + `trust` no índice; `ade catalog inspect` é a tela de revisão; a promoção é um evento `decision` no journal |
-| 7 | **Engine nunca executa script de catálogo** | `curl\|bash` com ZIP protegido por senha (Snyk). Não executar é o único controle com 100 % de eficácia | Estrutural: o Runner (C5) só conhece os argv das famílias e do gate runner; nenhuma função faz spawn a partir de `~/.ade/catalog/`. O agente pode, sob `contain` e portões |
-| 8 | **`allowed-tools` sempre ignorado; frontmatter inteiro removido antes da injeção** | Doc da Claude Code: "A skill can grant itself broad tool access". Como a ADE injeta o corpo no pack, `allowed-tools` viajaria como texto para dentro do prompt — o buraco que J3 §4 apontou nas três propostas | Pack compiler (C10): a seção recebe o corpo pós-`---`, nunca o bloco YAML |
-| 9 | **`contain` inviolável** mesmo contra instrução explícita da skill | "Scope escalation": skill que manda editar `~/.claude/settings.json`, `.git/hooks`, memória do agente ou outro repositório | C7, pós-fato sobre a árvore, com canário por família: verificação de efeito, imune ao texto que o causou |
-| 10 | **Primeira aparição no projeto exige aprovação** com nome, fonte, commit, licença, `trust`, `has_scripts` e achados do SkillGuard | OWASP LLM03; typosquat por nome parecido; consentimento explícito é o que Gemini CLI (`--consent`) e Claude Code fazem | Resumo de aprovação única do Intent Compiler (§5.9 da arquitetura). Em lote desatendido: `awaiting_operator` |
-| 11 | **Memória e config do agente no escopo do scan**, não só o `SKILL.md` | "Comprometimento persistente por manipulação da memória do agente" é categoria nomeada da Snyk; a auto memory do Claude Code vem **ligada** e quebra determinismo (digest #9) | Prevenção: `--safe-mode` + `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. Detecção: `ade doctor --skills` reporta delta em `~/.claude`, `.claude/`, `~/.codex/`, `.agents/` — **coleta, não bloqueio, na v1** (ADR 0017) |
-| 12 | **Nunca ingerir `install.sh`, `hooks/` ou `scripts/` de contribuinte** | ECC traz `install.sh` + instaladores por CLI; `addyosmani` registra `SessionStart` que injeta contexto e um hook que **reescreve arquivos do usuário no disco** durante `Read`/`Edit` | `sync` fase 2: allowlist de caminho na materialização. Path fora de `paths` nunca chega ao disco — não é filtrado depois |
+| # | Controle | Ataque documentado que bloqueia | Onde é implementado | Teste que o prova |
+| :-- | :--- | :--- | :--- | :--- |
+| 1 | **Allowlist de fontes**; nunca ClawHub, nunca registry aberto, nunca seguir link de lista "awesome" | Campanha coordenada no ClawHub (30+ skills maliciosas, conta GitHub de uma semana, sem assinatura nem revisão); 8 payloads ainda no ar na publicação da Snyk | `sync` fase 0; `catalog.sources` no `ade-config.schema.json`. Nenhum caminho de código escreve em `sources/` fora do `sync` | `unlisted_source_is_never_synced` |
+| 2 | **Pin por commit + sha256 por arquivo**; fetch + checkout do SHA, nunca `pull` | **Rug pull**: repositório legítimo comprometido ou reescrito depois do consentimento. O ECC empurrou commits em 2026-09-12 e 09-15, dentro da janela da própria pesquisa | `sync` fases 1–3; campos `commit`/`sha256` do índice. Hash novo em skill aprovada reabre a aprovação do controle 10 | `changed_sha_reopens_approval` |
+| 3 | **Licença por skill, não por repositório**; sem licença ou proprietária não entra | `anthropics/skills` sem LICENSE de repo com 4 skills proprietárias; Composio sem licença nenhuma redistribuindo essas 4; `openai/skills` sem licença (digest #12) | `sync` fase 4. Gate legal: falha dura, sem override por flag | `skill_without_license_is_refused` |
+| 4 | **Validação estrutural** (`skills-ref validate`, Apache-2.0, pinado) | Campo de topo inventado (`requires:` do Composio) quebra validador estrito e vira canal de metadado não previsto; `name` divergente do diretório é vetor de typosquat | `sync` fase 5, subprocesso pelo Runner sob o mesmo firewall de saída (C11) | `invalid_frontmatter_is_refused` |
+| 5 | **Sanitização estática (SkillGuard)**: NFKC e a lista concreta de padrões de `architecture.md` §10 A7 — zero-width/bidi (`​ ‌ ‍ ⁠ ﻿ ‪-‮`), tags Unicode, `<!--`, `<script`, `data:text/html`, `base64,`, `curl\|wget\|nc\|scp\|ssh`, `enableAllProjectMcpServers`, `ANTHROPIC_BASE_URL` — mais URL fora da allowlist, referência a `~/.ssh`, `~/.aws`, `.env`, `credentials`, `keychain`, e instrução para desabilitar gate | **A defesa com melhor número medido**: ASR 36,0 % → **7,2 %** em build time, contra 12,9 % de interceptação em runtime e 26,6 % de defesa só por system prompt (arXiv 2606.01567v2; digest #34). Cobre Unicode smuggling e base64-exfil da Snyk. Atenção (`architecture.md` §10): o "36 %" da Snyk (skills com falha) não é o "36,0 %" de ASR do paper — métricas diferentes | `sync` fase 6; `src/skills/skillguard.ts` (pacote único na raiz na v1, E29; ~200 linhas de regex + normalização). Achado → `quarantine/` | `skillguard_flags_corpus_of_known_payloads` (corpus adversarial versionado, §9) |
+| 6 | **Quarentena por padrão para skill com `scripts/`**; `trust` sobe só por revisão humana | 124 scripts dentro de `skills/` no ECC; 13,4 % de skills com issue crítica; MalSkillBench mostra que scanner estático não pega tudo | `has_scripts` + `trust` no índice; `ade catalog inspect` é a tela de revisão; a promoção é um evento `decision` no journal | `skill_with_scripts_starts_quarantined` |
+| 7 | **Engine nunca executa script de catálogo**; na v1 os scripts **nunca ficam disponíveis ao agente** (`architecture.md` §11 E35): só o corpo do `SKILL.md` e `references/*.md` entram como texto | `curl\|bash` com ZIP protegido por senha (Snyk). Não executar é o único controle com 100 % de eficácia | Estrutural: o Runner (C5) só conhece os argv das famílias e do gate runner; nenhuma função faz spawn a partir de `~/.ade/catalog/`, e nenhum caminho de `scripts/` é materializado no worktree | `skill_script_is_never_exposed` |
+| 8 | **`allowed-tools` sempre ignorado; frontmatter inteiro removido antes da injeção** | Doc da Claude Code: "A skill can grant itself broad tool access". Como a ADE injeta o corpo no pack, `allowed-tools` viajaria como texto para dentro do prompt — o buraco que J3 §4 apontou nas três propostas | Pack compiler (C10): a seção recebe o corpo pós-`---`, nunca o bloco YAML | `frontmatter_never_reaches_the_pack` |
+| 9 | **`contain` inviolável** mesmo contra instrução explícita da skill | "Scope escalation": skill que manda editar `~/.claude/settings.json`, `.git/hooks`, memória do agente ou outro repositório | C7, pós-fato sobre a árvore, com canário por família: verificação de efeito, imune ao texto que o causou | `hostile_skill_cannot_escape_contain` |
+| 10 | **Primeira aparição no projeto exige aprovação** com nome, fonte, commit, licença, `trust`, `has_scripts` e achados do SkillGuard. A aprovação única **congela o conjunto elegível da missão** = união do top-8 por story (`architecture.md` §11 E33) | OWASP LLM03; typosquat por nome parecido; consentimento explícito é o que Gemini CLI (`--consent`) e Claude Code fazem | Resumo de aprovação única do Intent Compiler (§5.9 da arquitetura). Só skill **fora do conjunto congelado** parqueia em lote desatendido (`awaiting_operator`) | `skill_outside_frozen_set_parks_unattended` |
+| 11 | **Memória e config do agente no escopo do scan**, não só o `SKILL.md` — **detect-only na v1** com baseline de hashes; bloqueio de despacho em v0.5 (`architecture.md` §11 E35) | "Comprometimento persistente por manipulação da memória do agente" é categoria nomeada da Snyk; a auto memory do Claude Code vem **ligada** e quebra determinismo (digest #9) | Prevenção: `--safe-mode` + `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. Detecção: `ade doctor --skills` reporta delta em `~/.claude`, `.claude/`, `~/.codex/`, `.agents/` contra o baseline — **coleta, não bloqueio, na v1** (ADR 0017) | `agent_memory_delta_is_reported_not_blocked` (detect-only, E35); a supressão do listing nativo tem teste próprio em §8, `native_skill_listing_is_suppressed_in_dispatched_call` |
+| 12 | **Nunca ingerir `install.sh`, `hooks/` ou `scripts/` de contribuinte** | ECC traz `install.sh` + instaladores por CLI; `addyosmani` registra `SessionStart` que injeta contexto e um hook que **reescreve arquivos do usuário no disco** durante `Read`/`Edit` | `sync` fase 2: allowlist de caminho na materialização. Path fora de `paths` nunca chega ao disco — não é filtrado depois | `path_outside_allowlist_is_never_materialized` |
 
 Três controles herdados de outros componentes, citados porque a literatura de skill injection os trata
 como um só conjunto: corte da **lethal trifecta** por papel (skill de catálogo em contexto nunca
 coexiste com segredos e efeito de rede na mesma chamada; push/PR/merge são do engine, C22); **conteúdo
 de skill é dado, nunca instrução** (cerca inbound do Firewall, C11); **teto de 3 skills gravado no
-journal** (`skills_injected[]`), o rastro da auditoria pós-incidente.
+journal** (`skills_injected[]`, com `sha256` e `source` por skill desde `architecture.md` §12 E59), o
+rastro da auditoria pós-incidente.
 
 ---
 
@@ -152,19 +164,29 @@ no índice com `shadowed_by: <id vencedor>`, nunca silenciosamente ausente. Dupl
 (mesmo `sha256`, nomes diferentes) é reportada por `ade doctor` e não bloqueia: 5 skills byte-idênticas
 entre Composio e Anthropic foram medidas, e o padrão é comum.
 
+Na v1 esta precedência é **bookkeeping de identidade, não de injeção**: só entradas do catálogo são
+candidatas à seleção (§7) e ao pack, porque skill local de repositório ou de máquina não entra no pack e
+não é carregada pela CLI despachada, que roda sob `--safe-mode` (`architecture.md` §12 E56). Skill
+`local` que vença por precedência marca a do catálogo como `shadowed_by` no índice e no relatório do
+doctor, mas **não** a retira do conjunto de candidatas — senão a supressão do listing nativo deixaria a
+story sem skill alguma.
+
 ---
 
 ## 7. Seleção
 
-Roda no step `prepare` da story, antes do pack. Entrada: `task`, `domains`/`languages` do Task
+Roda no step `prepare` da story, antes do pack — e só quando o `prepare` não recusa antes, como no
+worktree com `takeover.json` presente, em que a story para em `awaiting_operator{reason:'takeover_open'}`
+sem seleção nenhuma (`architecture.md` §12 E42). Entrada: `task`, `domains`/`languages` do Task
 Contract, caminhos de `scope_paths`, família do Maker.
 
 ```
 (0) filtro duro          domains ∩ / languages ∩ / families ∋ maker / trust ≠ quarantine
-                         / body_tokens ≤ 2500 / license ok            → descarta ~80 %
+                         / license ok  (NUNCA por tamanho, E14)       → descarta ~80 %
 (1) BM25 local           top-8, ~80 linhas TS, sem rede, sem modelo   ~5 ms, $0
 (2) seletor barato       spec + 8 descrições → --json-schema, ≤3      ~1,5–2k in / ~200 out
-(3) fecho                precedência §6, dedup, teto 3, journal
+(3) fecho                precedência §6, dedup, teto 3, poda gulosa
+                         por score até a soma caber em 7,5k, journal
 ```
 
 **Campos e pesos do BM25** (k1 = 1,2; b = 0,75; tokenização por `\W+` com case-folding, sem stemming —
@@ -189,13 +211,18 @@ escolhendo sobe de 87,1 % para 93,1 % (arXiv 2605.24660), que é a etapa (2). Up
 quando o catálogo passar de ~500 skills ou `precision@3` cair abaixo de 0,70
 (`landscape-routing-skills-terminal.md` §2.3).
 
-**Tetos**: ≤3 skills por story; **2,5k tokens por skill**; **7,5k somados** na seção do pack
-(`architecture.md` §7). Skill fora do teto individual não é candidata — fica `oversized` no índice e
-aparece em `ade doctor`. Quatro das 25 de `addyosmani` e `claude-api` (21,7k tok) caem aqui.
+**Tetos** (`architecture.md` §11 E14): ≤3 skills por story; **≤5k tokens por skill**; **≤7,5k somados**
+na seção do pack, resolvidos por **poda gulosa pelo score do BM25** no fecho (3) — 1 de 5k + 1 de 2,5k é
+legal, 3 de 3,5k não. O filtro duro (0) **não** elimina por tamanho antes do BM25; skill acima de 5k fica
+`oversized` no índice, sai do conjunto de candidatas e aparece em `ade doctor` (`claude-api`, 21,7k tok,
+cai aqui; das 25 de `addyosmani`, só as acima de 5k caem aqui). Braço de controle obrigatório antes de
+manter a etapa (2): **"BM25@3 puro"** medido contra o pipeline completo (E14).
 
 Custo da etapa (2) é **medido, não assumido**: `claude -p --model haiku` faturou como claude-sonnet-5
-(US$ 0,37 para ecoar 200 bytes, digest #26). A telemetria carrega o custo real com `cost_source`; o
-fallback determinístico (top-3 do BM25 puro) cobre o caso de orçamento esgotado.
+(US$ 0,37 para ecoar 200 bytes, digest #26). A telemetria carrega o custo real com `cost_source` e o
+modelo da chamada em `models[]` (`architecture.md` §12 E66); o fallback determinístico (top-3 do BM25
+puro) cobre o caso de orçamento esgotado — a fórmula de `max_model_calls` de E65 não reserva chamada
+para a seleção.
 
 ---
 
@@ -205,6 +232,16 @@ A skill selecionada **nunca é instalada**: não há cópia para `.claude/skills
 `~/.claude/skills/`. O corpo entra como bloco fixo da seção `skills` do Context Pack (C10), ordenado
 por `id` estável para o cache de prompt funcionar, com frontmatter removido (controle 8) e delimitado
 como dado de terceiro, não como instrução do operador.
+
+A injeção é **substitutiva, não aditiva**: o engine tem de suprimir o listing nativo de skills e plugins
+do usuário na chamada despachada (`architecture.md` §11 E15) — a supressão é `--safe-mode`, que desliga
+todas as customizações do usuário (CLAUDE.md, skills, plugins, hooks, MCP, comandos, agentes), enquanto
+`--setting-sources` e `--plugin-dir` ficam fora da receita até a sonda mostrar necessidade — e o doctor
+prova a supressão por **contagem em `system/init`**. É o mesmo mecanismo que mantém skills de
+`<repo>/.claude/skills/` e de `~/.claude/skills/` fora do pack e fora da chamada na v1
+(`architecture.md` §12 E56); em `codex`/`agy` a supressão equivalente é provada pela sonda.
+`skills_injected[]` só descreve o que estava em contexto sob essa supressão; sem ela, o campo (e
+`cited`) é falso. **[hipótese]** até a sonda.
 
 Motivo técnico, não só de segurança: **não existe diretório de skills comum às CLIs**. Codex e Gemini
 leem `.agents/skills/`; a Claude Code documenta explicitamente que **não** o suporta (digest #14).
@@ -229,7 +266,7 @@ Método portado de `addyosmani/agent-skills` (`evals/`), o achado real daquele r
 | :--- | :--- | :--- | ---: |
 | **T1 estrutural** | Frontmatter válido, `name` == diretório, `description` ≤1024, campos de topo dentro do spec, `body_tokens` dentro do teto | CI, sobre `index.json` e sobre snapshot de fixture | $0 |
 | **T2 roteamento** | `recall@8`, `precision@3`, `hard_miss = 0`, `contamination = 0`, e **detector de colisão**: similaridade par-a-par entre descrições — erro em ≥75 %, aviso em ≥50 % | Vitest puro na etapa (1); CLI falsa na etapa (2) | $0 |
-| **T3 comportamental** | A skill injetada muda o comportamento? Casos de pressão (prazo, custo afundado, autoridade) para skill de disciplina: o workflow segura quando o prompt argumenta para pular a etapa | Sob demanda, `claude -p` em repo git descartável | tokens |
+| **T3 comportamental** | A skill injetada muda o comportamento? Protocolo de eval de conformidade de `architecture.md` §10 A8: 3 níveis de rigor de prompt, execução, classificação da sequência. Casos de pressão (prazo, custo afundado, autoridade) para skill de disciplina: o workflow segura quando o prompt argumenta para pular a etapa | Sob demanda, `claude -p` em repo git descartável | tokens |
 
 Formato da fixture (`tests/fixtures/skill-selection/<caso>.json`), três níveis porque verdade absoluta
 não existe:
@@ -246,10 +283,17 @@ não existe:
 ```
 
 `must_not_include` mede o risco real de um catálogo grande: a skill parecida que sequestra a seleção.
-Alvos da v1, **[hipotese]** até o dogfood medir: `recall@8 ≥ 0,85`, `precision@3 ≥ 0,75`,
+Alvos da v1, **[hipótese]** até o dogfood medir: `recall@8 ≥ 0,85`, `precision@3 ≥ 0,75`,
 `hard_miss = 0`, `contamination = 0`. Nenhum número publicado mede "escolher 1–3 skills entre centenas
 para uma story de engenharia"; a ancoragem honesta é <52 % recall@10 em ToolRet e 93,1 % de acerto em
 lista curta no BFCL.
+
+**Corpus adversarial** (`tests/fixtures/skillguard/`): artefato de **entrada** da v0.4a, não saída —
+derivado de `snyk-labs/toxicskills-goof` pinado por commit, com pelo menos uma amostra por padrão do
+controle 5 (zero-width/bidi, base64-exfil, `curl|bash`, `ANTHROPIC_BASE_URL`,
+`enableAllProjectMcpServers`) mais amostras benignas para medir falso positivo. É o que
+`skillguard_flags_corpus_of_known_payloads` consome; sem ele os 7,2 % de ASR continuam sendo do paper
+e não da implementação (§14, pergunta 3). **[hipótese]** até o corpus rodar.
 
 O **detector de colisão** roda no `sync`, não só no CI: colisão ≥75 % entre skill nova e skill já
 indexada é motivo de `awaiting_operator` no lote desatendido.
@@ -262,12 +306,19 @@ indexada é motivo de `awaiting_operator` no lote desatendido.
 toda mudança de política **rejeitada por evidência de eval** vira uma linha com data, proposta, métrica
 que caiu e commit do run. Custo: uma linha. Retorno: ninguém re-propõe a mesma ideia a cada dogfood.
 Entradas de abertura: "ingerir `hooks/` de `addyosmani`" (rejeitado por execução automática), "subir o
-teto por skill para 5k" (pendente de medição), "usar `npx skills add`" (rejeitado pelo controle 1).
+teto por skill para 5k" (**aceito**, `architecture.md` §11 E14: ≤5k por skill com soma ≤7,5k), "usar
+`npx skills add`" (rejeitado pelo controle 1).
 
-**Telemetria.** Cada `model_call` grava `skills_injected: [{ name, bytes, cited }]`
-(`architecture.md` §4). `cited` é a única métrica que responde "a skill fez diferença ou só custou
+**Telemetria.** Cada `model_call` — inclusive a chamada do seletor barato (§7, etapa 2) — grava
+`skills_injected: [{ name, bytes, cited, sha256, source }]` (`architecture.md` §4), com `sha256` do
+conteúdo injetado e `source` = `catalog@<commit>` ou `local`, evidência de supply chain dentro do próprio
+evento (`architecture.md` §12 E59); na v1 `source` é sempre `catalog@<commit>`, porque skill local não
+entra no pack (E56). O mesmo evento nomeia os modelos da chamada em `models[]` por papel
+(`executor`/`advisor`, E66). `cited` é a única métrica que responde "a skill fez diferença ou só custou
 tokens": `true` quando o output referencia o conteúdo de forma detectável (nome, termo exclusivo do
-corpo, caminho que só ela menciona) — heurística, marcada como tal. J3 §4 registrou que sem este campo
+corpo, caminho que só ela menciona) — heurística, marcada como tal, e só computável porque `unit-result`
+e `review-result` carregam `sources: string[]` obrigatório com os digests das seções do pack usadas
+(`architecture.md` §11 E8); sem `sources`, `cited` é sempre falso. J3 §4 registrou que sem este campo
 "metade da coleta da v1 não coleta". Dele `ade report` deriva a tabela de poda: skill × stories
 injetada × stories citada × tokens. Injeção alta com citação zero é candidata a sair do índice —
 decisão humana na v1.
@@ -283,9 +334,9 @@ decisão humana na v1.
 | Drift de pin | sha256 divergente entre `sources/` e `index.json` |
 | Fontes atrás do upstream | commit pinado vs `HEAD` remoto, sem sincronizar |
 | Quarentena | quantas, por qual controle, há quanto tempo |
-| `oversized` | skills fora do teto de 2,5k, com o tamanho |
+| `oversized` | skills fora do teto de 5k por skill, com o tamanho |
 | Colisão de descrição | pares ≥50 % |
-| Controle 11 | delta em `~/.claude/`, `.claude/`, `~/.codex/`, `.agents/` desde o último run; `CLAUDE.md`/`AGENTS.md` acima de 8 KB (Codex trunca AGENTS.md a 32 KiB — digest #39) |
+| Controle 11 | delta em `~/.claude/`, `.claude/`, `~/.codex/`, `.agents/` contra o baseline de hashes desde o último run; `CLAUDE.md`/`AGENTS.md` acima de 8 KB (Codex trunca AGENTS.md a 32 KiB — digest #39; o `AGENTS.md` escrito pelo engine no worktree é ≤2 KB, E16) |
 | Citação | top-10 e bottom-10 por `cited` nas últimas N missões |
 
 ---
@@ -295,50 +346,40 @@ decisão humana na v1.
 | Versão | Entrega |
 | :--- | :--- |
 | v0.2 | `~/.ade/catalog/` vazio; `catalog_sync` no schema do journal; `ade catalog sync` no-op que só grava o evento. Custo ~zero, evita migração de schema depois |
-| **v0.4** | Completo: sync com os 12 controles, SkillGuard, índice, BM25, seletor, injeção no pack, T1+T2 |
-| v0.5 | T3 comportamental; ledger com entradas reais do dogfood; `cited` na coleta do harness doctor |
+| **v0.4a** | Completo: sync com os 12 controles, SkillGuard, índice, BM25, seletor (com o braço de controle BM25@3 puro), injeção no pack, T1+T2, os 12 testes nomeados da tabela de controles (§5) e o corpus adversarial de entrada (§9) |
+| v0.5 | T3 comportamental (protocolo A8); ledger com entradas reais do dogfood; `cited` na coleta do harness doctor; bloqueio de despacho do controle 11 |
 | pós-v1 | Híbrido BM25+embedding acima de ~500 skills; promoção de `quarantine` por assinatura upstream |
 
 ---
 
-## 13. Divergências propostas
+## 13. Divergências resolvidas
 
-**D1 — O teto de 2,5k tokens por skill exclui a maior parte do catálogo medido.**
-`architecture.md` §7 fixa ≤7,5k para a seção de skills; com teto de 3 skills isso dá 2,5k por skill.
-Medido: mediana do ECC 1.890 tok (p90 4.461), mediana da Anthropic 2.136 (p90 8.247), **média de
-`addyosmani` 3.535** com 4 de 25 acima de 5k (`ref-skill-sources.md` §5;
-`ref-addyosmani-agent-skills.md` §3). 2,5k derruba o p90 de todas as fontes e a média inteira de uma
-fonte ADAPT — o filtro duro (0) eliminaria skills boas antes do BM25 ver, e o próprio spec do Agent
-Skills recomenda <5k. **Proposta**: manter 7,5k como teto da seção e trocar "2,5k fixo por skill" por
-"≤5k por skill, soma das selecionadas ≤7,5k, resolvido por poda gulosa pelo score do BM25". Efeito: 1
-de 5k + 1 de 2,5k é legal; 3 de 3,5k não. Sem isso, o catálogo de 60–80 vira um catálogo de ~35.
+**D1 → aceita** (`architecture.md` §11 E14). O teto vira **≤5k tokens por skill com soma ≤7,5k**,
+resolvido por poda gulosa pelo score do BM25 no fecho (3), e o filtro duro (0) deixa de eliminar por
+tamanho antes do BM25. Base medida que sustentou a objeção: mediana do ECC 1.890 tok (p90 4.461),
+mediana da Anthropic 2.136 (p90 8.247), média de `addyosmani` 3.535 (`ref-skill-sources.md` §5;
+`ref-addyosmani-agent-skills.md` §3); 2,5k fixo derrubaria o p90 de todas as fontes e reduziria o
+catálogo de 60–80 a ~35. Texto aplicado em §7. A arbitragem acrescentou um braço de controle
+obrigatório: **BM25@3 puro** medido antes de manter o seletor barato da etapa (2).
 
-**D2 — Nada na arquitetura suprime o mecanismo nativo de skills da CLI durante uma chamada da ADE.**
-A ADE seleciona fora e injeta o corpo no pack, mas o processo `claude` despachado continua carregando o
-próprio listing de `~/.claude/skills/` + plugins — nesta máquina, ~300 skills por nome+descrição, várias
-truncadas (`landscape-routing-skills-terminal.md` §2.1, observação direta). Três consequências: (a) o
-custo de índice que a ADE acha que eliminou continua sendo pago a cada chamada; (b) uma skill **não
-selecionada** pode disparar sozinha, o que quebra a premissa de que `skills_injected[]` descreve o que
-estava em contexto; (c) `cited` mede o bloco do pack e ignora a skill nativa que de fato agiu.
-`--safe-mode` + `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` cobre memória, não skills. **Proposta**: medir no
-doctor da v0.2 se existe flag ou setting que zere o listing nativo por chamada (um `settings.json`
-efêmero por worktree via `--settings` é o candidato **[hipotese]**) e, se não existir, escrever na
-arquitetura que a injeção é **aditiva**, não substitutiva — hoje o documento permite a segunda leitura.
+**D2 → aceita** (`architecture.md` §11 E15), na forma **oposta** à alternativa da proposta: a arquitetura
+não passa a chamar a injeção de "aditiva". O engine **tem de suprimir** o listing nativo de skills e
+plugins na chamada despachada; a flag da supressão é `--safe-mode`
+(`--setting-sources` e `--plugin-dir` ficam fora da receita até a sonda mostrar necessidade,
+`architecture.md` §11 E15) e o doctor prova a supressão por contagem em `system/init`. Enquanto a sonda não rodar,
+o item é **[hipótese]**, e `skills_injected[]`/`cited` só são verdadeiros sob a supressão. Texto aplicado
+em §8.
 
-**D3 — O controle 11 não tem enforcement na v1 e a arquitetura não diz isso.**
-`architecture.md` §7 o lista entre os obrigatórios; ADR 0017 fixa doctor como coleta-primeiro. A
-categoria que ele cobre — "comprometimento persistente por manipulação da memória do agente" — é
-nomeada pela Snyk. Detectar sem bloquear é defensável, mas precisa estar escrito onde o controle é
-prometido. **Proposta**: marcar o 11 como **detect-only na v1** na §7, com o bloqueio (recusar despacho
-quando `~/.claude/CLAUDE.md` mudou desde a aprovação) agendado para v0.5.
+**D3 → aceita** (`architecture.md` §11 E35). O controle 11 é **detect-only na v1**, com baseline de
+hashes, e o bloqueio de despacho fica para a v0.5. A arbitragem foi além da proposta: scripts de skills
+de catálogo **nunca ficam disponíveis ao agente na v1** (só o corpo do `SKILL.md` e `references/*.md`
+como texto). Texto aplicado nos controles 7 e 11 e em §12.
 
-**D4 — `--ignore-user-config` no Codex pode derrubar `$imagegen`.**
-`architecture.md` §7 manda `--ignore-user-config` em chamada curta do Codex (piso de 19,4k tokens,
-digest #27) e, na mesma seção, manda usar `$imagegen` via `codex exec`. `$imagegen` vive em
-`~/.codex/skills/.system/`, que é config de usuário: se a flag suprime a descoberta de skills do
-`CODEX_HOME`, as duas instruções são incompatíveis na mesma chamada. Não medi. **Proposta**: caso no
-harness `ade doctor` que rode `codex exec --ignore-user-config` pedindo `$imagegen` e grave o resultado
-no CapabilitySet como campo medido. **[hipotese]**
+**D4 → aceita** (`architecture.md` §11 E16). A receita de chamada curta do Codex é
+`--ignore-user-config --ignore-rules --ephemeral -c skills.max_context_tokens=0` mais `AGENTS.md` ≤2 KB
+escrito pelo engine no worktree; as chamadas de `$imagegen` usam a **configuração completa**, e a sonda
+do `ade doctor` confirma as duas formas gravando o resultado no CapabilitySet. As duas instruções deixam
+de ser incompatíveis porque não compartilham a mesma chamada. Texto aplicado em §1.
 
 ---
 
@@ -350,6 +391,6 @@ no CapabilitySet como campo medido. **[hipotese]**
    `agentskills/agentskills` + `skills-ref`), não uma versão.
 3. O SkillGuard não foi validado contra amostras maliciosas reais. `snyk-labs/toxicskills-goof` existe
    desde 2026-02-07 e nunca foi executado: o 7,2 % de ASR é do paper, não da implementação.
-   **[hipotese]**
+   **[hipótese]**
 4. `allowed-tools` é Experimental no spec. Ignorá-lo é seguro hoje; se virar normativo e as CLIs
    passarem a exigi-lo, o controle 8 precisa de reavaliação.

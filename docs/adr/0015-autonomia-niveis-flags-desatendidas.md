@@ -17,15 +17,28 @@ fronteira real.
 | :--- | :--- | :--- |
 | `safe` | ler, editar, testar, branch, commit local | sim |
 | `controlled` | push, PR, dependências novas, migrations | sim, com aprovação única na missão |
-| `restricted` | produção, segredos, destrutivo | **nunca**; `ask_operator: ['*']` |
+| `restricted` | produção, segredos, destrutivo | **nunca**; `dispatch: never` com motivo `autonomy_requires_operator` |
+
+`ask_operator` é **enum fechado** (`push`, `pull_request`, `pull_request_merge`, `dependency_add`,
+`dependency_major_bump`, `migration_destructive`, `deploy`, `secrets_read`, `destructive_local`,
+`skill_first_use`, `*`) mais um `note` livre. `restricted` não tem bloco de famílias: não despacha e
+herda `scope_paths` da story (§11 E5).
+
+`ade run --unattended` tem precondição dura e recusa sem (a) gates ativos, (b) baseline de eval verde,
+(c) caminho de rollback em `refs/ade/`, (d) isolamento por worktree verificado pelo canário (§10 A5).
 
 Flags de modo desatendido por família, medidas, aplicadas como **filtro barato**, não como fronteira:
-Claude `--permission-mode bypassPermissions --permission-prompts none --disallowedTools "Bash(git *)"
-"Bash(gh *)"` (nunca `--permission-mode auto`); Codex `codex exec --sandbox workspace-write
---approve-for-me` + `.rules` de `execpolicy`; `agy` `--approval-mode yolo`.
+Claude `--permission-mode bypassPermissions --permission-prompts none --disallowedTools
+"Bash(git push*),Bash(gh pr*)"` — **um argumento único separado por vírgula**, forma medida (§11 E24),
+nunca `--permission-mode auto`; Codex `codex exec --sandbox workspace-write --approve-for-me` +
+`.rules` de `execpolicy`; `agy` `--dangerously-skip-permissions` (o `--approval-mode yolo` é do Gemini
+CLI, que não faz parte da ADE).
 
-A **fronteira real é tripla e é do engine**: (1) `env` do worker explicitamente filtrado (I49); (2) o
-engine é o único que roda `git`/`gh` (C22); (3) `contain` pós-fato sobre a árvore, com precedência
+A **fronteira real é tripla e é do engine**: (1) `env` do worker explicitamente filtrado (I49), que é
+onde vive a deny-list de caminhos fora do worktree (`~/.ssh/**`, `~/.aws/**`, `**/.env*`) junto com o
+canário e o `ade doctor` — **não** no `contain`, que só vê o diff (§11 E23, ajustando §10 A4);
+`ANTHROPIC_BASE_URL` e equivalentes nunca propagados nem aceitos (CVE-2026-21852, CVE-2025-59536);
+(2) o engine é o único que roda `git`/`gh` (C22); (3) `contain` pós-fato sobre a árvore, com precedência
 **segurança > `sensitive_paths` > `scope_paths`/`do_not_touch`** (I23), `maxBuffer` explícito, e canário
 de isolamento por família (escrever fora do worktree tem de falhar).
 
@@ -44,9 +57,10 @@ de isolamento por família (escrever fora do worktree tem de falhar).
 - Digest #7: `--full-auto` não existe no Codex 0.154.0; `codex exec` não tem `-a`.
 - Digest #38: `agy` escreveu em `~/.gemini/antigravity-cli/scratch/` em vez do `--add-dir` pedido, sem
   aviso — o canário por família é obrigatório, não opcional.
-- `judgment-J3` §5 e buraco 7: `--disallowedTools "Bash(git push*)"` é glob de string —
+- `judgment-J3` §5 e buraco 7: `--disallowedTools "Bash(git push*),Bash(gh pr*)"` é glob de string —
   `git -C <dir> push`, um alias ou um script de repo passam. A rede real é o `env` filtrado, e isso
-  precisa estar escrito.
+  precisa estar escrito. A sonda do `ade doctor` exige `permission_denials` não vazio num
+  `git push --dry-run` para dar a flag por aplicada (§11 E24).
 - `runtime-port-map.md` §1.2 (I24): o default de 1 MiB do `maxBuffer` do `execFile` **trunca a varredura
   de segredo em silêncio** — segredo no fim de um diff grande passa.
 - `landscape-dev-workflows.md` b2: usuários do Claude Code aprovam 93 % dos prompts de permissão — o
@@ -79,7 +93,9 @@ operador; não é reversão, é decisão nova.
 ## Consequências para outros documentos
 
 `schemas/task-contract.schema.json` (`guardrails.autonomy`, `guardrails.ask_operator`,
-`sensitive_paths`), `schemas/capability-set.schema.json` (`unattended_flags`, `sandbox`, `probe_ok` do
-canário por família), `docs/operations/autonomy-and-permissions.md`, `docs/security/README.md`,
+`sensitive_paths`; `ask_operator` como enum fechado + `note`), `schemas/capability-set.schema.json`
+(`unattended_flags`, `sandbox`, `probe_ok: boolean | null` e `probe_mode` do canário por família),
+`docs/operations/autonomy-and-permissions.md` (precondições de `--unattended`), `docs/security/README.md`
+(deny-list no `env` filtrado, no canário e no doctor),
 `docs/specs/` (`contain` com `maxBuffer` explícito em todo `execFile`), ADR 0006 (Checker que não
 escreve torna I28 impossível), ADR 0012, ADR 0013, ADR 0022.

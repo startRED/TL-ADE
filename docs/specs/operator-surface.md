@@ -22,49 +22,64 @@ visual sem navegador, mudar de ideia no meio); §4–§11 deste documento são a
 | Saída de máquina | `--json` em todo comando de leitura (`status`, `report`, `journal`, `show`, `doctor`, `catalog list/inspect`, `validate`); uma linha JSON, nunca prosa misturada |
 | Fonte da verdade | todo comando de leitura é **projeção do journal**; nenhum mantém estado próprio |
 | Repo | descoberto por `git rev-parse --show-toplevel`; `--repo <path>` sobrescreve |
-| Missão | omitida = missão ativa do repo (`.ade/missions/*/status.json` com `state != done`); ambígua = erro 1 listando as candidatas |
+| Missão | omitida = missão ativa do repo (`.ade/missions/*/status.json` com `state != done`); ambígua = exit 4 listando as candidatas |
 | Interatividade | só `plan`/`run` na entrevista e `approve` pedem input; todo o resto é não interativo e roda em script |
 | Windows | caminhos impressos com `\`; nenhuma saída depende de shell POSIX (ADR 0022) |
 
-**Exit codes.** Sete, porque sete são as reações distintas que um script de operador precisa ter. O 5 é
-fixo pelo porte (I04, `coordinator_conflict`).
+**Exit codes.** Cinco, herdados do runtime de referência — a tabela canônica é a do `master-spec` §4 (E47)
+(mapa `{done:0, in_progress:0, stopped:2, blocked:3}` + `Refusal(code=4)`), reproduzida aqui com a reação
+esperada. O 5 é fixo pelo porte (I04, `coordinator_conflict`). Não há códigos 1 e 6.
 
 | Código | Significado | Reação esperada |
 | ---: | :--- | :--- |
-| 0 | sucesso; o que foi pedido terminou verde | seguir |
-| 1 | erro de uso, validação ou ambiguidade (inclui `ajv` recusando plano) | corrigir o comando ou o plano |
-| 2 | trabalho terminou vermelho (eval, gate, contain, canário) com evidência gravada | ler `ade report` |
-| 3 | `awaiting_operator`: parou pedindo decisão humana | `ade status` → `ade decide`/`takeover`/`discard` |
-| 4 | orçamento esgotado (`max_model_calls`, `max_usd`, `max_wall_clock_seconds`) | reaprovar com teto maior ou descartar |
+| 0 | ok / idle: o que foi pedido terminou verde, ou executa sem parada | seguir |
+| 2 | stop / recusa: trabalho vermelho (eval, gate, contain, canário) com evidência gravada; cadeia de journal quebrada; entrada válida recusada por política | ler `ade report` / corrigir a condição |
+| 3 | concluído com paradas: unidades em `awaiting_operator`/`parked`/`blocked` | `ade status` → `ade decide`/`takeover`/`discard` |
+| 4 | entrada inválida: schema, campo desconhecido, plano que não valida, uso ambíguo | corrigir o comando ou o plano |
 | 5 | conflito de lease (outro `ade` escrevendo neste repo) | esperar ou matar o dono |
-| 6 | `stale_workflow_version` (`runtime_stamp` divergente, §6 da arquitetura) | `--accept-stale-version` ou reinstalar a versão do engine |
 
-Códigos 2, 3 e 4 **não são erro**: são estados legítimos do trabalho. `ade run` nunca devolve 0 com uma
-story vermelha — isso é o equivalente CLI da regra "o relato do agente nunca conta" (`architecture.md` §7,
-digest #37).
+Códigos 2 e 3 **não são erro de uso**: são estados legítimos do trabalho. `ade run` nunca devolve 0 com
+uma story vermelha — isso é o equivalente CLI da regra "o relato do agente nunca conta" (`architecture.md`
+§7, digest #37). O exit 3 vale quando há `awaiting_operator` com `batch_state: in_progress`
+(`architecture.md` §11 E31) **só nos comandos que um watchdog consulta** (`ade run`, `ade status`); todo
+comando de leitura (`report`, `journal`, `show`, `doctor`, `catalog list/inspect`) sai 0 nesse estado, como
+já fixa a coluna de exits do `master-spec` §4 — relatório que "falha" toda manhã treina o operador a
+ignorar exit code. Orçamento esgotado (`max_model_calls`, `max_usd`,
+`max_wall_clock_seconds`) parqueia a unit, logo também sai 3, não tem código próprio.
+`stale_workflow_version` sem `--accept-stale-version` é recusa (2), não código próprio (E7: só
+`core_version` bloqueia).
+
+**Forma canônica.** `ade run <pedido>` é a forma canônica (E31); a forma nua (`ade "<pedido>"`) só é
+aceita quando o primeiro token não é um comando conhecido **e** o pedido tem espaço em branco — caso
+contrário sai 4 com a sugestão do comando correto. `--help` curto separa a superfície operacional
+(`run`, `report`, `decide`, `discard`) da avançada (o resto da tabela §2).
 
 ---
 
 ## 2. Comandos
 
+A lista de flags de cada comando é publicada uma única vez na tabela de `2026-09-17-master-spec.md`
+§4, que é a fonte do `--help`; esta seção descreve semântica, não inventa flag nova.
+
 | Comando | Efeito | Exit típico |
 | :--- | :--- | ---: |
-| `ade run <pedido>` \| `--plan <arquivo>` | compila intenção (ou carrega plano), aprova, executa até acabar ou parar | 0/2/3/4 |
-| `ade plan <pedido>` | compila intenção e grava `plan.json`; **não** executa | 0/1 |
-| `ade approve <missão>` | aprova um plano já compilado | 0/1 |
-| `ade validate <plan>` | valida um `plan.json` contra os schemas, sem tocar no repo | 0/1 |
+| `ade run <pedido>` \| `--plan <arquivo>` | compila intenção (ou carrega plano), aprova, executa até acabar ou parar | 0/2/3/4/5 |
+| `ade plan <pedido> [--from <missão>]` | compila intenção e grava `plan.json`; **não** executa | 0/2/4 |
+| `ade approve <missão>` | aprova um plano já compilado | 0/2/4 |
+| `ade validate <plan>` | valida um `plan.json` contra os schemas, sem tocar no repo | 0/4 |
 | `ade status` | fila de escalação + estado de cada story | 0/3 |
 | `ade report [missão]` | relatório da manhã | 0 |
 | `ade journal [--unit <id>]` | eventos do journal, filtrados e legíveis | 0 |
-| `ade decide <unit> --option retry\|skip` | resolve um item da fila | 0/1 |
-| `ade takeover <story>` | imprime o comando de retomada e para o engine naquela story | 0/1 |
-| `ade release <story>` | devolve a story ao engine | 0/1/2 |
-| `ade discard <missão>` | descarta a missão inteira para `refs/ade/discarded/` | 0/1 |
-| `ade show <ref>` | drill-down de um artifact do Firewall | 0/1 |
-| `ade eval <story>` | roda os evals da story sem Maker | 0/2 |
-| `ade doctor` | sonda capacidades, ambiente e órfãos | 0/1 |
-| `ade catalog sync\|list\|inspect` | catálogo de skills | 0/1 |
-| *(v0.4+)* `ade serve`, `ade index --rebuild` | painel e reconstrução do índice | 0/1 |
+| `ade decide <unit> --option retry\|skip\|discard\|pick\|accept_unproven --value <id>` | resolve um item da fila (E32; `accept_unproven` vem de E51) | 0/4/5 |
+| `ade takeover <story>` | imprime o comando de retomada, grava `.cmd` e `.ps1`, e para o engine naquela story | 0/4 |
+| `ade release <story>` | devolve a story ao engine | 0/2/4/5 |
+| `ade discard <missão>` | descarta a missão inteira para `refs/ade/discarded/` | 0/4/5 |
+| `ade show <ref> [--open]` | drill-down de um artifact do Firewall; `--open` usa o visualizador do SO | 0/4 |
+| `ade steer <missão> "<nota>"` | enfileira intenção consumida no `prepare` da próxima story (não é steering intraturno) | 0/4 |
+| `ade eval <story>` | roda os evals do contrato (dono: C9) sem Maker | 0/2/4 |
+| `ade doctor` | sonda capacidades, ambiente e órfãos | 0/2 |
+| `ade catalog sync\|list\|inspect` | catálogo de skills | 0/2/4 |
+| *(v0.4b)* `ade serve`, `ade index --rebuild` | painel e reconstrução do índice | 0 |
 
 ### 2.1 `ade run`
 
@@ -72,13 +87,26 @@ digest #37).
 ade run "corrija o botão de login que não envia o formulário"
 ade run --plan .ade/missions/M07/plan.json
 ade run --autonomy safe|controlled|restricted --max-usd 3 --unattended --yes
+ade run --accept-stale-version
 ```
 
-Sem `--plan`, roda `plan` + `approve` + execução no mesmo processo. `--yes` pula o prompt de aprovação e
-só é aceito quando o plano inteiro cabe em `autonomy: safe` — é assim que a faixa rápida da classe
-`trivial` não pergunta nada (`architecture.md` §5.4). `--unattended` liga os orçamentos de parede
-(`max_wall_clock_seconds`, `max_parked_units`) e obriga `--yes`; `restricted` recusa `--unattended` com
-exit 1, nunca com aviso.
+Sem `--plan`, roda `plan` + `approve` + execução no mesmo processo. A faixa rápida da classe `trivial`
+**não depende de flag**: auto-aprovação é propriedade do par (`trivial`, `autonomy: safe`), gravada como
+`decision{kind:'auto_approved', class:'trivial'}` (`architecture.md` §5.4; `intent-compiler.md` §3), logo
+`ade run "<pedido>"` puro já não pergunta nada — a jornada 1 é dois comandos e nenhuma flag
+(`vision.md` §5.6). `--yes` existe só para `--unattended` e `ade discard`, onde há confirmação a pular.
+`--unattended` liga os orçamentos de parede de
+`plan.mission_budget` (`max_wall_clock_seconds`, `max_parked_units`; defaults da jornada 6: 8 h e 3
+[hipótese] — E3) e obriga `--yes`; `restricted` recusa `--unattended` com exit 2, nunca com aviso
+(`dispatch: never`, `autonomy_requires_operator`, E5; `operations` §7) — recusa é 2 na tabela única de
+exit codes, o 3 é reservado a "concluído com paradas" (E47). Não existem tetos de tokens em
+`mission_budget` (E61): `--max-usd` + `prices.json` cobrem as famílias que reportam custo e nas demais o
+teto é `max_model_calls`.
+
+`--unattended` também recusa com exit 2 quando falta qualquer precondição dura da jornada 6 (A5):
+(a) gates ativos, (b) baseline de eval verde, (c) caminho de rollback em `refs/ade/`, (d) isolamento por
+worktree verificado pelo canário. `--accept-stale-version` aceita `runtime_stamp` divergente e grava a
+aceitação como evento `decision` (E7: só `core_version` bloqueia).
 
 Saída durante a execução: uma linha por transição de step, prefixada pelo id da story, sem spinner e sem
 redesenho (o log precisa ser legível depois de `ade run > log.txt 2>&1`).
@@ -105,20 +133,26 @@ M07  concluída  1 story  $0.31  4m12s   ade report
 perguntas em JSON — é o modo usado pelo painel (v0.4) e por scripts.
 
 `ade approve <missão>` congela o plano: grava `decision` no journal com o digest canônico (JCS) do
-`plan.json`. Aprovar plano cujo digest mudou desde a impressão do resumo é exit 1. `--reject "<motivo>"`
+`plan.json`. Aprovar plano cujo digest mudou desde a impressão do resumo é recusa, exit 2. `--reject "<motivo>"`
 devolve ao Intent Compiler.
 
 `ade validate <plan>` é o único comando que roda fora de um repo com `.ade/`. Valida contra
 `plan.schema.json`, `task-contract.schema.json` e `eval.schema.json` e aplica as recusas semânticas de
 `architecture.md` §5.8 (story sem eval por cenário, sem `do_not_touch`, sem classe, UI sem `design_brief`,
-`checker.model_id == maker.model_id`, story acima do teto de pack). Imprime uma linha por violação com
-JSON Pointer.
+`checker.model_id == maker.model_id` — e também `vendor` igual ao do Maker, E10 —, story acima do teto de
+pack em bytes `limits.max_pack_bytes`). A regra Maker ≠ Checker por `model_id` e por `vendor` vale para
+**todo** papel da chamada, incluindo o advisor registrado em `telemetry.models[]` (E66). O teto da seção
+`contract` do pack é 32 000 bytes [hipótese], dentro de `limits.max_pack_bytes`; estouro é
+`story_pack_overflow` e reabre a divisão da story (E50). O que **não** é validado aqui: `eval.cmd[0]`
+contra os `scripts` do projeto — no plano valida-se só a forma, e a existência do runner é verificada no
+`prepare` de cada story por re-discovery no worktree (E63), que é o que deixa uma missão multifase caber
+numa única aprovação. Imprime uma linha por violação com JSON Pointer.
 
 ```
 $ ade validate plan.json
 /stories/2/evals            story sem eval; todo cenário precisa de ≥1 (architecture §5.8)
 /stories/4/roles/checker_round  model_id igual ao do maker (Maker ≠ Checker)
-2 violações   exit 1
+2 violações   exit 4
 ```
 
 ### 2.3 `ade status`
@@ -134,8 +168,8 @@ missão M07  "billing com Stripe"  feature  8 stories  autonomy: controlled
 AGUARDANDO VOCÊ (2)
   S04  budget_exhausted   14 chamadas de 12 autorizadas; 2 evals ainda vermelhos
        retry  skip  takeover  discard
-  S06  visual_choice      juiz 7.1 (<7,5) em 2 rodadas; 2 direções para escolher
-       ade show M07/S06/visual  →  ade decide M07/S06 --option ...
+  S06  visual_choice      juiz 7.1 (<7,5) em 2 rodadas; escolher rodada 1 ou 2
+       ade show visual:M07/S06  →  ade decide M07/S06 --option ...
 
 STORIES
   S01 done      S02 done      S03 done
@@ -154,21 +188,51 @@ originais (é a saída que se cola num bug report: preserva `prev`, logo preserv
 recomputa a cadeia de hash e sai 2 na primeira quebra, apontando o `seq`.
 
 `ade show <ref>` é o drill-down do Tool Output Firewall (`architecture.md` §7): o extrato entregue ao
-modelo carrega `{ref}`, e `ade show` imprime o bruto correspondente de `artifacts/`. Aceita
-`M07/S04/gates/typecheck`, um sha256 ou um caminho. `--out <arquivo>` escreve em vez de imprimir;
-`ade show M07/S06/visual` abre o índice de screenshots (§9).
+modelo carrega `{ref}`, e `ade show` imprime o bruto correspondente de `artifacts/`.
+
+**Gramática de `<ref>`**, publicada aqui uma vez e única fonte para quem emite ponteiro:
+
+| Forma | Exemplo | Emitido por |
+| :--- | :--- | :--- |
+| `art:<ref>` | `art:M07/S04/gates/typecheck` | Firewall, seções 5 e 7 do pack (`context-firewall-telemetry.md` §1.1) |
+| `diff:<story>#<arquivo>` | `diff:S04#src/pay.ts` | corte de `review.max_diff_bytes` (E13) |
+| `skill:<id>` | `skill:forms-a11y` | seção 4 do pack |
+| `contract:<story>` | `contract:S04` | seção 6 do pack |
+| `repo:invariants` | `repo:invariants` | seção 3 do pack |
+| `visual:<story>` | `visual:M07/S06` | FQE, índice de imagens (§8) |
+| *(legado)* caminho de `artifacts/` ou sha256 | `M07/S04/gates/typecheck`, `9e21c4…` | digitação humana |
+
+O compilador de pack só emite refs desta gramática; o teste é
+`every_pointer_emitted_resolves` — todo `{ref}` de uma saída truncada tem de resolver por `ade show`,
+senão a truncagem com ponteiro é irreparável. `--out <arquivo>` escreve em vez de imprimir;
+`--open` entrega o artifact ao visualizador do SO (E32); `ade show visual:M07/S06` abre o índice de
+screenshots (§8). `ade show M07 --discarded` é a exceção de escopo de missão (§7), não um `<ref>`.
 
 ### 2.5 `ade eval`, `ade doctor`, `ade catalog`
 
 `ade eval <story> [--phase red|green] [--id <eval>]` roda os evals do contrato contra a árvore atual, sem
 Maker e sem consumir orçamento de modelo. É o comando que responde "isso ainda passa?" sem acordar o
 engine, e o que se usa depois de um takeover antes de `ade release`. Exit 2 com qualquer eval vermelho.
+A leitura do resultado exige reporter estruturado (`--reporter=json` no Vitest/Jest, equivalente por
+runner) e `numTotalTests ≥ 1`: zero testes executados é `red_reason: 'missing_target'`, nunca verde (E58).
 
 `ade doctor` sonda, não conserta (ADR 0017): resolve o `.exe` real atrás dos shims npm (digest #30), faz
-**uma chamada real** por família (`probe_ok`/`probed_at`, nunca presença de binário — digest #2/#3),
-confere `core.longpaths`, mede o tamanho do pack p90, conta worktrees e `conhost.exe` órfãos e grava
-`~/.ade/capabilities.json`. `--routing` imprime as sugestões de troca de default (`landscape-routing-skills-terminal.md` §1.4);
-aplicá-las é decisão humana na v1. Exit 1 quando um papel fica sem primário nem fallback.
+**uma chamada real** por família com `--probe-real` (`probe_ok`/`probed_at`, nunca presença de binário
+— digest #2/#3),
+confere `core.longpaths`, mede o tamanho do pack p90 (em bytes, contra `limits.max_pack_bytes`), conta
+worktrees, `conhost.exe` órfãos e o volume de `refs/ade/discarded/` (E36) e grava
+`~/.ade/capabilities.json`. Cada família registra `probe_mode ∈ {real, help_only, fixture}` e
+`bootstrap_cost_tokens`; `--offline` é o default em CI e grava `probe_ok: null`, que fora de CI **recusa
+despacho** em vez de degradar (E10). O relatório segue as 7 categorias do `/harness-audit` (Tool Coverage,
+Context Efficiency, Quality Gates, Memory Persistence, Eval Coverage, Security Guardrails, Cost
+Efficiency) com `score`, `checks` com caminho e `top_actions`, pontuadas por telemetria, nunca por presença
+de arquivo (A10). `--routing` imprime as sugestões de troca de default
+(`landscape-routing-skills-terminal.md` §1.4); aplicá-las é decisão humana na v1. Exit 2 quando um papel
+fica sem primário nem fallback e também quando o `ENGINE_VERSION` do Impeccable diverge do pin: é falha
+do doctor, nunca aviso (E45) — o FQE entra em modo degradado e as stories com UI param em
+`awaiting_operator{reason:'fqe_unavailable'}`, as sem UI seguem. `capabilities_digest` divergente **não**
+bloqueia: tem dois leitores nomeados, o relatório do doctor e o evento `mission_summary` (E67, E68).
+Contadores de cota por família ficam fora da v1 (E69).
 
 ```
 $ ade doctor
@@ -182,7 +246,13 @@ git 2.47.0  core.longpaths=true  node v24.16.0  worktrees: 1  conhost órfãos: 
 `ade catalog sync` faz fetch + checkout do commit pinado (nunca pull), sha256 por arquivo, sanitização
 estática e quarentena; `list` filtra por domínio/linguagem/trust; `inspect <id>` mostra fonte, commit,
 hash, licença, flags do SkillGuard e em que stories a skill já foi injetada e **citada** (`cited` da
-telemetria). Mudança de hash de skill já aprovada no projeto reabre a aprovação (C2 do SkillGuard).
+telemetria), com o `sha256` do conteúdo injetado e a `source` (`catalog@<commit>` ou `local`) de cada
+injeção — evidência de supply chain no próprio evento (E59). Mudança de hash de skill já aprovada no
+projeto reabre a aprovação (C2 do SkillGuard).
+`inspect` marca que scripts de skills de catálogo nunca ficam disponíveis ao agente na v1 — só o corpo do
+`SKILL.md` e `references/*.md` como texto (E35). A v1 assume repositório do próprio operador: `catalog.sources`
+é lido do `.ade/config.json` do repositório e skills em `<repo>/.claude/skills/` **não** entram no pack nem
+são carregadas pela CLI despachada, que roda sob `--safe-mode` (E56, E15).
 
 ---
 
@@ -201,16 +271,17 @@ VOU FAZER            8 stories, 1 epic
   · página de billing no app com estados vazio/erro/carregando
 NÃO VOU TOCAR        prisma/migrations/*, .env*, src/auth/**   (do_not_touch)
 COMO PROVO           17 evals; 3 negativos (webhook sem assinatura é rejeitado)
-                     FQE D1–D7 + juiz na story de UI
+                     FQE D1–D6 + juiz na story de UI (lint anti-slop é gate do C8)
 CUSTO ESTIMADO       $6,40–$9,10  (estimated; Codex não reporta USD — digest #28)
                      teto autorizado: $8,00 e 96 chamadas
-SKILLS NOVAS         stripe-webhooks (skills.sh@a91f2, MIT, sem flags)
-                     forms-a11y (anthropic-skills@7c30d, sem licença de repo → quarentena)
+SKILLS NOVAS         improve-ui (ibelick/ui-skills@c5bcd86, MIT, sem flags)
+                     skill-creator (anthropics/skills@34040c9, Apache-2.0 por skill,
+                                    has_scripts → quarentena)
 EFEITOS EXTERNOS     commit local, push, PR. Sem merge. Sem migration.
 AUTONOMIA            controlled
 DEFAULTS ASSUMIDOS   "não sei" em 2 perguntas:
                      · moeda = BRL   · trial = sem trial
-                     (gravados como incógnita no contrato; mudar exige replanejar)
+                     (gravados em unknowns[] do contrato; mudar exige replanejar)
 ─────────────────────────────────────────────────────────────────────────────
 [a]provar  [r]ecusar  [d]etalhar story  [e]ditar orçamento           M07  digest 4f1c…
 ```
@@ -221,10 +292,10 @@ Regras de conteúdo:
 | :--- | :--- |
 | NÃO VOU TOCAR | vem de `guardrails.do_not_touch` literal; ausente = o plano não passou no `validate` |
 | COMO PROVO | conta evals por tipo, nunca lista comandos; comando é detalhe de `ade show` |
-| CUSTO | sempre com `cost_source`; `estimated` impresso, nunca escondido (digest #28) |
-| SKILLS NOVAS | só as que nunca apareceram neste projeto, com fonte, commit e flags do SkillGuard (C7) |
-| EFEITOS EXTERNOS | lista fechada e positiva: o que **não** está aqui não é autorizado |
-| DEFAULTS | todo "não sei" da entrevista vira linha aqui; o furo J2 §5.2 é fechado nesta linha |
+| CUSTO | sempre com `cost_source`; `estimated` impresso, nunca escondido (digest #28). O teto de chamadas vem de `max_model_calls = 2 + 2·visual_rounds + 2·(max_rework_rounds + 1)` [hipótese]: `bounded` com UI = 8 chamadas/3 rework, sem UI 6/2, `feature` com UI = 12/3 (E65) |
+| SKILLS NOVAS | só as que nunca apareceram neste projeto, com fonte, commit e flags do SkillGuard (C7). A fonte é sempre da allowlist de `catalog-sources.md` (registry aberto — `skills.sh`, ClawHub — é controle 1/S1, não chega aqui) e a licença é sempre declarada (ausente é falha dura no ingest, S3: não há skill sem licença para exibir); quarentena aqui só por `has_scripts` ou achado do SkillGuard. A aprovação **congela o conjunto elegível da missão** (união do top-8 por story); só skill fora desse conjunto parqueia em lote desatendido (E33) |
+| EFEITOS EXTERNOS | lista fechada e positiva: o que **não** está aqui não é autorizado. O `local_merge` fast-forward da branch da story na base, quando a base não mudou desde o `prepare`, é efeito local e entra em `safe` (E64): não aparece nesta lista e não pede autorização |
+| DEFAULTS | todo "não sei" da entrevista vira linha aqui e uma entrada em `TaskContract.unknowns[]`, com `kind ∈ {product_choice, external_fact, repo_fact}` (E48); o furo J2 §5.2 é fechado nesta linha |
 
 `--json` no lugar do prompt devolve o mesmo conteúdo estruturado, para o painel renderizar sem
 reimplementar a lógica.
@@ -241,20 +312,29 @@ Destino único de toda parada (`architecture.md` §5.11). Um item = uma unit em 
 | :--- | :--- | :--- |
 | `budget_exhausted` | Scheduler | retry (com novo teto) · skip · discard |
 | `loop_detected` | detector de loop (normalização literal, I41) | retry · skip · takeover |
-| `stagnation` | 2 rodadas sem mudar `tree_after` | takeover · skip |
+| `stagnation` | 2 rodadas sem mudar `tree_after`, `findings_digest` idêntico (E22) ou assinatura de falha idêntica — hash de stderr/stack normalizado — em 2 tentativas (A6) | takeover · skip |
 | `human_action_item` | `review-result.action_items[].target_role = 'human'` | takeover · retry · skip |
 | `research_tie` | empate no time de pesquisa | *(pergunta de múltipla escolha)* |
-| `visual_choice` | FQE 2 rodadas abaixo de 7,5 | *(escolha entre imagens, §9)* |
-| `new_skill_first_use` | SkillGuard C7 em lote desatendido | aprovar · negar |
+| `visual_choice` | FQE 2 rodadas abaixo de 7,5 | *(escolha entre rodada 1 e rodada 2, §8)* |
+| `fqe_unavailable` | `ENGINE_VERSION` do Impeccable divergente do pin: falha do doctor, FQE degradado; só stories com UI param (E45) | takeover · skip |
+| `red_unproven` | `trivial` cujo vermelho não foi por `assertion`: o rebaixamento para `additive` de E12 não se aplica à classe (E51) | accept_unproven · retry · takeover |
+| `takeover_open` | `prepare` recusa worktree com `takeover.json` presente; `--option retry` devolve a mesma parada (E42) | release · discard |
+| `environment` | `prepare` de story `trivial` com hash de lockfile divergente do checkout base, onde não cabe rodar o instalador (E49) | retry · takeover · skip |
+| `skill_first_use` | SkillGuard C7 em lote desatendido, só para skill fora do conjunto congelado na aprovação (E33); mesmo valor do enum fechado de `ask_operator` (E5, master-spec §4) | aprovar · negar |
+| `worker_heartbeat_lost` | dead-man switch do worker: sem heartbeat por N s o engine mata o grupo de processos e põe o log em quarentena (A3) | retry · takeover · discard |
 | `network_unavailable` | push/PR na retomada (nunca retry automático) | retry · skip |
 | `no_checker_family_available` | Capability Registry | retry · takeover |
 | `isolation_canary_failed` | canário de contenção da família | takeover · discard |
 | `stale_branch` / `unexpected_tree_state` | GitPort | takeover · discard |
 
-`ade decide <unit> --option retry|skip` grava um evento `decision` e devolve a unit ao scheduler
-(`retry`) ou a marca `skipped`, liberando dependentes com `continue_independent_after_block`. `--note
-"<motivo>"` é opcional e vai para o relatório. `takeover` e `discard` são comandos próprios porque mudam o
-dono da árvore e do lote, não o estado de uma unit. Decidir unit que não está na fila é exit 1; decidir em
+`ade decide <unit> --option retry|skip|discard|pick|accept_unproven --value <id>` grava um evento `decision` (com
+`source: operator`, E11) e devolve a unit ao scheduler (`retry`), a marca `failed` — `skipped` não existe em
+`UNIT_STATES` (master-spec §6), então as stories que dependem dela caem em `blocked` por dependência em
+estado terminal não-`completed` e só as **independentes** seguem, com `continue_independent_after_block` —, joga a story fora para `refs/ade/discarded/<missão>/<n>`
+(`discard`, escopo de uma unit — §13 D1), registra a direção visual escolhida (`pick`, §8) ou fecha uma
+story `trivial` como `complete` com o vermelho não provado assumido por escrito (`accept_unproven`, só em
+`red_unproven`, E51). `--note "<motivo>"` é opcional e vai para o relatório. `takeover` continua sendo comando próprio porque muda o
+dono da árvore; `ade discard <missão>` continua operando no lote inteiro (§7). Decidir unit que não está na fila é exit 4; decidir em
 lote (`--all --option skip`) é permitido e registrado item a item.
 
 ---
@@ -263,22 +343,27 @@ lote (`--all --option skip`) é permitido e registrado item a item.
 
 v1 é **uma linha de comando impressa**, não um PTY (ADR 0013; `proposal-A-minimal.md` §5; digest #29). O
 comando faz quatro coisas, nesta ordem: para o engine naquela story, grava checkpoint da árvore em
-`refs/ade/checkpoint/<story>`, grava `human_takeover` no journal (com `session_ref` e `worktree`) e imprime
-o comando de retomada da família que rodou por último naquela story.
+`refs/ade/checkpoints/<missão>/<story>/<n>` (namespace do `GitPort`, `engine-durability.md` §7 I18 — é
+essa ref que `human_release` reconcilia), grava `human_takeover` no journal (com `session_ref` e `worktree`) e imprime
+o comando de retomada da família que rodou por último naquela story. Enquanto o takeover está aberto, o
+`prepare` recusa aquele worktree: a story para em `awaiting_operator{reason:'takeover_open'}` e
+`ade decide --option retry` devolve a mesma parada, sem exit code novo (exit 3) — a saída é `ade release`
+ou `ade decide --option discard` (E42).
 
 ```
 $ ade takeover S04
-S04 entregue a você.   checkpoint refs/ade/checkpoint/S04 (tree 9e21c4)
+S04 entregue a você.   checkpoint refs/ade/checkpoints/M07/S04/1 (tree 9e21c4)
 worktree:  E:\proj\.ade\wt\S04        branch: ade/S04
 
-Cole no seu terminal (ou rode o .cmd gerado):
+Cole no seu terminal (ou rode o .cmd / .ps1 gerado):
 
   claude --resume 0c7b1d3e-5f92-4a11-9a77-2c5e8f014b6d ^
          --add-dir E:\proj\.ade\missions\M07\packs ^
          --settings E:\proj\.ade\missions\M07\settings.json ^
          --permission-mode default
 
-  arquivo: E:\proj\.ade\missions\M07\takeover-S04.cmd
+  arquivos: E:\proj\.ade\missions\M07\takeover-S04.cmd
+            E:\proj\.ade\missions\M07\takeover-S04.ps1
 
 Quando terminar:  ade release S04      (ou ade decide M07/S04 --option skip)
 ```
@@ -335,7 +420,7 @@ qualquer momento (`--rebuild` reescreve do zero). Sete seções fixas, sempre ne
 
 | Seção | Conteúdo |
 | :--- | :--- |
-| **Feito** | stories concluídas, uma linha cada: título, sha do commit, evals verdes, nota visual quando houve |
+| **Feito** | stories concluídas, uma linha cada: título, sha do commit, evals verdes, nota visual quando houve. O fast-forward da branch da story na base é `local_merge` de `safe` quando a base não mudou desde o `prepare`; se mudou, o commit fica na branch da story e esta seção imprime o comando de merge a rodar (E64) |
 | **Mudado** | arquivos por story com `+/−`, agrupados por diretório; `dirty_paths -z` com os dois lados de rename |
 | **Evidência** | por story: evals (cmd, exit, duração), gates, veredito do Checker com `action_items` críticos, refs para `ade show` |
 | **Notas visuais** | por story de UI: screenshots lado a lado (antes \| depois, 2 larguras × claro/escuro), nota do juiz por critério, achados do `impeccable detect`, link `file:///…/artifacts/visual/S06/` |
@@ -376,8 +461,8 @@ M07  "billing com Stripe"  8 stories (3 done, 1 parked, 4 ready)
   6 commits locais, 2 branches, 1 PR aberto (#41)
 
 Vai acontecer:
-  · 6 commits  →  refs/ade/discarded/M07/<story>/<sha>
-  · árvores sujas de S04, S06  →  refs/ade/discarded/M07/<story>/tree
+  · 6 commits  →  refs/ade/discarded/M07/<n>   (um <n> por item descartado)
+  · árvores sujas de S04, S06  →  refs/ade/discarded/M07/<n>
   · 2 worktrees removidos; branches ade/S0x mantidos sob refs/ade/discarded/
   · PR #41 NÃO é fechado (efeito externo; feche você ou use --close-pr)
   · journal, artifacts e report permanecem em .ade/missions/M07/
@@ -388,34 +473,44 @@ Confirmar [s/N]:
 
 `--yes` pula a confirmação; `--close-pr` adiciona o fechamento como step com `effect_class:
 pull_request` (é efeito externo, logo passa pelo journal e pela autonomia). O evento `batch_state:
-discarded` fecha a missão; retomar uma missão descartada é exit 1 — o caminho é `ade plan` de novo.
+discarded` fecha a missão; retomar uma missão descartada é recusa, exit 2 — o caminho é `ade plan` de novo.
 
 ---
 
 ## 8. Aprovação visual sem abrir navegador
 
-Furo J2 §5.4. Quando o FQE esgota as 2 rodadas sem atingir 7,5 (ou quando o brief pede escolha de
-direção), o engine grava `visual_choice` na fila e produz um índice de imagens em
-`artifacts/visual/<story>/`:
+Furo J2 §5.4. Quando o FQE esgota as 2 rodadas sem atingir 7,5, o engine grava `visual_choice` na fila e
+produz um índice de imagens em `artifacts/visual/<story>/`.
+
+**Não são duas direções.** O `DesignBrief` tem uma `direction` só (`architecture.md` §4) e a rodada 2 é
+rework da rodada 1 guiado pelos defeitos do juiz e pelas falhas de D1–D6
+(`frontend-quality-engine.md` §6) — o que o operador compara é **rodada 1 × rodada 2 da mesma direção**,
+que é exatamente o par lado a lado que o FQE já grava. Escolher `r1` significa "a rodada 2 piorou";
+gerar duas direções concorrentes seria uma chamada extra de Maker paga no orçamento da classe, e não é v1.
 
 ```
-$ ade show M07/S06/visual
-S06  2 direções, 2 rodadas, corte 7,5
+$ ade show visual:M07/S06
+S06  2 rodadas da mesma direção, corte 7,5
 
-  A  r1  7,1   artifacts\visual\S06\A-1280-light.png   A-390-dark.png
+  r1  7,1   artifacts\visual\S06\r1-1280-light.png   r1-390-dark.png
        especificidade 6,5 · hierarquia 8,0 · movimento 6,0
-  B  r2  7,4   artifacts\visual\S06\B-1280-light.png   B-390-dark.png
+  r2  7,4   artifacts\visual\S06\r2-1280-light.png   r2-390-dark.png
        especificidade 7,5 · hierarquia 7,0 · movimento 7,0
 
-  ade decide M07/S06 --option pick --value A|B     escolher e seguir
+  ade decide M07/S06 --option pick --value r1|r2   escolher e seguir
   ade decide M07/S06 --option retry --note "..."   mais uma rodada com direção sua
   ade decide M07/S06 --option skip                 entregar como está, nota registrada
 ```
 
 O operador abre dois PNGs no visualizador do Windows (ou lê o `report.md`) e digita uma letra. Nenhum
 navegador, nenhum servidor, nenhum julgamento estético pedido por escrito. `--option pick` exige
-`--value` e é a razão pela qual o conjunto `retry|skip` do ADR de escalação precisa de um terceiro verbo
-(§13, divergência D2).
+`--value` e é verbo canônico da CLI desde `architecture.md` §11 E32 (§13, D2 aceita). O `visual_score` do
+juiz só é comparável dentro do mesmo `judge` pinado por `model_id` (E9).
+
+`pick --value r1` restaura a árvore da rodada 1, que o rework sobrescreveu: exige **checkpoint por rodada
+do FQE** em `refs/ade/checkpoint/<story>/fqe-r<N>`, gravado antes de cada `rework` visual pelo mesmo código
+de checkpoint do takeover (§5). [hipótese] custo desprezível (um `git commit-tree` por rodada, ≤2 por
+story de UI); sem ele, `pick` só pode oferecer a última rodada e a escolha vira `skip`.
 
 ---
 
@@ -429,6 +524,15 @@ ADR 0004): não existe na v1. O que existe é **cancelar no checkpoint e replane
 | :--- | :--- | :--- |
 | durante um turno do Maker | `Ctrl+C` no `ade run` | engine mata a árvore de processos (`taskkill /T /F /PID`), a chamada vira `ambiguous`, a árvore suja vira checkpoint; o próximo `ade run` reconcilia |
 | entre stories | `ade decide <unit> --option skip` | pula a story, libera as independentes |
+| quero ajustar o rumo sem replanejar | `ade steer M07 "<nota>"` | enfileira a nota; o `prepare` da próxima story a consome. Não é steering intraturno (E32) |
+
+`ade steer` é verbo obrigatório por `architecture.md` §11 E32, mas hoje **não tem consumidor declarado**:
+o Context Pack tem 8 seções fixas (`context-firewall-telemetry.md` §1.1) e nenhuma admite intenção do
+operador, e o contrato é imutável por `immutable_digest`. Para ser verificável, a nota entra como bloco
+`operator_steer` **dentro da seção 7 (`round`)**, sob o teto de 24 000 bytes dela, com a mesma cerca de
+dado não confiável de achado de pesquisa e citação obrigatória em `sources[]` do `unit-result` (E8) —
+sem isso não é medível se foi lida, e o verbo vira decoração. [hipótese] até a seção existir na spec do
+pack: a alternativa honesta já disponível é `ade plan --from` + `takeover`.
 | quero outro plano | `ade plan "<novo pedido>" --from M07` | novo plano herdando discovery, respostas da entrevista e stories já `done` de M07; M07 fica `superseded` |
 | quero nada disso | `ade discard M07` | §7 |
 
@@ -438,10 +542,12 @@ cacheado por árvore; a medição entra no harness doctor.
 
 ---
 
-## 10. Painel v0.4
+## 10. Painel v0.4b
 
 Três áreas — **Chat · Missão · Log** — servidas por `ade serve` em `127.0.0.1` (porta em
-`.ade/config.json`, sem bind externo, sem autenticação porque não há superfície remota; ADR 0013).
+`.ade/config.json`, sem bind externo; ADR 0013). A autenticação é mínima e obrigatória: **token aleatório
+por sessão do `ade serve`, impresso no terminal**, mais checagem de `Origin` (E34) — localhost não é
+fronteira de confiança. O painel, o índice SQLite e os npm workspaces entram juntos na v0.4b (E29, E37).
 
 | Área | O que mostra | De onde vem |
 | :--- | :--- | :--- |
@@ -495,20 +601,31 @@ nada descobre o estado por `ade status` de manhã, que é o caso de uso projetad
 
 ---
 
-## 13. Divergências propostas
+## 13. Divergências resolvidas
+
+Arbitragem em `architecture.md` §11 (2026-09-17). As quatro propostas foram aceitas e absorvidas no verbo
+novo de CLI E32; o texto acima já reflete a decisão.
+
+| # | Decisão |
+| :-- | :--- |
+| D1 | aceita — `architecture.md` §11 E32: `ade decide <unit> --option retry\|skip\|discard\|pick` |
+| D2 | aceita — §11 E32: `--option pick --value <id>` (§8) |
+| D3 | aceita — §11 E32: `takeover` grava `.ade/missions/<id>/takeover-<story>.cmd` **e** `.ps1` |
+| D4 | aceita — §11 E32: `ade plan <pedido> --from <missão>`; a anterior fica `superseded` |
 
 **D1 — `discard` é opção da fila de escalação mas não tem verbo por unit.** `architecture.md` §5.11 lista
 as opções `retry`/`skip`/`takeover`/`discard`, mas a CLI fixada tem `ade decide --option retry|skip` e um
 `ade discard <missão>` que opera no lote inteiro. Um operador que quer jogar fora **uma** story parada não
 tem comando: `skip` a marca pulada mantendo a árvore e os commits parciais, o que não é o mesmo. Proposta:
 `ade decide <unit> --option discard` grava os commits e a árvore daquela story em
-`refs/ade/discarded/<missão>/<story>/` e libera as dependentes como `skip`. Custo: reuso do mesmo código de
+`refs/ade/discarded/<missão>/<n>` e libera as dependentes como `skip`. Custo: reuso do mesmo código de
 `ade discard`, escopo de uma unit.
 
 **D2 — a escolha visual não é expressável com `retry|skip`.** `architecture.md` §7 (FQE) termina em
 `awaiting_operator` "com screenshots lado a lado para escolha preguiçosa", e J2 §5.4 registra que nenhuma
 proposta entregou isso. Com o conjunto fechado `retry|skip`, o operador não consegue dizer *qual* direção
-escolheu: `retry` significa "de novo", `skip` significa "tanto faz". Proposta: `--option pick --value <id>`
+escolheu: `retry` significa "de novo", `skip` significa "tanto faz". (Leia-se "direção" como **rodada**:
+§8 fixa que o par é r1 × r2 da mesma `direction`.) Proposta: `--option pick --value <id>`
 (§8), o único verbo que fecha o furo. Sem ele, o FQE produz duas imagens e descarta a preferência humana —
 o gasto de duas rodadas do juiz não vira decisão.
 
@@ -517,7 +634,7 @@ comando exato". Em Windows o comando carrega dois caminhos absolutos longos (`--
 um UUID; copiar do terminal para o PowerShell quebra em aspas e em continuação de linha (`^` vs `` ` ``),
 e é exatamente a queixa de J2 §1 contra a proposta A ("o operador precisa lembrar de `--add-dir`/`--settings`
 — é o oposto de preguiçoso"). Proposta: `ade takeover` continua imprimindo, **e** grava
-`.ade/missions/<id>/takeover-<story>.cmd` com o mesmo conteúdo, para o operador executar por caminho em vez
+`.ade/missions/<id>/takeover-<story>.cmd` e `.ps1` com o mesmo conteúdo, para o operador executar por caminho em vez
 de colar. Custo: uma escrita de arquivo. Risco: nenhum — o `.cmd` vive em `.ade/`, que nunca entra em commit.
 
 **D4 — "mudar de ideia" precisa de `ade plan --from <missão>` para não reentrevistar.** A arquitetura trata
@@ -531,18 +648,19 @@ discovery cacheado e as respostas gravadas, com a missão anterior marcada `supe
 
 ## 14. Perguntas em aberto
 
-1. **Retenção de `refs/ade/discarded/`.** Nada é apagado por design, mas um repo em dogfood acumula refs
-   indefinidamente. Sugestão: `ade doctor` reporta o volume e o operador poda à mão na v1; poda automática
-   só com política explícita. Precisa de decisão de Erick antes da v0.2.
+1. **Retenção de `refs/ade/discarded/`.** Decidido em `architecture.md` §11 E36: os refs acumulam, o
+   `ade doctor` reporta o volume e a purga é comando manual pós-v1. Continua na lista de pendências de
+   Erick só quanto à política de retenção em si (§11, pendências finais).
 2. **`ade report` em HTML.** O Markdown com PNGs relativos cobre a leitura; um `--html` de arquivo único
    (imagens em data: URI) seria mais fácil de mandar para outra pessoa. [hipótese] de valor baixo antes do
    painel; deixado fora até alguém pedir.
-3. **Idioma da saída.** A CLI está em português neste documento; os nomes de estado, `reason` e
-   `effect_class` são ingleses porque vão para o journal e para os schemas. Confirmar se a mistura é
-   aceitável ou se a saída humana também vai para inglês.
+3. **Idioma da saída.** Resolvido em `architecture.md` §11 E31: estados, `reason` e `effect_class` em
+   inglês (journal e schemas), mensagens humanas em português. A mistura é a decisão, não uma pendência.
 4. **Eval da métrica "conhecimento exigido do operador"** (J2 §5.1): a faixa rápida já tem eval de slice
    (≤30 s, 0 perguntas, ≤2 chamadas), mas "conhecimento exigido" continua sem medida. Sugestão barata:
    contar os verbos distintos da CLI que a jornada 1 exige ponta a ponta (alvo: 1) e a jornada 6 (alvo: ≤4)
-   como critério de aceite das v0.3/v0.5. Não implementado neste documento.
+   como critério de aceite das v0.3/v0.5, mais a asserção de que o `argv` da jornada 1 **não contém flag
+   alguma** (§2.1: auto-aprovação é do par `trivial`+`safe`, nunca de `--yes`). Não implementado neste
+   documento.
 5. **Porta padrão do `ade serve`** e comportamento quando `127.0.0.1` está bloqueado por política
-   corporativa. Sem decisão; irrelevante antes da v0.4.
+   corporativa. Sem decisão; irrelevante antes da v0.4b.

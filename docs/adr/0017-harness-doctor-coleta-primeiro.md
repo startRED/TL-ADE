@@ -16,10 +16,25 @@ o que é barato agora e o que espera.
 Um evento `kind: 'telemetry'` por `model_call` no journal, com o que a poda vai precisar depois:
 `pack_bytes`, `pack_sections[{section, bytes, digest}]`, `skills_injected[{name, bytes, cited}]`,
 `tokens_in/out`, `cache_read`, `cache_write`, `cost_usd` + `cost_source`, `tool_output_raw_bytes` vs
-`tool_output_model_bytes`, e correlação com `eval_pass`/`rework` pelo `step_id`.
+`tool_output_model_bytes`, e correlação com `eval_pass`/`rework` pelo `step_id`. Somam-se
+`approval_decisions`, `network_attempts`, `files_touched` (§10 A2) e `compaction_events`,
+`outcome ∈ {ok, retry, rework, park, stop}`, `ttft_ms`, mais um evento `scope: 'mission_summary'` no
+fechamento da missão (intervenções, perguntas, wall time, verbos de CLI usados); eventos `decision`
+carregam `source: operator | engine` (§11 E11). Agregados `pass@k` e `pass^k` por classe de
+complexidade (§10 A2).
 
-`ade doctor` v1 **só relata**: taxa de injeção, taxa de citação, custo por item, e os dois candidatos
-estáticos de poda (redundância entre itens, obsolescência). Não decide, não remove.
+A citação só existe porque `unit-result` e `review-result` carregam `sources: string[]` obrigatório
+(digests das seções do pack usadas) — sem isso `cited` é sempre falso (§11 E8).
+
+`ade doctor` v1 **só relata**, nas 7 categorias do `/harness-audit` (Tool Coverage, Context Efficiency,
+Quality Gates, Memory Persistence, Eval Coverage, Security Guardrails, Cost Efficiency) e no contrato de
+saída `score` + `checks` com caminho + `top_actions`, pontuadas **por telemetria e ablação, nunca por
+presença de arquivo** (§10 A10): taxa de injeção, taxa de citação, custo por item, e os dois candidatos
+estáticos de poda (redundância entre itens, obsolescência). A **primeira métrica** é
+`cache_read / (tokens_in + cache_read)` por papel, porque o benefício de cache é **[hipótese]**
+(§11 E17). Achado sai no formato instinto `{trigger, action, confidence 0,3–0,9, evidence[], domain,
+scope: project | global}`, derivado do journal e nunca de hooks, com promoção project→global ao observar
+em 2+ repositórios (§10 A12). Não decide, não remove.
 
 A **ablação pareada** entra pós-v1, adotando o protocolo do Caliper (`run` → `run --ablate <item>` →
 `compare`) e `claude plugin eval` (que já tem braço baseline), com o ponto cego declarado: o braço Codex
@@ -64,6 +79,7 @@ real em vez de começar do zero.
 | Ablação pareada na v1 | exige lote e baseline que não existem antes da v1 (`landscape-context-observability.md` §5.2) |
 | Reimplementar o Caliper | a ferramenta já faz instalação + ablação + compare; reescrever mede outra coisa (a colagem no prompt, não o disparo) |
 | Poda por julgamento do operador, sem métrica | é a spec v2; sem `cited` não há como distinguir item inútil de item silenciosamente truncado (#39) |
+| O método do `harness-audit.js` do ECC | pontua **presença de arquivo**; a ADE adota as 7 categorias e o contrato de saída, não a pontuação (§10 A10) |
 | OTel export na v1 | `gen_ai.*` em Development, sem tipo de token de cache (#28) |
 | Confiar no custo reportado pela CLI | `--model haiku` faturado como sonnet (#26); Codex não reporta USD (#28) |
 
@@ -76,8 +92,9 @@ a telemetria — o custo é perder a base do harness doctor inteiro e voltar à 
 
 ## Consequências para outros documentos
 
-`schemas/journal-event.schema.json` (kind `telemetry`), `schemas/unit-result.schema.json` e
-`review-result` (campo `sources`, sem o qual `cited` não existe), `~/.ade/prices.json` (custo
+`schemas/journal-event.schema.json` (kind `telemetry`, `source` em `decision`),
+`schemas/unit-result.schema.json` e `schemas/review-result.schema.json` (campo `sources` **obrigatório**,
+sem o qual `cited` não existe), `~/.ade/prices.json` (custo
 `estimated` do braço Codex), `docs/specs/` (`ade doctor` relata e não decide), `docs/roadmap.md`
 (ablação pareada pós-v1), ADR 0009 (`cited` por skill), ADR 0011, ADR 0021 (toda série de custo é
 filtrada por `runtime_stamp`).

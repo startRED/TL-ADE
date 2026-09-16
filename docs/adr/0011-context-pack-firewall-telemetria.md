@@ -10,21 +10,35 @@ saída de ferramenta vire instrução, e medir o que cada byte injetado produziu
 
 ## Decisão
 
-**Pack**: seções em ordem fixa por volatilidade (ferramentas → papel → invariantes do repo ≤1,5k →
-skills por id ≤7,5k → contexto recuperado ≤6k → contrato → rodada → tarefa), teto global 40k tokens
-**[hipótese]**, ponteiro de drill-down ao estourar teto de seção, redação de segredos **pós-montagem**,
-manifesto com digest por seção como evidência. Sempre `{pack_path}`, nunca `{pack_text}`. Isolamento do
-processo: `--safe-mode` + `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, nunca `--bare`.
+**Pack**: seções em ordem fixa por volatilidade (ferramentas → papel → invariantes do repo ≤1,5k, em
+forma canônica "Must Always / Must Never", imperativo curto (A11) → skills por id, ≤5k por skill e soma
+≤7,5k (E14) → contexto recuperado ≤6k → contrato → rodada → tarefa). O **corte é em bytes**:
+`limits.max_pack_bytes`, default **120 000** **[hipótese]**, calibrado por p90; "40k tokens" continua
+como alvo de projeto por estimativa, não como portão. A seção de rodada (achados, falhas de gate,
+checkpoint) tem teto próprio de **24 000 bytes** com ponteiro (E13). Ponteiro de drill-down ao estourar
+teto de seção, redação de segredos **pós-montagem**, manifesto com digest por seção como evidência —
+os digests usados voltam em `sources[]` de `unit-result` e `review-result`, sem os quais `cited` é
+sempre falso (E8). Sempre `{pack_path}`, nunca `{pack_text}`. Isolamento do processo: `--safe-mode` +
+`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, nunca `--bare`. Medir `--system-prompt` como veículo do pack
+contra o prompt de usuário é **[hipótese]** do harness doctor; o pack continua vindo de arquivo (A9).
 
 **Firewall**: todo comando passa pelo executor com assinatura `run(argv) → { rawPath, extract }`. O
-bruto vira artifact; o modelo recebe extrato — falha **íntegra, mas cercada como dado não confiável**;
-sucesso resumido. `ade show <ref>` faz o drill-down. Hooks `PostToolUse` das CLIs são segunda camada,
-nunca a única. `max_diff_bytes` herdado (200 000 chars) é reduzido, com ponteiro.
+bruto vira artifact; o extrato tem **forma fixa** `{status: success | warning | error, summary,
+next_actions[], artifacts[], raw_ref}` (schema inline), nunca texto livre (A1) — falha **íntegra, mas
+cercada como dado não confiável**; sucesso resumido. `ade show <ref>` faz o drill-down. Hooks
+`PostToolUse` das CLIs são segunda camada, nunca a única. O `max_diff_bytes` herdado (200 000 chars)
+cai para `review.max_diff_bytes` = **60 000 chars**, por arquivo em ordem de relevância de escopo, com
+ponteiro `ade show diff:<story>#<arquivo>` (E13).
 
 **Telemetria**: um evento por `model_call` com `tokens_in/out`, `cache_read/write`, `cost_usd` +
-`cost_source` (`reported` | `estimated` | `unknown`), `pack_bytes`, `pack_sections[]`,
-`skills_injected[{name, bytes, cited}]`, `tool_output_raw_bytes` / `tool_output_model_bytes`. Doctor v1
-apenas coleta e relata.
+`cost_source` (`reported` | `estimated` | `unknown`), `ttft_ms`, `pack_bytes`, `pack_sections[]`,
+`skills_injected[{name, bytes, cited}]`, `tool_output_raw_bytes` / `tool_output_model_bytes`,
+`compaction_events`, `outcome ∈ {ok, retry, rework, park, stop}`, `approval_decisions`,
+`network_attempts`, `files_touched` (A2, E11); agregados `pass@k` e `pass^k` por classe de
+complexidade; um evento `scope: 'mission_summary'` no fechamento (intervenções, perguntas, wall time,
+verbos de CLI usados) e `source: operator | engine` nos eventos `decision`. O benefício de cache é
+**[hipótese]**: `cache_read / (tokens_in + cache_read)` por papel é a primeira métrica do harness
+doctor (E17). Doctor v1 apenas coleta e relata.
 
 ## Evidência
 
@@ -42,13 +56,18 @@ apenas coleta e relata.
 - `judgment-J3-durability-security-cost.md` §7: só uma proposta carregava `cited` em contrato — sem esse
   campo, metade da coleta da v1 não coleta. E a ablação por `claude plugin eval` é cega no braço Codex.
 - `judgment-J3-durability-security-cost.md` §6 e `runtime-port-map.md` §6: `max_diff_bytes` de 200 000
-  chars (~50k tokens) herdado sem revisão nas três propostas, pago por rodada e por Checker.
+  chars (~50k tokens) herdado sem revisão nas três propostas, pago por rodada e por Checker — daí os
+  60 000 chars de E13.
+- `ref-affaan-mustafa-ecc.md` (A1, A2): extrato de ferramenta com forma fixa e telemetria com
+  `approval_decisions` / `network_attempts` / `files_touched` vêm dos guias do ECC, lidos como
+  referência pinada por commit, nunca como dependência de runtime.
 - Digest #13: corpo de 3 skills ≈6–7k tokens — origem do teto de 7,5k da seção de skills.
 
 ## Trade-offs
 
 Os tetos são hipóteses até a telemetria dar p90 por seção; tetos apertados produzem ponteiros que o
-modelo talvez não siga. A cerca inbound pode esconder a pista útil dentro de um log de falha hostil —
+modelo talvez não siga. Cortar em bytes é operacional e auditável, mas desalinha do que a CLI cobra em
+tokens: a conversão fica como estimativa declarada, não como verdade. A cerca inbound pode esconder a pista útil dentro de um log de falha hostil —
 por isso o bruto fica em `artifacts/` e o drill-down é um comando. Manifesto e artifacts crescem em
 disco por missão. Custo do braço Codex fica `estimated` (tabela de preços em `~/.ade/prices.json`), e a
 ablação do doctor continua estruturalmente cega em metade do harness — limitação registrada, não
@@ -61,18 +80,22 @@ resolvida na v1.
 | `{pack_text}` no argv | estoura `lpCommandLine` (#31) |
 | `--bare` para contexto limpo | quebra a assinatura (#9) |
 | Resumir a saída de falha | perde a evidência que o rework precisa (§2.1) |
+| Extrato do Firewall em texto livre | sem forma fixa não há como o engine decidir nem medir (A1) |
+| Teto de pack contado só em tokens | o executor corta bytes; token é estimativa por família (E13) |
 | Hooks das CLIs como camada única | só existem no Claude Code; o firewall tem de ser universal |
 | Mem0 / Letta como memória | dependência e estado fora do journal (ADR 0019) |
 | OTel export na v1 | convenção em Development, sem tipo de cache (#28) |
 
 ## Como reverter
 
-Gatilho: p90 medido de uma seção estourando o teto de forma sistemática, ou TDR fora do alvo. Custo:
-tetos são config; o manifesto já grava bytes e digest por seção, então a revisão é feita sobre dado
+Gatilho: p90 medido de uma seção estourando o teto de forma sistemática, TDR fora do alvo, ou razão de
+cache por papel que desminta o benefício suposto (E17). Custo: tetos são config (`limits.max_pack_bytes`,
+`review.max_diff_bytes`); o manifesto já grava bytes e digest por seção, então a revisão é feita sobre dado
 próprio. Exportar OTel depois é aditivo sobre o mesmo evento de telemetria.
 
 ## Consequências para outros documentos
 
-`schemas/journal-event.schema.json` (kind `telemetry`), `docs/specs/` (Pack compiler, Firewall,
-`ade show`), `~/.ade/prices.json`, ADR 0006 (`max_diff_bytes` do Checker), ADR 0009 (`cited`),
-ADR 0017, ADR 0019, ADR 0022.
+`schemas/journal-event.schema.json` (kind `telemetry`), `schemas/unit-result.schema.json` e
+`schemas/review-result.schema.json` (`sources[]`), `docs/specs/` (Pack compiler, Firewall, `ade show`),
+`~/.ade/prices.json`, ADR 0006 (`review.max_diff_bytes` do Checker), ADR 0009 (`cited` e o teto de
+skills), ADR 0017, ADR 0019, ADR 0022.

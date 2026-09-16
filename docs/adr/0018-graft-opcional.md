@@ -80,5 +80,6 @@ como contexto recuperado comum.
 `docs/specs/intent-compiler.md` (context discovery com duas rotas e fallback silencioso),
 `docs/specs/` (`ade doctor` reporta presença do Graft e em que rota o discovery opera),
 `docs/roadmap.md` (Graft fora da v1, opcional na v0.x), ADR 0011 (achado do Graft entra como contexto
-recuperado, sob o teto de 6k), ADR 0017 (eval pareado na lista do harness doctor), ADR 0022 (raiz curta
+recuperado, sob o teto de 6k da seção e sob o corte global em bytes `limits.max_pack_bytes`, §11 E13),
+ADR 0017 (eval pareado na lista do harness doctor), ADR 0022 (raiz curta
 e `core.longpaths`).

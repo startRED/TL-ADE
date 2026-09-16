@@ -15,11 +15,23 @@ metadados **fora** do `SKILL.md` (o upstream fica byte-idêntico). Sync = `fetch
 pinado**, nunca `pull`; sha256 por arquivo. SkillGuard aplica os **12 controles** de
 `ref-skill-sources.md` §6, incluindo os cinco que o painel não cobria: pin por commit, **licença por
 skill**, `skills-ref validate`, `allowed-tools`/frontmatter **removido antes da injeção**, e nunca
-ingerir `install.sh`/`hooks/`. Scripts nunca são executados pelo engine; skill com `scripts/` nasce em
-quarentena; primeira aparição no projeto exige aprovação (em lote desatendido, `awaiting_operator`);
-skills locais do repositório vencem por nome. Seleção: filtro duro (domínio/linguagem/família) → **BM25
-top-8** local (~80 linhas, $0) → seletor barato fecha **≤3** → bloco fixo do pack ordenado por id
-estável. Alvos: `recall@8 ≥ 0,85`, `precision@3 ≥ 0,75`.
+ingerir `install.sh`/`hooks/` (de qualquer fonte, ECC incluído: só `skills/` entra no catálogo, pinado
+por commit e nunca como dependência de runtime, A13). Os padrões concretos do SkillGuard são nomeados:
+zero-width/bidi, `<!--`, `<script`, `data:text/html`, `base64,`, `curl|wget|nc|scp|ssh`,
+`enableAllProjectMcpServers`, `ANTHROPIC_BASE_URL` (A7). Scripts de skills de catálogo **nunca ficam
+disponíveis ao agente na v1** — só o corpo do `SKILL.md` e `references/*.md` como texto — e o engine
+nunca os executa; skill com `scripts/` nasce em quarentena; o controle 11 (memória/config do agente no
+scan) é **detect-only na v1**, com baseline de hashes, e só bloqueia despacho na v0.5 (E35). Primeira
+aparição no projeto exige aprovação (em lote desatendido, `awaiting_operator`); a aprovação única
+congela o conjunto elegível da missão (união do top-8 por story) e só skill fora desse conjunto parqueia
+(E33); skills locais do repositório vencem por nome. Seleção: filtro duro
+(domínio/linguagem/família — **nunca por tamanho**) → **BM25 top-8** local (~80 linhas, $0) → seletor
+barato fecha **≤3** → bloco fixo do pack ordenado por id estável, com **≤5k tokens por skill e soma
+≤7,5k** (E14). Um braço de controle "BM25@3 puro" é medido antes de manter o seletor barato. O engine
+suprime o listing nativo de skills/plugins do usuário na chamada despachada (`--safe-mode`,
+`--setting-sources`, `--plugin-dir` vazio — flags exatas medidas pelo doctor, que prova a supressão por
+contagem em `system/init`); `skills_injected[]` só é verdadeiro sob essa supressão (E15) **[hipótese
+até a sonda]**. Alvos: `recall@8 ≥ 0,85`, `precision@3 ≥ 0,75`.
 
 ## Evidência
 
@@ -48,8 +60,10 @@ estável. Alvos: `recall@8 ≥ 0,85`, `precision@3 ≥ 0,75`.
 
 Curadoria de 60–80 skills é trabalho humano recorrente. BM25 fica ~11 pontos abaixo de embedding, mas
 embedding exige chave de API — princípio inegociável da ADE. O bloco fixo gasta tokens mesmo quando a
-skill não é citada; a telemetria `skills_injected[].cited` (ADR 0011) é quem mede esse desperdício.
-Sanitização em build time não protege contra conteúdo legítimo mal escrito.
+skill não é citada; a telemetria `skills_injected[].cited` (ADR 0011), válida só sob a supressão do
+listing nativo, é quem mede esse desperdício. Sanitização em build time não protege contra conteúdo
+legítimo mal escrito. Sem scripts disponíveis ao agente, skills que dependem de um utilitário próprio
+ficam degradadas na v1 — preço do controle 7 levado ao limite.
 
 ## Alternativas rejeitadas
 
@@ -61,11 +75,14 @@ Sanitização em build time não protege contra conteúdo legítimo mal escrito.
 | Embeddings na v1 | chave de API obrigatória; ganho de ~11 pontos não paga o princípio |
 | Engine executando scripts do catálogo | controle 7; o agente pode, sob `contain` |
 | Repassar `allowed-tools` do catálogo | controle 8; a skill se autoconcede ferramentas |
+| Teto fixo de 2,5k tokens por skill | poda skill legítima antes do BM25; o limite real é ≤5k por skill e ≤7,5k de soma (E14) |
+| ECC (ou qualquer fonte) ingerido inteiro | `hooks/` e instaladores fora; só `skills/`, pinado por commit (A13) |
 
 ## Como reverter
 
 Gatilho: catálogo acima de ~500 skills ou `precision@3` medida abaixo de 0,7 → híbrido BM25+embedding
-local. Custo: uma etapa a mais no seletor; `index.json` já carrega os campos.
+local. Custo: uma etapa a mais no seletor; `index.json` já carrega os campos. Gatilho inverso: se o
+braço "BM25@3 puro" empatar com o seletor barato, o seletor sai e economiza uma chamada por story.
 
 ## Consequências para outros documentos
 

@@ -1,6 +1,6 @@
 # ADR 0005 — Duas famílias na v1, `agy` na v0.x, Maker ≠ Checker por `model_id`
 
-**Status:** aceito 2026-09-17
+**Status:** aceito 2026-09-17, pendente de confirmação do Erick (`architecture.md` §9.2 e §9.3)
 
 ## Contexto
 
@@ -12,10 +12,12 @@ modelos de outras famílias e já foi flagrado escrevendo fora do diretório aut
 
 v1 com **duas** famílias: `claude` (Claude Code 2.1.271) e `codex` (Codex CLI 0.154.0). A família Google
 é `agy` (Antigravity CLI 1.2.x), entra na **v0.x** com papel de pesquisa e fallback de Checker, e só
-depois de o canário de isolamento por família passar — até lá, somente-leitura. O Gemini CLI não faz
-parte da ADE. A separação Maker ≠ Checker é verificada por **`model_id`**, nunca por binário. Sem
-família de Checker disponível, a story vai para `parked` (`no_checker_family_available`), nunca
-"aprovada sem revisão".
+depois de o canário de isolamento por família passar — até lá, somente-leitura. Modo desatendido do
+`agy` é `--dangerously-skip-permissions`; `--approval-mode yolo` é flag do Gemini CLI e nunca é usada.
+O Gemini CLI não faz parte da ADE. A separação Maker ≠ Checker é verificada por **`model_id`**, nunca
+por binário, e reforçada por `models[].vendor` no `CapabilitySet`: o Checker de rodada recusa vendor
+igual ao do Maker (E10). Sem família de Checker disponível, a story vai para `parked`
+(`no_checker_family_available`), nunca "aprovada sem revisão".
 
 ## Evidência
 
@@ -36,7 +38,9 @@ família de Checker disponível, a story vai para `parked` (`no_checker_family_a
 
 Com duas famílias, indisponibilidade de uma leva stories a `parked` em vez de degradar para um terceiro
 revisor — escolha deliberada (revisão fraca é pior que fila). `agy` auto-atualiza, então o
-`CapabilitySet` dele precisa de re-sondagem por `ade doctor` mais frequente que as outras. Adiar a
+`CapabilitySet` dele precisa de re-sondagem por `ade doctor` mais frequente que as outras — o
+`capabilities_digest` do `runtime_stamp` (E7) existe para tornar um `agy` 1.2.3 → 1.2.4 visível no
+journal. Adiar a
 família Google adia também a diversidade de juiz visual em cenários onde Claude é o Maker.
 
 ## Alternativas rejeitadas

@@ -1,7 +1,8 @@
 # Spec — Frontend Quality Engine (FQE)
 
-Componente C17 de `architecture.md` §3. Esta spec detalha o que a arquitetura fixa em §3 (linha C17)
-e §7 ("Frontend Quality Engine"); não repete as decisões, só as implementa. Decisão de rumo em
+Componente C17 de `architecture.md` §3, entregue na **v0.4a** (D1–D6 + juiz; conjunto bloqueante
+calibrado no dogfood — `architecture.md` §11 E37, E39). Esta spec detalha o que a arquitetura fixa em
+§3 (linha C17), §7 ("Frontend Quality Engine") e §11; não repete as decisões, só as implementa. Decisão de rumo em
 `docs/adr/0010-frontend-quality-engine-impeccable-juiz-2-rodadas.md`; rejeições (pixel-diff, MCP de
 browser, avaliador barato, banimento de fontes) em `docs/adr/0019-rejeicoes.md`.
 
@@ -40,7 +41,9 @@ deliberadamente permissiva.
 ajv recusa a story sem ele (`architecture.md` §5 passo 8). O ciclo insere o loop do FQE entre `gates`
 e `review` (§5 passo 10). Story marcada `has_ui` sem `visual.serve_command` nem `visual.url`
 resolvível não passa silenciosamente: o Intent Compiler pergunta o comando de serve (é uma das ≤5
-perguntas) ou grava `visual_degraded` com motivo, e o FQE roda em modo degradado (§4.8).
+perguntas) ou registra a lacuna em `TaskContract.unknowns[]` com `kind: 'repo_fact'`
+(`architecture.md` §12 E48 — a incógnita é do contrato, não do plano) e grava `visual_degraded` com
+motivo, e o FQE roda em modo degradado (§4.8).
 
 Desligamento explícito: `visual.enabled: false` em `.ade/config.json` (por repositório). Vira
 `decision` no journal, nunca default silencioso.
@@ -83,8 +86,9 @@ isso como pergunta aberta (`landscape-evals-visual.md` §9.7). Calibração no d
 **Camada 4 — direção com assinatura e auto-crítica.** `signature` é o único elemento memorável da
 tela (frontend-design da Anthropic). `self_critique` é a exigência que a spec v2 não tinha: *"if any
 part of it reads like the generic default you would produce for any similar page… revise that part,
-say what you changed and why"*. O campo é texto e é **obrigatório**: brief com `self_critique` vazio
-é recusado por ajv. Ele é a única parte do brief que o juiz lê como promessa a cobrar.
+say what you changed and why"*. O campo é texto e é **obrigatório** por decisão canônica
+(`architecture.md` §11 E39): `minLength` em `task-contract.schema.json`, brief com `self_critique`
+vazio é recusado por ajv. Ele é a única parte do brief que o juiz lê como promessa a cobrar.
 
 ### 2.1 O brief vence os guardrails
 
@@ -122,11 +126,18 @@ gates verdes (build de produção)
        └─► capture     Playwright como BIBLIOTECA, nunca MCP
             rotas × {1280, 390} × {claro, escuro}:
               a11y snapshot · console · rede · estilos computados
-       └─► D1…D7       portões determinísticos  ──reprovou?──► rework SEM chamar o juiz
+       └─► D1…D6       portões determinísticos (todos dependentes de render)
+                        ──reprovou?──► rework SEM chamar o juiz
        └─► screenshots viewport (fullPage: false), só agora, só para o juiz
        └─► juiz        família ≠ Maker, model_id pinado, sub-agente isolado
        └─► decisão     pass → review · rework ≤2 rodadas · esgotou → awaiting_operator
 ```
+
+**Dependências antes do serve.** O serve só sobe depois que o `prepare` da story resolve
+`node_modules`: junction (Windows) ou symlink para o checkout base quando o hash do lockfile do
+worktree é igual ao do base; lockfile divergente em classe ≥ `bounded` roda o instalador do discovery
+como step `prepare`, com `prepare_dependency_ms` na telemetria, e em `trivial` para em
+`awaiting_operator{reason:'environment'}` (`architecture.md` §12 E49).
 
 Playwright entra como biblioteca no engine. MCP de browser está fora do caminho automático: Playwright
 MCP e Chrome DevTools MCP trazem 70+ e 58 ferramentas de descrição no contexto para capacidade que a
@@ -138,16 +149,24 @@ quando o julgamento estético é inevitável.
 grava `{route, width, theme, url, commit_sha, at, sha256}` no step `visual_eval`
 (`landscape-evals-visual.md` §3.6.1).
 
-**Classes de efeito.** D1–D7 rodam pelo Eval runner (C9) como evals `kind: 'visual'` → `eval_run`.
-Captura e chamada do juiz são `visual_eval`, que é classe model_call-like: em crash a intenção fica
-`ambiguous` e a retomada repete a avaliação (as capturas já estão em `artifacts/`; o custo perdido é
-uma chamada, `architecture.md` §6).
+**Classes de efeito.** A rodada visual inteira — serve, captura e portões D1–D6 — é `visual_eval`, com
+evidência no conjunto de artefatos em `artifacts/visual/<tree>/` (a11y snapshot, console, rede, saída de
+`impeccable detect --json`, screenshots) e cache por árvore, como gate; conjunto ausente ou parcial refaz
+a rodada, que é idempotente, e `visual_eval` nunca fica `ambiguous` (`engine-durability.md` §3). D1–D6
+**não** passam pelo Eval runner (C9): não têm fase `red`/`green` e por isso não cabem no `EvalRecord` de
+`eval_run` (`engine-durability.md` §10). A chamada do juiz é `model_call` própria e segue a regra de
+reconciliação de `model_call`: em crash a intenção fica `ambiguous` e a retomada repete a chamada (as
+capturas já estão em `artifacts/`; o custo perdido é uma chamada, `architecture.md` §6).
+`eval_run{kind: 'visual'}` fica só para o eval de contrato que invoca o FQE por fora
+(`tools/ade-fqe.mjs`, `evals/README.md` §3), cujo `cmd[0]` é validado contra os `scripts` no
+`prepare` da story — no plano valida-se só a forma (`architecture.md` §12 E63).
 
 ---
 
-## 4. Portões determinísticos D1–D7
+## 4. Portões determinísticos D1–D6
 
-Todos code-based, todos baratos, todos com evidência em `artifacts/`. Severidade `critical` bloqueia
+Todos code-based, todos baratos, todos **dependentes de render**, todos com evidência em
+`artifacts/` (`architecture.md` §11 E39). Severidade `critical` bloqueia
 sozinha; `major` bloqueia por acúmulo ≥1 também, mas entra no rework em lote.
 
 | ID | Portão | Comando / critério exato | Sev. |
@@ -156,13 +175,28 @@ sozinha; `major` bloqueia por acúmulo ≥1 também, mas entra no rework em lote
 | D2 | rede sem 4xx/5xx | `page.on('response')`: falha se `status ≥ 400` e a URL não casa `visual.network_allowlist` | critical |
 | D3 | contraste AA | axe-core vendorizado em `tools/axe/axe.min.js`, injetado por `page.addScriptTag`, `axe.run(document,{runOnly:['color-contrast']})`; falha se `violations.length > 0` (4,5:1 corpo, 3:1 texto grande) | critical |
 | D4 | estados presentes | para cada `visual.routes[].states` (`default`,`empty`,`loading`,`error`,`focus`,`disabled`): a rota `?state=<nome>` renderiza e o a11y snapshot difere do `default`; estado declarado que não muda nada é falha | major |
-| D5 | detector estético limpo | `impeccable detect --json <visual.url + rota>`; exit `0` limpo, `2` com achados, `1` falha operacional. Falha se houver achado `category: slop` ou `severity: error` não presente em `impeccable ignores` | major |
-| D6 | lint anti-slop | `npx oxlint --config tools/oxlint/anti-slop/.oxlintrc.json <scope_paths>`; zero erros | major |
-| D7 | responsivo | em 390 e 1280: `document.scrollingElement.scrollWidth ≤ clientWidth + 1` **e** nenhum elemento com `getBoundingClientRect().right > innerWidth + 1` | critical |
+| D5 | detector estético limpo **[hipótese: alvo URL nunca executado, ver abaixo]** | `impeccable detect --json <visual.url + rota>`; exit `0` limpo, `2` com achados, `1` falha operacional. Falha se houver achado `category: slop` ou `severity: error` não presente em `impeccable ignores` | major |
+| D6 | responsivo | em 390 e 1280: `document.scrollingElement.scrollWidth ≤ clientWidth + 1` **e** nenhum elemento com `getBoundingClientRect().right > innerWidth + 1` | critical |
+
+> Nota de exit codes: os `0`/`1`/`2` de D5 são do detector Impeccable, não da tabela de exit codes
+> do `ade`, que é única e vive em `2026-09-17-master-spec.md` §4 (0 ok/idle; 2 recusa ou parada final;
+> 3 concluído com paradas; 4 entrada inválida; 5 lease — não existem 1 nem 6; `architecture.md` §12
+> E47).
 
 > Nota de numeração: `landscape-evals-visual.md` §3.2 numera D4 como "sem scroll horizontal" e D7
-> como "estados". A numeração canônica é a de `architecture.md` §7 (D4 = estados, D7 = responsivo) e
-> é a usada em código, schema e journal.
+> como "estados". A numeração canônica é a de `architecture.md` §11 E39 (D4 = estados, D6 =
+> responsivo, sem D7) e é a usada em código, schema e journal.
+
+**Lint anti-slop está fora do FQE.** `architecture.md` §11 E39 move o Oxlint vendorizado
+(`dmmulroy/anti-slop`) para o Gate runner (C8) com nome próprio `gate:anti-slop`, gate por flag sobre
+a árvore do Maker e condicionado a projeto TS/JS detectado no discovery (nas demais linguagens o
+portão anti-slop é o linter nativo do projeto): ele
+rejeita padrões TS/JS de baixo sinal (`no-array-filter-map`, `no-chained-type-assertions`,
+`no-runtime-typeof`), é higiene de código e não depende de render — obrigar o serve e o browser a
+subir para reprovar uma asserção de tipo era custo sem contrapartida. `ade doctor` continua copiando
+as regras para `tools/oxlint/anti-slop/` do projeto-alvo; `dmmulroy/anti-slop` é explícito: *"This
+project is meant to be vendored… There is no official npm package"* (`landscape-evals-visual.md`
+§4.3).
 
 **D5 — a limitação que decide o alvo.** No modo de arquivo estático o detector pega um subconjunto
 pequeno: contra uma fixture com `background-clip:text`, `nested-cards`, `eyebrow`, `box-shadow` sem
@@ -172,19 +206,29 @@ composição recebem **valores computados de estilo**, não CSS bruto. Portanto 
 servida**, nunca contra os arquivos do diff. Rodar D5 em modo de arquivo é o modo degradado (§4.8) e
 é registrado como tal.
 
-**D6 — vendorizado, nunca dependência.** `dmmulroy/anti-slop` é explícito: *"This project is meant to
-be vendored… There is no official npm package"* (`landscape-evals-visual.md` §4.3). `ade doctor`
-copia as regras para `tools/oxlint/anti-slop/` do projeto-alvo. E o registro honesto: ele **não é
-estético** — rejeita padrões TS/JS de baixo sinal (`no-array-filter-map`,
-`no-chained-type-assertions`, `no-runtime-typeof`). D6 é higiene de código, não de design; está aqui
-porque roda no mesmo lote e reprova antes do juiz.
+**Rótulo honesto: o alvo URL é [hipótese], não achado confirmado.** A pesquisa executou **só** o modo
+de arquivo (`npx --yes impeccable@4.1.0 detect --json bad.html`) e a conclusão sobre a URL é explícita
+na fonte como *"[inferido: comportamento observado, não documentado explicitamente na skill]"*
+(`addendum-frontend-engine-anchor.md` §1.2). Não há evidência de que `detect` aceite URL como alvo.
+Como D5 é o único portão estético determinístico do FQE, o rótulo fica **[hipótese]** até que uma
+**sonda do `ade doctor`** execute `impeccable detect --json <url>` contra a fixture `bad-generic/`
+servida (§9.1) e compare o conjunto de achados com o do modo de arquivo — é a mesma comparação que a
+fixture `detector-mode/` já assere. A sonda grava `impeccable.url_mode ∈ {ok, unsupported}` em
+`~/.ade/capabilities.json`. **Fallback definido antes de fechar o escopo da v0.4a:** com
+`url_mode: unsupported`, D5 degrada para axe-core (já vendorizado por D3, ruleset completo em vez de
+só `color-contrast`) mais as regras próprias que o brief já torna observáveis (§2.1: kicker/eyebrow,
+gradiente em texto, hierarquia plana), deixa de ser bloqueante e vira sinal para o juiz; a degradação
+é `decision` no journal, nunca silêncio.
 
 ### 4.8 Modo degradado
 
 Sem serve resolvível, sem Node ≥ 22.18, ou sem rede na primeira execução do launcher do Impeccable:
-D1–D4 e D7 não rodam, D5 cai para modo de arquivo (subconjunto conhecido), D6 roda normal. O juiz
+D1–D4 e D6 não rodam e D5 cai para modo de arquivo (subconjunto conhecido); `gate:anti-slop` é
+indiferente ao modo porque roda no C8, fora do FQE. O juiz
 **não** é chamado — julgar sem captura é teatro. A story vai para `awaiting_operator` com motivo
-`visual_degraded`: falha fechada, nunca aprovação silenciosa.
+`visual_degraded`: falha fechada, nunca aprovação silenciosa. Quando a causa é `ENGINE_VERSION`
+divergente do pin, o doctor falha fechado e o motivo é `fqe_unavailable`; stories sem UI seguem
+normalmente (`architecture.md` §12 E45).
 
 ---
 
@@ -193,7 +237,16 @@ D1–D4 e D7 não rodam, D5 cai para modo de arquivo (subconjunto conhecido), D6
 **Quem.** Melhor modelo multimodal de **família diferente da do Maker**, escolhido pelo Capability
 Registry (`image_in: true`) e **pinado por `model_id`** em `visual.judge`. O pin é requisito de
 medição, não preferência: sem ele `visual_score` anda quando o modelo muda, não quando a qualidade
-muda (`landscape-evals-visual.md` §5.2). Trocar o pin é `decision` no journal e invalida a série.
+muda (`landscape-evals-visual.md` §5.2). Trocar o pin é `decision` no journal e invalida a série:
+`visual_score` só é comparável **dentro do mesmo juiz** (`architecture.md` §11 E9). O `model_id`
+pinado vive no contrato e é replicado no registro; `judge_family` é registrado em cada `VisualEval`.
+A chamada do juiz grava `models: [{ role: 'executor', model_id }]` na telemetria — a exigência de
+família e `model_id` distintos do Maker vale para **todo** papel da chamada — e `--advisor` fica fora
+da receita enquanto o modelo do advisor não for observável em `modelUsage` (`architecture.md` §12
+E66).
+Com duas famílias na v1 e Maker quase sempre Claude, o juiz recai quase sempre em Codex — "juiz único
+(Codex) com Maker sempre Claude" fica registrado como **[hipótese]** explícita, não como propriedade
+do desenho.
 
 **Barato não entra.** Juiz em modelo mais barato economiza ~US$ 0,14/rodada num orçamento dominado
 pelo rework (10–50×) e compra julgamento pior. O teto vale para o rework
@@ -223,24 +276,38 @@ Seis critérios ponderados. Pesos base (modo `persuade`); os demais modos redist
 | 7–8 | decisão própria visível e sustentada em toda a tela (topo da banda; **alvo**) |
 | 9–10 | raro: a decisão é a razão de lembrar a tela |
 
-**Corte: final ≥ 7,5, critério 1 ≥ 7, nenhum critério < 6, zero defeito `critical`, D1–D7 verdes.**
+**Corte: final ≥ 7,5, critério 1 ≥ 7, nenhum critério < 6, zero defeito `critical`, D1–D6 verdes.**
 Rótulo honesto: a rubrica de 6 critérios com estes pesos é **desenho da ADE inspirado no Impeccable,
 não derivado dele** — a fonte usa 10 heurísticas de Nielsen num critique dual-agent mais caro
-(`addendum-frontend-engine-anchor.md` §3). O 7,5 é compromisso, não medição: **[hipótese]**, faixa
-7,0–7,5 a validar nos primeiros lotes (`architecture.md` §9, decisão 4).
+(`addendum-frontend-engine-anchor.md` §3). O 7,5 é compromisso, não medição: **[hipótese]**
+(`architecture.md` §9, decisão 4, pendente de confirmação do Erick).
+
+**Critério de recalibração publicado** (`architecture.md` §11 E39) — o número só é revisto por
+gatilho escrito, nunca por impressão:
+
+| Gatilho medido no dogfood | Ação sobre `visual.cut` |
+| :--- | :--- |
+| `escaped_visual_defects` > 10 % em 20 stories com UI | subir para 8,0 |
+| `awaiting_operator` por `visual_cut_not_met` em trabalho que o operador aprova à primeira vista | descer para 7,0 |
+
+O ECC (`gan-style-harness`) usa 5–15 rodadas e corte 7,0; a ADE mantém ≤2 e 7,5 por Impeccable
+normativo (digest #16) e mede no dogfood (`architecture.md` §10 A14).
 
 **Escape hatch.** Critério não avaliável vira `null` e o total é renormalizado sobre o máximo
 aplicável (mecânica que o Impeccable formaliza como `/32` em vez de `/40`). Sem escape hatch o
 modelo inventa nota.
 
-### 5.2 Saída — `visual-eval` (schema inline)
+### 5.2 Saída — `visual-eval`
 
-Inline enquanto houver um consumidor só (`architecture.md` §4).
+Inline enquanto houver um consumidor só (`architecture.md` §4); vira o **9º schema publicado em
+`schemas/` na v0.4b**, quando o painel de projeção passa a ser o segundo consumidor
+(`architecture.md` §11 E9).
 
 ```ts
 interface VisualEval {
   story_id: string; round: 1 | 2; rubric_version: string
   judge: { family: string; model_id: string }                 // pinado; igual a visual.judge
+  detector: { engine_version: string; url_mode: 'ok' | 'unsupported' }  // ENGINE_VERSION efetivo (§8)
   surface_mode: 'persuade' | 'operate' | 'read' | 'experience'
   captures: { path: string; route: string; width: 1280 | 390
               theme: 'light' | 'dark'; sha256: string }[]
@@ -266,8 +333,8 @@ ingênua — detector e juiz no mesmo prompt — viola isso.
 | Regra | Implementação |
 | :--- | :--- |
 | julga antes de ver o detector | os achados de D5/D6 só entram no pack **do rework**, nunca no pack do juiz |
-| não vê o diff nem o prompt do Maker | o pack do juiz contém: capturas + `design_brief` + `task` + rubrica. Nada mais |
-| sub-agente isolado | sessão nova, processo próprio, `--safe-mode`, sem `--resume`; nunca inline na sessão do Maker |
+| não vê o diff nem o prompt do Maker | o pack do juiz contém: capturas + `design_brief` + `task` + rubrica. Nada mais. A seção `task` carrega os `operator_notes` do `ade steer` drenados no `prepare` (≤600 bytes, mais recente primeiro) — contexto, nunca requisito novo (E53) — e a seção `contract` respeita o teto de 32 000 bytes (E50) |
+| sub-agente isolado | sessão nova por chamada, processo próprio, `--safe-mode`, sem `--resume`; nunca inline na sessão do Maker. Turno único: nunca há compactação, e a telemetria não tem `compaction_events` (E67) |
 | sem histórico de rodadas | a rodada 2 não recebe o `VisualEval` da rodada 1 (evita deriva de leniência) |
 | sem randomização de posição | pontuação absoluta de item único não sofre viés de posição; swap A/B dobraria custo por nada (digest #21 / `landscape-evals-visual.md` §3.6.8) |
 
@@ -282,18 +349,29 @@ one more round, and stop polishing. Open-ended self-QA burns the user's money."*
 
 | Rodada | O que roda | Saída |
 | :-- | :--- | :--- |
-| 1 | D1–D7 + juiz sobre **todas** as rotas × larguras × temas de uma vez | `pass` → `review`; senão um lote único de defeitos |
-| rework | step `rework` do Maker com: defeitos do juiz + falhas de D1–D7 + capturas próprias. Conta no `budget.max_rework_rounds` | árvore nova |
-| 2 | D1–D7 + juiz, confirmação | `pass` → `review`; senão `awaiting_operator` |
+| 1 | D1–D6 + juiz sobre **todas** as rotas × larguras × temas de uma vez | `pass` → `review`; senão um lote único de defeitos |
+| rework | step `rework` do Maker com: defeitos do juiz + falhas de D1–D6 + capturas próprias. Conta no `budget.max_rework_rounds` | árvore nova |
+| 2 | D1–D6 + juiz, confirmação | `pass` → `review`; senão `awaiting_operator` |
 
-Reprovação em D1–D7 na rodada 1 **não chama o juiz**: vai direto para rework. Isso corta a maioria
+Reprovação em D1–D6 na rodada 1 **não chama o juiz**: vai direto para rework. Isso corta a maioria
 das chamadas de modelo em trabalho obviamente quebrado.
+
+**Orçamento de rework reservado.** Toda story com `has_ui` reserva **1 rodada de rework para o FQE no
+`prepare`** (`architecture.md` §11 E39): o balde é o mesmo `budget.max_rework_rounds` do contrato, mas
+a reserva impede que uma falha de eval funcional consuma tudo e deixe o loop visual sem a rodada 2.
+Esgotar qualquer um dos dois tetos (`budget.max_rework_rounds` ou `visual.max_rounds`) leva a
+`awaiting_operator`. O teto de chamadas acompanha a reserva:
+`max_model_calls = 2 + 2·visual_rounds + 2·(max_rework_rounds + 1)`, o que dá **8 chamadas e 3 rodadas
+de rework** para `bounded` com UI (contra 6/2 sem UI) e 12/3 para `feature` com UI — **[hipótese]**
+(`architecture.md` §12 E65, emenda a E4).
 
 **Esgotou → `awaiting_operator`** com motivo `visual_cut_not_met`, o `VisualEval` das duas rodadas e
 as capturas **lado a lado** (rodada 1 × rodada 2, mesma rota/largura/tema) no `ade report`. É a forma
 preguiçosa de aprovar direção estética que o painel J2 apontou faltar nas três propostas
 (`design-panel/judgment-J2-journeys.md` §5.4): o operador olha duas imagens e responde
-`ade decide <unit> --option retry|skip`, sem abrir navegador.
+`ade decide <unit> --option retry|skip|discard|pick --value <id>` (`architecture.md` §11 E32) — `pick`
+escolhe a captura preferida pelo id do `VisualEval`, sem abrir navegador. `ade show <ref> --open` abre
+a captura no visualizador do SO.
 
 **Custo por rodada** — aritmética sobre `tokens ≈ (largura × altura) / 750`
 (`landscape-evals-visual.md` §3.5), **[hipótese]** nos valores absolutos (preços de tabela não
@@ -309,6 +387,10 @@ verificados em fonte primária):
 Duas regras de captura que valem dinheiro real: `fullPage: false` (viewport custa 3–4× menos que
 página inteira) e eixo longo ≤ 1024px em rota longa.
 
+Esses tokens são contabilidade de telemetria, não portão: não existe `max_tokens_in`/`max_tokens_out`
+no `mission_budget` (`architecture.md` §12 E61). O teto é `max_usd` com `prices.json` nas famílias que
+reportam custo e `max_model_calls` nas demais.
+
 ---
 
 ## 7. Geração de direção e a etapa opcional de duas famílias
@@ -316,7 +398,11 @@ página inteira) e eixo longo ≤ 1024px em rota longa.
 **Geração (quando falta `DESIGN.md`).** Um gerador só, por `.ade/config.json`: skill `impeccable`
 (`shape`/`craft`, produz `PRODUCT.md`+`DESIGN.md`) **ou** `frontend-design` da Anthropic — os dois no
 mesmo passo cobrem o mesmo espaço de decisão por custo dobrado
-(`addendum-frontend-engine-anchor.md` §2). O produto do passo é arquivo commitado, não contexto.
+(`addendum-frontend-engine-anchor.md` §2). O produto do passo é arquivo commitado, não contexto. A
+skill vem do catálogo curado: skills em `<repo>/.claude/skills/` não entram no pack nem são carregadas
+pela CLI, porque a chamada despachada roda sob `--safe-mode` (`architecture.md` §12 E56), e a injeção
+é registrada em `skills_injected[]` com `sha256` do conteúdo injetado e `source`
+(`catalog@<commit>` ou `local`) — evidência de supply chain no próprio evento (E59).
 
 **Duas etapas (Claude projeta → Codex estrutura): flag medida, não default.** `visual.two_stage`,
 default `false`. Quando ligada, `implement` vira dois steps na mesma árvore: `implement:design`
@@ -371,6 +457,17 @@ codex exec --json --sandbox workspace-write --skip-git-repo-check --ignore-user-
 plugin `4.3.1`, engine Rust `ENGINE_VERSION` (hoje `0.1.5`) — este último é o único estável
 (`addendum-frontend-engine-anchor.md` §1).
 
+**O pin é exigido pelo launcher, não pelo npm.** `npx impeccable@0.1.5` não existe: numa máquina sem
+o plugin, a única via reprodutível é o shim baixando o GitHub Release `engine-v<ENGINE_VERSION>` com
+SHA-256 obrigatório (abaixo). `ade doctor` **exige** a versão, não só registra: `ENGINE_VERSION`
+lido ≠ `visual.impeccable.engine_version` é falha de doutor (fail-closed), nunca aviso
+(`architecture.md` §12 E45): o FQE entra em modo degradado (§4.8), stories com UI param em
+`awaiting_operator{reason:'fqe_unavailable'}` e stories sem UI seguem. Sem `IMPECCABLE_BIN` nem
+release alcançável vale o mesmo caminho, em vez de rodar D5 contra binário de versão não controlada. **A versão efetiva é dado do resultado:** cada `VisualEval`
+grava o `ENGINE_VERSION` que rodou (§5.2) e `visual_score` não é comparável entre engines diferentes,
+pela mesma razão que não é entre juízes (§5.2, §9.2) — mudar o pin invalida a série e é `decision` no
+journal.
+
 **Instalação.** O shim `cli/bin/cli.js` resolve `$IMPECCABLE_BIN` → `@impeccable/cli-<os>-<arch>` →
 cache `~/.impeccable/bin/<versão>/` → GitHub Release `engine-v<versão>` com SHA-256 obrigatório e
 recusa fail-closed. Há binário para darwin-arm64/x64, linux-x64/arm64 e windows-x64 — cobre "local e
@@ -392,7 +489,7 @@ Grupo "loop visual" da suíte de dogfood, 4–6 casos, `runs: 3`, reporte em `pa
 | Fixture | Asserção |
 | :--- | :--- |
 | `bad-generic/` — kicker, Inter, paleta clichê, `outline:none`, cards aninhados, erro no console | **reprova**: D1 e D5 vermelhos; se passar, o portão está quebrado |
-| `bad-subtle/` — sem violação mecânica, visualmente genérica | **reprova no juiz**: especificidade < 7 com D1–D7 verdes. É o caso que prova que o juiz ganha o salário |
+| `bad-subtle/` — sem violação mecânica, visualmente genérica | **reprova no juiz**: especificidade < 7 com D1–D6 verdes. É o caso que prova que o juiz ganha o salário |
 | `good-specific/` — brief fixado, `signature` presente, estados desenhados | **passa em 1 rodada**, zero rework |
 | `good-pinned-default/` — brief que fixa Inter explicitamente | **passa**: guardrail liberado pelo brief não reprova |
 | `ban-kicker/` — brief que pede kicker acima de heading | **reprova mesmo assim**: nenhum brief libera o banimento |
@@ -410,9 +507,9 @@ O FQE é medido, não assumido. Métricas derivadas do journal, sem instrumenta�
 | :--- | :--- | :--- |
 | `visual_score` | mediana de `VisualEval.final` e % reprovada na rodada 1 | só comparável com juiz pinado |
 | `visual_score_by_family` | mesma captura julgada por cada família disponível | vira evidência de roteamento em `~/.ade/routing.jsonl` |
-| `escaped_visual_defects` | defeito visual achado após `complete` ÷ stories com UI | mede se o corte 7,5 é frouxo |
+| `escaped_visual_defects` | defeito visual achado após `complete` ÷ stories com UI | gatilho de recalibração do corte (§5.1): > 10 % em 20 stories → 8,0 |
 | `rounds_to_pass` | distribuição de rodadas até `pass` | valida (ou derruba) o teto de 2 |
-| `gate_vs_judge` | % de reprovações resolvidas por D1–D7 sem chamar o juiz | mede o ganho do determinístico primeiro |
+| `gate_vs_judge` | % de reprovações resolvidas por D1–D6 sem chamar o juiz | mede o ganho do determinístico primeiro |
 
 O braço de família fecha a lacuna honesta da pesquisa: **não há medição pública de que juiz
 multimodal de outra família com rubrica reduz slop** — a evidência é indireta (*MLLM as a UI Judge*:
@@ -439,7 +536,12 @@ conta, custo recorrente e CI externo contra uma ADE local; Lost Pixel está arqu
 
 ## 10. Configuração — bloco `visual` de `.ade/config.json`
 
-Validado por `ade-config.schema.json` (um dos 8 schemas publicados).
+**Derivado do schema.** `schemas/ade-config.schema.json` (um dos 8 schemas publicados) é a única
+fonte das chaves de configuração; este bloco é ilustração derivada e não normativa, e divergência
+entre a prosa e o schema resolve-se pelo schema (`architecture.md` §12 E55). O schema é único e tem
+`additionalProperties: false` com exit 4 em campo desconhecido (`2026-09-17-master-spec.md` §3, mesma
+tabela de exit codes de E47), então nenhum outro documento pode nomear chaves diferentes — o
+master-spec §3 referencia esta seção em vez de repetir a lista.
 
 ```json
 "visual": {
@@ -452,6 +554,8 @@ Validado por `ade-config.schema.json` (um dos 8 schemas publicados).
   "widths": [1280, 390],
   "themes": ["light", "dark"],
   "console_allowlist": [], "network_allowlist": [],
+  "gates": ["D1", "D2", "D3", "D4", "D5", "D6"],
+  "imagegen": true,
   "max_rounds": 2, "cut": 7.5, "specificity_min": 7, "criterion_min": 6,
   "judge": { "family": "codex", "model_id": "<pinado>", "pinned_at": "<iso>" },
   "generator": "impeccable",
@@ -460,44 +564,35 @@ Validado por `ade-config.schema.json` (um dos 8 schemas publicados).
 }
 ```
 
+`gates` é o **subconjunto bloqueante** de D1–D6 (os seis por default; qual subconjunto fica
+bloqueante ao fim da calibração do dogfood é pergunta aberta, §12.6 — [hipótese]). `imagegen`
+liga/desliga a geração de asset final do §7. O corte do juiz é `cut` (não `judge_cutoff`) e a versão
+pinada do Impeccable é `impeccable.engine_version` (não `impeccable_engine_version`).
+
 ---
 
-## 11. Divergências propostas
+## 11. Divergências resolvidas
 
-1. **D6 (Oxlint anti-slop) não deveria ser portão do FQE.** `dmmulroy/anti-slop` rejeita padrões
-   TS/JS de baixo sinal (`no-array-filter-map`, `no-chained-type-assertions`), não padrões estéticos
-   — a própria pesquisa registra a ambiguidade (`landscape-evals-visual.md` §4.3 e §8.7). Ele é lint
-   de código e pertence ao Gate runner (C8), que já roda lint sobre a árvore do Maker, não ao loop
-   visual: colocá-lo em D6 obriga a subir o serve e o browser para reprovar uma asserção de tipo.
-   **Proposta:** mover para C8 como gate por flag e renumerar D6→D7, deixando o FQE com seis portões,
-   todos dependentes de render. **Evidência:** `landscape-evals-visual.md` §4.3 (nota sobre
-   `dmmulroy/anti-slop`), `architecture.md` §3 C8. Decisão fixa até a revisão: fica como D6.
+Arbitragem em `architecture.md` §11 (2026-09-17). As quatro divergências foram aceitas; o texto desta
+spec já reflete as decisões.
 
-2. **O corte 7,5 é compromisso não medido e a fonte não o sustenta.**
-   `addendum-frontend-engine-anchor.md` §3 corrige o argumento de `landscape-evals-visual.md`: a
-   banda 20–32/40 do Impeccable normaliza para 5,0–8,0, então 8/10 é o **topo** da banda, não acima
-   dela; e o número 7,5 *"não está em nenhuma fonte primária — é uma escolha de compromisso do
-   pesquisador"*. **Proposta:** manter 7,5 como default de `visual.cut` mas publicar junto um
-   **critério de saída do dogfood** (ex.: `escaped_visual_defects` > 10 % em 20 stories com UI → subir
-   para 8,0; `awaiting_operator` em trabalho que o operador aprova na primeira olhada → descer para
-   7,0). Sem esse critério o número nunca é revisto. Decisão fixa até a revisão: 7,5.
+1. **D1 (Oxlint anti-slop fora do FQE) → aceita**, `architecture.md` §11 E39. O lint vendorizado vira
+   gate por flag no Gate runner (C8) e o FQE fica com **D1–D6, todos dependentes de render**; o antigo
+   D7 (responsivo) passa a ser D6 em código, schema e journal (§4).
 
-3. **O teto de 2 rodadas e o teto de rework do contrato podem se contradizer.**
-   `budget.max_rework_rounds` é global da story e `visual.max_rounds` é do loop visual; uma story de
-   UI que gaste o rework em falha de eval funcional chega ao FQE sem orçamento para a rodada 2, e
-   hoje nada diz qual teto vence. **Proposta:** reservar 1 rodada de rework para o FQE no `prepare`
-   de toda story com `has_ui`, ou declarar explicitamente que `visual.max_rounds` consome do mesmo
-   balde e que esgotar qualquer um dos dois leva a `awaiting_operator`. **Evidência:**
-   `architecture.md` §4 (`budget`) e §7 (teto visual) não se cruzam. Decisão fixa até a revisão:
-   ambos os tetos valem, o que esgotar primeiro para o loop.
+2. **D2 (critério de recalibração do corte) → aceita**, `architecture.md` §11 E39. `visual.cut`
+   continua 7,5 e o critério de saída do dogfood está publicado em §5.1:
+   `escaped_visual_defects` > 10 % em 20 stories com UI → 8,0; `awaiting_operator` em trabalho
+   aprovado à primeira vista → 7,0. O 7,5 segue **[hipótese]** e pendente de confirmação do Erick
+   (`architecture.md` §9, decisão 4).
 
-4. **`self_critique` obrigatório é uma exigência que a arquitetura não impõe.** `architecture.md` §4
-   declara `direction: { name, signature, self_critique }` mas não diz que ajv recusa campo vazio.
-   Esta spec torna obrigatório, porque é a única parte do brief que o juiz consegue cobrar como
-   promessa, e porque a fonte a trata como passo do processo, não como campo opcional
-   (`landscape-evals-visual.md` §4.1, frontend-design). **Proposta:** fixar `minLength` no
-   `task-contract.schema.json`. Se a revisão discordar, o campo vira opcional e o juiz perde o
-   gancho.
+3. **D3 (colisão entre `budget.max_rework_rounds` e `visual.max_rounds`) → aceita**,
+   `architecture.md` §11 E39, na forma da reserva: toda story com `has_ui` reserva 1 rodada de rework
+   para o FQE no `prepare`; o balde é o mesmo e esgotar qualquer um dos tetos leva a
+   `awaiting_operator` (§6).
+
+4. **D4 (`self_critique` obrigatório) → aceita**, `architecture.md` §11 E39: `minLength` em
+   `task-contract.schema.json` (§2, camada 4).
 
 ---
 
@@ -512,7 +607,6 @@ Validado por `ade-config.schema.json` (um dos 8 schemas publicados).
 5. Reprodutibilidade do pin do Impeccable numa máquina sem o plugin do Claude Code depende do GitHub
    Releases estar acessível na primeira execução — fail-closed por design, mas é ponto único de falha
    para "universal" (`addendum-frontend-engine-anchor.md` §1).
-6. `architecture.md` §3 marca C17 como "v1 parcial (D1–D5 + juiz)" e o roadmap entrega "D1–D7 + juiz"
-   na v0.4, que é anterior à v1. Leitura adotada aqui: D1–D7 implementados na v0.4, com D6 e D7 como
-   `warning` registrado até calibrados, de modo que o conjunto **bloqueante** em v1 seja D1–D5 +
-   juiz. Confirmar ou corrigir na revisão.
+6. ~~Descompasso entre C17 "v1 parcial" e o roadmap.~~ Resolvido: `architecture.md` §3 (C17) e §11
+   E37 fixam **D1–D6 + juiz na v0.4a**, com o conjunto bloqueante calibrado no dogfood. Fica em aberto
+   só qual subconjunto de D1–D6 é bloqueante ao fim da calibração.
