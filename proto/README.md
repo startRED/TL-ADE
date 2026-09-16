@@ -13,6 +13,9 @@ Duplo clique em `abrir.bat`. Na primeira vez instala as dependências (1 a 2 min
 5. Se o plano pede fotos ou ilustrações, o Codex gera as imagens (`$imagegen`) em `assets/img` antes das partes começarem, e elas aparecem na aba Plano.
 6. Decida só quando a ADE pedir. Por padrão ela segue sozinha: após 4 rodadas de revisão com provas verdes e nada grave, aceita e vai para a próxima parte (opção "Depois de 4 rodadas"). Cada parte tem orçamento (US$ 4 no Claude por padrão, em Opções): estourou, não há novas rodadas. Cada rodada tem teto de ações (prova 20, implementação 30); a 3ª rodada sobe o maker para o modelo do planejador.
 7. Duas ADEs ao mesmo tempo (dois projetos): `abrir.bat 2` abre uma segunda instância em `localhost:5174` (servidor 4318).
+8. Anexos: cole imagens com Ctrl+V, arraste arquivos, ou use o "+" (abre o Explorer). Vão para `.ade-attachments/` no projeto (ignorado pelo git) e as IAs abrem com Read. O "+" e a página Projetos também abrem o Explorer para escolher ou criar a pasta do projeto.
+9. Faixa rápida: pedido curto de correção ("corrija o botão…") num projeto existente pula entrevista e plano; vai direto para prova, correção e revisão (~US$ 0,9 medido). Desligável em Opções.
+10. Economia medida: cada fase é uma sessão nova do Claude, mas o prompt já leva a árvore do projeto, o conteúdo dos arquivos tocados e o resumo da fase anterior (pacote de contexto); turnos por chamada caíram pela metade. Telemetria por chamada em `.ade/journal.jsonl` (`model_call`).
 
 ## O que acontece por baixo
 
