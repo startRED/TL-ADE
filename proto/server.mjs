@@ -78,10 +78,18 @@ async function runTests() {
   const r = await run('node', ['node_modules/vitest/vitest.mjs', 'run', '--reporter=json', `--outputFile=${outFile}`], { cwd: EXAMPLE })
   try {
     const j = JSON.parse(await readFile(outFile, 'utf8'))
-    const tests = j.testResults.flatMap((f) => f.assertionResults.map((a) => ({
-      name: a.fullName, status: a.status, file: path.basename(f.name), message: (a.failureMessages || [])[0]?.split('\n')[0] || '',
-    })))
-    return { ok: j.numFailedTests === 0 && j.numTotalTests > 0, total: j.numTotalTests, failed: j.numFailedTests, tests }
+    const tests = j.testResults.flatMap((f) => {
+      // Arquivo de prova que nem chega a rodar (importa módulo que ainda não existe, erro de sintaxe)
+      // conta como prova vermelha do tipo "alvo ausente" (architecture.md E12), com o nome do arquivo.
+      if (f.assertionResults.length === 0 && f.status === 'failed') {
+        return [{ name: `${path.basename(f.name)} (arquivo ainda não roda)`, status: 'failed', file: path.basename(f.name), message: (f.message || '').split('\n')[0].slice(0, 200) }]
+      }
+      return f.assertionResults.map((a) => ({
+        name: a.fullName, status: a.status, file: path.basename(f.name), message: (a.failureMessages || [])[0]?.split('\n')[0] || '',
+      }))
+    })
+    const failed = tests.filter((t) => t.status !== 'passed').length
+    return { ok: failed === 0 && tests.length > 0, total: tests.length, failed, tests }
   } catch {
     return { ok: false, total: 0, failed: 0, tests: [], error: (r.err || r.out).slice(0, 500) }
   }
