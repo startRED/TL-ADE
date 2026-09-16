@@ -248,7 +248,7 @@ async function discover(dir) {
     if (await exists(path.join(dir, 'node_modules', 'vitest'))) { info.runner = 'vitest'; info.test_cmd = 'node node_modules/vitest/vitest.mjs run' }
     else if (pkg.scripts?.test && !/no test specified/.test(pkg.scripts.test)) { info.runner = 'npm'; info.test_cmd = 'npm test' }
   } else if (await exists(path.join(dir, 'pyproject.toml')) || await exists(path.join(dir, 'pytest.ini')) || await exists(path.join(dir, 'requirements.txt'))) {
-    info.language = 'python'; info.runner = 'pytest'; info.test_cmd = 'python -m pytest -q'
+    info.language = 'python'; info.runner = 'pytest'; info.test_cmd = '.venv\\Scripts\\python.exe -m pytest -q'
   } else if (await exists(path.join(dir, 'go.mod'))) {
     info.language = 'go'; info.runner = 'go'; info.test_cmd = 'go test ./...'
   } else if (await exists(path.join(dir, 'Cargo.toml'))) {
@@ -274,13 +274,37 @@ async function runTests(project) {
       return { ok: failed === 0 && tests.length > 0, total: tests.length, failed, tests, runner: 'vitest' }
     } catch { return { ok: false, total: 0, failed: 0, tests: [], runner: 'vitest', error: (r.err || r.out).slice(-600) } }
   }
-  if (['npm', 'pytest', 'go', 'cargo'].includes(project.runner)) {
+  if (project.runner === 'pytest') {
+    const py = await ensurePython(dir)
+    const r = await run(py, ['-m', 'pytest', '-q', '-p', 'no:cacheprovider'], { cwd: dir, timeoutMs: 5 * 60 * 1000 })
+    const out = (r.out + '\n' + r.err).trim()
+    const tests = []
+    for (const line of out.split('\n')) { const m1 = /^(FAILED|ERROR) (\S+?)(?: - (.*))?$/.exec(line.trim()); if (m1) tests.push({ name: m1[2], status: 'failed', message: (m1[3] || '').slice(0, 300) }) }
+    const sum = /(\d+) passed/.exec(out), nfail = tests.length
+    const total = (sum ? Number(sum[1]) : 0) + nfail
+    if (!tests.length && r.code !== 0) tests.push({ name: 'pytest', status: 'failed', message: out.split('\n').slice(-6).join(' ').slice(-300) })
+    return { ok: r.code === 0 && total > 0, total: total || tests.length, failed: r.code === 0 ? 0 : Math.max(nfail, 1), tests, runner: 'pytest', output: out.split('\n').slice(-12).join('\n') }
+  }
+  if (['npm', 'go', 'cargo'].includes(project.runner)) {
     const [cmd, ...args] = project.test_cmd.split(' ')
     const r = await run(cmd, args, { cwd: dir, timeoutMs: 5 * 60 * 1000 })
     const tail = (r.out + '\n' + r.err).trim().split('\n').slice(-12).join('\n')
     return { ok: r.code === 0, total: 1, failed: r.code === 0 ? 0 : 1, tests: [{ name: project.test_cmd, status: r.code === 0 ? 'passed' : 'failed', message: r.code === 0 ? '' : tail.slice(-300) }], runner: project.runner, output: tail }
   }
   return { ok: false, total: 0, failed: 0, tests: [], runner: 'none' }
+}
+// Python: interpretador do projeto em .venv (uv), com requirements.txt + pytest instalados antes de cada rodada de provas.
+async function ensurePython(dir) {
+  const py = path.join(dir, '.venv', 'Scripts', 'python.exe')
+  if (!(await exists(py))) { const v = await run('uv', ['venv', '.venv', '-q'], { cwd: dir }); if (v.code !== 0) log('engine', `uv venv falhou: ${(v.err || v.out).trim().slice(0, 200)}`, 'error') }
+  const pkgs = ['pytest']
+  const req = await exists(path.join(dir, 'requirements.txt'))
+  // sem --python: o uv usa o .venv do cwd. Se o venv não foi criado pelo uv (python -m venv), o uv pode falhar ao inspecioná-lo: cai para o pip do próprio venv.
+  const spec = [...pkgs, ...(req ? ['-r', 'requirements.txt'] : [])]
+  let i = await run('uv', ['pip', 'install', '-q', ...spec], { cwd: dir, timeoutMs: 5 * 60 * 1000 })
+  if (i.code !== 0) i = await run(py, ['-m', 'pip', 'install', '-q', '--disable-pip-version-check', ...spec], { cwd: dir, timeoutMs: 5 * 60 * 1000 })
+  if (i.code !== 0) log('engine', `instalação Python falhou: ${(i.err || i.out).trim().split('\n').slice(-2).join(' ').slice(0, 300)}`, 'error')
+  return py
 }
 // forma longa: ':!__pycache__' falha no git ("Unimplemented pathspec magic '_'")
 const DIFF_EXCLUDES = ['node_modules', '**/node_modules/**', 'package-lock.json', '.ade-vitest.json', 'dist', 'build', '__pycache__', '.venv'].map((x) => `:(exclude)${x}`)
@@ -578,7 +602,8 @@ function common(st) {
     `Critérios de aceite: ${(st.acceptance || []).map((a, i) => `(${i + 1}) ${a}`).join(' ')}`,
     'Trabalhe só dentro do diretório atual; não suba para diretórios acima. Leia antes de escrever.',
     m.allow_commands ? 'Você pode rodar comandos (instalar dependências, inicializar projeto). Não rode servidores que fiquem abertos; não use git.' : 'Você só tem ferramentas de leitura e edição; o harness roda as provas.',
-    p.runner === 'none' ? 'Não há runner de provas: crie o mínimo (JS: package.json com vitest e "test": "vitest run"; Python: pytest) antes da prova.' : '',
+    p.runner === 'none' ? 'Não há runner de provas: crie o mínimo (JS: package.json com vitest e "test": "vitest run"; Python: requirements.txt com pytest e as dependências) antes da prova.' : '',
+    p.language === 'python' || /python|fastapi|django|flask|pytest/i.test(m.request) ? 'Python: o harness cria .venv com uv e instala requirements.txt + pytest antes de cada rodada de provas. Liste toda dependência em requirements.txt; para rodar algo você mesmo use .venv\\Scripts\\python.exe (o "python" do PATH é o stub da Microsoft Store, sem pacotes). Não instale nada globalmente.' : '',
     p.has_index ? 'Há um index.html na raiz; o que for visual tem de aparecer nele.' : (m.plan.needs_ui ? 'Se esta story é visual, entregue/atualize index.html na raiz funcionando como arquivos estáticos (ES modules, sem build).' : ''),
     m.research?.findings?.length ? `Pesquisa prévia: ${m.research.findings.map((f) => `${f.question} → ${f.answer}`).join(' | ')}` : '',
     m.assets_done?.length ? `Imagens já geradas no projeto (use onde indicado, com alt descritivo; não gere outras): ${m.assets_done.map((a) => `${a.file} — ${a.purpose}`).join('; ')}. Regras de aplicação: object-fit: cover com enquadramento pensado (object-position), width/height ou aspect-ratio para não pular o layout, loading="lazy" fora do topo; texto sobre foto só com scrim/gradiente na cor da página garantindo contraste AA; sobreposição sutil (mix-blend-mode ou overlay de 10–25 % na cor de marca) quando a foto destoar da paleta; nunca esticar, nunca borda colorida, nunca filtro exagerado.` : '',
@@ -691,7 +716,14 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   setStep('tests', 'running'); st.tests_after = await runTests(state.project); st.diff = await gitDiff(state.project.dir)
   log('engine', `provas depois: ${st.tests_after.total} no total, ${st.tests_after.failed} vermelha(s)`); setStep('tests', st.tests_after.ok ? 'done' : 'failed')
   if (!st.diff.trim()) { setStep('checker', 'skipped'); return stop('no_changes') }
-  if (!st.tests_after.ok) return stop('tests_red')
+  if (!st.tests_after.ok) {
+    const spentNow = m.cost.usd - (st.usd_start || 0)
+    if (round < 4 && spentNow <= (state.settings.max_usd_per_story || 4)) {
+      st.red_tests = st.tests_after.tests.filter((t) => t.status !== 'passed').map((t) => ({ name: t.name, status: 'failed', message: t.message || (st.tests_after.output || '').slice(-300) }))
+      log('engine', `provas vermelhas depois da implementação; rodada ${round + 1} com o erro`, 'warn'); return runStory(st, round + 1, previousReview, null)
+    }
+    return stop('tests_red')
+  }
   if (m.plan.needs_ui && state.settings.visual_gate) {
     setStep('visual', 'running'); st.visual = newFindings(await visualGate(), st.visual_before)
     if (!st.visual.available) { setStep('visual', 'skipped'); log('engine', 'portão visual indisponível (Impeccable não encontrado)') }
