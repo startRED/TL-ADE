@@ -240,6 +240,10 @@ button { font: inherit; color: inherit; }
 .proj-txt b { display: block; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .proj-txt small { display: block; font-size: 11.5px; line-height: 1.4; color: var(--gray-10); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .proj-swap { font-size: 11px; color: var(--gray-9); flex-shrink: 0; }
+.proj-add { display: flex; align-items: center; gap: 7px; width: 100%; padding: 7px 10px; border: 1px dashed var(--line-2); border-radius: var(--r-ctl); background: none; color: var(--gray-10); font-size: 12px; text-align: left; cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
+.proj-add svg { width: 13px; height: 13px; flex-shrink: 0; }
+.proj-add:hover { background: var(--gray-a2); color: var(--gray-12); border-color: var(--teal-8); }
+.side-tip { margin: 0; padding: 0 4px; font-size: 11px; line-height: 1.45; color: var(--gray-9); }
 
 .side-hist { min-height: 0; overflow: auto; display: grid; gap: 2px; align-content: start; margin: 0 -4px; padding: 0 4px; }
 .hist-item { display: grid; gap: 2px; width: 100%; padding: 7px 9px; border: 0; border-radius: var(--r-ctl); background: none; color: inherit; text-align: left; cursor: pointer; transition: background .15s; }
@@ -251,6 +255,12 @@ button { font: inherit; color: inherit; }
 .hist-top > span:last-child { font-size: 9px; line-height: 1; }
 .hist-sub { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--gray-9); }
 .hist-sub > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eng-list { max-height: 152px; }
+.hist-wrap { display: grid; gap: 2px; }
+.hist-resume { justify-self: start; display: inline-flex; align-items: center; gap: 5px; margin: 0 0 4px 9px; }
+.hist-resume svg { width: 10px; height: 10px; }
+.hist-err { margin: 0 0 4px 9px; font-size: 11px; line-height: 1.4; color: var(--amber-11); }
+.dot-live { animation: fade-pulse 1.4s ease-in-out infinite; }
 .side-none { margin: 0; padding: 0 4px; font-size: 12px; color: var(--gray-9); }
 .side-more { margin: 4px 0 0 9px; text-align: left; }
 
@@ -630,7 +640,10 @@ button { font: inherit; color: inherit; }
 .row-txt { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .row-txt b { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-txt small { font-size: 11.5px; color: var(--gray-9); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-txt small.bad { color: var(--amber-11); white-space: normal; }
 .row-end { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.row-end .mini { display: inline-flex; align-items: center; gap: 5px; }
+.row-end .mini svg { width: 10px; height: 10px; }
 .row-go { width: 14px; height: 14px; flex-shrink: 0; color: var(--gray-8); }
 
 .skill-list { list-style: none; margin: 0; padding: 0; }

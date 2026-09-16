@@ -9,6 +9,7 @@ import { readFile, writeFile, mkdir, appendFile, rm, stat, access, readdir, real
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { AsyncLocalStorage } from 'node:async_hooks'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
 const ADE_DIR = path.join(ROOT, '.ade')
@@ -65,7 +66,23 @@ const DEFAULT_SETTINGS = {
 }
 
 // ---------- estado ----------
-const state = { project: null, mission: null, log: [], history: [], live: null, recent: [], settings: DEFAULT_SETTINGS, catalog: [], registry: REGISTRY, quota: { claude: null, codex: null }, attachments: [] }
+// Vários projetos ao mesmo tempo: cada pasta tem um "engine" (projeto, missão, log, anexos). O que é global fica em G.
+// `state` é um proxy: dentro de uma cadeia assíncrona iniciada por withEngine(e, fn), state.mission/project/log/... apontam
+// para aquele engine; fora dela, para o engine ativo (o que o painel está mostrando). Assim o motor não precisou mudar.
+const G = { history: [], recent: [], settings: DEFAULT_SETTINGS, catalog: [], registry: REGISTRY, quota: { claude: null, codex: null } }
+const engines = new Map() // dir → engine
+let activeDir = null
+const als = new AsyncLocalStorage()
+const PAUSE = Symbol('pause')
+function newEngine(project) { return { project, mission: null, log: [], live: null, attachments: [], phase: null, children: new Set() } }
+function engineFor(dir) { const key = path.resolve(dir); if (!engines.has(key)) engines.set(key, newEngine(null)); return engines.get(key) }
+function activeEngine() { if (!activeDir) return null; return engines.get(activeDir) || null }
+function currentEngine() { return als.getStore() || activeEngine() || (activeDir = 'sem-projeto', engines.set('sem-projeto', newEngine(null)), engines.get('sem-projeto')) }
+const withEngine = (e, fn) => als.run(e, fn)
+const state = new Proxy({}, {
+  get(_, k) { if (k in G) return G[k]; return currentEngine()[k] },
+  set(_, k, v) { if (k in G) G[k] = v; else currentEngine()[k] = v; return true },
+})
 
 // ---------- anexos e diálogos do Explorer ----------
 const ATTACH_DIR = '.ade-attachments'
@@ -121,12 +138,19 @@ async function readQuota() {
     state.quota.codex = { at: new Date(newest.m).toISOString(), five_hour: wins.find((w) => w.minutes <= 300) || null, seven_day: wins.find((w) => w.minutes > 300) || null, plan: rl.plan_type || null }
   } catch { state.quota.codex = null }
 }
-let currentPhase = null
 let pending = null
 const clients = new Set()
 
 function now() { return new Date().toISOString() }
-function pub() { const { catalog, ...rest } = state; return { ...rest, catalog: catalog.map(({ body, ...c }) => c) } }
+function engineView(e, dir, full) { return { dir, project: e.project, mission: e.mission, live: e.live, attachments: e.attachments, log: full ? e.log : undefined, busy: !!(e.mission && ['running', 'planning'].includes(e.mission.state)) } }
+function pub() {
+  const a = activeEngine() || newEngine(null)
+  return {
+    ...engineView(a, activeDir, true),
+    engines: [...engines.entries()].filter(([, e]) => e.project).map(([dir, e]) => ({ ...engineView(e, dir, false), active: dir === activeDir })),
+    history: G.history, recent: G.recent, settings: G.settings, registry: G.registry, quota: G.quota, catalog: G.catalog.map(({ body, ...c }) => c),
+  }
+}
 function broadcast() { const data = `data: ${JSON.stringify(pub())}\n\n`; for (const res of clients) res.write(data) }
 function broadcastSoon() { if (pending) return; pending = setTimeout(() => { pending = null; broadcast() }, 150) }
 function setLive(live) { state.live = live; broadcastSoon() }
@@ -136,7 +160,7 @@ async function journal(event) {
   await appendFile(path.join(ADE_DIR, 'journal.jsonl'), JSON.stringify({ ts: now(), project: state.project?.dir, mission: state.mission?.id, ...event }) + '\n')
 }
 function log(source, text, kind = 'info') {
-  const line = { ts: now(), source, text: String(text).slice(0, 4000), kind, phase: currentPhase, story: state.mission?.current ?? null }
+  const line = { ts: now(), source, text: String(text).slice(0, 4000), kind, phase: state.phase, story: state.mission?.current ?? null }
   state.log.push(line)
   if (state.log.length > 800) state.log.shift()
   journal({ type: 'log', ...line }).catch(() => {})
@@ -148,7 +172,7 @@ function setStep(name, status, extra = {}) {
   if (!target) return
   const step = target.steps.find((s) => s.name === name)
   const stamp = status === 'running' ? { started_at: now() } : { finished_at: now() }
-  if (status === 'running') currentPhase = name
+  if (status === 'running') state.phase = name
   if (step) Object.assign(step, { status, ...stamp, ...extra }); else target.steps.push({ name, status, ...stamp, ...extra })
   journal({ type: 'step', name, status, story: state.mission?.current ?? null }).catch(() => {})
   broadcast()
@@ -156,11 +180,13 @@ function setStep(name, status, extra = {}) {
 
 // ---------- processos ----------
 function run(cmd, args, { cwd, stdin, onLine, timeoutMs = 20 * 60 * 1000, env = {} } = {}) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     // shell:true no Windows concatena os argumentos sem aspas: qualquer argumento com espaço ou aspas
     // (mensagem de commit, prompt do agy, schema JSON) precisa de escape estilo MSVC aqui, uma vez só.
     const quoted = IS_WIN ? args.map((a) => /[\s"&|<>^()]/.test(a) ? '"' + a.replace(/(\\*)"/g, '$1$1\\"') + '"' : a) : args
+    const eng = als.getStore(); if (eng?.mission?.pause_requested) return reject(PAUSE)
     const child = spawn(cmd, quoted, { cwd, shell: IS_WIN, env: { ...process.env, ...env }, windowsHide: true })
+    if (eng) eng.children.add(child)
     let out = '', err = '', buf = ''
     const timer = setTimeout(() => { try { child.kill() } catch {} }, timeoutMs)
     child.stdout.on('data', (d) => {
@@ -171,12 +197,62 @@ function run(cmd, args, { cwd, stdin, onLine, timeoutMs = 20 * 60 * 1000, env = 
       for (const l of lines) if (l.trim()) onLine(l)
     })
     child.stderr.on('data', (d) => { err += d })
-    child.on('close', (code) => { clearTimeout(timer); if (onLine && buf.trim()) onLine(buf); resolve({ code, out, err }) })
-    child.on('error', (e) => { clearTimeout(timer); resolve({ code: -1, out, err: String(e) }) })
+    child.on('close', (code) => { clearTimeout(timer); if (eng) eng.children.delete(child); if (onLine && buf.trim()) onLine(buf); if (eng?.mission?.pause_requested) return reject(PAUSE); resolve({ code, out, err }) })
+    child.on('error', (e) => { clearTimeout(timer); if (eng) eng.children.delete(child); resolve({ code: -1, out, err: String(e) }) })
     if (stdin != null) { child.stdin.write(stdin); child.stdin.end() } else child.stdin.end()
   })
 }
 const exists = (p) => access(p).then(() => true, () => false)
+// mata a árvore inteira (shell:true no Windows: cmd.exe → claude/codex/node); só child.kill() deixaria o neto vivo
+function killTree(child) { try { if (IS_WIN) spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); else child.kill('SIGTERM') } catch {} }
+
+// ---------- pausar / continuar / persistir ----------
+const MISSIONS_DIR = path.join(ADE_DIR, 'missions')
+async function persistMission() {
+  const e = currentEngine(); const m = e.mission; if (!m || !e.project) return
+  await mkdir(MISSIONS_DIR, { recursive: true })
+  await writeFile(path.join(MISSIONS_DIR, `${m.id}.json`), JSON.stringify({ dir: e.project.dir, mission: m, log: e.log.slice(-300), saved_at: now() }))
+}
+// guard: toda cadeia do motor passa por aqui. PAUSE vira estado 'paused' (parte em andamento volta para a fila); outro erro vira parada.
+async function guard(fn) {
+  try { return await fn() } catch (err) {
+    const m = state.mission; if (!m) return
+    if (err === PAUSE) {
+      m.pause_requested = false; m.state = 'paused'; m.reason = null
+      if (m.current != null && m.stories[m.current] && m.stories[m.current].state !== 'done') { const st = m.stories[m.current]; Object.assign(st, { state: 'queued', round: 0, steps: [], red_tests: [], tests_after: null, diff: '', review: null, visual: null }); if (state.project) await gitDiscard(state.project.dir).catch(() => {}); await refreshProject().catch(() => {}) }
+      state.live = null; log('operador', 'pausou; a parte em andamento volta do começo quando continuar')
+      await persistMission().catch(() => {}); return finish()
+    }
+    m.state = 'awaiting_operator'; m.reason = 'engine_error'; log('engine', `erro do engine: ${err.message}`, 'error'); await persistMission().catch(() => {}); return finish()
+  }
+}
+async function pauseMission() {
+  const e = currentEngine(); const m = e.mission
+  if (!m || !['running', 'planning'].includes(m.state)) return 'Nada rodando para pausar.'
+  m.pause_requested = true; log('operador', 'pediu para pausar; interrompendo a IA…', 'warn')
+  for (const c of e.children) killTree(c) // sem processo vivo, a próxima chamada a run() rejeita com PAUSE e o guard fecha a missão
+  return null
+}
+async function resumeMission() {
+  const m = state.mission
+  if (!m || m.state !== 'paused') return 'Esta missão não está pausada.'
+  const fresh = await discover(state.project.dir); if (fresh.dirty) { await gitDiscard(fresh.dir); }
+  state.project = await discover(fresh.dir); m.finished_at = null; log('operador', 'continuou a missão')
+  if (!m.plan || !m.stories.length) { m.state = 'planning'; m.steps = []; return guard(planMission) }
+  return guard(runStories)
+}
+async function loadSavedMissions() {
+  let files = []; try { files = await readdir(MISSIONS_DIR) } catch { return }
+  for (const f of files) {
+    try {
+      const j = JSON.parse(await readFile(path.join(MISSIONS_DIR, f), 'utf8')); const m = j.mission
+      if (!['paused', 'awaiting_plan', 'awaiting_operator'].includes(m.state)) continue
+      if (m.state !== 'paused') { m.state = 'paused'; m.reason = null } // estava esperando você quando o servidor caiu: continua do mesmo ponto ao retomar
+      const e = engineFor(j.dir); e.project = await discover(j.dir); if (e.project.error) continue
+      e.mission = m; e.log = j.log || []
+    } catch {}
+  }
+}
 
 // ---------- configurações e recentes ----------
 async function loadJson(file, fallback) { try { return JSON.parse(await readFile(path.join(ADE_DIR, file), 'utf8')) } catch { return fallback } }
@@ -741,7 +817,7 @@ async function planMission() {
   m.skills = selectSkills(intent)
   setStep('intent', 'done')
   log('engine', `entendido: ${intent.complexity} · ${intent.domains.join(', ')} · skills — planejador: ${m.skills.planner.map((s) => s.id).join(', ') || 'nenhuma'}; maker: ${m.skills.maker.map((s) => s.id).join(', ') || 'nenhuma'}; revisor: ${m.skills.checker.map((s) => s.id).join(', ') || 'nenhuma'}; pesquisa: ${m.skills.research.map((s) => s.id).join(', ') || 'nenhuma'}`)
-  if (intent.questions?.length) { m.plan = { title: m.request.slice(0, 60), summary: intent.summary, complexity: intent.complexity, domains: intent.domains, needs_ui: intent.needs_ui, needs_backend: intent.needs_backend, questions: intent.questions, research_questions: [], stories: [] }; m.state = 'awaiting_plan'; m.reason = 'questions'; broadcast(); return }
+  if (intent.questions?.length) { m.plan = { title: m.request.slice(0, 60), summary: intent.summary, complexity: intent.complexity, domains: intent.domains, needs_ui: intent.needs_ui, needs_backend: intent.needs_backend, questions: intent.questions, research_questions: [], stories: [] }; m.state = 'awaiting_plan'; m.reason = 'questions'; broadcast(); await persistMission().catch(() => {}); return }
   return continuePlanning()
 }
 async function continuePlanning() {
@@ -764,7 +840,7 @@ async function makePlan() {
   log('engine', `plano: ${plan.title} · ${m.plan.complexity} · ${m.stories.length} story(s)`)
   if (plan.questions?.length) { m.state = 'awaiting_plan'; m.reason = 'questions'; broadcast(); return }
   // depois de um pedido de mudança o usuário sempre confere de novo
-  if (m.plan_feedback?.length || m.stories.length > 2 || m.plan.complexity === 'subsystem') { m.state = 'awaiting_plan'; m.reason = 'approve_plan'; broadcast(); return }
+  if (m.plan_feedback?.length || m.stories.length > 2 || m.plan.complexity === 'subsystem') { m.state = 'awaiting_plan'; m.reason = 'approve_plan'; broadcast(); await persistMission().catch(() => {}); return }
   return runStories()
 }
 
@@ -787,11 +863,11 @@ async function runStories() {
       await gitCommit(state.project.dir, `ade: ${st.title.slice(0, 72)}`)
       await refreshProject()
       log('engine', `commit feito: ${st.title}`)
-      st.state = 'done'; broadcast()
+      st.state = 'done'; broadcast(); await persistMission().catch(() => {})
     }
     m.state = 'complete'; m.reason = null; m.current = null
     log('engine', 'missão pronta: todas as stories provadas, revisadas e commitadas')
-  } catch (e) { m.state = 'awaiting_operator'; m.reason = 'engine_error'; log('engine', `erro do engine: ${e.message}`, 'error') }
+  } catch (e) { if (e === PAUSE) throw e; m.state = 'awaiting_operator'; m.reason = 'engine_error'; log('engine', `erro do engine: ${e.message}`, 'error') }
   return finish()
 }
 
@@ -856,10 +932,13 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
 function finish() {
   const m = state.mission
   m.finished_at = now()
-  const entry = { id: m.id, project: state.project.dir, request: m.request, title: m.plan?.title || m.request, state: m.state, reason: m.reason, usd: m.cost.usd, calls: m.cost.calls, stories: m.stories.length, finished_at: m.finished_at }
+  const entry = { id: m.id, project: state.project.dir, request: m.request, title: m.plan?.title || m.request, state: m.state, reason: m.reason, usd: m.cost.usd, calls: m.cost.calls, stories: m.stories.length, done: m.stories.filter((x) => x.state === 'done').length, finished_at: m.finished_at, resumable: ['paused', 'awaiting_plan', 'awaiting_operator'].includes(m.state) }
   const h = state.history.find((x) => x.id === m.id)
   if (h) Object.assign(h, entry); else state.history.unshift(entry)
   saveJson('history.json', state.history.slice(0, 50)).catch(() => {})
+  // concluída/descartada: apaga o arquivo de retomada; senão grava (sem correr com o rm)
+  if (['complete', 'discarded'].includes(m.state)) rm(path.join(MISSIONS_DIR, `${m.id}.json`), { force: true }).catch(() => {})
+  else persistMission().catch(() => {})
   journal({ type: 'mission', state: m.state, reason: m.reason }).catch(() => {})
   broadcast()
 }
@@ -873,7 +952,7 @@ async function startMission(request) {
   if (fresh.dirty) return 'A pasta tem alterações não commitadas. Commite ou descarte antes, para a ADE poder desfazer só o que ela mesma fizer.'
   const s = state.settings
   if (vendorOf(s.roles.maker.family, s.roles.maker.model) === vendorOf(s.roles.checker.family, s.roles.checker.model)) return 'Quem escreve e quem revisa precisam ser de empresas diferentes. Ajuste em Modelos.'
-  await ensureIgnore(fresh.dir); state.project = await discover(fresh.dir); state.log = []; currentPhase = 'intent'
+  await ensureIgnore(fresh.dir); state.project = await discover(fresh.dir); state.log = []; state.phase = 'intent'
   state.mission = {
     id: 'm-' + Date.now().toString(36), request, attachments: state.attachments.splice(0), state: 'planning', reason: null, current: null,
     allow_commands: !!s.allow_commands, roles: JSON.parse(JSON.stringify(s.roles)),
@@ -882,7 +961,7 @@ async function startMission(request) {
   }
   journal({ type: 'mission_start', request }).catch(() => {})
   log('engine', `missão ${state.mission.id} em ${p.dir}: "${request}"`)
-  planMission()
+  guard(planMission)
   return null
 }
 
@@ -902,6 +981,7 @@ async function decide(option, payload = {}) {
     if (option === 'discard') { m.state = 'discarded'; log('operador', 'descartou o plano'); return finish() }
     return
   }
+  if (m.state === 'paused' && option === 'discard') { await gitDiscard(state.project.dir); await refreshProject(); m.state = 'discarded'; log('operador', 'descartou a missão pausada; arquivos restaurados'); return finish() }
   if (m.state !== 'awaiting_operator') return
   const st = story()
   if (option === 'accept') { if (st) { st.state = 'done'; await gitCommit(state.project.dir, `ade: ${st.title.slice(0, 72)} (aceita pelo operador)`); await refreshProject() } log('operador', 'aceitou como está'); return runStories() }
@@ -919,7 +999,9 @@ async function decide(option, payload = {}) {
 // ---------- HTTP ----------
 async function body(req) { let s = ''; for await (const c of req) s += c; return s ? JSON.parse(s) : {} }
 const json = (res, code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)) }
-const busy = () => state.mission && ['running', 'planning'].includes(state.mission.state)
+const busyOf = (e) => !!(e?.mission && ['running', 'planning'].includes(e.mission.state))
+// engine alvo do pedido: `dir` no corpo/query → esse; senão o ativo
+async function targetEngine(req, url, b) { const dir = b?.dir || url.searchParams.get('dir'); return dir ? engineFor(dir) : activeEngine() }
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x')
@@ -937,38 +1019,55 @@ http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/project' && req.method === 'POST') {
       const { dir } = await body(req)
-      if (busy()) return json(res, 409, { error: 'Há uma missão rodando.' })
       if (!String(dir || '').trim()) return json(res, 400, { error: 'Informe o caminho da pasta.' })
       const target = path.resolve(String(dir).trim().replace(/^~/, HOME))
       if (!(await exists(target))) await mkdir(target, { recursive: true })
       const info = await discover(target)
       if (info.error) return json(res, 400, info)
-      state.project = info; state.mission = null; state.log = []; await saveRecent(info.dir); broadcast(); return json(res, 200, info)
+      // cada pasta é um engine próprio; trocar de pasta não mata a missão da outra (ela continua rodando ao fundo)
+      const e = engineFor(info.dir); e.project = info; activeDir = path.resolve(info.dir); await saveRecent(info.dir); broadcast(); return json(res, 200, info)
+    }
+    if (url.pathname === '/api/select' && req.method === 'POST') { const { dir } = await body(req); const e = dir && engines.get(path.resolve(dir)); if (!e) return json(res, 404, { error: 'Projeto não aberto.' }); activeDir = path.resolve(dir); broadcast(); return json(res, 200, { ok: true }) }
+    if (url.pathname === '/api/pause' && req.method === 'POST') { const b = await body(req); const e = await targetEngine(req, url, b); if (!e) return json(res, 400, { error: 'Sem projeto.' }); const err = await withEngine(e, pauseMission); return err ? json(res, 400, { error: err }) : json(res, 202, { ok: true }) }
+    if (url.pathname === '/api/resume' && req.method === 'POST') {
+      const { id, dir } = await body(req)
+      let e = dir ? engines.get(path.resolve(dir)) : null
+      if (!e && id) e = [...engines.values()].find((x) => x.mission?.id === id)
+      if (!e?.mission) return json(res, 404, { error: 'Missão não encontrada (só missões pausadas neste servidor podem continuar).' })
+      if (busyOf(e)) return json(res, 409, { error: 'Essa missão já está rodando.' })
+      activeDir = path.resolve(e.project.dir); broadcast()
+      withEngine(e, () => guard(resumeMission)); return json(res, 202, { ok: true })
     }
     if (url.pathname === '/api/project/git-init' && req.method === 'POST') {
-      if (!state.project) return json(res, 400, { error: 'Sem pasta.' })
-      const d = state.project.dir
-      await run('git', ['init', '-q'], { cwd: d }); await run('git', ['add', '-A'], { cwd: d })
-      await run('git', ['-c', 'user.name=TL-ADE', '-c', 'user.email=ade@local', 'commit', '-q', '-m', 'base: antes da TL-ADE', '--allow-empty'], { cwd: d })
-      state.project = await discover(d); broadcast(); return json(res, 200, state.project)
+      const e = activeEngine(); if (!e?.project) return json(res, 400, { error: 'Sem pasta.' })
+      return withEngine(e, async () => {
+        const d = state.project.dir
+        await run('git', ['init', '-q'], { cwd: d }); await run('git', ['add', '-A'], { cwd: d })
+        await run('git', ['-c', 'user.name=TL-ADE', '-c', 'user.email=ade@local', 'commit', '-q', '-m', 'base: antes da TL-ADE', '--allow-empty'], { cwd: d })
+        state.project = await discover(d); broadcast(); return json(res, 200, state.project)
+      })
     }
     if (url.pathname === '/api/pick' && req.method === 'POST') { const { kind } = await body(req); return json(res, 200, { paths: await pickNative(kind) }) }
-    if (url.pathname === '/api/attach' && req.method === 'POST') { try { return json(res, 200, { added: await addAttachments(await body(req)), attachments: state.attachments }) } catch (e) { return json(res, 400, { error: e.message }) } }
-    if (url.pathname === '/api/attach/remove' && req.method === 'POST') { const { name } = await body(req); const i = state.attachments.findIndex((a) => a.name === name); if (i >= 0) { const [a] = state.attachments.splice(i, 1); await rm(path.join(state.project.dir, a.path), { force: true }); broadcast() } return json(res, 200, { attachments: state.attachments }) }
+    if (url.pathname === '/api/attach' && req.method === 'POST') { const b = await body(req); const e = await targetEngine(req, url, b); if (!e?.project) return json(res, 400, { error: 'Escolha uma pasta primeiro.' }); try { return await withEngine(e, async () => json(res, 200, { added: await addAttachments(b), attachments: state.attachments })) } catch (err) { return json(res, 400, { error: err.message }) } }
+    if (url.pathname === '/api/attach/remove' && req.method === 'POST') { const b = await body(req); const e = await targetEngine(req, url, b); if (!e) return json(res, 400, {}); return withEngine(e, async () => { const i = state.attachments.findIndex((a) => a.name === b.name); if (i >= 0) { const [a] = state.attachments.splice(i, 1); await rm(path.join(state.project.dir, a.path), { force: true }); broadcast() } return json(res, 200, { attachments: state.attachments }) }) }
     if (url.pathname === '/api/run' && req.method === 'POST') {
-      const { request } = await body(req)
+      const b = await body(req); const request = b.request
       if (!request?.trim()) return json(res, 400, { error: 'Pedido vazio.' })
-      if (busy()) return json(res, 409, { error: 'Já há uma missão rodando.' })
-      const err = await startMission(request.trim()); return err ? json(res, 400, { error: err }) : json(res, 202, { ok: true })
+      const e = await targetEngine(req, url, b); if (!e?.project) return json(res, 400, { error: 'Escolha uma pasta primeiro.' })
+      if (busyOf(e)) return json(res, 409, { error: 'Já há uma missão rodando nesta pasta. Pause-a ou espere; em outra pasta pode rodar em paralelo.' })
+      if (e.mission && ['awaiting_plan', 'awaiting_operator', 'paused'].includes(e.mission.state)) return json(res, 409, { error: 'A missão anterior desta pasta ainda espera uma decisão sua (continuar ou descartar).' })
+      activeDir = path.resolve(e.project.dir)
+      const err = await withEngine(e, () => startMission(request.trim())); return err ? json(res, 400, { error: err }) : json(res, 202, { ok: true })
     }
-    if (url.pathname === '/api/decide' && req.method === 'POST') { const { option, text, answers } = await body(req); decide(option, { text, answers }); return json(res, 202, { ok: true }) }
+    if (url.pathname === '/api/decide' && req.method === 'POST') { const b = await body(req); const e = await targetEngine(req, url, b); if (!e) return json(res, 400, {}); withEngine(e, () => guard(() => decide(b.option, { text: b.text, answers: b.answers }))); return json(res, 202, { ok: true }) }
     if (url.pathname === '/api/skill' && url.searchParams.get('id')) { const c = state.catalog.find((x) => x.id === url.searchParams.get('id')); return c ? json(res, 200, { id: c.id, body: c.body }) : json(res, 404, {}) }
     if (url.pathname === '/api/app' || url.pathname.startsWith('/api/app/')) {
-      if (!state.project) { res.writeHead(404); return res.end('sem projeto') }
+      const e = (url.searchParams.get('dir') && engines.get(path.resolve(url.searchParams.get('dir')))) || activeEngine()
+      if (!e?.project) { res.writeHead(404); return res.end('sem projeto') }
       if (url.pathname === '/api/app') { res.writeHead(302, { Location: '/api/app/' }); return res.end() }
       const rel = url.pathname === '/api/app/' ? 'index.html' : decodeURIComponent(url.pathname.slice(9))
-      const file = path.join(state.project.dir, rel)
-      if (!file.startsWith(state.project.dir) || rel.includes('node_modules')) { res.writeHead(403); return res.end() }
+      const file = path.join(e.project.dir, rel)
+      if (!file.startsWith(e.project.dir) || rel.includes('node_modules')) { res.writeHead(403); return res.end() }
       const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.woff2': 'font/woff2' }
       try { const data = await readFile(file); res.writeHead(200, { 'Content-Type': types[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' }); return res.end(data) }
       catch { res.writeHead(404); return res.end('não encontrado') }
@@ -983,6 +1082,8 @@ http.createServer(async (req, res) => {
   if (!state.settings.roles.intent) state.settings.roles.intent = DEFAULT_SETTINGS.roles.intent
   await loadCatalog()
   await readQuota()
-  state.project = await discover(state.recent[0] || path.join(ROOT, 'example'))
-  console.log(`TL-ADE: http://127.0.0.1:${PORT}  projeto: ${state.project.dir}  skills no catálogo: ${state.catalog.length}`)
+  await loadSavedMissions()
+  const first = G.recent[0] || path.join(ROOT, 'example')
+  const e = engineFor(first); if (!e.project) e.project = await discover(first); activeDir = path.resolve(first)
+  console.log(`TL-ADE: http://127.0.0.1:${PORT}  projeto: ${e.project.dir}  skills no catálogo: ${G.catalog.length}  missões retomáveis: ${[...engines.values()].filter((x) => x.mission).length}`)
 })

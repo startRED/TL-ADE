@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Switch } from '@radix-ui/themes'
 import {
-  ArrowSquareOut, ArrowLeft, ArrowCounterClockwise, Play, Trash, SkipForward, CheckCircle, XCircle, Warning,
+  ArrowSquareOut, ArrowLeft, ArrowCounterClockwise, Play, Pause, Trash, SkipForward, CheckCircle, XCircle, Warning,
   Circle, CircleDashed, CaretRight, GitDiff, GitCommit, FolderSimple, FolderOpen, ClockCounterClockwise, GearSix,
   Sparkle, UserCircle, Cpu, MagnifyingGlass, Plus, Paperclip, File as FileIcon, X, NotePencil, ListChecks,
   TestTube, Wrench, Eye, ShieldCheck, ListBullets, Terminal, ImageSquare, Compass, Table, Storefront, List,
@@ -37,6 +37,7 @@ const STATE = {
   awaiting_plan: { label: 'Plano pronto', tone: 'warn' },
   running: { label: 'Em andamento', tone: 'accent' },
   awaiting_operator: { label: 'Precisa de você', tone: 'warn' },
+  paused: { label: 'Pausada', tone: 'mute' },
   complete: { label: 'Pronta', tone: 'good' },
   discarded: { label: 'Descartada', tone: 'mute' },
 }
@@ -72,6 +73,9 @@ const fmtUsd = (n) => `US$ ${(n || 0).toLocaleString('pt-BR', { minimumFractionD
 const fmtWhen = (iso) => iso ? new Date(iso).toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : ''
 const fmtHour = (iso) => iso ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''
 const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+// arquivos do projeto: com vários projetos abertos o mesmo caminho existe em pastas diferentes, então o dir vai na URL
+const appUrl = (rel, dir, extra) => `/api/app/${rel}?${new URLSearchParams({ ...(dir ? { dir } : {}), ...(extra || {}) })}`
+const folderName = (dir) => (dir || '').split(/[\\/]/).filter(Boolean).pop() || dir || ''
 const secsBetween = (a, b) => Math.max(0, Math.round(((b ? new Date(b) : new Date()) - new Date(a)) / 1000))
 const missionStep = (m, name) => (m?.steps || []).find((x) => x.name === name)
 const tail = (text, n = 2) => (text || '').trim().split('\n').filter(Boolean).slice(-n).join(' ').slice(-200)
@@ -121,7 +125,7 @@ const PENDING_WHY = {
 
 /* ========================= app ========================= */
 export default function App() {
-  const [state, setState] = useState({ project: null, mission: null, log: [], history: [], live: null, recent: [], settings: null, catalog: [], registry: {}, attachments: [] })
+  const [state, setState] = useState({ dir: null, project: null, mission: null, log: [], history: [], live: null, recent: [], settings: null, catalog: [], registry: {}, attachments: [], engines: [] })
   const [request, setRequest] = useState('')
   const [menu, setMenu] = useState(false)
   const [attachErr, setAttachErr] = useState(null)
@@ -132,6 +136,7 @@ export default function App() {
   const [nav, setNav] = useState(false)
   const [side, setSide] = useState(false)
   const [cleared, setCleared] = useState(null)
+  const [resumeErr, setResumeErr] = useState(null)
   const ask = useRef(null)
 
   useEffect(() => {
@@ -146,12 +151,16 @@ export default function App() {
   const live = !!m && !['complete', 'discarded'].includes(m.state)
   const shown = m && m.id !== cleared ? m : null
   const need = pendingDecision(shown)
+  const paused = shown?.state === 'paused'
+  // servidor antigo não manda engines: lista vazia, e a seção "Em andamento" some
+  const engines = state.engines || []
+  const withMission = engines.filter((e) => e.mission)
 
   useEffect(() => { if (m?.id && m.id !== cleared) setCleared(null) }, [m?.id])
   useEffect(() => { document.title = need ? '● TL-ADE' : 'TL-ADE' }, [need])
-  useEffect(() => { if (need) setSide(true) }, [need])
+  useEffect(() => { if (need || paused) setSide(true) }, [need, paused])
 
-  async function attachFiles(payload) { setAttachErr(null); const r = await post('/api/attach', payload); if (!r.ok) { const j = await r.json().catch(() => ({})); setAttachErr(j.error || 'Não anexou.') } }
+  async function attachFiles(payload) { setAttachErr(null); const r = await post('/api/attach', { ...payload, dir: state.dir }); if (!r.ok) { const j = await r.json().catch(() => ({})); setAttachErr(j.error || 'Não anexou.') } }
   async function pick(kind) {
     setMenu(false)
     const r = await post('/api/pick', { kind }); const j = await r.json().catch(() => ({})); const paths = j.paths || []
@@ -173,10 +182,21 @@ export default function App() {
     const req = (text ?? request).trim()
     if (!req || busy) return
     setPage(null); setError(null); setCleared(null); setRequest('')
-    const r = await post('/api/run', { request: req })
+    const r = await post('/api/run', { request: req, dir: state.dir })
     if (!r.ok) { const j = await r.json().catch(() => ({})); setRequest(req); setError(j.error || 'Não deu para começar.'); if (/git|pasta/i.test(j.error || '')) setPage('projects'); if (/Modelos/.test(j.error || '')) setPage('models') }
   }
-  const decide = (option, extra) => post('/api/decide', typeof extra === 'object' ? { option, ...extra } : { option, text: extra })
+  const decide = (option, extra) => post('/api/decide', typeof extra === 'object' ? { option, ...extra, dir: state.dir } : { option, text: extra, dir: state.dir })
+  async function pause() {
+    const r = await post('/api/pause', { dir: state.dir })
+    if (!r.ok) { const j = await r.json().catch(() => ({})); setError(j.error || 'Não deu para pausar.') }
+  }
+  async function resume(body) {
+    setResumeErr(null)
+    const r = await post('/api/resume', body)
+    if (r.ok) { setPage(null); setError(null); setCleared(null); return }
+    const j = await r.json().catch(() => ({}))
+    setResumeErr({ key: body.id || body.dir, error: j.error || 'Não deu para continuar.' })
+  }
   const save = (patch) => post('/api/settings', patch)
   const go = (name) => { setPage(name); setNav(false); setDrawer(false) }
   function novoPedido() {
@@ -205,16 +225,42 @@ export default function App() {
             </span>
             <span className="proj-swap">trocar</span>
           </button>
+          <button className="proj-add" onClick={() => pick('folder')}><Plus weight="bold" /> Abrir outra pasta</button>
+          <p className="side-tip">Abrir outra pasta não interrompe a missão desta: as duas rodam ao mesmo tempo.</p>
         </div>
+
+        {engines.length > 1 && withMission.length > 0 && (
+          <div className="side-block">
+            <span className="side-lbl">Em andamento</span>
+            <div className="side-hist eng-list">
+              {withMission.map((e) => {
+                const es = STATE[e.mission.state] || { label: e.mission.state, tone: 'mute' }
+                return (
+                  <button key={e.dir} className={`hist-item${e.active ? ' now' : ''}`} onClick={() => post('/api/select', { dir: e.dir })} title={e.dir}>
+                    <span className="hist-top">
+                      <span className="hist-title">{e.mission.plan?.title || e.mission.request}</span>
+                      <span className={`dot-${es.tone}${e.busy ? ' dot-live' : ''}`} aria-hidden="true">●</span>
+                    </span>
+                    <span className="hist-sub"><span>{e.project?.name || folderName(e.dir)}</span><span>{es.label}</span></span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="side-block grow-block">
           <span className="side-lbl">Pedidos anteriores</span>
           <div className="side-hist">
             {state.history?.length ? state.history.slice(0, 7).map((h) => (
-              <button key={h.id} className={`hist-item${h.id === m?.id ? ' now' : ''}`} onClick={() => go('history')} title={h.request}>
-                <span className="hist-top"><span className="hist-title">{h.title || h.request}</span><span className={`dot-${STATE[h.state]?.tone || 'mute'}`} aria-hidden="true">●</span></span>
-                <span className="hist-sub"><span>{h.project?.split(/[\\/]/).pop()}</span><span className="mono">{fmtHour(h.finished_at)} · {fmtUsd(h.usd)}</span></span>
-              </button>
+              <div key={h.id} className="hist-wrap">
+                <button className={`hist-item${h.id === m?.id ? ' now' : ''}`} onClick={() => go('history')} title={h.request}>
+                  <span className="hist-top"><span className="hist-title">{h.title || h.request}</span><span className={`dot-${STATE[h.state]?.tone || 'mute'}`} aria-hidden="true">●</span></span>
+                  <span className="hist-sub"><span>{folderName(h.project)}</span><span className="mono">{fmtHour(h.finished_at)} · {fmtUsd(h.usd)}</span></span>
+                </button>
+                {h.resumable && h.id !== m?.id && <button className="mini hist-resume" onClick={() => resume({ id: h.id })}><Play weight="fill" /> Continuar</button>}
+                {resumeErr?.key === h.id && <p className="hist-err">{resumeErr.error}</p>}
+              </div>
             )) : <p className="side-none">Os pedidos que terminarem aparecem aqui.</p>}
             {state.history?.length > 7 && <button className="link side-more" onClick={() => go('history')}>ver todos os {state.history.length}</button>}
           </div>
@@ -240,6 +286,9 @@ export default function App() {
             <><span className="head-title">{shown ? (shown.plan?.title || 'Seu pedido') : 'Conversa'}</span>{shown && <MissionChip m={shown} />}</>
           )}
           <span className="grow" />
+          {!page && shown && ['running', 'planning'].includes(shown.state) && (
+            <button className="ghost-btn" onClick={pause} disabled={!!shown.pause_requested}><Pause weight="fill" /> {shown.pause_requested ? 'pausando…' : 'Pausar'}</button>
+          )}
           {showSide && <button className={`ghost-btn only-mid${need ? ' warn' : ''}`} onClick={() => setSide(true)}><ListChecks /> Sua vez</button>}
           {!page && <button className={`ghost-btn${drawer ? ' on' : ''}`} onClick={() => setDrawer((v) => !v)}><Terminal /> Atividade completa</button>}
         </header>
@@ -250,7 +299,7 @@ export default function App() {
           <div className="page">
             {page === 'skills' && <SkillsPage state={state} save={save} />}
             {page === 'models' && <ModelsPage state={state} save={save} />}
-            {page === 'history' && <HistoryPage history={state.history} current={m} />}
+            {page === 'history' && <HistoryPage history={state.history} current={m} onResume={(id) => resume({ id })} err={resumeErr} />}
             {page === 'projects' && <ProjectsPage p={p} recent={state.recent} busy={busy} onChanged={() => { setPage(null); setError(null) }} />}
             {page === 'options' && <OptionsPage s={s} save={save} />}
           </div>
@@ -267,9 +316,9 @@ export default function App() {
                     <div className="attachments">
                       {state.attachments.map((a) => (
                         <span className="att-chip" key={a.name} title={a.path}>
-                          {a.image ? <img src={`/api/app/${a.path}`} alt="" /> : <FileIcon />}
+                          {a.image ? <img src={appUrl(a.path, state.dir)} alt="" /> : <FileIcon />}
                           <span>{a.name}</span>
-                          <button type="button" onClick={() => post('/api/attach/remove', { name: a.name })} aria-label={`Remover ${a.name}`}><X /></button>
+                          <button type="button" onClick={() => post('/api/attach/remove', { name: a.name, dir: state.dir })} aria-label={`Remover ${a.name}`}><X /></button>
                         </span>
                       ))}
                       {attachErr && <span className="att-chip bad">{attachErr}</span>}
@@ -290,7 +339,7 @@ export default function App() {
                       onChange={(e) => setRequest(e.target.value)} onPaste={onPaste}
                       onInput={(e) => { e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 176)}px` }}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run() } }}
-                      placeholder={live ? 'Rodando… espere terminar ou decida ao lado' : p ? `O que construir em ${p.name}? Escreva do seu jeito; cole imagens com Ctrl+V.` : 'Escolha uma pasta primeiro, no botão +'}
+                      placeholder={busy ? 'Rodando… pause ou espere' : paused ? 'Missão pausada: continue ou descarte ao lado' : live ? 'Esperando a sua decisão ao lado' : p ? `O que construir em ${p.name}? Escreva do seu jeito; cole imagens com Ctrl+V.` : 'Escolha uma pasta primeiro, no botão +'}
                     />
                     <button className="run" type="submit" disabled={live || !request.trim()}>{busy ? 'Rodando' : 'Rodar'}</button>
                   </div>
@@ -306,7 +355,7 @@ export default function App() {
         <>
           {side && <button className="scrim side-scrim" aria-label="Fechar" onClick={() => setSide(false)} />}
           <aside className={`turn${side ? ' open' : ''}`} aria-label="Sua vez">
-            <TurnPanel m={shown} state={state} decide={decide} need={need} onNew={novoPedido} onClose={() => setSide(false)} />
+            <TurnPanel m={shown} state={state} decide={decide} need={need} onNew={novoPedido} onResume={() => resume({ dir: state.dir })} err={resumeErr && resumeErr.key === state.dir ? resumeErr.error : null} onClose={() => setSide(false)} />
           </aside>
         </>
       )}
@@ -322,20 +371,21 @@ export default function App() {
 }
 
 /* ========================= painel "Sua vez" ========================= */
-function TurnPanel({ m, state, decide, need, onNew, onClose }) {
+function TurnPanel({ m, state, decide, need, onNew, onResume, err, onClose }) {
   const [text, setText] = useState('')
   const st = cur(m)
+  const paused = m.state === 'paused'
   const why = need === 'operator' ? (REASON[m.reason] || m.reason) : PENDING_WHY[need]
   return (
     <>
       <div className={`turn-head${need ? ' hot' : ''}`}>
         <div className="turn-head-top">
-          <span className="turn-ico" aria-hidden="true">{need ? <Warning weight="fill" /> : <ListChecks />}</span>
-          <b>{need ? 'Precisa de você' : 'Sua vez'}</b>
+          <span className="turn-ico" aria-hidden="true">{need ? <Warning weight="fill" /> : paused ? <Pause weight="fill" /> : <ListChecks />}</span>
+          <b>{need ? 'Precisa de você' : paused ? 'Missão pausada' : 'Sua vez'}</b>
           <span className="grow" />
           <button className="icon-btn only-mid" onClick={onClose} aria-label="Fechar"><X /></button>
         </div>
-        <p>{need ? why : 'Nada para decidir agora.'}</p>
+        <p>{need ? why : paused ? 'A IA foi interrompida. A parte em andamento voltou para a fila e o que ela tinha mexido foi desfeito.' : 'Nada para decidir agora.'}</p>
       </div>
 
       <div className="turn-body">
@@ -370,11 +420,21 @@ function TurnPanel({ m, state, decide, need, onNew, onClose }) {
           </>
         )}
 
+        {paused && (
+          <>
+            <div className="decide">
+              <button className="act primary" onClick={onResume}><Play weight="fill" /><span><b>Continuar</b><small>Retoma da parte {(m.current ?? 0) + 1}, do começo dela.</small></span></button>
+              <button className="act danger" onClick={() => decide('discard')}><Trash /><span><b>Descartar</b><small>Volta os arquivos ao que eram antes do pedido.</small></span></button>
+            </div>
+            {err && <p className="warn-box">{err}</p>}
+          </>
+        )}
+
         {!need && m.state === 'complete' && (
           <>
             <p className="turn-done"><CheckCircle weight="fill" /> Tudo pronto e gravado na sua pasta.</p>
             <div className="decide">
-              {state.project?.has_index && <a className="act primary" href="/api/app/" target="_blank" rel="noreferrer"><ArrowSquareOut /><span><b>Abrir o app</b><small>Vê o resultado no navegador.</small></span></a>}
+              {state.project?.has_index && <a className="act primary" href={appUrl('', state.dir)} target="_blank" rel="noreferrer"><ArrowSquareOut /><span><b>Abrir o app</b><small>Vê o resultado no navegador.</small></span></a>}
               <button className="act" onClick={onNew}><NotePencil /><span><b>Novo pedido</b><small>Começa outra coisa nesta pasta.</small></span></button>
             </div>
           </>
@@ -472,7 +532,7 @@ function Conversation({ state, m }) {
           {m.attachments?.length > 0 && (
             <div className="thumbs">
               {m.attachments.map((a) => a.image
-                ? <img key={a.name} src={`/api/app/${a.path}`} alt={a.name} title={a.name} />
+                ? <img key={a.name} src={appUrl(a.path, state.dir)} alt={a.name} title={a.name} />
                 : <span key={a.name} className="thumb-file"><FileIcon /> {a.name}</span>)}
             </div>
           )}
@@ -525,7 +585,7 @@ function Conversation({ state, m }) {
                 ))}
               </ol>
             )}
-            {m.plan.assets?.length > 0 && !started && <Assets m={m} />}
+            {m.plan.assets?.length > 0 && !started && <Assets m={m} dir={state.dir} />}
           </Ade>
         )}
 
@@ -533,7 +593,7 @@ function Conversation({ state, m }) {
           <Ade>
             <h3 className="msg-h">Gerando as imagens</h3>
             <p className="msg-p">{(m.assets_done || []).length} de {m.plan?.assets?.length || 0} prontas. As imagens entram no projeto antes das partes começarem.</p>
-            <Assets m={m} />
+            <Assets m={m} dir={state.dir} />
             {assetsStep.status === 'running' && <Typing live={state.live} />}
           </Ade>
         )}
@@ -561,6 +621,15 @@ function Conversation({ state, m }) {
           </Ade>
         )}
 
+        {m.state === 'paused' && (
+          <Ade kind="mute" time={m.finished_at}>
+            <h3 className="msg-h">Pausada</h3>
+            <p className="msg-p">{m.stories.length
+              ? `Continuar retoma da parte ${(m.current ?? 0) + 1}${m.stories[m.current ?? 0] ? `: ${m.stories[m.current ?? 0].title}` : ''}, do começo dela. O que ela tinha mexido foi desfeito; as partes já gravadas ficam como estão.`
+              : 'Continuar retoma do ponto em que a IA parou. Nada ficou pela metade na sua pasta.'}</p>
+          </Ade>
+        )}
+
         {m.state === 'discarded' && (
           <Ade kind="mute"><h3 className="msg-h">Descartada</h3><p className="msg-p">Os arquivos voltaram ao que eram antes do pedido. Nada ficou pela metade.</p></Ade>
         )}
@@ -571,7 +640,7 @@ function Conversation({ state, m }) {
   )
 }
 
-function Assets({ m }) {
+function Assets({ m, dir }) {
   const list = m.plan?.assets || []
   if (!list.length) return null
   return (
@@ -582,7 +651,7 @@ function Assets({ m }) {
           const ok = (m.assets_done || []).some((d) => d.file === a.file)
           return (
             <figure key={a.file} className={ok ? 'done' : ''}>
-              {ok ? <img src={`/api/app/${a.file}?t=${m.assets_done.length}`} alt={a.purpose} /> : <div className="ph"><ImageSquare />{m.state === 'running' ? 'gerando…' : 'ainda não'}</div>}
+              {ok ? <img src={appUrl(a.file, dir, { t: m.assets_done.length })} alt={a.purpose} /> : <div className="ph"><ImageSquare />{m.state === 'running' ? 'gerando…' : 'ainda não'}</div>}
               <figcaption><b className="mono">{a.file.replace('assets/img/', '')}</b><small>{a.purpose}</small></figcaption>
             </figure>
           )
@@ -725,7 +794,7 @@ function Tests({ st, m }) {
   return (
     <>
       <p className="msg-p">A IA escreve a prova primeiro. Ela tem de falhar no código antigo e passar no código novo.</p>
-      {st.tests_after.error && <p className="bad-box mono">{st.tests_after.error}</p>}
+      {st.tests_after?.error && <p className="bad-box mono">{st.tests_after.error}</p>}
       <table className="tbl"><thead><tr><th>Prova</th><th>Antes</th><th>Depois</th></tr></thead><tbody>
         {st.tests_after.tests.map((t) => { const b = before.get(t.name); return (
           <tr key={t.name}><td><span className="mono">{t.name}</span>{!b && <span className="new">nova</span>}{t.message && <span className="dim small block">{t.message}</span>}</td><td><Result s={b} /></td><td><Result s={t.status} /></td></tr>
@@ -918,20 +987,20 @@ function ProjectsPage({ p, recent, busy, onChanged }) {
           {!p.git && <button className="btn" disabled={busy} onClick={async () => { const r = await post('/api/project/git-init', {}); if (r.ok) setMsg('Histórico iniciado com um ponto de partida.') }}>Iniciar o histórico nesta pasta</button>}
         </Card>
       )}
-      <Card title="Trocar de pasta">
-        <button className="btn primary big" type="button" disabled={busy} onClick={async () => { const r = await post('/api/pick', { kind: 'folder' }); const j = await r.json().catch(() => ({})); if (j.paths?.[0]) choose(j.paths[0]) }}><FolderOpen weight="fill" /> Procurar no Explorer, ou criar uma pasta nova</button>
+      <Card title="Abrir outra pasta">
+        <button className="btn primary big" type="button" onClick={async () => { const r = await post('/api/pick', { kind: 'folder' }); const j = await r.json().catch(() => ({})); if (j.paths?.[0]) choose(j.paths[0]) }}><FolderOpen weight="fill" /> Procurar no Explorer, ou criar uma pasta nova</button>
         <form className="dir-form" onSubmit={(e) => { e.preventDefault(); choose(dir) }}>
-          <input className="ta" value={dir} onChange={(e) => setDir(e.target.value)} placeholder="E:\meus-projetos\minha-app" disabled={busy} aria-label="Caminho da pasta" />
-          <button className="btn" type="submit" disabled={busy || !dir.trim()}>Usar</button>
+          <input className="ta" value={dir} onChange={(e) => setDir(e.target.value)} placeholder="E:\meus-projetos\minha-app" aria-label="Caminho da pasta" />
+          <button className="btn" type="submit" disabled={!dir.trim()}>Usar</button>
         </form>
-        <p className="dim small">Cole o caminho de qualquer pasta do seu PC. Se ela não existir, a ADE cria.</p>
+        <p className="dim small">Cole o caminho de qualquer pasta do seu PC. Se ela não existir, a ADE cria. A missão que estiver rodando na pasta atual continua ao fundo.</p>
         {msg && <p className="warn-box">{msg}</p>}
       </Card>
       {recent?.length > 0 && (
         <Card title="Recentes">
           <div className="rows">
             {recent.map((d) => (
-              <button key={d} className="row" onClick={() => choose(d)} disabled={busy || d === p?.dir}>
+              <button key={d} className="row" onClick={() => choose(d)} disabled={d === p?.dir}>
                 <span className="row-ico"><FolderSimple weight="fill" /></span>
                 <span className="row-txt"><b>{d.split(/[\\/]/).pop()}</b><small className="mono">{d}</small></span>
                 {d === p?.dir ? <Chip tone="accent">atual</Chip> : <CaretRight className="row-go" />}
@@ -944,7 +1013,7 @@ function ProjectsPage({ p, recent, busy, onChanged }) {
   )
 }
 
-function HistoryPage({ history, current }) {
+function HistoryPage({ history, current, onResume, err }) {
   if (!history?.length) return <Page title="Pedidos anteriores"><Card><p className="hint">Os pedidos que terminarem aparecem aqui, com o custo e o resultado.</p></Card></Page>
   return (
     <Page title="Pedidos anteriores" note={`${history.length} no total.`}>
@@ -953,8 +1022,16 @@ function HistoryPage({ history, current }) {
           {history.map((h) => (
             <div key={h.id} className={`row static${h.id === current?.id ? ' now' : ''}`}>
               <span className={`row-dot dot-${STATE[h.state]?.tone || 'mute'}`} aria-hidden="true" />
-              <span className="row-txt"><b>{h.title || h.request}</b><small>{h.project?.split(/[\\/]/).pop()} · {h.stories || 0} parte(s) · {fmtWhen(h.finished_at)}</small></span>
-              <span className="row-end"><Chip tone={STATE[h.state]?.tone || 'mute'}>{STATE[h.state]?.label || h.state}</Chip><span className="mono small dim">{fmtUsd(h.usd)}</span></span>
+              <span className="row-txt">
+                <b>{h.title || h.request}</b>
+                <small>{folderName(h.project)} · {h.done ?? 0} de {h.stories || 0} parte(s) · {fmtWhen(h.finished_at)}</small>
+                {err?.key === h.id && <small className="bad">{err.error}</small>}
+              </span>
+              <span className="row-end">
+                {h.resumable && h.id !== current?.id && <button className="mini" onClick={() => onResume(h.id)}><Play weight="fill" /> Continuar</button>}
+                <Chip tone={STATE[h.state]?.tone || 'mute'}>{STATE[h.state]?.label || h.state}</Chip>
+                <span className="mono small dim">{fmtUsd(h.usd)}</span>
+              </span>
             </div>
           ))}
         </div>
