@@ -7,7 +7,8 @@ import {
 
 const MISSION_STEPS = ['intent', 'plan', 'research', 'prepare']
 const ROLES_PT = { planner: 'planejador', maker: 'maker', checker: 'revisor', research: 'pesquisador' }
-const allSkills = (m) => m?.skills ? Object.entries(m.skills).flatMap(([role, list]) => (list || []).map((x) => ({ ...x, role }))) : []
+const skillsByRole = (m) => !m?.skills ? {} : Array.isArray(m.skills) ? { maker: m.skills } : m.skills
+const allSkills = (m) => Object.entries(skillsByRole(m)).flatMap(([role, list]) => (Array.isArray(list) ? list : []).map((x) => ({ ...x, role })))
 const STORY_STEPS = ['test', 'red', 'fix', 'tests', 'visual', 'checker']
 const STEP = {
   intent: { title: 'Entender o pedido', help: 'Uma IA lê o seu pedido, decide o tamanho, os domínios e quais skills cada papel (planejador, maker, revisor, pesquisador) vai receber.' },
@@ -290,7 +291,7 @@ function ModelsPanel({ state, save }) {
       {Object.entries(ROLE_LABEL).map(([role, label]) => (
         <div key={role} className="role">
           <span className="role-label">{label}</span>
-          <select className="sel" value={`${s.roles[role].family}|${s.roles[role].model}`} onChange={(e) => { const [f, mo] = e.target.value.split('|'); setRole(role, f, mo) }}>
+          <select className="sel" value={`${(s.roles[role] || {}).family || 'claude'}|${(s.roles[role] || {}).model || ''}`} onChange={(e) => { const [f, mo] = e.target.value.split('|'); setRole(role, f, mo) }}>
             {Object.entries(registry).map(([fam, fr]) => <optgroup key={fam} label={fr.label}>{fr.models.map((mo) => <option key={mo.id} value={`${fam}|${mo.id}`}>{mo.label}{mo.note ? ` · ${mo.note}` : ''}</option>)}</optgroup>)}
           </select>
         </div>
@@ -388,7 +389,7 @@ function Plan({ m, catalog }) {
         ))}
       </ol>
       <span className="lbl">Skills por papel</span>
-      {Object.entries(m.skills || {}).map(([role, list]) => <div key={role} className="role-skills"><span className="role-name">{ROLES_PT[role]}</span>{list?.length ? <div className="chips">{list.map((x) => <span key={x.id} className="chip-skill on">{x.id}<small>{x.reason} · {Math.round(x.bytes / 4 / 1000)}k tok</small></span>)}</div> : <span className="dim small">nenhuma</span>}</div>)}
+      {Object.entries(skillsByRole(m)).map(([role, list]) => <div key={role} className="role-skills"><span className="role-name">{ROLES_PT[role]}</span>{list?.length ? <div className="chips">{list.map((x) => <span key={x.id} className="chip-skill on">{x.id}<small>{x.reason} · {Math.round(x.bytes / 4 / 1000)}k tok</small></span>)}</div> : <span className="dim small">nenhuma</span>}</div>)}
       {m.research?.findings?.length > 0 && <><span className="lbl">Pesquisa</span>{m.research.findings.map((f) => <div key={f.question} className="explain"><b>{f.question}</b><p>{f.answer}</p>{f.sources?.length > 0 && <p className="dim small">{f.sources.join(' · ')}</p>}</div>)}</>}
     </div>
   )
