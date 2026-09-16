@@ -1,33 +1,51 @@
-# Protótipo descartável da TL-ADE
+# TL-ADE — demonstração
 
-Serve para sentir o produto antes de construir o motor durável. Não tem diário à prova de crash, não tem catálogo de skills, não tem painel de missões múltiplas. O código aqui é jogado fora quando o slice 1 chegar; o que ele ensina vira ajuste no plano.
+Versão de demonstração da ADE: incompleta, mas real. Constrói software de verdade em qualquer pasta do seu PC usando as suas assinaturas de Claude Code, Codex e Antigravity. Não tem ainda o motor durável (diário à prova de crash, retomada), nem o painel de vários projetos em paralelo. O que ela tem funciona de ponta a ponta.
 
-## O que faz
+## Como usar
 
-1. Você digita um pedido em linguagem natural no painel (ex.: "o botão Entrar tem de ficar desabilitado enquanto o envio está em curso").
-2. O servidor roda os testes do projeto de exemplo (`example/`) e grava a linha de base.
-3. Chama o **Claude Code** em modo silencioso (`claude -p --output-format stream-json`) com o pedido e a regra "teste que falha antes, passa depois".
-4. Roda os testes de novo e monta o diff.
-5. Chama o **Codex** em modo somente leitura (`codex exec --json --sandbox read-only --output-schema`) para revisar o diff.
-6. Mostra tudo ao vivo no painel e para em "aguardando você" se a revisão pedir mudanças ou algum teste ficar vermelho. Você aceita, pede mais uma rodada ou descarta.
+Duplo clique em `abrir.bat`. Na primeira vez instala as dependências (1 a 2 minutos) e abre o painel no navegador.
 
-## Rodar
+1. Escolha a pasta do projeto (ícone de pasta). Qualquer pasta serve; se não existir, a ADE cria; se não for git, o botão "Iniciar git" resolve.
+2. Escreva o pedido em português, do seu jeito, e clique em Rodar.
+3. Acompanhe: plano, atividade ao vivo, alterações, provas, portão visual, revisão.
+4. Decida só quando a ADE pedir: aprovar um plano grande, responder uma dúvida, aceitar/repetir/pular/descartar uma parte.
 
-Duplo clique em `abrir.bat`. Na primeira vez ele instala as dependências (1 a 2 minutos).
+## O que acontece por baixo
 
-Ou, à mão:
+| Passo | Quem | O que faz |
+| --- | --- | --- |
+| Entender o pedido | Claude Opus (planejador) | Lê o pedido e a pasta; devolve um plano com partes (stories), critérios de aceite e dica de prova, em JSON validado. |
+| Skills | motor | Escolhe até 4 skills do catálogo (as suas em `~/.claude/skills` + plugins instalados). Regras fixas: interface ou design ativam `impeccable` + `design-taste-frontend` + `frontend-design`; backend ativa `backend-patterns` + `api-design`; banco ativa `postgres-patterns`; mais afinidade por palavras do pedido. Cada skill cortada em 7,5k tokens; bloco de até 20k. |
+| Pesquisa | Antigravity (Gemini) | Só quando o plano depende de um fato externo. Resposta com fontes, em JSON. |
+| Escrever a prova | Claude Sonnet (maker) | Escreve só o teste da parte, sem implementar. |
+| Prova falha antes | motor | Roda o runner (Vitest, `npm test` ou pytest). A prova nova tem de falhar. |
+| Implementar | Claude Sonnet + skills | Implementa até a prova passar e os critérios valerem. |
+| Prova passa depois | motor | Todas as provas verdes. |
+| Portão visual | Impeccable detect | Em pedidos com interface: varre o código atrás de cara de template; se achar, força uma rodada de retoque. |
+| Revisão | Codex GPT-5.6 Terra (revisor) | Lê o diff em modo somente leitura e aprova ou pede mudanças (até 3 rodadas automáticas). |
+| Entrega | motor | Cada parte aprovada vira um commit `ade: <parte>` na sua pasta. |
 
-```bash
-npm run setup
-npm run server
-npm run ui
-```
+Quem escreve e quem revisa têm de ser de empresas diferentes. Modelos por papel em "Modelos": Claude (Sonnet, Opus, Fable, Haiku), Codex (GPT-5.6 Terra/Sol/Luna, GPT-6 Astra, GPT-5.5), Antigravity (Gemini 3.1 Pro, 3.8 Flash, e Claude/GPT-OSS via Google).
 
-Precisa de `claude` e `codex` instalados e logados nas suas assinaturas. Cada rodada gasta chamadas reais.
+## Proteções
 
-## Onde ficam as coisas
+- A pasta precisa estar sem alterações pendentes para começar: assim "descartar" desfaz só o que a ADE fez.
+- O Claude roda em `--safe-mode`: sem os seus hooks, CLAUDE.md, MCPs e skills globais; só recebe o que a ADE injeta.
+- Com "rodar comandos" ligado, a IA pode instalar dependências e criar o projeto (equivale a "ignorar permissões" do Claude desktop). Desligue em Opções para ela só ler e editar.
+- O Codex revisa em sandbox somente leitura.
 
-- `server.mjs`: orquestração, API HTTP e eventos ao vivo (SSE). Grava `.ade/journal.jsonl`.
-- `src/App.jsx`: painel (React + Radix Themes + Tailwind).
-- `example/`: projeto alvo, com um bug de propósito.
-- `review.schema.json`: formato da resposta do revisor.
+## Limites conhecidos
+
+- Cota do plano (5 h / semanal) não é exposta pelas CLIs em modo silencioso; o painel mostra chamadas, tokens e custo em dólar do Claude.
+- Sem retomada após queda do servidor: uma missão interrompida fica registrada em `.ade/journal.jsonl`, mas não continua sozinha.
+- Um projeto por vez.
+- O seletor de pasta é um campo de texto, não uma janela do Windows.
+
+## Arquivos
+
+- `server.mjs`: motor, adaptadores das três CLIs, catálogo de skills, API e eventos ao vivo.
+- `src/App.jsx`: painel (React + Radix Themes + Tailwind + Geist).
+- `review.schema.json`, `research.schema.json`: formatos de resposta do revisor e da pesquisa.
+- `.ade/`: configurações, projetos recentes, histórico e journal (não versionado).
+- `example/`: projeto de exemplo com um bug de propósito.
