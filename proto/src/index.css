@@ -765,3 +765,6 @@ button { font: inherit; color: inherit; }
 .msg-card { max-width: 100%; overflow-wrap: anywhere; }
 .msg-card pre, .msg-card code { overflow-wrap: anywhere; white-space: pre-wrap; }
 .main { overflow-x: hidden; }
+
+.errbar.ask { align-items: center; gap: 12px; }
+.errbar .btn.primary.sm { margin-left: auto; padding: 6px 12px; font-size: 12.5px; white-space: nowrap; }

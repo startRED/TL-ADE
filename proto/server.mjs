@@ -86,12 +86,12 @@ const state = new Proxy({}, {
 
 // ---------- anexos e diálogos do Explorer ----------
 const ATTACH_DIR = '.ade-attachments'
-async function pickNative(kind) {
+async function pickNative(kind, start = '') {
   // Diálogo nativo do Explorer. O dono (form invisível, TopMost) precisa estar MOSTRADO: com um form nunca exibido o ShowDialog devolvia Cancel na hora, sem abrir nada.
   // Pasta: truque do OpenFileDialog (Explorer moderno, com "Nova pasta"); a pasta é o diretório do nome escolhido.
   const owner = "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true; Opacity = 0; ShowInTaskbar = $false; Width = 1; Height = 1; StartPosition = 'CenterScreen' }; $f.Show(); $f.Activate(); "
   const script = kind === 'folder'
-    ? owner + "$d = New-Object System.Windows.Forms.OpenFileDialog; $d.Title = 'Escolha a pasta do projeto (entre nela e clique em Abrir; pode criar uma nova)'; $d.ValidateNames = $false; $d.CheckFileExists = $false; $d.CheckPathExists = $true; $d.FileName = 'Selecionar esta pasta'; $d.Filter = 'Pasta|*.pasta'; $r = $d.ShowDialog($f); $f.Close(); if ($r -eq 'OK') { [Console]::Out.Write([System.IO.Path]::GetDirectoryName($d.FileName)) }"
+    ? owner + "$d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Escolha a pasta do projeto (ou crie uma nova com o botao)'; $d.ShowNewFolderButton = $true; $d.RootFolder = 'MyComputer'; $d.SelectedPath = '" + String(start).replace(/'/g, "''") + "'; $r = $d.ShowDialog($f); $f.Close(); if ($r -eq 'OK') { [Console]::Out.Write($d.SelectedPath) }"
     : owner + "$d = New-Object System.Windows.Forms.OpenFileDialog; $d.Title = 'Anexar arquivos ou fotos'; $d.Multiselect = $true; $d.Filter = 'Tudo (*.*)|*.*|Imagens|*.png;*.jpg;*.jpeg;*.webp;*.gif|Documentos|*.pdf;*.md;*.txt;*.docx;*.xlsx;*.csv;*.json'; $r = $d.ShowDialog($f); $f.Close(); if ($r -eq 'OK') { [Console]::Out.Write(($d.FileNames -join [char]10)) }"
   const r = await run('powershell', ['-STA', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { timeoutMs: 10 * 60 * 1000 })
   return r.out.split(String.fromCharCode(10)).map((x) => x.trim()).filter(Boolean)
@@ -946,13 +946,21 @@ function finish() {
   broadcast()
 }
 
-async function startMission(request) {
+// commit das alterações que o usuário deixou pendentes (com a identidade git dele; se não houver, a da TL-ADE)
+async function commitPending(dir, message = 'antes da TL-ADE: alterações pendentes do usuário') {
+  await run('git', ['add', '-A', '--', '.'], { cwd: dir })
+  let c = await run('git', ['commit', '-q', '-m', message, '--', '.'], { cwd: dir })
+  if (c.code !== 0 && /user\.name|user\.email|identity/i.test(c.err)) c = await run('git', ['-c', 'user.name=TL-ADE', '-c', 'user.email=ade@local', 'commit', '-q', '-m', message, '--', '.'], { cwd: dir })
+  return c.code === 0 ? null : (c.err || c.out).trim().split(String.fromCharCode(10)).slice(-2).join(' ')
+}
+async function startMission(request, { commitFirst = false } = {}) {
   const p = state.project
   if (!p) return 'Escolha uma pasta primeiro.'
-  const fresh = await discover(p.dir)
+  let fresh = await discover(p.dir)
   if (fresh.error) return fresh.error
   if (!fresh.git) return 'A pasta precisa ser um repositório git: é assim que a ADE mostra e desfaz alterações. Use "Iniciar git nesta pasta".'
-  if (fresh.dirty) return 'A pasta tem alterações não commitadas. Commite ou descarte antes, para a ADE poder desfazer só o que ela mesma fizer.'
+  if (fresh.dirty && commitFirst) { const err = await commitPending(fresh.dir); if (err) return `Não deu para commitar: ${err}`; fresh = await discover(fresh.dir); log('operador', 'commitou as alterações pendentes antes de começar') }
+  if (fresh.dirty) return { error: 'A pasta tem alterações suas ainda não commitadas. A ADE precisa de um ponto de partida limpo para poder desfazer só o que ela mesma fizer.', code: 'dirty' }
   const s = state.settings
   if (vendorOf(s.roles.maker.family, s.roles.maker.model) === vendorOf(s.roles.checker.family, s.roles.checker.model)) return 'Quem escreve e quem revisa precisam ser de empresas diferentes. Ajuste em Modelos.'
   await ensureIgnore(fresh.dir); state.project = await discover(fresh.dir); state.log = []; state.phase = 'intent'
@@ -1050,7 +1058,11 @@ http.createServer(async (req, res) => {
         state.project = await discover(d); broadcast(); return json(res, 200, state.project)
       })
     }
-    if (url.pathname === '/api/pick' && req.method === 'POST') { const { kind } = await body(req); return json(res, 200, { paths: await pickNative(kind) }) }
+    if (url.pathname === '/api/project/commit' && req.method === 'POST') {
+      const b = await body(req); const e = await targetEngine(req, url, b); if (!e?.project?.git) return json(res, 400, { error: 'Sem repositório git.' })
+      return withEngine(e, async () => { const err = await commitPending(state.project.dir, b.message || undefined); if (err) return json(res, 400, { error: err }); state.project = await discover(state.project.dir); log('operador', 'commitou as alterações pendentes'); broadcast(); return json(res, 200, state.project) })
+    }
+    if (url.pathname === '/api/pick' && req.method === 'POST') { const { kind } = await body(req); const cur = activeEngine()?.project?.dir; return json(res, 200, { paths: await pickNative(kind, cur ? path.dirname(cur) : HOME) }) }
     if (url.pathname === '/api/attach' && req.method === 'POST') { const b = await body(req); const e = await targetEngine(req, url, b); if (!e?.project) return json(res, 400, { error: 'Escolha uma pasta primeiro.' }); try { return await withEngine(e, async () => json(res, 200, { added: await addAttachments(b), attachments: state.attachments })) } catch (err) { return json(res, 400, { error: err.message }) } }
     if (url.pathname === '/api/attach/remove' && req.method === 'POST') { const b = await body(req); const e = await targetEngine(req, url, b); if (!e) return json(res, 400, {}); return withEngine(e, async () => { const i = state.attachments.findIndex((a) => a.name === b.name); if (i >= 0) { const [a] = state.attachments.splice(i, 1); await rm(path.join(state.project.dir, a.path), { force: true }); broadcast() } return json(res, 200, { attachments: state.attachments }) }) }
     if (url.pathname === '/api/run' && req.method === 'POST') {
@@ -1060,7 +1072,7 @@ http.createServer(async (req, res) => {
       if (busyOf(e)) return json(res, 409, { error: 'Já há uma missão rodando nesta pasta. Pause-a ou espere; em outra pasta pode rodar em paralelo.' })
       if (e.mission && ['awaiting_plan', 'awaiting_operator', 'paused'].includes(e.mission.state)) return json(res, 409, { error: 'A missão anterior desta pasta ainda espera uma decisão sua (continuar ou descartar).' })
       activeDir = path.resolve(e.project.dir)
-      const err = await withEngine(e, () => startMission(request.trim())); return err ? json(res, 400, { error: err }) : json(res, 202, { ok: true })
+      const err = await withEngine(e, () => startMission(request.trim(), { commitFirst: !!b.commit_first })); return err ? json(res, 400, typeof err === 'string' ? { error: err } : err) : json(res, 202, { ok: true })
     }
     if (url.pathname === '/api/decide' && req.method === 'POST') { const b = await body(req); const e = await targetEngine(req, url, b); if (!e) return json(res, 400, {}); withEngine(e, () => guard(() => decide(b.option, { text: b.text, answers: b.answers }))); return json(res, 202, { ok: true }) }
     if (url.pathname === '/api/skill' && url.searchParams.get('id')) { const c = state.catalog.find((x) => x.id === url.searchParams.get('id')); return c ? json(res, 200, { id: c.id, body: c.body }) : json(res, 404, {}) }
