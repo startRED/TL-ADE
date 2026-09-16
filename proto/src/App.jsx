@@ -234,19 +234,19 @@ export default function App() {
           <p className="side-tip">Abrir outra pasta não interrompe a missão desta: as duas rodam ao mesmo tempo.</p>
         </div>
 
-        {engines.length > 1 && withMission.length > 0 && (
+        {engines.length > 1 && (
           <div className="side-block">
-            <span className="side-lbl">Em andamento</span>
+            <span className="side-lbl">Pastas abertas</span>
             <div className="side-hist eng-list">
-              {withMission.map((e) => {
-                const es = STATE[e.mission.state] || { label: e.mission.state, tone: 'mute' }
+              {engines.map((e) => {
+                const es = e.mission ? (STATE[e.mission.state] || { label: e.mission.state, tone: 'mute' }) : { label: 'sem pedido', tone: 'mute' }
                 return (
                   <button key={e.dir} className={`hist-item${e.active ? ' now' : ''}`} onClick={() => post('/api/select', { dir: e.dir })} title={e.dir}>
                     <span className="hist-top">
-                      <span className="hist-title">{e.mission.plan?.title || e.mission.request}</span>
+                      <span className="hist-title">{e.project?.name || folderName(e.dir)}</span>
                       <span className={`dot-${es.tone}${e.busy ? ' dot-live' : ''}`} aria-hidden="true">●</span>
                     </span>
-                    <span className="hist-sub"><span>{e.project?.name || folderName(e.dir)}</span><span>{es.label}</span></span>
+                    <span className="hist-sub"><span>{e.mission ? (e.mission.plan?.title || e.mission.request) : (e.project ? `${e.project.branch || 'sem git'} · ${e.project.runner === 'none' ? 'sem provas' : e.project.runner}` : '')}</span><span>{es.label}</span></span>
                   </button>
                 )
               })}
