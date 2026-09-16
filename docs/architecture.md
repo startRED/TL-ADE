@@ -54,7 +54,7 @@ Nada em `.ade/` entra em commit (`.git/info/exclude`).
 | :-- | :--- | :--- | :--- | :-- |
 | C1 | Journal | JSONL append-only, `prev` = 16 hex do SHA-256 da linha anterior sobre JSON canônico (RFC 8785 via `canonicalize`), `fsync` por linha, escritor único serializado | próprio (porte I01–I06) | v1 |
 | C2 | Step + Reconciler | `step_intent` antes do efeito, `step_result` depois, `input_digest`, `intent_context`; tabela fechada de reconciliação por `effect_class` (I07–I17) | próprio (porte) | v1 |
-| C3 | Lease | `mkdir` + heartbeat 2 s + TTL 6 s + fingerprint (pid, start time); exit 5 em conflito | próprio (~60 linhas; `proper-lockfile` abandonado) | v1 |
+| C3 | Lease | `mkdir` + heartbeat em `worker_thread` a cada 2 s + TTL 15 s [hipótese, medir no slice 1] + fingerprint (pid, start time); exit 5 em conflito; regra dura: nenhuma chamada externa síncrona no engine | próprio (~60 linhas; `proper-lockfile` abandonado) | v1 |
 | C4 | GitPort | uma instância por worktree (nunca singleton), `worktree_tree` com índice racy, `dirty_paths -z` com os dois lados de rename, checkpoint/descarte em `refs/ade/...` | próprio sobre `git` | v1 |
 | C5 | Runner | spawn com `env` explícito filtrado (I49), recibo durável em disco com fingerprint anti-reuso de PID, `cwd` no worktree, kill por `taskkill /T /F /PID` (nunca `pty.kill`), Job Object herdado do libuv (filho não-detached) | próprio | v1 |
 | C6 | BinaryResolver | resolve o `.exe` real atrás dos 3 shims npm; `spawn` de `.cmd` só via `cmd.exe /c` | próprio | v1 |
@@ -65,10 +65,10 @@ Nada em `.ade/` entra em commit (`.git/info/exclude`).
 | C11 | Tool Output Firewall | `run(argv) → {rawPath, extract}`: bruto vira artifact; o modelo recebe extrato (falhas íntegras, sucesso resumido) + ponteiro de drill-down; saída de ferramenta é dado não confiável (cerca inbound) | próprio; hooks das CLIs só como reforço | v1 |
 | C12 | Adapters | bespoke headless: `claude`, `codex`; `agy` para pesquisa (v0.x). Casca fina sobre flags nativas + parser tolerante a campos desconhecidos + CLI falsa por família | próprio, fino | v1 (2) |
 | C13 | Capability Registry | JSON por família com `probe_ok/probed_at` medidos por `ade doctor` com chamada real; roteamento por papel com primário + 2 fallbacks; Maker ≠ Checker por `model_id` | próprio, pequeno | v1 |
-| C14 | Scheduler | lista de stories com `depends_on` opcional (DAG só quando o plano declara); `next_ready` devolve conjunto (N-capaz), N=1 na v1; reserva de orçamento; `blocked` por dependência parada | próprio (~80 linhas) | v1 |
+| C14 | Scheduler | lista de stories com `depends_on` opcional (DAG só quando o plano declara); `next_ready` devolve conjunto (N-capaz), N=1 na v1 (N>1 pós-v1); reserva de orçamento; `blocked` por dependência parada; `--unattended` recusa sem precondições (A5) | próprio (~80 linhas) | v1 |
 | C15 | Intent Compiler | context discovery determinístico (git, rg, manifestos) → classificação de complexidade → expansão em camadas → ≤5 perguntas (recusa pergunta respondível pelo discovery; "não sei" = default registrado) → plano de Task Contracts validado por ajv → resumo de aprovação | próprio + 1–2 chamadas com `--json-schema` | v1 |
 | C16 | Skill Fabric | catálogo curado (60–80), `index.json` com extensão fora do SKILL.md, filtro duro por domínio → BM25 top-8 (~80 linhas, $0) → seletor barato ≤3 → bloco fixo do pack ordenado por id estável; SkillGuard (12 controles) | próprio | v1 |
-| C17 | Frontend Quality Engine | DesignBrief em 4 camadas no contrato; build → serve → a11y snapshot + console + rede + `impeccable detect --json` (URL renderizada) → portões determinísticos D1–D7 → juiz multimodal de outra família (anti-ancoragem) → ≤2 rodadas, corte 7,5; `$imagegen` para assets | próprio orquestrando Playwright (lib) + Impeccable pinado | v1 parcial (D1–D5 + juiz) |
+| C17 | Frontend Quality Engine | DesignBrief em 4 camadas no contrato; build → serve → a11y snapshot + console + rede + `impeccable detect --json` (URL renderizada) → portões determinísticos D1–D6 (todos dependentes de render; lint anti-slop vive no Gate runner C8) → juiz multimodal de outra família (anti-ancoragem, pinado por `model_id`) → ≤2 rodadas, corte 7,5; `$imagegen` para assets | próprio orquestrando Playwright (lib) + Impeccable pinado | v0.4a (D1–D6 + juiz; conjunto bloqueante calibrado no dogfood) |
 | C18 | Pesquisa | step `research`: uma chamada com schema por incógnita declarada (classe ≥ feature); time paralelo somente-leitura (2–4) opt-in; empate vira pergunta; achado é dado | próprio, fino | v1 (simples) |
 | C19 | Telemetria + harness doctor | evento por `model_call` no journal (tokens, cache, custo com `cost_source`, pack por seção, `skills_injected[{name,bytes,cited}]`); doctor v1 só coleta e relata | próprio | v1 (coleta) |
 | C20 | Painel | projeção do journal via índice SQLite reconstruível + WebSocket; Chat · Missão · Log; toda ação do painel vira step | próprio | v0.4 |
@@ -184,11 +184,11 @@ interface Telemetry {                      // kind: 'telemetry', um por model_ca
 
 | Classe | Perguntas | Pesquisa | Plano | Checker | FQE | Concorrência |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| trivial | 0 | não | contrato mínimo | só se diff > N arquivos | detector só | — |
+| trivial | 0 | não | contrato mínimo | só se diff > 1 arquivo-fonte (config `fast_lane.checker_threshold_files`) | detector só | — |
 | bounded | ≤2 | não | 1–3 stories | rodada | D1–D5 + juiz se UI | — |
 | feature | ≤5 | se incógnita | 4–8 stories, 1 epic | rodada + portão | completo | — |
-| subsystem | ≤5 | sim | 9–20 stories, epics | rodada + portão | completo | N opt-in |
-| project | ≤5 | time | fases, epics, stories | rodada + portão | completo | N opt-in |
+| subsystem | ≤5 | sim | 9–20 stories, epics | rodada + portão | completo | — (N opt-in pós-v1) |
+| project | ≤5 | time | fases, epics, stories | rodada + portão | completo | — (N opt-in pós-v1) |
 
 A jornada 6 ("continue enquanto durmo") não é classe: é missão com `autonomy` e orçamento de parede
 (`max_wall_clock_seconds`, `max_parked_units`), que retoma sem nova entrevista e para em
@@ -278,7 +278,7 @@ migrations), `restricted` (produção, segredos, destrutivo; nunca desatendido).
 por família medidas: Claude `--permission-mode bypassPermissions --permission-prompts none
 --disallowedTools "Bash(git *)" "Bash(gh *)"` (glob best-effort; a cerca real é o `env` filtrado e o
 engine ser o único a rodar git/gh); Codex `--sandbox workspace-write --approve-for-me` + `.rules`;
-`agy` `--approval-mode yolo`. Nunca `--permission-mode auto`.
+`agy` `--dangerously-skip-permissions` (o `--approval-mode yolo` é do Gemini CLI, não do `agy`). Nunca `--permission-mode auto`.
 
 ## 8. O que mudou em relação à spec v2
 
@@ -333,3 +333,61 @@ Rejeitados do ECC: catálogo inteiro (gargalo de índice), 39 hooks automáticos
 `autonomous-agent-harness`, `token-budget-advisor`, os 14 MCPs, `ecc2/`, GitHub App pago, e o método
 do `harness-audit.js` (pontua presença de arquivo). Atenção: o "36 %" da Snyk (skills com injeção)
 não é o "36,0 % → 7,2 %" da premissa #34 (ASR); métricas diferentes.
+
+## 11. Arbitragem das divergências dos escritores (2026-09-17)
+
+Os 18 documentos derivados registraram objeções a este documento. Decisões abaixo são canônicas e
+prevalecem sobre qualquer trecho anterior deste arquivo ou dos derivados; a revisão adversarial
+propaga. "E" = evidência principal.
+
+**Contratos e estado**
+- E1 `passes` sai do Task Contract. O contrato é imutável após aprovação (coberto por `immutable_digest`); o estado da story vive no journal (`unit_state`) e na projeção `status.json`. `unit-result` carrega o veredito. E: master-spec; digest #22.
+- E2 Exceção única de mutabilidade: em `trivial` com `evals: []` na aprovação, o Maker preenche `evals` uma vez (`author: 'maker'`), gravado como step `local_write` com `eval_authored_by`, e o vermelho diferido é condição de validade. E: intent-compiler D2.
+- E3 `plan.mission_budget: { max_wall_clock_seconds, max_parked_units, max_usd }` gravado no `batch_open`; defaults da jornada 6: 8 h e 3 [hipótese]. `permitted_effects` lista só efeitos externos; classes internas (`model_call`, `eval_run`, `local_write`, `gate`, `prepare`) são implícitas. E: journeys; master-spec.
+- E4 Orçamento default por story e classe [hipótese]: trivial 3 chamadas/1 rework; bounded 6/2; feature 10/3; subsystem e project 12/3. E: vision (pergunta aberta).
+- E5 `ask_operator` é enum fechado (`push`, `pull_request`, `pull_request_merge`, `dependency_add`, `dependency_major_bump`, `migration_destructive`, `deploy`, `secrets_read`, `destructive_local`, `skill_first_use`, `*`) mais `note` livre. `restricted` não tem bloco de famílias: `dispatch: never` (`autonomy_requires_operator`) e herda `scope_paths` da story. E: operations 9.2, 9.4, 9.5.
+- E6 `effect_class` ganha `gate` e `prepare` agora (antes do slice 1), além das classes novas já listadas. E: engine D3.
+- E7 `runtime_stamp = <core_version>:<config_digest>:<capabilities_digest>`; `core_version` é constante do núcleo durável (C1–C5, C7) e só ela bloqueia com `stale_workflow_version`; `capabilities_digest` cobre upgrade silencioso de CLI (`agy` 1.2.3 → 1.2.4 sem ação). Aceite por `ade run --accept-stale-version`, gravado como `decision`. E: development-method D1; adapters D2; engine D6.
+- E8 `unit-result` e `review-result` ganham `sources: string[]` obrigatório (digests das seções do pack usadas); sem isso `cited` é sempre falso. E: context D1; judgment-J3.
+- E9 `visual-eval` vira 9º schema publicado na v0.4b (dois consumidores). `judge` pinado por `model_id` no contrato e replicado no registro; `visual_score` só comparável dentro do mesmo juiz; `judge_family` registrado e "juiz único (Codex) com Maker sempre Claude" é hipótese explícita. E: evals D3; journeys.
+- E10 `CapabilitySet`: `probe_ok: boolean | null`, `probe_mode: 'real' | 'help_only' | 'fixture'`, `bootstrap_cost_tokens` medido por família, `models[].vendor` (derivado por prefixo). `ade doctor --offline` é o default em CI; `null` fora de CI recusa despacho, nunca degrada. Checker de rodada recusa vendor igual ao do Maker. E: adapters D3, D4, D5; context D4.
+- E11 Telemetria ganha `compaction_events`, `outcome ∈ {ok, retry, rework, park, stop}`, `ttft_ms`, e um evento `scope: 'mission_summary'` no fechamento (intervenções, perguntas, wall time, verbos de CLI usados). Eventos `decision` carregam `source: operator | engine`. E: vision D1; context D5.
+- E12 `EvalRecord.red_reason ∈ {assertion, missing_target, compile_error, environment}`; só `assertion` conta como vermelho válido; os demais rebaixam para `additive` com aviso (classe ≥ feature: `awaiting_operator`). `additive` exige no mesmo cenário um eval `negative` ou um spot-check `mutate` (validação ajv). E: evals D1, D2.
+
+**Limites e contexto**
+- E13 Corte do pack em bytes (`limits.max_pack_bytes`, default 120 000 [hipótese], calibrar por p90); "40k tokens" é alvo de projeto por estimativa. Teto próprio da seção de rodada (achados, falhas de gate, checkpoint): 24 000 bytes com ponteiro. Diff do Checker: `review.max_diff_bytes` default 60 000 chars, por arquivo em ordem de relevância de escopo, ponteiro `ade show diff:<story>#<arquivo>`. E: context D2, D3; engine D1; operations 9.6; judgment-J3.
+- E14 Skills: ≤5k tokens por skill e soma ≤7,5k (não 2,5k fixo); o filtro duro não elimina por tamanho antes do BM25. Braço de controle "BM25@3 puro" medido antes de manter o seletor barato. E: skill-fabric D1; adr-1.
+- E15 O engine tem de suprimir o listing nativo de skills/plugins do usuário na chamada despachada (flags exatas medidas pelo doctor: `--safe-mode`, `--setting-sources`, `--plugin-dir` vazio) e o doctor prova por contagem em `system/init`; `skills_injected[]` só é verdadeiro sob essa supressão. E: skill-fabric D2 [hipótese até a sonda].
+- E16 Receita de chamada curta no Codex: `--ignore-user-config --ignore-rules --ephemeral -c skills.max_context_tokens=0` + `AGENTS.md` ≤2 KB escrito pelo engine no worktree; o pack do Checker inclui obrigatoriamente a seção "invariantes do repo". Chamadas de `$imagegen` usam a configuração completa (sonda do doctor confirma). E: adapters D5; adr-1; skill-fabric D4.
+- E17 Benefício de cache é [hipótese]; `cache_read / (tokens_in + cache_read)` por papel é a primeira métrica do harness doctor. E: context D6.
+- E18 Classificador: regra determinística primeiro em candidatos a `trivial` (1 arquivo tocado no discovery + verbo de correção); chamada de modelo só com confiança < 0,6 ou classe ≥ feature. As ≤2 chamadas da faixa rápida incluem o classificador quando ele roda. E: intent D1; journeys; digest #26.
+- E19 Pesquisa dispara por incógnita declarada do tipo `external_fact` (não por classe); teto por classe: bounded ≤1 consulta sem time; feature+ até 3; time paralelo opt-in. E: intent D3.
+- E20 Teto de pack por story tem duas verificações: estimativa no plano (divide por cenário) e medição no `prepare` (poda contexto recuperado, nunca o contrato; reabre divisão se o contrato sozinho estourar). E: intent D4.
+
+**Durabilidade e engine**
+- E21 Worker não-detached na v1: a branch "anexa e espera" de I09 fica dormente; o recibo com fingerprint serve para decidir `ambiguous` com honestidade e para `taskkill` seguro; o teste de attach é v0.5+. E: slice-1 D1; engine D4; adr-2.
+- E22 `findings_digest = sha256(sorted(normalize(location) + '|' + normalize(problem)))` com as regex de `tl_ci_slice.normalize`; teste `same_findings_reworded_is_still_stagnation`. E: engine D5.
+- E23 Deny-list de caminhos fora do worktree (`~/.ssh/**`, `~/.aws/**`, `**/.env*`) vive no `env` filtrado, no canário e no doctor, não no `contain` (que só vê o diff). `ANTHROPIC_BASE_URL` e equivalentes nunca propagados. Ajusta A4. E: operations 9.3.
+- E24 `--disallowedTools` em argumento único separado por vírgula (`"Bash(git push*),Bash(gh pr*)"`), forma medida; sonda do doctor exige `permission_denials` não vazio num `git push --dry-run`. E: operations 9.1.
+- E25 I15 (`ci_rerun`) e I40 (merge remoto exige CI verde) entram como "portados desligados" com teste do caminho inerte; `ci.enabled: false` default. E: roadmap.
+- E26 Paridade: tabela `parity-name-map.json` (lista fechada dos casos que mudam de nome/semântica por `review-result` rico e `plan`) é artefato de ENTRADA da v0.2. Slice 1 tem subconjunto nomeado de 44 casos; 93/93 é critério da v0.2. Dois alvos normativos: `parity` (zero credencial, CI Windows + Linux) e `probes` (chamadas reais, local, opt-in). E: slice-1 D3; evals D4; adr-1.
+- E27 Cobertura: ≥85 % de linhas só em `journal, step, lease, git, runner, contain` [hipótese]; razão teste:produção no corpo do PR sem portão no resto. E: slice-1 D4.
+- E28 Fallback do estágio 0 (`claude -p` em loop) grava cursor durável no formato de linha do `journal-event`. Gravador de transcript (`scripts/record-transcript.ts`) é artefato do dia 1. E: slice-1 D5; development-method D4.
+- E29 Pacote único na raiz na v1; npm workspaces só no commit que cria `packages/web` (v0.4b). E: development-method D2.
+- E30 Meta "zero revisão humana" tem exceção escrita: as três superfícies de segurança (contain/isolamento, servidor local do painel, ingestão do catálogo) têm revisão humana obrigatória. E: development-method D3.
+
+**Operador e superfície**
+- E31 CLI: `ade run <pedido>` é canônico; forma nua aceita só quando o primeiro token não é comando e o pedido tem espaço em branco (senão exit 4 com sugestão). `--help` curto separa superfície operacional (`run`, `report`, `decide`, `discard`) da avançada. Exit 3 quando há `awaiting_operator` com `batch_state: in_progress`. Estados e `reason` em inglês (journal); mensagens em português. E: master-spec; vision D2.
+- E32 Novos verbos: `ade decide <unit> --option retry|skip|discard|pick --value <id>`; `ade show <ref> --open` (visualizador do SO; `report.md` emite caminhos absolutos por parada); `ade steer <missão> "<nota>"` (enfileira intenção consumida no `prepare` da próxima story; não é steering intraturno); `ade plan <pedido> --from <missão>` (herda discovery, respostas e stories concluídas; a anterior fica `superseded`); `ade run --accept-stale-version`; `ade run --unattended`. Takeover grava também `.ade/missions/<id>/takeover-<story>.cmd` e `.ps1`. E: operator-surface D1–D4; vision D3, D4.
+- E33 Aprovação única congela o conjunto elegível de skills da missão (união do top-8 por story); só skill fora do conjunto parqueia em lote desatendido. E: journeys.
+- E34 Painel (v0.4b): token aleatório por sessão do `ade serve` impresso no terminal + checagem de `Origin`. E: security D1.
+- E35 Scripts de skills de catálogo nunca ficam disponíveis ao agente na v1 (só o corpo do `SKILL.md` e `references/*.md` como texto); controle 11 (memória/config do agente no scan) é detect-only na v1 com baseline de hashes, bloqueio de despacho em v0.5. E: security D2, D3; skill-fabric D3.
+- E36 `refs/ade/discarded/` acumula; `ade doctor` reporta volume; purga é comando manual pós-v1. E: operator-surface.
+
+**Roadmap e FQE**
+- E37 v0.4 divide-se em v0.4a (Skill Fabric + FQE) e v0.4b (painel projeção + SQLite + workspaces). A v1 completa é ~15–16 semanas a 5 dias/semana (não "3 meses"); o slice 1 mede linhas portadas por dia na semana 1 e replaneja explicitamente. E: roadmap; master-spec.
+- E38 `ade eval <story>` roda os evals do contrato (dono: C9); a suíte de dogfood é suíte Vitest, não comando da v1. E: roadmap.
+- E39 Lint anti-slop (Oxlint vendorizado) sai do FQE e vira gate por flag no C8; FQE fica com D1–D6 dependentes de render. `self_critique` é obrigatório (`minLength`). Corte 7,5 com critério de recalibração publicado (escaped_visual_defects > 10 % em 20 stories → 8,0; `awaiting_operator` em trabalho aprovado à primeira vista → 7,0). Toda story com UI reserva 1 rodada de rework para o FQE no `prepare`. E: fqe D1–D4.
+- E40 Faixa rápida: teste `fast_lane_trivial_starts_within_30s_zero_questions` é critério de saída da v0.3; slice 1 grava só `first_source_edit_ms` como baseline. E: slice-1 D2.
+
+**Pendências que ficam para Erick ou para o dogfood**: retenção de refs descartados; defaults numéricos de lease/pack/orçamentos; confirmação dos itens de §9.
