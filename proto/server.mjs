@@ -436,7 +436,14 @@ async function makeAssets() {
     if (await exists(full)) { m.assets_done.push(a); continue }
     await mkdir(path.dirname(full), { recursive: true })
     log('engine', `codex gera imagem: ${a.file}`)
-    const prompt = `Use $imagegen to generate ONE image and save it at exactly "${a.file}" (path relative to the working directory; the folder already exists). Image description: ${a.prompt}. Requirements: no text, no letters, no watermark, no logo. Do not create or modify any other file. When the file is saved, reply with just the path.`
+    const style = (m.plan.assets_style || '').trim()
+    const prompt = [
+      `Use $imagegen to generate ONE image and save it at exactly "${a.file}" (path relative to the working directory; the folder already exists).`,
+      `Scene: ${a.prompt}`,
+      style ? `Art direction shared by every image of this website (follow it exactly): ${style}.` : '',
+      'It must look like a real photograph taken for this website, not AI art: natural light with real shadows, physically plausible objects, natural imperfections, shallow depth of field where a photographer would use it, subtle film grain, muted realistic colors, matte surfaces. Forbidden: text, letters, logos, watermarks, HDR glow, oversaturation, plastic-smooth skin or surfaces, perfect symmetry, floating objects, close-up faces, stock-photo grey backdrop, 3D render or illustration style unless the scene asks for an illustration.',
+      'Do not create or modify any other file. When the file is saved, reply with just the path.',
+    ].filter(Boolean).join(' ')
     // configuração completa do Codex (a skill imagegen precisa estar visível); sandbox só na pasta do projeto
     const r = await run('codex', ['exec', '--json', '--sandbox', 'workspace-write', '--skip-git-repo-check', '-C', dir, '-m', model, prompt], {
       cwd: dir, stdin: '', timeoutMs: 10 * 60 * 1000,
@@ -525,7 +532,11 @@ function planPrompt() {
     'Explore o projeto só o necessário (Glob/Read/Grep). Depois produza:',
     '- title (≤8 palavras), summary (2 frases, o que será entregue), complexity (trivial|bounded|feature|subsystem).',
     '- explanation: 4 a 8 linhas curtas para um usuário leigo, sem termos técnicos (nada de JSON, vitest, ES modules, tokens): o que ele vai ter no fim, o que cada parte entrega em uma frase, e o que foi assumido por conta própria.',
-    state.settings.assets_enabled ? '- assets: imagens que o Codex vai gerar ANTES das stories, só quando needs_ui e imagens reais melhorariam muito o resultado (hero, produtos, ilustrações). 0 a 6 itens: file (sempre assets/img/<nome>.png), prompt (em inglês, descrição fotográfica ou ilustrativa detalhada: assunto, enquadramento, luz, paleta; sem texto nem logotipo na imagem), purpose (onde a imagem entra, em português). As stories que usam a imagem citam o caminho e exigem alt descritivo.' : '- assets: lista vazia.',
+    state.settings.assets_enabled ? [
+      '- assets: imagens que o Codex vai gerar ANTES das stories, só quando needs_ui e imagens reais melhorariam muito o resultado (hero, produtos, ilustrações). 0 a 6 itens: file (sempre assets/img/<nome>.png), prompt (em inglês), purpose (onde a imagem entra, em português). As stories que usam a imagem citam o caminho e exigem alt descritivo.',
+      '- assets_style: UMA direção de arte em inglês, compartilhada por todas as imagens, coerente com o visual da página (paleta em palavras, luz, hora do dia, lente/câmera, textura, clima). Ex.: "editorial food photography, 50mm, soft window light late afternoon, muted warm palette (walnut, cream, sage), matte surfaces, subtle film grain".',
+      '- Cada prompt de asset descreve uma cena real e específica (assunto, o que está em volta, enquadramento, profundidade de campo, imperfeições naturais: migalhas, vapor, marcas de uso) como um fotógrafo faria. Proibido: texto, logotipos, rostos em close, brilho HDR, saturação alta, simetria perfeita, fundo neutro de banco de imagens, "3D render", "digital art", objetos flutuando.',
+    ].join('\n') : '- assets: lista vazia. assets_style: string vazia.',
     '- Critérios de aceite descrevem comportamento observável pelo usuário ou pela prova, nunca implementação: não fixe nomes de variáveis CSS, valores exatos, estrutura interna de arquivos ou "usar só X". Isso gera reprovações inúteis na revisão.',
     '- Nunca prescreva nos critérios: borda lateral colorida em cards, gradiente roxo/azul, três cards iguais, fundo creme/bege por reflexo, sombras pretas puras. O portão visual (Impeccable) bloqueia isso e a story trava.',
     '- domains: subconjunto de [frontend, design, backend, api, database, testing, python, security, a11y, docs].',
@@ -548,10 +559,11 @@ const PLAN_JSON_SCHEMA = {
     domains: { type: 'array', items: { type: 'string' } }, keywords: { type: 'array', items: { type: 'string' } },
     needs_ui: { type: 'boolean' }, needs_backend: { type: 'boolean' },
     research_questions: { type: 'array', items: { type: 'string' } }, questions: { type: 'array', items: { type: 'string' } },
+    assets_style: { type: 'string' },
     assets: { type: 'array', maxItems: 6, items: { type: 'object', additionalProperties: false, properties: { file: { type: 'string' }, prompt: { type: 'string' }, purpose: { type: 'string' } }, required: ['file', 'prompt', 'purpose'] } },
     stories: { type: 'array', minItems: 1, maxItems: 6, items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, title: { type: 'string' }, request: { type: 'string' }, acceptance: { type: 'array', items: { type: 'string' } }, test_hint: { type: 'string' } }, required: ['id', 'title', 'request', 'acceptance', 'test_hint'] } },
   },
-  required: ['title', 'summary', 'explanation', 'complexity', 'domains', 'keywords', 'needs_ui', 'needs_backend', 'research_questions', 'questions', 'assets', 'stories'],
+  required: ['title', 'summary', 'explanation', 'complexity', 'domains', 'keywords', 'needs_ui', 'needs_backend', 'research_questions', 'questions', 'assets_style', 'assets', 'stories'],
 }
 
 // ---------- prompts do maker ----------
@@ -567,7 +579,7 @@ function common(st) {
     p.runner === 'none' ? 'Não há runner de provas: crie o mínimo (JS: package.json com vitest e "test": "vitest run"; Python: pytest) antes da prova.' : '',
     p.has_index ? 'Há um index.html na raiz; o que for visual tem de aparecer nele.' : (m.plan.needs_ui ? 'Se esta story é visual, entregue/atualize index.html na raiz funcionando como arquivos estáticos (ES modules, sem build).' : ''),
     m.research?.findings?.length ? `Pesquisa prévia: ${m.research.findings.map((f) => `${f.question} → ${f.answer}`).join(' | ')}` : '',
-    m.assets_done?.length ? `Imagens já geradas no projeto (use onde indicado, com alt descritivo; não gere outras): ${m.assets_done.map((a) => `${a.file} — ${a.purpose}`).join('; ')}` : '',
+    m.assets_done?.length ? `Imagens já geradas no projeto (use onde indicado, com alt descritivo; não gere outras): ${m.assets_done.map((a) => `${a.file} — ${a.purpose}`).join('; ')}. Regras de aplicação: object-fit: cover com enquadramento pensado (object-position), width/height ou aspect-ratio para não pular o layout, loading="lazy" fora do topo; texto sobre foto só com scrim/gradiente na cor da página garantindo contraste AA; sobreposição sutil (mix-blend-mode ou overlay de 10–25 % na cor de marca) quando a foto destoar da paleta; nunca esticar, nunca borda colorida, nunca filtro exagerado.` : '',
     m.answers?.length ? `Escolhas do usuário na entrevista: ${m.answers.map((a) => `${a.question} → ${a.answer}`).join(' | ')}` : '',
   ].filter(Boolean)
 }
