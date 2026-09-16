@@ -16,7 +16,7 @@ const PORT = 4317
 const IS_WIN = process.platform === 'win32'
 
 // ---------- estado ----------
-const state = { mission: null, log: [] }
+const state = { mission: null, log: [], history: [] }
 const clients = new Set()
 
 function now() { return new Date().toISOString() }
@@ -169,13 +169,30 @@ async function checker(diff, tests) {
 }
 
 // ---------- pipeline ----------
-function makerPrompt(round, review) {
+// Duas fases de Maker, como na arquitetura (prova vermelha antes da correção):
+//   test: a IA escreve só o teste novo -> harness roda -> tem de haver teste novo VERMELHO
+//   fix:  a IA corrige o código -> harness roda -> tudo verde -> Codex revisa
+const COMMON = [
+  'Projeto: JavaScript puro em src/, testes Vitest em src/*.test.js (ambiente happy-dom).',
+  'Você só tem ferramentas de leitura e edição; o harness roda os testes e te devolve o resultado. Trabalhe só dentro do diretório atual (src/ já existe: leia antes de escrever); não suba para diretórios acima.',
+]
+
+function testPrompt() {
+  return [
+    `Pedido do usuário: ${state.mission.request}`, ...COMMON,
+    'FASE 1 de 2: escreva APENAS um teste novo em src/login-form.test.js que reproduza o problema e que FALHE no código atual. Não altere nenhum outro arquivo e não corrija o código ainda.',
+    'Ao terminar, escreva uma frase com o nome exato do teste novo.',
+  ].join('\n')
+}
+
+function fixPrompt(round, review) {
+  const m = state.mission
+  const red = m.red_tests.map((t) => `- ${t.name}: ${t.message}`).join('\n')
   const base = [
-    `Pedido do usuário: ${state.mission.request}`,
-    'Projeto: JavaScript puro em src/, testes Vitest em src/*.test.js (ambiente happy-dom).',
-    'Método obrigatório: 1) escreva primeiro um teste novo em src/login-form.test.js que reproduza o problema e que FALHE no código atual; 2) só depois altere o código mínimo para o teste passar; 3) não toque em nada fora do escopo do pedido.',
-    'Você só tem ferramentas de leitura e edição; o harness roda os testes depois e te devolve o resultado. Trabalhe só dentro do diretório atual (src/ já existe: leia antes de escrever); não suba para diretórios acima.',
-    'Ao terminar, escreva uma frase dizendo o que mudou e qual teste prova.',
+    `Pedido do usuário: ${m.request}`, ...COMMON,
+    `FASE 2 de 2: o harness rodou os testes e o teste novo está vermelho, como esperado:\n${red}`,
+    'Agora altere o código mínimo em src/login-form.js para o teste passar. Não modifique os testes. Não toque em nada fora do escopo do pedido.',
+    'Ao terminar, escreva uma frase dizendo o que mudou.',
   ]
   if (round > 1 && review) {
     base.push(`Esta é a rodada ${round}. O revisor (outra IA) pediu mudanças: ${review.summary}`)
@@ -193,17 +210,36 @@ async function pipeline(round = 1, previousReview = null) {
       m.tests_before = await runTests()
       log('engine', `linha de base: ${m.tests_before.total} testes, ${m.tests_before.failed} vermelhos`)
       setStep('prepare', 'done')
+
+      setStep('test', 'running')
+      await maker(testPrompt())
+      setStep('test', 'done')
+
+      setStep('red', 'running')
+      const afterTest = await runTests()
+      const before = new Set(m.tests_before.tests.map((t) => t.name))
+      m.red_tests = afterTest.tests.filter((t) => !before.has(t.name) && t.status !== 'passed')
+      m.new_tests = afterTest.tests.filter((t) => !before.has(t.name)).map((t) => t.name)
+      const regress = afterTest.tests.filter((t) => before.has(t.name) && t.status !== 'passed')
+      log('engine', `prova vermelha: ${m.new_tests.length} teste(s) novo(s), ${m.red_tests.length} vermelho(s), ${regress.length} antigo(s) quebrado(s)`)
+      if (m.red_tests.length === 0 || regress.length > 0) {
+        setStep('red', 'failed')
+        m.tests_after = afterTest; m.diff = await gitDiff()
+        m.state = 'awaiting_operator'; m.reason = regress.length ? 'tests_red' : 'no_red_test'
+        log('engine', `parada: ${m.reason}`, 'error')
+        return finish()
+      }
+      setStep('red', 'done')
     }
-    setStep('maker', 'running', { round })
-    await maker(makerPrompt(round, previousReview))
-    setStep('maker', 'done', { round })
+
+    setStep('fix', 'running', { round })
+    await maker(fixPrompt(round, previousReview))
+    setStep('fix', 'done', { round })
 
     setStep('tests', 'running')
     m.tests_after = await runTests()
     m.diff = await gitDiff()
-    const before = new Set(m.tests_before.tests.map((t) => t.name))
-    m.new_tests = m.tests_after.tests.filter((t) => !before.has(t.name)).map((t) => t.name)
-    log('engine', `testes depois: ${m.tests_after.total} no total, ${m.tests_after.failed} vermelhos, ${m.new_tests.length} novos`)
+    log('engine', `testes depois: ${m.tests_after.total} no total, ${m.tests_after.failed} vermelhos`)
     setStep('tests', m.tests_after.ok ? 'done' : 'failed')
 
     if (!m.diff.trim()) {
@@ -216,12 +252,12 @@ async function pipeline(round = 1, previousReview = null) {
     m.review = await checker(m.diff, m.tests_after)
     setStep('checker', m.review ? (m.review.verdict === 'approve' ? 'done' : 'failed') : 'failed')
 
-    if (m.tests_after.ok && m.review?.verdict === 'approve' && m.new_tests.length > 0) {
+    if (m.tests_after.ok && m.review?.verdict === 'approve') {
       m.state = 'complete'; m.reason = null
-      log('engine', 'pronta: testes verdes, teste novo presente, revisor aprovou')
+      log('engine', 'pronta: teste novo ficou vermelho antes e verde depois; revisor de outra família aprovou')
     } else {
       m.state = 'awaiting_operator'
-      m.reason = !m.tests_after.ok ? 'tests_red' : m.new_tests.length === 0 ? 'no_new_test' : 'review_changes'
+      m.reason = !m.tests_after.ok ? 'tests_red' : 'review_changes'
       log('engine', `parada: ${m.reason}`)
     }
   } catch (e) {
@@ -233,6 +269,9 @@ async function pipeline(round = 1, previousReview = null) {
 
 function finish() {
   state.mission.finished_at = now()
+  const h = state.history.find((x) => x.id === state.mission.id)
+  const entry = { id: state.mission.id, request: state.mission.request, state: state.mission.state, reason: state.mission.reason, usd: state.mission.cost.usd, finished_at: state.mission.finished_at }
+  if (h) Object.assign(h, entry); else state.history.unshift(entry)
   journal({ type: 'mission', state: state.mission.state, reason: state.mission.reason }).catch(() => {})
   broadcast()
 }
@@ -247,7 +286,7 @@ async function startMission(request) {
   state.log = []
   state.mission = {
     id: 'm-' + Date.now().toString(36), request, state: 'running', reason: null, round: 0,
-    steps: [], tests_before: null, tests_after: null, new_tests: [], diff: '', review: null,
+    steps: [], tests_before: null, tests_after: null, new_tests: [], red_tests: [], diff: '', review: null,
     cost: { usd: 0, calls: 0, turns: 0, tokens_in: 0, tokens_out: 0, cache_read: 0 }, started_at: now(), finished_at: null,
   }
   journal({ type: 'mission_start', id: state.mission.id, request }).catch(() => {})
