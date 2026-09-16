@@ -1,3 +1,5 @@
+> **Superada em 2026-09-17.** Documento histórico. A arquitetura canônica é `docs/architecture.md`; a spec mestra é `docs/specs/2026-09-17-master-spec.md`. Premissas derrubadas em `docs/research/README.md`.
+
 # TL-ADE — Agentic Development Environment (design v2)
 
 Data: 2026-09-16. Estado: design aprovado em entrevista; v2 incorpora os requisitos adicionais de Erick
