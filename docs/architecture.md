@@ -304,3 +304,32 @@ engine ser o único a rodar git/gh); Codex `--sandbox workspace-write --approve-
 3. **Sem chave de API obrigatória** mantém-se; consequência: sem 4º provider (OpenCode). Família Google só via `agy` (assinatura), nunca via Gemini CLI. Confirmar.
 4. **Corte visual 7,5 e teto de 2 rodadas** (contra 8 e 4 da entrevista). Recomendação: aceitar e calibrar no dogfood.
 5. **Worker morre com o engine na v1** (uma chamada perdida em crash do engine) em troca de contenção de processos de graça. Recomendação: aceitar.
+
+## 10. Adendos incorporados após o painel
+
+Fonte: `docs/research/ref-affaan-mustafa-ecc.md` (guias shortform, longform e de segurança do ECC,
+lidos das versões versionadas no repositório; plugin local está em 1.10.0 contra 2.2.1 upstream).
+Os três guias confirmam a tese §1, o Firewall (C11), a morte do grupo de processos (C5), a fronteira
+de política (§7 Autonomia), N=1 e Maker ≠ Checker. Nenhum contradiz a arquitetura. Entram:
+
+| # | Mudança | Componente |
+| :-- | :--- | :--- |
+| A1 | Extrato do Firewall com forma fixa `{status: success\|warning\|error, summary, next_actions[], artifacts[], raw_ref}` em vez de texto livre; schema inline | C11 |
+| A2 | Telemetria ganha `approval_decisions`, `network_attempts`, `files_touched`; agregados `pass@k` e `pass^k` por classe de complexidade | §4 Telemetry, C19 |
+| A3 | Heartbeat do worker + dead-man switch: sem heartbeat por N s o engine mata o grupo de processos e põe a unidade em `awaiting_operator` com o log em quarentena | C5, C3 |
+| A4 | Deny-list nomeada no `contain` e no `env` filtrado: leitura negada em `~/.ssh/**`, `~/.aws/**`, `**/.env*`; `ANTHROPIC_BASE_URL` e equivalentes nunca propagados nem aceitos (CVE-2026-21852, CVE-2025-59536) | C7, I49, ADR 0015 |
+| A5 | Precondição dura da jornada 6: `ade run --unattended` recusa sem (a) gates ativos, (b) baseline de eval verde, (c) caminho de rollback em `refs/ade/`, (d) isolamento por worktree verificado pelo canário | C14, operações |
+| A6 | Estagnação também por assinatura de falha idêntica (hash de stderr/stack normalizado) em duas tentativas consecutivas; corrige o falso positivo herdado do `review-result` | C8/C9, detector de loop |
+| A7 | SkillGuard com lista concreta de padrões: zero-width/bidi (`​ ‌ ‍ ⁠ ﻿ ‪-‮`), `<!--`, `<script`, `data:text/html`, `base64,`, `curl\|wget\|nc\|scp\|ssh`, `enableAllProjectMcpServers`, `ANTHROPIC_BASE_URL` | C16 |
+| A8 | Protocolo de eval de conformidade (3 níveis de rigor de prompt, execução, classificação da sequência) para fixtures de skills e para o canário de isolamento | C16, C7 |
+| A9 | [hipótese] medir `--system-prompt` como veículo do pack contra o prompt de usuário; pack continua vindo de arquivo (`lpCommandLine`) | C10, harness doctor |
+| A10 | `ade doctor` adota as 7 categorias do `/harness-audit` (Tool Coverage, Context Efficiency, Quality Gates, Memory Persistence, Eval Coverage, Security Guardrails, Cost Efficiency) e o contrato de saída (score, checks com caminho, `top_actions`), pontuadas por telemetria e ablação, nunca por presença de arquivo | C19, ADR 0017 |
+| A11 | Seção "invariantes do repositório" do pack em forma canônica "Must Always / Must Never", imperativo curto, ≤1,5k tokens | C10 |
+| A12 | Achado do harness doctor no formato instinto `{trigger, action, confidence 0,3–0,9, evidence[], domain, scope: project\|global}`, derivado do journal (nunca de hooks), promoção project→global ao observar em 2+ repositórios; v1 só coleta | C19, ADR 0017 |
+| A13 | ECC é referência pinada por commit, nunca dependência de runtime; só `skills/` entra no catálogo, nunca `hooks/`, `install.sh` ou instaladores | C16, `catalog-sources.md` |
+| A14 | Divergência registrada: `gan-style-harness` do ECC usa 5–15 rodadas e corte 7,0; a ADE mantém ≤2 e 7,5 (Impeccable normativo, digest #16) e mede no dogfood. "Sprint contract" (Checker assina os critérios antes do `implement`) entra como flag experimental | C17, evals |
+
+Rejeitados do ECC: catálogo inteiro (gargalo de índice), 39 hooks automáticos, 79 comandos legados,
+`autonomous-agent-harness`, `token-budget-advisor`, os 14 MCPs, `ecc2/`, GitHub App pago, e o método
+do `harness-audit.js` (pontua presença de arquivo). Atenção: o "36 %" da Snyk (skills com injeção)
+não é o "36,0 % → 7,2 %" da premissa #34 (ASR); métricas diferentes.
