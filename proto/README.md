@@ -37,7 +37,11 @@ Quem escreve e quem revisa têm de ser de empresas diferentes. Modelos por papel
 
 ## Limites conhecidos
 
-- Cota do plano (5 h / semanal) não é exposta pelas CLIs em modo silencioso; o painel mostra chamadas, tokens e custo em dólar do Claude.
+- Cota do plano (5 h / semanal), por empresa, lida de onde cada CLI deixa o dado:
+  - **Claude**: a linha de status do Claude Code recebe `rate_limits` a cada turno interativo; `~/.claude/statusline.mjs` grava isso em `~/.claude/ade-usage.json` (chamadas silenciosas da ADE não atualizam; abra o Claude Code de vez em quando).
+  - **Codex**: cada sessão grava `rate_limits` em `~/.codex/sessions/…jsonl`; a ADE lê a sessão mais recente (as revisões da ADE também contam, por isso rodam sem `--ephemeral`).
+  - **Antigravity**: não deixa nada legível; abra o `agy` → Models & Quota.
+- Tokens acima de 1000k aparecem em M; custo em dólar com vírgula (US$ 1,41).
 - Sem retomada após queda do servidor: uma missão interrompida fica registrada em `.ade/journal.jsonl`, mas não continua sozinha.
 - Um projeto por vez.
 - O seletor de pasta é um campo de texto, não uma janela do Windows.

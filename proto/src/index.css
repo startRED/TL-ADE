@@ -268,3 +268,9 @@ button { font: inherit; color: inherit; }
 
 .role-skills { display: grid; grid-template-columns: 90px 1fr; gap: 8px; align-items: start; margin-top: 6px; }
 .role-name { font-size: 12px; color: var(--gray-10); padding-top: 6px; }
+
+.quota { display: flex; flex-direction: column; gap: 6px; font-size: 12px; margin-bottom: 14px; }
+.quota-row { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.quota-vendor { color: var(--gray-11); min-width: 74px; }
+.quota-win b { color: var(--gray-12); font-variant-numeric: tabular-nums; }
+.quota small { font-size: 11px; }
