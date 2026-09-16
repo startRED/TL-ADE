@@ -248,6 +248,10 @@ async function discover(dir) {
     else if (pkg.scripts?.test && !/no test specified/.test(pkg.scripts.test)) { info.runner = 'npm'; info.test_cmd = 'npm test' }
   } else if (await exists(path.join(dir, 'pyproject.toml')) || await exists(path.join(dir, 'pytest.ini')) || await exists(path.join(dir, 'requirements.txt'))) {
     info.language = 'python'; info.runner = 'pytest'; info.test_cmd = 'python -m pytest -q'
+  } else if (await exists(path.join(dir, 'go.mod'))) {
+    info.language = 'go'; info.runner = 'go'; info.test_cmd = 'go test ./...'
+  } else if (await exists(path.join(dir, 'Cargo.toml'))) {
+    info.language = 'rust'; info.runner = 'cargo'; info.test_cmd = 'cargo test'
   }
   return info
 }
@@ -269,7 +273,7 @@ async function runTests(project) {
       return { ok: failed === 0 && tests.length > 0, total: tests.length, failed, tests, runner: 'vitest' }
     } catch { return { ok: false, total: 0, failed: 0, tests: [], runner: 'vitest', error: (r.err || r.out).slice(-600) } }
   }
-  if (project.runner === 'npm' || project.runner === 'pytest') {
+  if (['npm', 'pytest', 'go', 'cargo'].includes(project.runner)) {
     const [cmd, ...args] = project.test_cmd.split(' ')
     const r = await run(cmd, args, { cwd: dir, timeoutMs: 5 * 60 * 1000 })
     const tail = (r.out + '\n' + r.err).trim().split('\n').slice(-12).join('\n')
