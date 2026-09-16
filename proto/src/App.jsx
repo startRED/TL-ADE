@@ -245,6 +245,7 @@ export default function App() {
                     <span className="hist-top">
                       <span className="hist-title">{e.project?.name || folderName(e.dir)}</span>
                       <span className={`dot-${es.tone}${e.busy ? ' dot-live' : ''}`} aria-hidden="true">●</span>
+                      <span role="button" tabIndex={0} className="eng-close" title={e.busy ? 'Pause antes de fechar' : 'Fechar esta pasta'} onClick={async (ev) => { ev.stopPropagation(); if (e.busy) return setError('Essa pasta tem um pedido rodando. Pause ou espere terminar antes de fechar.'); const hasM = e.mission && ['awaiting_plan', 'awaiting_operator', 'paused'].includes(e.mission.state); if (hasM && !window.confirm('Esta pasta tem um pedido esperando ou pausado. Ele fica salvo e você pode continuar depois pelo histórico. Fechar a pasta?')) return; const r = await post('/api/close', { dir: e.dir }); if (!r.ok) { const j = await r.json().catch(() => ({})); setError(j.error || 'Não deu para fechar.') } }}><X /></span>
                     </span>
                     <span className="hist-sub"><span>{e.mission ? (e.mission.plan?.title || e.mission.request) : (e.project ? `${e.project.branch || 'sem git'} · ${e.project.runner === 'none' ? 'sem provas' : e.project.runner}` : '')}</span><span>{es.label}</span></span>
                   </button>
