@@ -22,5 +22,13 @@ body { background: var(--color-background); color: var(--gray-12); font-variant-
 
 .log-line { display: grid; grid-template-columns: 62px 84px 1fr; gap: 10px; padding: 3px 0; border-bottom: 1px solid var(--gray-a3); font-family: var(--code-font-family); font-size: 12px; }
 .log-line time { color: var(--gray-9); }
+.log-text { white-space: pre-wrap; word-break: break-word; }
+.kind-thinking .log-text { color: var(--gray-10); font-style: italic; }
+.kind-tool .log-text { color: var(--gray-11); }
+.kind-result .log-text { color: var(--gray-10); }
+.kind-error .log-text { color: var(--red-11); }
+.log-line.live { background: var(--teal-a2); border-radius: 4px; }
+.cursor { display: inline-block; width: 6px; height: 12px; margin-left: 2px; background: var(--teal-9); vertical-align: -2px; animation: blink 1s steps(2) infinite; }
+@keyframes blink { to { opacity: 0; } }
 
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
