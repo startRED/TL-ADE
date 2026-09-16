@@ -154,7 +154,7 @@ function pub() {
     history: G.history, recent: G.recent, settings: G.settings, registry: G.registry, quota: G.quota, catalog: G.catalog.map(({ body, ...c }) => c),
   }
 }
-function broadcast() { const data = `data: ${JSON.stringify(pub())}\n\n`; for (const res of clients) res.write(data) }
+function broadcast() { const data = `data: ${JSON.stringify(pub())}\n\n`; for (const res of clients) res.write(data); persistSoon() }
 function broadcastSoon() { if (pending) return; pending = setTimeout(() => { pending = null; broadcast() }, 150) }
 function setLive(live) { state.live = live; broadcastSoon() }
 
@@ -211,11 +211,14 @@ function killTree(child) { try { if (IS_WIN) spawn('taskkill', ['/PID', String(c
 
 // ---------- pausar / continuar / persistir ----------
 const MISSIONS_DIR = path.join(ADE_DIR, 'missions')
-async function persistMission() {
-  const e = currentEngine(); const m = e.mission; if (!m || !e.project) return
+async function persistMission(e = currentEngine()) {
+  const m = e?.mission; if (!m || !e.project) return
   await mkdir(MISSIONS_DIR, { recursive: true })
-  await writeFile(path.join(MISSIONS_DIR, `${m.id}.json`), JSON.stringify({ dir: e.project.dir, mission: m, log: e.log.slice(-300), saved_at: now() }))
+  await writeFile(path.join(MISSIONS_DIR, `${m.id}.json`), JSON.stringify({ dir: e.project.dir, mission: m, log: e.log.slice(-400), saved_at: now() }))
 }
+async function persistEngines() { await saveJson('engines.json', { dirs: [...engines.entries()].filter(([, e]) => e.project).map(([k]) => k), active: activeDir }) }
+let persistTimer = null
+function persistSoon() { if (persistTimer) return; persistTimer = setTimeout(() => { persistTimer = null; for (const e of engines.values()) persistMission(e).catch(() => {}); persistEngines().catch(() => {}) }, 3000) }
 // guard: toda cadeia do motor passa por aqui. PAUSE vira estado 'paused' (parte em andamento volta para a fila); outro erro vira parada.
 async function guard(fn) {
   try { return await fn() } catch (err) {
@@ -245,16 +248,28 @@ async function resumeMission() {
   return guard(runStories)
 }
 async function loadSavedMissions() {
-  let files = []; try { files = await readdir(MISSIONS_DIR) } catch { return }
+  const saved = await loadJson('engines.json', { dirs: [], active: null })
+  for (const d of saved.dirs || []) { try { const e = engineFor(d); e.project = await discover(d); if (e.project.error) engines.delete(path.resolve(d)) } catch { engines.delete(path.resolve(d)) } }
+  let files = []; try { files = await readdir(MISSIONS_DIR) } catch { files = [] }
+  const latest = new Map() // dir → missão mais recente
   for (const f of files) {
     try {
-      const j = JSON.parse(await readFile(path.join(MISSIONS_DIR, f), 'utf8')); const m = j.mission
-      if (!['paused', 'awaiting_plan', 'awaiting_operator'].includes(m.state)) continue
-      if (m.state !== 'paused') { m.state = 'paused'; m.reason = null } // estava esperando você quando o servidor caiu: continua do mesmo ponto ao retomar
-      const e = engineFor(j.dir); e.project = await discover(j.dir); if (e.project.error) continue
-      e.mission = m; e.log = j.log || []
+      const j = JSON.parse(await readFile(path.join(MISSIONS_DIR, f), 'utf8')); const key = path.resolve(j.dir)
+      if (!latest.has(key) || (j.mission.started_at || '') > (latest.get(key).mission.started_at || '')) latest.set(key, j)
     } catch {}
   }
+  for (const [key, j] of latest) {
+    const m = j.mission
+    const e = engineFor(key); if (!e.project) { e.project = await discover(key); if (e.project.error) { engines.delete(key); continue } }
+    if (['running', 'planning'].includes(m.state)) { // caiu no meio: vira pausada; a parte em andamento volta do começo ao continuar
+      m.pause_requested = false; m.state = 'paused'; m.reason = null
+      if (m.current != null && m.stories[m.current] && m.stories[m.current].state !== 'done') Object.assign(m.stories[m.current], { state: 'queued', round: 0, steps: [], red_tests: [], tests_after: null, diff: '', review: null, visual: null })
+      if (!m.plan || !m.stories.length) { m.steps = [] }
+      j.log = [...(j.log || []), { ts: now(), source: 'engine', kind: 'warn', text: 'o servidor foi reiniciado no meio; a missão ficou pausada. Continuar retoma da parte pendente.' }]
+    }
+    e.mission = m; e.log = j.log || []; e.live = null
+  }
+  if (saved.active && engines.get(path.resolve(saved.active))?.project) activeDir = path.resolve(saved.active)
 }
 
 // ---------- configurações e recentes ----------
@@ -939,9 +954,7 @@ function finish() {
   const h = state.history.find((x) => x.id === m.id)
   if (h) Object.assign(h, entry); else state.history.unshift(entry)
   saveJson('history.json', state.history.slice(0, 50)).catch(() => {})
-  // concluída/descartada: apaga o arquivo de retomada; senão grava (sem correr com o rm)
-  if (['complete', 'discarded'].includes(m.state)) rm(path.join(MISSIONS_DIR, `${m.id}.json`), { force: true }).catch(() => {})
-  else persistMission().catch(() => {})
+  persistMission().catch(() => {})
   journal({ type: 'mission', state: m.state, reason: m.reason }).catch(() => {})
   broadcast()
 }
@@ -964,6 +977,7 @@ async function startMission(request, { commitFirst = false } = {}) {
   const s = state.settings
   if (vendorOf(s.roles.maker.family, s.roles.maker.model) === vendorOf(s.roles.checker.family, s.roles.checker.model)) return 'Quem escreve e quem revisa precisam ser de empresas diferentes. Ajuste em Modelos.'
   await ensureIgnore(fresh.dir); state.project = await discover(fresh.dir); state.log = []; state.phase = 'intent'
+  if (state.mission?.id) rm(path.join(MISSIONS_DIR, `${state.mission.id}.json`), { force: true }).catch(() => {}) // a conversa anterior desta pasta fica só no histórico
   state.mission = {
     id: 'm-' + Date.now().toString(36), request, attachments: state.attachments.splice(0), state: 'planning', reason: null, current: null,
     allow_commands: !!s.allow_commands, roles: JSON.parse(JSON.stringify(s.roles)),
@@ -1036,7 +1050,7 @@ http.createServer(async (req, res) => {
       const info = await discover(target)
       if (info.error) return json(res, 400, info)
       // cada pasta é um engine próprio; trocar de pasta não mata a missão da outra (ela continua rodando ao fundo)
-      const e = engineFor(info.dir); e.project = info; activeDir = path.resolve(info.dir); await saveRecent(info.dir); broadcast(); return json(res, 200, info)
+      const e = engineFor(info.dir); e.project = info; activeDir = path.resolve(info.dir); await saveRecent(info.dir); await persistEngines(); broadcast(); return json(res, 200, info)
     }
     if (url.pathname === '/api/select' && req.method === 'POST') { const { dir } = await body(req); const e = dir && engines.get(path.resolve(dir)); if (!e) return json(res, 404, { error: 'Projeto não aberto.' }); activeDir = path.resolve(dir); broadcast(); return json(res, 200, { ok: true }) }
     if (url.pathname === '/api/close' && req.method === 'POST') {
@@ -1047,7 +1061,7 @@ http.createServer(async (req, res) => {
       if (e.mission && ['awaiting_plan', 'awaiting_operator', 'paused'].includes(e.mission.state)) { if (e.mission.state !== 'paused') { e.mission.state = 'paused'; e.mission.reason = null } await withEngine(e, () => persistMission().catch(() => {})) }
       engines.delete(key)
       if (activeDir === key) activeDir = [...engines.keys()].find((k) => engines.get(k).project) || null
-      broadcast(); return json(res, 200, { ok: true })
+      await persistEngines(); broadcast(); return json(res, 200, { ok: true })
     }
     if (url.pathname === '/api/pause' && req.method === 'POST') { const b = await body(req); const e = await targetEngine(req, url, b); if (!e) return json(res, 400, { error: 'Sem projeto.' }); const err = await withEngine(e, pauseMission); return err ? json(res, 400, { error: err }) : json(res, 202, { ok: true }) }
     if (url.pathname === '/api/resume' && req.method === 'POST') {
@@ -1108,7 +1122,7 @@ http.createServer(async (req, res) => {
   await loadCatalog()
   await readQuota()
   await loadSavedMissions()
-  const first = G.recent[0] || path.join(ROOT, 'example')
-  const e = engineFor(first); if (!e.project) e.project = await discover(first); activeDir = path.resolve(first)
+  if (!activeDir) { const first = G.recent[0] || path.join(ROOT, 'example'); const e0 = engineFor(first); if (!e0.project) e0.project = await discover(first); activeDir = path.resolve(first) }
+  const e = engines.get(activeDir)
   console.log(`TL-ADE: http://127.0.0.1:${PORT}  projeto: ${e.project.dir}  skills no catálogo: ${G.catalog.length}  missões retomáveis: ${[...engines.values()].filter((x) => x.mission).length}`)
 })
