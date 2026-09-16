@@ -178,6 +178,14 @@ export default function App() {
     })))
     await attachFiles({ files: encoded })
   }
+  // rascunho do pedido por pasta: o que você escreveu não some ao trocar de pasta nem ao recarregar
+  const draftKey = (d) => 'ade.draft.' + (d || '')
+  const dirRef = useRef(state.dir)
+  useEffect(() => {
+    if (dirRef.current !== state.dir) { try { localStorage.setItem(draftKey(dirRef.current), request) } catch {} dirRef.current = state.dir }
+    try { const saved = localStorage.getItem(draftKey(state.dir)); if (saved != null && saved !== request) setRequest(saved) } catch {}
+  }, [state.dir]) // eslint-disable-line
+  useEffect(() => { try { if (state.dir !== undefined) localStorage.setItem(draftKey(state.dir), request) } catch {} }, [request]) // eslint-disable-line
   const [dirtyReq, setDirtyReq] = useState(null) // pedido que esbarrou em alterações pendentes; "Commitar e continuar" reenvia com commit_first
   async function run(text, opts = {}) {
     const req = (text ?? request).trim()
