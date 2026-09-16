@@ -1,9 +1,10 @@
 # Prompt para a rodada de rearquitetação da TL-ADE
 
-Cole a mensagem abaixo num chat novo do Claude Code aberto em `E:\Documentos\ProjetosIA\TL-ADE`,
-com o modelo Claude Fable 5.1. A palavra `ultracode` no texto autoriza orquestração multi-agente
-(Workflow) quando o ambiente suportar — não existe `/effort ultracode` nem
-`CLAUDE_CODE_SUBAGENT_MODEL`; o esforço vem da configuração da sessão.
+Antes de colar, no chat novo (Claude Code aberto em `E:\Documentos\ProjetosIA\TL-ADE`, modelo
+Claude Fable 5.1): rode `/effort ultracode` — ativa o modo de esforço máximo com orquestração
+multi-agente. A palavra `ultracode` no início da mensagem reforça a opção por orquestração
+(Workflow) no turno. `CLAUDE_CODE_SUBAGENT_MODEL` não é verificado — se quiser rotear subagentes
+para modelo mais barato, confirme na doc antes de usar.
 
 ---
 
