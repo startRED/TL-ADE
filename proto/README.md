@@ -9,7 +9,10 @@ Duplo clique em `abrir.bat`. Na primeira vez instala as dependências (1 a 2 min
 1. Escolha a pasta do projeto (ícone de pasta). Qualquer pasta serve; se não existir, a ADE cria; se não for git, o botão "Iniciar git" resolve.
 2. Escreva o pedido em português, do seu jeito, e clique em Rodar.
 3. Acompanhe: plano, atividade ao vivo, alterações, provas, portão visual, revisão.
-4. Decida só quando a ADE pedir: aprovar um plano grande (ou pedir mudanças nele, do seu jeito, e conferir de novo), responder uma dúvida, aceitar/repetir/pular/descartar uma parte. Todo plano vem com uma explicação em palavras simples.
+4. Em pedidos médios e grandes a ADE faz uma entrevista curta (2 a 5 perguntas de múltipla escolha, a primeira opção é a recomendada) para você escolher o jeito do programa; "Seguir com as recomendações" pula tudo. Depois vem o plano, com explicação em palavras simples; você aprova, pede mudanças (em texto livre) ou descarta.
+5. Se o plano pede fotos ou ilustrações, o Codex gera as imagens (`$imagegen`) em `assets/img` antes das partes começarem, e elas aparecem na aba Plano.
+6. Decida só quando a ADE pedir. Por padrão ela segue sozinha: após 4 rodadas de revisão com provas verdes e nada grave, aceita e vai para a próxima parte (opção "Depois de 4 rodadas").
+7. Duas ADEs ao mesmo tempo (dois projetos): `abrir.bat 2` abre uma segunda instância em `localhost:5174` (servidor 4318).
 
 ## O que acontece por baixo
 

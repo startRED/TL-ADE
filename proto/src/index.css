@@ -274,3 +274,19 @@ button { font: inherit; color: inherit; }
 .quota-vendor { color: var(--gray-11); min-width: 74px; }
 .quota-win b { color: var(--gray-12); font-variant-numeric: tabular-nums; }
 .quota small { font-size: 11px; }
+
+.q-card { padding: 10px 12px; border-radius: 8px; background: var(--bg-2); border: 1px solid var(--line); margin-bottom: 10px; font-size: 13px; }
+.q-card > b { display: block; color: var(--gray-12); margin-bottom: 2px; }
+.q-card > small { display: block; margin-bottom: 8px; }
+.q-opt { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border-radius: 6px; border: 1px solid transparent; cursor: pointer; }
+.q-opt.on { border-color: var(--teal-8); background: var(--bg-3, var(--bg-2)); }
+.q-opt input[type=radio] { margin-top: 3px; accent-color: var(--teal-9); }
+.q-opt span { display: flex; flex-direction: column; flex: 1; }
+.q-opt em { font-style: normal; color: var(--teal-11); font-size: 11px; margin-left: 6px; }
+.q-opt small { color: var(--gray-11); }
+.assets-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.assets-grid figure { margin: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg-2); }
+.assets-grid img, .assets-grid .ph { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
+.assets-grid .ph { display: grid; place-items: center; color: var(--gray-10); font-size: 12px; }
+.assets-grid figcaption { padding: 6px 8px; font-size: 12px; display: flex; flex-direction: column; gap: 2px; }
+.assets-grid figcaption small { color: var(--gray-11); }

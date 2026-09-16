@@ -5,7 +5,7 @@ import {
   FolderSimple, ClockCounterClockwise, GearSix, Pulse, Circle, CheckFat, X, Lightning, Sparkle, Cpu, ListChecks, Eye, SkipForward, MagnifyingGlass,
 } from '@phosphor-icons/react'
 
-const MISSION_STEPS = ['intent', 'plan', 'research', 'prepare']
+const MISSION_STEPS = ['intent', 'plan', 'research', 'prepare', 'assets']
 const ROLES_PT = { planner: 'planejador', maker: 'maker', checker: 'revisor', research: 'pesquisador' }
 const skillsByRole = (m) => !m?.skills ? {} : Array.isArray(m.skills) ? { maker: m.skills } : m.skills
 const allSkills = (m) => Object.entries(skillsByRole(m)).flatMap(([role, list]) => (Array.isArray(list) ? list : []).map((x) => ({ ...x, role })))
@@ -15,6 +15,7 @@ const STEP = {
   plan: { title: 'Montar o plano', help: 'O planejador, já com as skills dele, explora o projeto e divide o trabalho em partes (stories), cada uma com critérios de aceite e como provar.' },
   research: { title: 'Pesquisar fatos', help: 'Só quando o plano depende de algo externo (versão de API, regra pública). O Google (agy) responde com fontes.' },
   prepare: { title: 'Conferir o projeto', help: 'Roda o que o projeto já tem de verificação, para saber o ponto de partida.' },
+  assets: { title: 'Gerar imagens', help: 'Quando o plano pede fotos ou ilustrações, o Codex gera as imagens ($imagegen) e salva em assets/img antes de qualquer parte começar.' },
   test: { title: 'Escrever a prova', help: 'Uma "prova" é um mini-programa que checa se o que você pediu funciona. A IA escreve só isso, sem mexer no código ainda.' },
   red: { title: 'Prova falha no código antigo', help: 'A ADE roda a prova ANTES de qualquer mudança. Ela tem de falhar, porque o que você pediu ainda não existe. Se passasse agora, a prova estaria checando a coisa errada.' },
   fix: { title: 'Implementar', help: 'Só agora a IA muda o código, seguindo as skills ativas, o mínimo para a prova passar e os critérios valerem.' },
@@ -90,7 +91,7 @@ export default function App() {
     const r = await post('/api/run', { request: req })
     if (!r.ok) { const j = await r.json().catch(() => ({})); setError(j.error || 'Não deu para começar.'); if (/git|pasta/i.test(j.error || '')) setView('projects'); if (/Modelos/.test(j.error || '')) setView('models') }
   }
-  const decide = (option, text) => post('/api/decide', { option, text })
+  const decide = (option, text) => post('/api/decide', typeof text === 'object' ? { option, ...text } : { option, text })
   const saveSettings = (patch) => post('/api/settings', patch)
 
   return (
@@ -129,7 +130,7 @@ export default function App() {
             </div>
             <span className="dim small" style={{ marginLeft: 'auto' }}>trocar</span>
           </button>
-          {view === 'mission' && <Progress m={m} />}
+          {view === 'mission' && <Progress m={m} quota={state.quota} />}
           {view === 'skills' && <SkillsPanel state={state} save={saveSettings} />}
           {view === 'models' && <ModelsPanel state={state} save={saveSettings} />}
           {view === 'history' && <History history={state.history} current={m} />}
@@ -200,7 +201,40 @@ function Tab({ active, onClick, icon, children, count, tone }) {
 }
 
 /* ---------- lateral: progresso (épicos = stories) ---------- */
-function Progress({ m }) {
+function Interview({ questions, onAnswer, onSkip }) {
+  const qs = (questions || []).map((q, i) => typeof q === 'string' ? { id: `q${i + 1}`, question: q, why: '', options: [], allow_other: true } : q)
+  const [picked, setPicked] = useState(() => Object.fromEntries(qs.map((q) => [q.id, q.options?.[0]?.label || ''])))
+  const [other, setOther] = useState({})
+  const answers = qs.map((q) => ({ id: q.id, question: q.question, answer: picked[q.id] === '__other' ? (other[q.id] || '').trim() : picked[q.id] }))
+  const ready = answers.every((a) => a.answer)
+  return (
+    <>
+      <p className="dim small" style={{ margin: '0 0 8px' }}>A primeira opção é sempre a recomendada. Não sabe? Deixe como está.</p>
+      {qs.map((q) => (
+        <div className="q-card" key={q.id}>
+          <b>{q.question}</b>{q.why && <small className="dim"> {q.why}</small>}
+          {q.options.map((o, i) => (
+            <label className={'q-opt' + (picked[q.id] === o.label ? ' on' : '')} key={o.label}>
+              <input type="radio" name={q.id} checked={picked[q.id] === o.label} onChange={() => setPicked({ ...picked, [q.id]: o.label })} />
+              <span><b>{o.label}</b>{i === 0 && <em> recomendado</em>}<small>{o.hint}</small></span>
+            </label>
+          ))}
+          {q.allow_other && (
+            <label className={'q-opt' + (picked[q.id] === '__other' ? ' on' : '')}>
+              <input type="radio" name={q.id} checked={picked[q.id] === '__other'} onChange={() => setPicked({ ...picked, [q.id]: '__other' })} />
+              <span><b>Outro</b><input className="ta" style={{ marginTop: 6 }} value={other[q.id] || ''} onFocus={() => setPicked({ ...picked, [q.id]: '__other' })} onChange={(e) => setOther({ ...other, [q.id]: e.target.value })} placeholder="Escreva do seu jeito" /></span>
+            </label>
+          )}
+        </div>
+      ))}
+      <div className="decide">
+        <button className="act primary" disabled={!ready} onClick={() => onAnswer(answers)}><CheckCircle weight="fill" /><span><b>Responder e montar o plano</b><small>O planejador usa as suas escolhas.</small></span></button>
+        <button className="act" onClick={onSkip}><Play weight="fill" /><span><b>Seguir com as recomendações</b></span></button>
+      </div>
+    </>
+  )
+}
+function Progress({ m, quota }) {
   const [showAll, setShowAll] = useState(false)
   const [, tick] = useState(0)
   useEffect(() => { if (!m || !['running', 'planning'].includes(m.state)) return; const id = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(id) }, [m?.state])
@@ -237,7 +271,7 @@ function Progress({ m }) {
         <Stat k="Custo no Claude" v={fmtUsd(m.cost.usd)} />
       </div>
       <span className="lbl">Cota do plano</span>
-      <Quota q={state.quota} />
+      <Quota q={quota} />
     </div>
   )
 }
@@ -325,6 +359,9 @@ function Options({ s, save }) {
       <label className="opt"><Switch checked={s.allow_commands} onCheckedChange={(v) => save({ allow_commands: v })} /><span><b>Deixar a IA rodar comandos</b><small>Instalar dependências, criar projeto. Desligue para ela só ler e editar arquivos.</small></span></label>
       <label className="opt"><Switch checked={s.visual_gate} onCheckedChange={(v) => save({ visual_gate: v })} /><span><b>Portão visual (Impeccable)</b><small>Varre a interface atrás de cara de template e força uma rodada de retoque.</small></span></label>
       <label className="opt"><Switch checked={s.research_enabled} onCheckedChange={(v) => save({ research_enabled: v })} /><span><b>Pesquisa com Google (agy)</b><small>Só quando o plano depende de um fato externo.</small></span></label>
+      <label className="opt"><Switch checked={s.assets_enabled !== false} onCheckedChange={(v) => save({ assets_enabled: v })} /><span><b>Imagens geradas pelo Codex</b><small>Quando o plano pede fotos ou ilustrações, o Codex gera ($imagegen) antes das partes começarem. Consome cota do Codex.</small></span></label>
+      <label className="opt"><select className="ta" style={{ width: 'auto' }} value={s.autonomy || 'auto'} onChange={(e) => save({ autonomy: e.target.value })}><option value="auto">segue sozinha</option><option value="ask">para e pergunta</option></select><span><b>Depois de 4 rodadas de revisão</b><small>Segue sozinha: se as provas estão verdes e o revisor não apontou nada grave, aceita e vai para a próxima parte. Para e pergunta: você decide.</small></span></label>
+      <label className="opt"><select className="ta" style={{ width: 'auto' }} value={s.interview || 'auto'} onChange={(e) => save({ interview: e.target.value })}><option value="auto">automática</option><option value="always">sempre</option><option value="never">nunca</option></select><span><b>Entrevista antes do plano</b><small>Perguntas fáceis de múltipla escolha para escolher o jeito do programa. Automática: só em pedidos médios e grandes.</small></span></label>
     </div>
   )
 }
@@ -393,7 +430,21 @@ function Plan({ m, catalog }) {
       </div>
       {pl.explanation && <div className="explain"><b>Em palavras simples</b><p style={{ whiteSpace: 'pre-line', margin: '6px 0 0' }}>{pl.explanation}</p></div>}
       <p className="plan-summary">{pl.summary}</p>
-      {pl.questions?.length > 0 && <div className="explain bad"><b>A IA precisa saber:</b><ul>{pl.questions.map((q) => <li key={q}>{q}</li>)}</ul></div>}
+      {pl.questions?.length > 0 && m.state === 'awaiting_plan' && m.reason === 'questions' && <div className="explain"><b>A IA quer saber como você prefere:</b><ul>{pl.questions.map((q) => <li key={q.id || q}>{q.question || q}</li>)}</ul><small className="dim">Responda no painel da direita.</small></div>}
+      {m.answers?.length > 0 && <div className="explain"><b>Suas escolhas</b><ul>{m.answers.map((a) => <li key={a.id}>{a.question} <b>→ {a.answer}</b></li>)}</ul></div>}
+      {pl.assets?.length > 0 && (
+        <>
+          <span className="lbl">Imagens do plano</span>
+          <div className="assets-grid">
+            {pl.assets.map((a) => { const done = (m.assets_done || []).some((d) => d.file === a.file); return (
+              <figure key={a.file} className={done ? 'done' : ''}>
+                {done ? <img src={`/api/app/${a.file}?t=${m.assets_done.length}`} alt={a.purpose} /> : <div className="ph">{m.state === 'running' ? 'gerando…' : 'ainda não gerada'}</div>}
+                <figcaption><b>{a.file.replace('assets/img/', '')}</b><small>{a.purpose}</small></figcaption>
+              </figure>
+            ) })}
+          </div>
+        </>
+      )}
       <span className="lbl">Partes do trabalho</span>
       <ol className="plan-stories">
         {m.stories.map((s, i) => (
@@ -515,11 +566,7 @@ function Report({ m, decide }) {
         <>
           <div className="card warn"><ListChecks weight="fill" /><div><b>{m.reason === 'questions' ? 'A IA tem uma dúvida' : 'Plano pronto para aprovar'}</b><p>{REASON[m.reason]} Veja a aba Plano.</p></div></div>
           {m.reason === 'questions' ? (
-            <>
-              <ul className="qs">{m.plan.questions.map((q) => <li key={q}>{q}</li>)}</ul>
-              <textarea className="ta" rows={3} value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Responda aqui, do seu jeito" />
-              <div className="decide"><button className="act primary" disabled={!answer.trim()} onClick={() => decide('answer', answer)}><CheckCircle weight="fill" /><span><b>Responder e replanejar</b></span></button><button className="act" onClick={() => decide('start')}><Play weight="fill" /><span><b>Seguir sem responder</b><small>A IA usa a escolha que já registrou no plano.</small></span></button></div>
-            </>
+            <Interview questions={m.plan.questions} onAnswer={(answers) => decide('answer', { answers })} onSkip={() => decide('start')} />
           ) : (
             <>
               {m.plan.explanation && <div className="explain"><b>Em palavras simples</b><p style={{ whiteSpace: 'pre-line', margin: '6px 0 0' }}>{m.plan.explanation}</p></div>}

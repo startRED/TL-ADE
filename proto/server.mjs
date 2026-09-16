@@ -14,7 +14,7 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url))
 const ADE_DIR = path.join(ROOT, '.ade')
 const REVIEW_SCHEMA = path.join(ROOT, 'review.schema.json')
 const RESEARCH_SCHEMA = path.join(ROOT, 'research.schema.json')
-const PORT = 4317
+const PORT = Number(process.env.ADE_PORT) || 4317 // abrir.bat 2 → 4318/5174: duas ADEs em projetos diferentes ao mesmo tempo
 const IS_WIN = process.platform === 'win32'
 const HOME = os.homedir()
 const IMPECCABLE = path.join(HOME, '.claude/plugins/cache/impeccable/impeccable/4.3.1/skills/impeccable/scripts/impeccable')
@@ -56,6 +56,9 @@ const DEFAULT_SETTINGS = {
   allow_commands: true,
   research_enabled: true,
   visual_gate: true,
+  autonomy: 'auto', // auto: após 4 rodadas com provas verdes e sem achado grave do revisor, aceita e segue; ask: para e pergunta
+  interview: 'auto', // auto | always | never — entrevista de múltipla escolha antes do plano (spec: ≤5 perguntas, recomendação primeiro)
+  assets_enabled: true, // imagens geradas pelo Codex ($imagegen) quando o plano pede
   skills: { auto: true, forced: [], excluded: [], max: 4 },
 }
 
@@ -109,7 +112,7 @@ function log(source, text, kind = 'info') {
 }
 function story() { const m = state.mission; return m && m.current != null ? m.stories[m.current] : null }
 function setStep(name, status, extra = {}) {
-  const target = ['intent', 'plan', 'research', 'prepare'].includes(name) ? state.mission : story()
+  const target = ['intent', 'plan', 'research', 'prepare', 'assets'].includes(name) ? state.mission : story()
   if (!target) return
   const step = target.steps.find((s) => s.name === name)
   const stamp = status === 'running' ? { started_at: now() } : { finished_at: now() }
@@ -385,6 +388,7 @@ async function checker(diff, tests, st) {
     `Pedido do usuário: ${m.request}`, `Story em revisão: ${st.title}. Critérios de aceite: ${(st.acceptance || []).join('; ')}`,
     `Skills que o autor tinha de seguir: ${(m.skills.maker || []).map((s) => s.id).join(', ') || 'nenhuma'}.`,
     `O harness JÁ RODOU as provas fora da sandbox: ${tests.failed} falharam de ${tests.total} (runner: ${tests.runner}); a prova nova falhou antes da implementação e passou depois. Não tente rodar provas nem instalar nada (sua sandbox é somente leitura e isso vai falhar); avalie o código e o diff. Arquivos de lock (package-lock.json) e dependências não fazem parte do escopo revisado.`,
+    'Critérios de aceite sobre detalhe decorativo (borda lateral colorida, gradiente, cor exata) cedem ao portão visual (Impeccable): não peça mudanças para reintroduzir isso; avalie a intenção do critério.',
     'Responda em português no formato JSON exigido. verdict = "approve" só se não houver achado high.',
     '--- DIFF ---', diff.slice(0, 60000),
   ].join('\n') + skillsBlock(m.skills.checker || [])
@@ -416,6 +420,34 @@ async function checker(diff, tests, st) {
   return review
 }
 
+// ---------- assets: imagens geradas pelo Codex ($imagegen, verificado em codex exec headless: research/addendum-frontend-engine-anchor.md §5) ----------
+async function makeAssets() {
+  const m = state.mission, dir = state.project.dir
+  const wanted = (m.plan.assets || []).filter((a) => /^assets\/img\/[\w.-]+\.(png|jpg|jpeg|webp)$/i.test(a.file))
+  if (m.assets_done || !state.settings.assets_enabled || !wanted.length) return
+  const { model } = state.settings.roles.checker
+  setStep('assets', 'running'); m.assets_done = []
+  for (const a of wanted) {
+    const full = path.join(dir, a.file)
+    if (await exists(full)) { m.assets_done.push(a); continue }
+    await mkdir(path.dirname(full), { recursive: true })
+    log('engine', `codex gera imagem: ${a.file}`)
+    const prompt = `Use $imagegen to generate ONE image and save it at exactly "${a.file}" (path relative to the working directory; the folder already exists). Image description: ${a.prompt}. Requirements: no text, no letters, no watermark, no logo. Do not create or modify any other file. When the file is saved, reply with just the path.`
+    // configuração completa do Codex (a skill imagegen precisa estar visível); sandbox só na pasta do projeto
+    const r = await run('codex', ['exec', '--json', '--sandbox', 'workspace-write', '--skip-git-repo-check', '-C', dir, '-m', model, prompt], {
+      cwd: dir, stdin: '', timeoutMs: 10 * 60 * 1000,
+      onLine: (line) => { let ev; try { ev = JSON.parse(line) } catch { return } if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') log('codex', ev.item.text.slice(0, 200), 'text'); if (ev.type === 'item.completed' && ev.item?.type === 'command_execution') log('codex', `$ ${ev.item.command}`.slice(0, 160), 'tool') },
+    })
+    m.cost.calls += 1
+    if (await exists(full)) { m.assets_done.push(a); log('engine', `imagem pronta: ${a.file}`) }
+    else log('engine', `imagem não gerada: ${a.file} (código ${r.code}) ${(r.err || '').trim().slice(0, 200)}`, 'error')
+    broadcast()
+  }
+  readQuota().then(broadcastSoon)
+  if (m.assets_done.length) { await gitCommit(dir, `ade: ${m.assets_done.length} imagem(ns) gerada(s) pelo Codex`); await refreshProject(); log('engine', `commit feito: ${m.assets_done.length} imagem(ns)`) }
+  setStep('assets', m.assets_done.length === wanted.length ? 'done' : 'warn')
+}
+
 // ---------- portão visual: Impeccable detect ----------
 async function visualGate() {
   const dir = state.project.dir
@@ -444,7 +476,8 @@ const INTENT_JSON_SCHEMA = {
     summary: { type: 'string' }, complexity: { type: 'string', enum: ['trivial', 'bounded', 'feature', 'subsystem'] },
     domains: { type: 'array', items: { type: 'string' } }, keywords: { type: 'array', items: { type: 'string' } },
     needs_ui: { type: 'boolean' }, needs_backend: { type: 'boolean' },
-    research_questions: { type: 'array', items: { type: 'string' } }, questions: { type: 'array', items: { type: 'string' } },
+    research_questions: { type: 'array', items: { type: 'string' } },
+    questions: { type: 'array', maxItems: 5, items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, question: { type: 'string' }, why: { type: 'string' }, options: { type: 'array', minItems: 2, maxItems: 4, items: { type: 'object', additionalProperties: false, properties: { label: { type: 'string' }, hint: { type: 'string' } }, required: ['label', 'hint'] } }, allow_other: { type: 'boolean' } }, required: ['id', 'question', 'why', 'options', 'allow_other'] } },
     skills: { type: 'object', additionalProperties: false, properties: Object.fromEntries(['planner', 'maker', 'checker', 'research'].map((r) => [r, { type: 'array', items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, reason: { type: 'string' } }, required: ['id', 'reason'] } }])), required: ['planner', 'maker', 'checker', 'research'] },
   },
   required: ['summary', 'complexity', 'domains', 'keywords', 'needs_ui', 'needs_backend', 'research_questions', 'questions', 'skills'],
@@ -459,8 +492,20 @@ function intentPrompt() {
     'Escolha, para cada papel, as skills do catálogo abaixo que elevam a qualidade daquele papel neste pedido (ids exatos; até 4 para o maker, até 3 para os outros; lista vazia é válida). Regras fixas: se há interface ou design, o maker recebe design-taste-frontend e impeccable (pode acrescentar frontend-design e accessibility); backend/API recebe backend-patterns e api-design; banco recebe postgres-patterns; o revisor recebe skills de revisão/segurança, não de estilo; o pesquisador raramente precisa de skill.',
     '- summary: 2 frases do que será entregue e das escolhas feitas por você quando o pedido é vago.',
     '- complexity, domains (subconjunto de frontend, design, backend, api, database, testing, python, security, a11y, docs, devops), keywords (5 a 12, pt e en), needs_ui, needs_backend.',
-    '- research_questions: só fatos externos que mudariam a implementação; normalmente vazio. questions: só se vago a ponto de gerar trabalho errado; máximo 2; normalmente vazio.',
+    '- research_questions: só fatos externos que mudariam a implementação; normalmente vazio.',
+    interviewRule(),
     'CATÁLOGO DE SKILLS:', catalogListing(),
+  ].join('\n')
+}
+
+// Entrevista (prompt reverso): perguntas fáceis, múltipla escolha, recomendação primeiro. Spec: trivial 0, bounded ≤2, feature+ ≤5.
+function interviewRule() {
+  const mode = state.settings.interview || 'auto'
+  if (mode === 'never') return '- questions: sempre lista vazia.'
+  return [
+    `- questions: entrevista curta para o usuário (leigo) escolher o jeito do programa antes do plano. ${mode === 'always' ? 'Faça de 2 a 5 perguntas sempre que complexity não for trivial.' : 'trivial: nenhuma. bounded: até 2, só se a resposta mudaria o resultado. feature/subsystem: de 2 a 5.'}`,
+    '  Cada pergunta: id curto (q1…), question (uma frase simples), why (por que importa, uma frase), options (2 a 4; a PRIMEIRA é sempre a recomendada; label curto + hint de uma frase, sem termos técnicos), allow_other (se vale escrever outra resposta).',
+    '  Temas bons: estilo visual e clima, para quem é, o que é prioridade, dados (guardar onde, precisa de login?), plataforma (web, celular, desktop), integrações. Nunca pergunte o que a pasta já responde nem o que você pode decidir bem sozinho.',
   ].join('\n')
 }
 
@@ -471,10 +516,14 @@ function planPrompt() {
     'Você é o Intent Compiler da TL-ADE. Transforme o pedido do usuário em um plano executável por outra IA, em português, no formato JSON exigido.',
     `Pedido: ${state.mission.request}`,
     `Entendimento prévio (outra IA): ${state.mission.intent?.summary || ''} Domínios: ${(state.mission.intent?.domains || []).join(', ')}.`,
+    m.answers?.length ? `ESCOLHAS DO USUÁRIO NA ENTREVISTA (obrigatórias): ${m.answers.map((a) => `${a.question} → ${a.answer}`).join(' | ')}` : '',
     `Projeto: ${p.name} em ${p.dir}; ${p.files} itens na raiz; linguagem detectada: ${p.language || 'nenhuma'}; runner de provas: ${p.runner === 'none' ? 'nenhum' : p.test_cmd}; index.html na raiz: ${p.has_index ? 'sim' : 'não'}.`,
     'Explore o projeto só o necessário (Glob/Read/Grep). Depois produza:',
     '- title (≤8 palavras), summary (2 frases, o que será entregue), complexity (trivial|bounded|feature|subsystem).',
     '- explanation: 4 a 8 linhas curtas para um usuário leigo, sem termos técnicos (nada de JSON, vitest, ES modules, tokens): o que ele vai ter no fim, o que cada parte entrega em uma frase, e o que foi assumido por conta própria.',
+    state.settings.assets_enabled ? '- assets: imagens que o Codex vai gerar ANTES das stories, só quando needs_ui e imagens reais melhorariam muito o resultado (hero, produtos, ilustrações). 0 a 6 itens: file (sempre assets/img/<nome>.png), prompt (em inglês, descrição fotográfica ou ilustrativa detalhada: assunto, enquadramento, luz, paleta; sem texto nem logotipo na imagem), purpose (onde a imagem entra, em português). As stories que usam a imagem citam o caminho e exigem alt descritivo.' : '- assets: lista vazia.',
+    '- Critérios de aceite descrevem comportamento observável pelo usuário ou pela prova, nunca implementação: não fixe nomes de variáveis CSS, valores exatos, estrutura interna de arquivos ou "usar só X". Isso gera reprovações inúteis na revisão.',
+    '- Nunca prescreva nos critérios: borda lateral colorida em cards, gradiente roxo/azul, três cards iguais, fundo creme/bege por reflexo, sombras pretas puras. O portão visual (Impeccable) bloqueia isso e a story trava.',
     '- domains: subconjunto de [frontend, design, backend, api, database, testing, python, security, a11y, docs].',
     '- keywords: 5 a 12 palavras técnicas do pedido (em inglês e português) para escolher skills.',
     '- needs_ui, needs_backend: booleanos.',
@@ -483,7 +532,7 @@ function planPrompt() {
     '- stories: 1 a 6 stories pequenas e independentes, em ordem de execução. Cada uma: id (s1, s2…), title, request (instrução completa e autossuficiente para a IA que vai implementar, incluindo o estilo visual quando houver interface), acceptance (2 a 4 critérios verificáveis), test_hint (como provar).',
     p.runner === 'none' ? '- Não há runner de provas: a primeira story deve incluir criar o mínimo para rodar provas (JS: package.json + vitest; Python: pytest).' : '',
     '- Se o pedido é visual e não há index.html, uma story deve entregar index.html na raiz funcionando como arquivos estáticos (ES modules, sem build), para abrir no navegador.',
-    'Pedidos simples viram 1 ou 2 stories. Não invente escopo além do pedido.',
+    'Pedidos simples viram 1 ou 2 stories. Não invente escopo além do pedido. questions: normalmente vazio (a entrevista já aconteceu).',
     m.plan_feedback?.length ? `PLANO ANTERIOR (para revisar, não para repetir):\n${JSON.stringify({ title: m.plan.title, summary: m.plan.summary, stories: m.stories.map((s) => ({ id: s.id, title: s.title, request: s.request })) })}` : '',
     m.plan_feedback?.length ? `O usuário pediu estas mudanças no plano, em ordem: ${m.plan_feedback.map((f, i) => `(${i + 1}) ${f}`).join(' ')} Aplique-as e mantenha o resto.` : '',
   ].filter(Boolean).join('\n') + skillsBlock(state.mission.skills.planner || [])
@@ -495,9 +544,10 @@ const PLAN_JSON_SCHEMA = {
     domains: { type: 'array', items: { type: 'string' } }, keywords: { type: 'array', items: { type: 'string' } },
     needs_ui: { type: 'boolean' }, needs_backend: { type: 'boolean' },
     research_questions: { type: 'array', items: { type: 'string' } }, questions: { type: 'array', items: { type: 'string' } },
+    assets: { type: 'array', maxItems: 6, items: { type: 'object', additionalProperties: false, properties: { file: { type: 'string' }, prompt: { type: 'string' }, purpose: { type: 'string' } }, required: ['file', 'prompt', 'purpose'] } },
     stories: { type: 'array', minItems: 1, maxItems: 6, items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, title: { type: 'string' }, request: { type: 'string' }, acceptance: { type: 'array', items: { type: 'string' } }, test_hint: { type: 'string' } }, required: ['id', 'title', 'request', 'acceptance', 'test_hint'] } },
   },
-  required: ['title', 'summary', 'explanation', 'complexity', 'domains', 'keywords', 'needs_ui', 'needs_backend', 'research_questions', 'questions', 'stories'],
+  required: ['title', 'summary', 'explanation', 'complexity', 'domains', 'keywords', 'needs_ui', 'needs_backend', 'research_questions', 'questions', 'assets', 'stories'],
 }
 
 // ---------- prompts do maker ----------
@@ -513,6 +563,8 @@ function common(st) {
     p.runner === 'none' ? 'Não há runner de provas: crie o mínimo (JS: package.json com vitest e "test": "vitest run"; Python: pytest) antes da prova.' : '',
     p.has_index ? 'Há um index.html na raiz; o que for visual tem de aparecer nele.' : (m.plan.needs_ui ? 'Se esta story é visual, entregue/atualize index.html na raiz funcionando como arquivos estáticos (ES modules, sem build).' : ''),
     m.research?.findings?.length ? `Pesquisa prévia: ${m.research.findings.map((f) => `${f.question} → ${f.answer}`).join(' | ')}` : '',
+    m.assets_done?.length ? `Imagens já geradas no projeto (use onde indicado, com alt descritivo; não gere outras): ${m.assets_done.map((a) => `${a.file} — ${a.purpose}`).join('; ')}` : '',
+    m.answers?.length ? `Escolhas do usuário na entrevista: ${m.answers.map((a) => `${a.question} → ${a.answer}`).join(' | ')}` : '',
   ].filter(Boolean)
 }
 function testPrompt(st) {
@@ -527,7 +579,7 @@ function fixPrompt(st, round, review, visual) {
     'Agora implemente o necessário para a prova passar e os critérios de aceite valerem. Não modifique a prova. Não toque em nada fora do escopo da story.',
     'Ao terminar, escreva uma frase dizendo o que mudou.']
   if (round > 1 && review) { base.push(`Rodada ${round}. O revisor (outra IA) pediu mudanças: ${review.summary}`); for (const f of review.findings) base.push(`- [${f.severity}] ${f.file}: ${f.problem} Correção sugerida: ${f.fix}`) }
-  if (visual?.length) { base.push('O portão visual (Impeccable detect) apontou; corrija:'); for (const f of visual) base.push(`- ${f.file}${f.line ? ':' + f.line : ''} [${f.rule}] ${f.message}`) }
+  if (visual?.length) { base.push('O portão visual (Impeccable detect) apontou; corrija. Se um achado conflita com um detalhe decorativo de um critério de aceite (borda lateral, gradiente, cor), o portão vence: satisfaça a intenção do critério de outro jeito, sem investigar o detector, e diga isso na frase final.'); for (const f of visual) base.push(`- ${f.file}${f.line ? ':' + f.line : ''} [${f.rule}] ${f.message}`) }
   return base.join('\n') + skillsBlock(state.mission.skills.maker || [])
 }
 
@@ -543,7 +595,12 @@ async function planMission() {
   setStep('intent', 'done')
   log('engine', `entendido: ${intent.complexity} · ${intent.domains.join(', ')} · skills — planejador: ${m.skills.planner.map((s) => s.id).join(', ') || 'nenhuma'}; maker: ${m.skills.maker.map((s) => s.id).join(', ') || 'nenhuma'}; revisor: ${m.skills.checker.map((s) => s.id).join(', ') || 'nenhuma'}; pesquisa: ${m.skills.research.map((s) => s.id).join(', ') || 'nenhuma'}`)
   if (intent.questions?.length) { m.plan = { title: m.request.slice(0, 60), summary: intent.summary, complexity: intent.complexity, domains: intent.domains, needs_ui: intent.needs_ui, needs_backend: intent.needs_backend, questions: intent.questions, research_questions: [], stories: [] }; m.state = 'awaiting_plan'; m.reason = 'questions'; broadcast(); return }
-  if (intent.research_questions?.length && state.settings.research_enabled) {
+  return continuePlanning()
+}
+async function continuePlanning() {
+  const m = state.mission, intent = m.intent
+  m.state = 'planning'; broadcast()
+  if (intent.research_questions?.length && state.settings.research_enabled && !m.research) {
     setStep('research', 'running'); m.research = await research(intent.research_questions.slice(0, 3)); setStep('research', m.research ? 'done' : 'failed')
   }
   return makePlan()
@@ -573,6 +630,7 @@ async function runStories() {
       log('engine', state.project.runner === 'none' ? 'ponto de partida: sem runner de provas (a IA vai criar um)' : `ponto de partida: ${m.tests_before.total} provas, ${m.tests_before.failed} vermelhas`)
       setStep('prepare', 'done')
     }
+    await makeAssets()
     for (let i = 0; i < m.stories.length; i++) {
       const st = m.stories[i]
       if (st.state === 'done' || st.state === 'skipped') continue
@@ -628,6 +686,9 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   setStep('checker', 'running'); st.review = await checker(st.diff, st.tests_after, st); setStep('checker', st.review ? (st.review.verdict === 'approve' ? 'done' : 'failed') : 'failed')
   if (st.review?.verdict === 'approve') return true
   if (st.review && round < 4) { log('engine', `revisor pediu mudanças; rodada ${round + 1} automática`); return runStory(st, round + 1, st.review, null) }
+  if (st.review && state.settings.autonomy !== 'ask' && st.tests_after.ok && !(st.review.findings || []).some((f) => f.severity === 'high')) {
+    st.auto_accepted = true; log('engine', 'autonomia: 4 rodadas, provas verdes e nenhum achado grave; aceita e segue (o pedido do revisor fica registrado na aba Revisão)', 'warn'); return true
+  }
   return stop(st.review ? 'review_changes' : 'review_failed')
 }
 
@@ -669,8 +730,13 @@ async function decide(option, payload = {}) {
   if (!m) return
   journal({ type: 'decision', option }).catch(() => {})
   if (m.state === 'awaiting_plan') {
+    if (option === 'start' && m.reason === 'questions') { m.answers = (m.plan.questions || []).map((q) => ({ id: q.id, question: q.question, answer: q.options?.[0]?.label || 'não sei' })); log('operador', 'seguiu com as recomendações'); return continuePlanning() }
     if (option === 'start') { log('operador', 'aprovou o plano'); return runStories() }
-    if (option === 'answer') { const req = `${m.request}\n\nRespostas do usuário: ${payload.text}`; log('operador', `respondeu: ${payload.text}`); return startMission(req) }
+    if (option === 'answer') {
+      m.answers = payload.answers?.length ? payload.answers : [{ id: 'livre', question: 'resposta livre', answer: payload.text || '' }]
+      log('operador', `respondeu: ${m.answers.map((a) => `${a.question} → ${a.answer}`).join(' | ')}`)
+      return continuePlanning()
+    }
     if (option === 'revise' && payload.text?.trim()) { m.plan_feedback = [...(m.plan_feedback || []), payload.text.trim()]; log('operador', `pediu mudanças no plano: ${payload.text.trim()}`); return makePlan() }
     if (option === 'discard') { m.state = 'discarded'; log('operador', 'descartou o plano'); return finish() }
     return
@@ -731,7 +797,7 @@ http.createServer(async (req, res) => {
       if (busy()) return json(res, 409, { error: 'Já há uma missão rodando.' })
       const err = await startMission(request.trim()); return err ? json(res, 400, { error: err }) : json(res, 202, { ok: true })
     }
-    if (url.pathname === '/api/decide' && req.method === 'POST') { const { option, text } = await body(req); decide(option, { text }); return json(res, 202, { ok: true }) }
+    if (url.pathname === '/api/decide' && req.method === 'POST') { const { option, text, answers } = await body(req); decide(option, { text, answers }); return json(res, 202, { ok: true }) }
     if (url.pathname === '/api/skill' && url.searchParams.get('id')) { const c = state.catalog.find((x) => x.id === url.searchParams.get('id')); return c ? json(res, 200, { id: c.id, body: c.body }) : json(res, 404, {}) }
     if (url.pathname === '/api/app' || url.pathname.startsWith('/api/app/')) {
       if (!state.project) { res.writeHead(404); return res.end('sem projeto') }
