@@ -46,6 +46,7 @@ const REASON = {
   no_red_test: 'A prova que a IA escreveu já passava no código antigo, ou ela não escreveu prova. Assim a prova não serve para garantir a mudança.',
   review_changes: 'A segunda IA pediu mudanças e quem escreve não conseguiu fechar em 4 rodadas.',
   review_failed: 'O revisor não respondeu. Veja o erro na atividade completa; "Mais uma rodada" tenta de novo.',
+  budget: 'A missão passou do teto de gasto definido em Opções. Continue se quiser gastar mais, ou descarte.',
   no_changes: 'A IA não alterou nenhum arquivo.',
   engine_error: 'O motor falhou. Veja a atividade completa.',
   plan_failed: 'Não deu para transformar o pedido em plano. Reescreva o pedido com mais contexto.',
@@ -970,6 +971,8 @@ function OptionsPage({ s, save }) {
         <Card title="Autonomia" note="Quanto ela faz sozinha antes de te chamar.">
           <Row title="Deixar a IA rodar comandos" note="Instalar dependências, criar projeto. Desligue para ela só ler e editar arquivos." control={<Switch checked={s.allow_commands} onCheckedChange={(v) => save({ allow_commands: v })} />} />
           <Row title="Depois de 4 rodadas de revisão" note="Segue sozinha: com as provas verdes e nada grave, aceita e vai para a próxima parte. Para e pergunta: você decide." control={<select className="sel" value={s.autonomy || 'auto'} onChange={(e) => save({ autonomy: e.target.value })}><option value="auto">segue sozinha</option><option value="ask">para e pergunta</option></select>} />
+          <Row title="Modo noturno (sem perguntar)" note="Responde a entrevista com as recomendações, aprova o plano sozinha e, se uma parte travar sem saída, pula a parte e segue. Para só se estourar o teto da missão ou der erro do motor." control={<Switch checked={!!s.unattended} onCheckedChange={(v) => save({ unattended: v })} />} />
+          <Row title="Teto por missão (US$ no Claude)" note="Estourou: a missão pausa e espera você." control={<input className="ta" style={{ width: 80 }} type="number" min={5} step={5} value={s.max_usd_per_mission ?? 60} onChange={(e) => save({ max_usd_per_mission: Number(e.target.value) || 60 })} />} />
           <Row title="Faixa rápida para correções pequenas" note="Pedido curto do tipo corrija, ajuste, troque, em projeto existente: pula a entrevista e o plano e vai direto para prova, correção e revisão." control={<Switch checked={s.fast_lane !== false} onCheckedChange={(v) => save({ fast_lane: v })} />} />
         </Card>
         <Card title="Custo" note="O teto de gasto por parte do trabalho.">
