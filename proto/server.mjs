@@ -394,6 +394,7 @@ async function checker(diff, tests, st) {
     `Skills que o autor tinha de seguir: ${(m.skills.maker || []).map((s) => s.id).join(', ') || 'nenhuma'}.`,
     `O harness JÁ RODOU as provas fora da sandbox: ${tests.failed} falharam de ${tests.total} (runner: ${tests.runner}); a prova nova falhou antes da implementação e passou depois. Não tente rodar provas nem instalar nada (sua sandbox é somente leitura e isso vai falhar); avalie o código e o diff. Arquivos de lock (package-lock.json) e dependências não fazem parte do escopo revisado.`,
     'Critérios de aceite sobre detalhe decorativo (borda lateral colorida, gradiente, cor exata) cedem ao portão visual (Impeccable): não peça mudanças para reintroduzir isso; avalie a intenção do critério.',
+    'Severidade: high = comportamento errado, critério de aceite não atendido, segurança, acessibilidade quebrada, mudança fora do escopo. Cobertura de prova além do necessário, estilo de código, nomes e refatorações são low e NÃO impedem approve: registre como achado low e aprove.',
     'Responda em português no formato JSON exigido. verdict = "approve" só se não houver achado high.',
     '--- DIFF ---', diff.slice(0, 60000),
   ].join('\n') + skillsBlock(m.skills.checker || [])
@@ -697,7 +698,8 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     else {
       log('engine', `portão visual: ${st.visual.findings.length} achado(s) novo(s)${st.visual.pre_existing ? ` (${st.visual.pre_existing} já existiam antes desta parte)` : ''}`)
       for (const f of st.visual.findings.slice(0, 12)) log('impeccable', `${f.file}${f.line ? ':' + f.line : ''} [${f.rule}] ${f.message}`, 'text')
-      if (st.visual.findings.length && !previousVisual && (m.cost.usd - (st.usd_start || 0)) <= (state.settings.max_usd_per_story || 4)) { setStep('visual', 'failed'); log('engine', 'rodada de retoque visual'); return runStory(st, round + 1, null, st.visual.findings) }
+      // um único retoque visual por story: achado que sobrevive ao retoque vira aviso, não loop
+      if (st.visual.findings.length && !st.visual_reworked && (m.cost.usd - (st.usd_start || 0)) <= (state.settings.max_usd_per_story || 4)) { st.visual_reworked = true; setStep('visual', 'failed'); log('engine', 'rodada de retoque visual'); return runStory(st, round + 1, null, st.visual.findings) }
       setStep('visual', st.visual.findings.length ? 'warn' : 'done')
     }
   }
