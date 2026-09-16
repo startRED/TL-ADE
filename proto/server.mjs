@@ -87,11 +87,14 @@ const state = new Proxy({}, {
 // ---------- anexos e diálogos do Explorer ----------
 const ATTACH_DIR = '.ade-attachments'
 async function pickNative(kind) {
+  // Diálogo nativo do Explorer. O dono (form invisível, TopMost) precisa estar MOSTRADO: com um form nunca exibido o ShowDialog devolvia Cancel na hora, sem abrir nada.
+  // Pasta: truque do OpenFileDialog (Explorer moderno, com "Nova pasta"); a pasta é o diretório do nome escolhido.
+  const owner = "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true; Opacity = 0; ShowInTaskbar = $false; Width = 1; Height = 1; StartPosition = 'CenterScreen' }; $f.Show(); $f.Activate(); "
   const script = kind === 'folder'
-    ? "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.Form -Property @{TopMost=$true; Width=0; Height=0; ShowInTaskbar=$false}; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Pasta do projeto (pode criar uma nova)'; $d.ShowNewFolderButton = $true; if ($d.ShowDialog($f) -eq 'OK') { [Console]::Out.Write($d.SelectedPath) }"
-    : "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.Form -Property @{TopMost=$true; Width=0; Height=0; ShowInTaskbar=$false}; $d = New-Object System.Windows.Forms.OpenFileDialog; $d.Title = 'Anexar arquivos ou fotos'; $d.Multiselect = $true; $d.Filter = 'Tudo (*.*)|*.*|Imagens|*.png;*.jpg;*.jpeg;*.webp;*.gif|Documentos|*.pdf;*.md;*.txt;*.docx;*.xlsx;*.csv;*.json'; if ($d.ShowDialog($f) -eq 'OK') { [Console]::Out.Write(($d.FileNames -join [char]10)) }"
-  const r = await run('powershell', ['-STA', '-NoProfile', '-NonInteractive', '-Command', script], { timeoutMs: 10 * 60 * 1000 })
-  return r.out.split('\n').map((x) => x.trim()).filter(Boolean)
+    ? owner + "$d = New-Object System.Windows.Forms.OpenFileDialog; $d.Title = 'Escolha a pasta do projeto (entre nela e clique em Abrir; pode criar uma nova)'; $d.ValidateNames = $false; $d.CheckFileExists = $false; $d.CheckPathExists = $true; $d.FileName = 'Selecionar esta pasta'; $d.Filter = 'Pasta|*.pasta'; $r = $d.ShowDialog($f); $f.Close(); if ($r -eq 'OK') { [Console]::Out.Write([System.IO.Path]::GetDirectoryName($d.FileName)) }"
+    : owner + "$d = New-Object System.Windows.Forms.OpenFileDialog; $d.Title = 'Anexar arquivos ou fotos'; $d.Multiselect = $true; $d.Filter = 'Tudo (*.*)|*.*|Imagens|*.png;*.jpg;*.jpeg;*.webp;*.gif|Documentos|*.pdf;*.md;*.txt;*.docx;*.xlsx;*.csv;*.json'; $r = $d.ShowDialog($f); $f.Close(); if ($r -eq 'OK') { [Console]::Out.Write(($d.FileNames -join [char]10)) }"
+  const r = await run('powershell', ['-STA', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { timeoutMs: 10 * 60 * 1000 })
+  return r.out.split(String.fromCharCode(10)).map((x) => x.trim()).filter(Boolean)
 }
 function safeName(name) { return name.replace(/[^\w.\-() ]+/g, '_').slice(0, 120) || 'anexo' }
 async function addAttachments({ paths = [], files = [] }) {
