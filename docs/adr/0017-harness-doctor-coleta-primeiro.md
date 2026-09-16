@@ -98,3 +98,17 @@ sem o qual `cited` não existe), `~/.ade/prices.json` (custo
 `estimated` do braço Codex), `docs/specs/` (`ade doctor` relata e não decide), `docs/roadmap.md`
 (ablação pareada pós-v1), ADR 0009 (`cited` por skill), ADR 0011, ADR 0021 (toda série de custo é
 filtrada por `runtime_stamp`).
+
+## Emendas (2026-09-17)
+
+Fonte: `architecture.md` §12 (revisão adversarial). Prevalecem sobre o texto acima onde houver conflito.
+
+- **E45** `ENGINE_VERSION` do Impeccable divergente do pin é falha do doctor (fail-closed), nunca aviso.
+  O FQE entra em modo degradado: stories com UI param em `awaiting_operator{reason:'fqe_unavailable'}`;
+  stories sem UI seguem.
+- **E59** `skills_injected[]` ganha `sha256` (do conteúdo injetado) e `source` (`catalog@<commit>` ou
+  `local`) — evidência de supply chain no próprio evento.
+- **E67** `compaction_events` sai da telemetria (sessão nova por chamada, turno único, pack com teto:
+  nunca há compactação). `capabilities_digest` passa a ter dois leitores nomeados: o relatório do doctor
+  e o `mission_summary`.
+- **E69** REJ Contadores de cota por família no doctor: subsistema de medição novo, fora da v1.

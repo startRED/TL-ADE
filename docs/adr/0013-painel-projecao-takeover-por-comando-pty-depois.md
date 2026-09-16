@@ -1,7 +1,7 @@
 # ADR 0013 — Painel como projeção, takeover por comando, PTY depois
 
-**Status:** aceito 2026-09-17, pendente de confirmação do Erick — contraria decisão prévia do
-`PROMPT.md` (painel com terminal embutido na v1); é o item 1 de `architecture.md` §9.
+**Status:** Aceito (confirmado por Erick em 2026-09-17) — substitui decisão prévia do `PROMPT.md`
+(painel com terminal embutido na v1); `architecture.md` §9.1.
 
 ## Contexto
 
@@ -76,3 +76,19 @@ o checkpoint não mudam, então não há migração de journal.
 defeito apontado em J3 §6), `docs/security/README.md` (token de sessão e `Origin` do `ade serve`),
 `docs/journeys.md` (jornadas 4 e 6), ADR 0012, ADR 0015 (durante o takeover só sobra o `contain`),
 ADR 0019.
+
+## Emendas (2026-09-17)
+
+Fonte: `architecture.md` §12 (revisão adversarial) e §9 (decisões de Erick). Prevalecem sobre o texto
+acima onde houver conflito.
+
+- **§9.1** Confirmado por Erick: o painel ao vivo entra na v1, no navegador, aberto por 2 cliques (o
+  lançador `ade.bat`/`ade.cmd` na raiz do repositório ou o atalho gerado por `ade init` sobe `ade serve`
+  e abre o navegador já pronto para uso). A interface deve ter aparência de IDE — painel de
+  missões/stories à esquerda, diff e evidências no centro, relatório e decisões à direita —, critério de
+  aceite de UX medido no dogfood D4. Continua somente-leitura + ações que viram `step` no journal; o
+  terminal embutido (PTY) confirma-se para a v0.5. Esta decisão amplia o escopo da v0.4b em relação a
+  "projeção mínima": o roadmap registra o acréscimo como [hipótese] de esforço até a medição. O status
+  deste ADR deixa de estar pendente.
+- **E62** REJ Cancelar story `running` (`operator_cancel`) não entra na v1: Ctrl-C para o lote inteiro
+  (lease + reconciliação) e `ade discard` trata a story depois; sem transição nova.

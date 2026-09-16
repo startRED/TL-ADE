@@ -85,3 +85,12 @@ W2, W4 e W5 por execução real e cacheia a resolução de binário por família
 reciclado; todo teste de contenção verifica por `tasklist`, fonte independente do processo Node),
 `docs/operations/autonomy-and-permissions.md` (W5), ADR 0001, ADR 0011 (`{pack_path}`), ADR 0012,
 ADR 0013, ADR 0015, ADR 0018.
+
+## Emendas (2026-09-17)
+
+Fonte: `architecture.md` §12 (revisão adversarial). Prevalece sobre o texto acima onde houver conflito.
+
+- **E49** `node_modules` por worktree no Windows é resolvido por **junction** (não symlink, que exige
+  privilégio elevado no Windows por padrão) apontando para o checkout base, criada pelo `prepare` quando
+  o hash do lockfile do worktree é igual ao do base; se diverge, classe ≥ `bounded` roda o instalador do
+  discovery como step `prepare`. A jornada 1 mantém ≤30 s com junction (ver também ADR 0012).

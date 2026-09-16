@@ -90,3 +90,7 @@ que nasceu observacional não muda o schema `visual-eval`.
 até a v0.4b, publicado ali), `schemas/task-contract.schema.json` (`design_brief` com `self_critique`
 obrigatório, `roles.judge` pinado por `model_id`), `docs/roadmap.md` (v0.4a), ADR 0005 (juiz de outra
 família), ADR 0007, ADR 0017, ADR 0019.
+
+## Emendas (2026-09-17)
+
+- E45: `ENGINE_VERSION` do Impeccable divergente do pin passa a ser falha do doctor (fail-closed), nunca aviso. O FQE entra em modo degradado nessa condição: stories com UI param em `awaiting_operator{reason:'fqe_unavailable'}`; stories sem UI seguem normalmente.

@@ -88,3 +88,8 @@ braço "BM25@3 puro" empatar com o seletor barato, o seletor sai e economiza uma
 
 `docs/catalog-sources.md`, `~/.ade/catalog/index.json`, `docs/specs/` (Skill Fabric, SkillGuard),
 ADR 0008 (skills decididas no `prepare`), ADR 0011 (teto de 7,5k e `cited`), ADR 0017, ADR 0019.
+
+## Emendas (2026-09-17)
+
+- E56: confiança em repositório — a v1 assume repositórios do próprio operador; `catalog.sources` permanece em `.ade/config.json` do repositório (não em `~/.ade/config.json`, que não existe no layout). Skills em `<repo>/.claude/skills/` não entram no pack e não são carregadas pela CLI porque a chamada despachada roda sob `--safe-mode` (E15); em `codex`/`agy` a supressão equivalente é provada pela sonda. "Modo repositório de terceiros" fica como backlog da v0.5, com ADR próprio.
+- E59: `skills_injected[]` ganha `sha256` (do conteúdo injetado) e `source` (`catalog@<commit>` ou `local`), como evidência de supply chain no próprio evento.

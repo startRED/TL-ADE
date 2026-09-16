@@ -85,3 +85,12 @@ linha. Remover o Task Contract, não — é fundação de ADR 0007 e ADR 0010.
 `schemas/plan.schema.json` e `schemas/task-contract.schema.json`, `docs/specs/` (Intent Compiler,
 entrevista, aprovação), `docs/journeys.md`, ADR 0007, ADR 0009 (skills decididas no `prepare`),
 ADR 0015 (`autonomy` e `ask_operator` no contrato), ADR 0016.
+
+## Emendas (2026-09-17)
+
+- E44: `deploy` e `dependency_install` são valores exclusivos do enum de `ask_operator` (E5); não entram em `effect_class` nem em `permitted_effects` — são vocabulário de aprovação, não de efeito.
+- E48: `TaskContract.unknowns?[]` entra no contrato e no `task-contract.schema.json` (`id`, `question`, `kind ∈ {product_choice, external_fact, repo_fact}`, `resolved_by?`); a incógnita é do contrato, não do plano.
+- E54: a métrica U1 da faixa rápida (`first_source_edit_ms`) ganha definição operacional única — tempo do `ade run` até o primeiro `local_write` em arquivo fora de `.ade/` que não seja arquivo de eval, medido pelo journal.
+- E61: rejeitados `max_tokens_in`/`max_tokens_out` em `plan.mission_budget`; `max_usd` + `prices.json` cobrem as famílias com custo reportado, e nas demais o teto é `max_model_calls`.
+- E63: a validação de `eval.cmd[0]` contra `scripts` migra do plano para o `prepare` de cada story (re-discovery no worktree); no plano valida-se só a forma. `story.provides_runner` é rejeitado.
+- E65: emenda a E4 — `max_model_calls = 2 + 2·visual_rounds + 2·(max_rework_rounds + 1)` [hipótese]; `bounded` com UI passa a 8 chamadas/3 rework (sem UI mantém 6/2); `feature` com UI passa a 12/3.

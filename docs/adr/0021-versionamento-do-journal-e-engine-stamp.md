@@ -88,3 +88,16 @@ abertas na versão antiga terminam na versão antiga ou são descartadas para `r
 `docs/roadmap.md` (o teste de paridade byte a byte do JCS
 entra no slice 1), ADR 0002, ADR 0003, ADR 0017 (toda série de telemetria é filtrada por stamp),
 ADR 0020 (o dogfood é o que torna o stamp necessário na v1).
+
+## Emendas (2026-09-17)
+
+Fonte: `architecture.md` §12 (revisão adversarial). Prevalecem sobre o texto acima onde houver conflito.
+
+- **E43** REJ `config_digest` bloqueante com `--accept-config-change`: E7 fica mantido, só
+  `core_version` bloqueia. Mitigação já aplicada: argv congelado no `batch_open` e hash de `.ade/**`
+  verificado pelo doctor.
+- **E67** `compaction_events` sai da telemetria (sessão nova por chamada, turno único, pack com teto:
+  nunca há compactação). `capabilities_digest` passa a ter dois leitores nomeados: o relatório do doctor
+  e o `mission_summary`.
+- **E68** REJ `capabilities_digest` divergente bloquear `--unattended`: E7 fica mantido; a divergência vai
+  ao relatório e ao `mission_summary`, não bloqueia.

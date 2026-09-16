@@ -75,3 +75,7 @@ Custo: linha de roteamento em `~/.ade/routing.jsonl` e config; o `review-result`
 
 `schemas/review-result.schema.json`, `docs/specs/` (ciclo por story, rework, escalação), ADR 0003
 (casos de teste renomeados pela forma rica), ADR 0005, ADR 0015.
+
+## Emendas (2026-09-17)
+
+- E66: o campo `model` da telemetria de `model_call` vira `models: { role: 'executor' | 'advisor'; model_id }[]`; a recusa de vendor igual ao do Maker, já prevista para o Checker de rodada, passa a valer para todo papel da chamada, incluindo um eventual `--advisor`, que só é adotado quando seu `model_id` é observável em `modelUsage`.

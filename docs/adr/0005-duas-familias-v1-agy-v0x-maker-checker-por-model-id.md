@@ -63,3 +63,7 @@ o roteamento por papel já aceita primário + 2 fallbacks sem mudança de schema
 
 `schemas/capability-set.schema.json`, `docs/specs/` (adapters, roteamento, canário de contenção),
 `~/.ade/capabilities.json` e `~/.ade/routing.jsonl`, ADR 0004, ADR 0006, ADR 0015, ADR 0016.
+
+## Emendas (2026-09-17)
+
+- E66: a telemetria de `model_call` passa de `model` único para `models: { role: 'executor' | 'advisor'; model_id }[]`; a separação Maker ≠ Checker por `model_id` e por vendor passa a valer para **todo** papel da chamada, não só para o Checker. `--advisor` só entra na receita quando o modelo do advisor é observável em `modelUsage` (sonda do doctor); até lá o Maker roda sem `--advisor`.

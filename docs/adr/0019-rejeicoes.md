@@ -65,3 +65,25 @@ local — nenhuma dessas rejeições está codificada em contrato ou schema, só
 `docs/research/landscape-harnesses.md` (nenhum texto da ADE pode citar Vibe Kanban, Crystal/Nimbalyst ou
 Gas Town como estado da arte vivo), `docs/specs/` (Playwright como biblioteca, nunca MCP no caminho
 automático), ADR 0004, ADR 0005, ADR 0006, ADR 0009, ADR 0010, ADR 0011, ADR 0014, ADR 0018, ADR 0020.
+
+## Emendas (2026-09-17)
+
+Fonte: `architecture.md` §12 (revisão adversarial). Sete rejeições novas, com o mesmo formato desta ADR
+(rejeição + gatilho de reavaliação onde aplicável).
+
+- **E41** REJ Estender `--disallowedTools` a `Read`/`Glob`/`Grep` com globs de caminhos negados: não é
+  fronteira real (best-effort sobre o próprio agente). Fica registrado como limite conhecido em security
+  §11; a contenção de leitura de segredos na v1 continua sendo o `env` filtrado (I49) + ausência de
+  credencial no processo.
+- **E52** REJ ADR de rotinas autônomas (`routine_budget`, `scope_paths`, política de PR). Rotinas são
+  pós-v1 (vision §2.13); o ADR abre quando entrarem no roadmap.
+- **E57** REJ Recalcular agora os totais de duração de E37. A medição da semana 1 do slice 1 replaneja os
+  números; até lá ficam [hipótese].
+- **E60** REJ Purga de segredo em blob na v1. Mantido o quarentenamento em `refs/ade/quarantine/`, nunca
+  empurrado, com alerta do doctor; purga é comando manual pós-v1.
+- **E61** REJ `max_tokens_in`/`max_tokens_out` em `mission_budget`. `max_usd` + `prices.json` cobrem as
+  famílias com custo reportado; nas demais o teto é `max_model_calls`.
+- **E62** REJ Cancelar story `running` (`operator_cancel`). Ctrl-C para o lote inteiro (lease +
+  reconciliação) e `ade discard` trata a story depois; sem transição nova (ver também ADR 0013).
+- **E69** REJ Contadores de cota por família no doctor. Subsistema de medição novo, fora da v1 (ver
+  também ADR 0017).
