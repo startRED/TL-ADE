@@ -83,7 +83,7 @@ button { font: inherit; color: inherit; }
 .steps { padding: 14px 14px 18px; }
 .steps-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .progress { height: 4px; border-radius: 2px; background: var(--bg-3); overflow: hidden; margin-bottom: 14px; }
-.progress span { display: block; height: 100%; background: var(--teal-9); transition: width .4s ease; }
+.progress span { display: block; height: 100%; width: 100%; background: var(--teal-9); transform-origin: left; transform: scaleX(var(--p, 0)); transition: transform .4s ease; }
 .timeline { list-style: none; margin: 0; padding: 0; position: relative; }
 .timeline::before { content: ""; position: absolute; left: 11px; top: 12px; bottom: 12px; width: 1px; background: var(--line-2); }
 .step { display: grid; grid-template-columns: 24px 1fr; gap: 10px; padding: 6px 0; position: relative; }
@@ -164,9 +164,9 @@ button { font: inherit; color: inherit; }
 .hint { color: var(--gray-10); font-size: 12.5px; margin: 12px 0 0; line-height: 1.5; }
 .review p { margin: 8px 0; line-height: 1.5; }
 .verdict { display: flex; align-items: center; gap: 10px; }
-.finding { padding: 10px 12px; border-radius: 8px; background: var(--bg-2); border-left: 3px solid var(--gray-8); margin-top: 8px; }
-.finding.high { border-left-color: var(--red-9); }
-.finding.medium { border-left-color: var(--amber-9); }
+.finding { padding: 10px 12px; border-radius: 8px; background: var(--bg-2); border: 1px solid var(--line); margin-top: 8px; }
+.finding.high .sev { color: var(--red-11); }
+.finding.medium .sev { color: var(--amber-11); }
 .finding-head { display: flex; gap: 8px; align-items: center; }
 .sev { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--gray-10); }
 
