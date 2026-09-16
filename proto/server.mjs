@@ -97,7 +97,10 @@ function setStep(name, status, extra = {}) {
 // ---------- processos ----------
 function run(cmd, args, { cwd, stdin, onLine, timeoutMs = 20 * 60 * 1000 } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, shell: IS_WIN, env: process.env, windowsHide: true })
+    // shell:true no Windows concatena os argumentos sem aspas: qualquer argumento com espaço ou aspas
+    // (mensagem de commit, prompt do agy, schema JSON) precisa de escape estilo MSVC aqui, uma vez só.
+    const quoted = IS_WIN ? args.map((a) => /[\s"&|<>^()]/.test(a) ? '"' + a.replace(/(\\*)"/g, '$1$1\\"') + '"' : a) : args
+    const child = spawn(cmd, quoted, { cwd, shell: IS_WIN, env: process.env, windowsHide: true })
     let out = '', err = '', buf = ''
     const timer = setTimeout(() => { try { child.kill() } catch {} }, timeoutMs)
     child.stdout.on('data', (d) => {
@@ -121,7 +124,7 @@ async function saveJson(file, data) { await mkdir(ADE_DIR, { recursive: true });
 async function saveRecent(dir) { state.recent = [dir, ...state.recent.filter((d) => d !== dir)].slice(0, 8); await saveJson('projects.json', state.recent) }
 
 // ---------- catálogo de skills ----------
-const DENY = /email-ops|enterprise|inventory|hipaa|llm-trading|nutrient|pytorch|springboot|jpa-|foundation-models|github-ops|exa-search|rules-distill|gan-style|eval-harness|ecc-tools|connections-optimizer|content-hash|continuous-agent|click-path|security-bounty|security-scan|caveman|cavecrew|closeout|stocktake|humanizer|^bro$|eli5|revisor|tl-orchestrator|graphify|everything-claude|configure-ecc|hookify|instinct|continuous-learning|^agent-|autonomous|dmux|devfleet|council|crosspost|article|brand-voice|content-engine|customer|customs|carrier|energy|finance-billing|healthcare|investor|jira|knowledge-ops|lead-|logistics|market-research|messages-ops|nanoclaw|openclaw|opensource|production-|project-flow|quality-nonconformance|returns|unified-notifications|visa|workspace|x-api|videodb|video|remotion|manim|fal-ai|minecraft|voxy|prism|neoforge|mod-backport|spark|log-crash|chunk|proxmox|iridium|safe-change|stitch|imagegen|image-to-code|brandkit|full-output|gpt-taste|design-taste-frontend-v1|frontend-slides|ui-demo|claw|^ck$|cost-aware|benchmark|blueprint|browser-qa|canary|code-tour|codebase-onboarding|context-budget|deep-research|data-scraper|defi|evm|iterative|liquid-glass|nodejs-keccak|regex-vs|repo-scan|research-ops|search-first|skill-|social-graph|strategic|team-builder|terminal-ops|token-budget|prompt-optim|plankton|santa|ralphinho|gateguard|safety-guard|product-|automation-audit|api-connector|api-payment|agentic|ai-first|ai-regression|android|compose-multi|dart|flutter|kotlin|swift|rust|golang|java|laravel|django|perl|csharp|cpp|dotnet|nestjs|nuxt|nextjs|bun-runtime|clickhouse|docker|deployment|mcp-server|hexagonal|^git-workflow$|architecture-decision|claude-api|claude-md|documentation-lookup|writing-|using-|dispatching|executing|finishing|receiving|requesting|subagent|systematic|verification|brainstorming|test-driven|redesign-existing|industrial|minimalist|high-end/i
+const DENY = /caveman|cavecrew|closeout|stocktake|humanizer|^bro$|eli5|revisor|tl-orchestrator|graphify|everything-claude|configure-ecc|hookify|instinct|continuous-learning|^agent-sort|dmux|devfleet|council|crosspost|article-writing|brand-voice|content-engine|customer-|customs-|carrier-|energy-|finance-billing|healthcare|hipaa|investor|jira|knowledge-ops|lead-|logistics|market-research|messages-ops|nanoclaw|openclaw|opensource|production-scheduling|project-flow|quality-nonconformance|returns-|unified-notifications|visa-|google-workspace|x-api|videodb|video-editing|remotion|manim|fal-ai|minecraft|voxy|prism-client|neoforge|mod-backport|spark-profiler|log-crash|chunk-pipeline|proxmox|iridium|safe-change|stitch|imagegen|image-to-code|full-output|gpt-taste|design-taste-frontend-v1|frontend-slides|ui-demo|^claw$|^ck$|cost-aware|ecc-tools|email-ops|enterprise-agent|inventory|llm-trading|nutrient|foundation-models|exa-search|rules-distill|gan-style|eval-harness|connections-optimizer|content-hash|continuous-agent|click-path|session-closeout|skill-stocktake|using-superpowers|writing-skills|claude-md-improver|everything-claude-useful|token-budget|context-budget|strategic-compact|prompt-optimizer|search-first|repo-scan|research-ops|team-builder|terminal-ops|social-graph|plankton|santa-|ralphinho|gateguard|safety-guard|automation-audit|agent-payment|defi-|evm-|iterative-retrieval|regex-vs|nodejs-keccak|liquid-glass|canary-watch|benchmark|blueprint|code-tour|codebase-onboarding|deep-research|data-scraper|dashboard-builder|agent-harness|agent-introspection|agentic-engineering|ai-first|autonomous-agent|autonomous-loops|claude-api|claude-devfleet|product-capability|product-lens|api-connector-builder|security-bounty|security-scan|seo$|skill-comply|workspace-surface|^agent-eval$|documentation-lookup|dispatching-parallel|subagent-driven|using-git-worktrees|executing-plans|finishing-a-development|receiving-code-review|requesting-code-review|github-ops|laravel-plugin-discovery/i
 const TAGS = {
   frontend: /frontend|\bui\b|design|landing|css|tailwind|react|visual|interface|layout|typograph|web page|website|component/i,
   backend: /backend|\bapi\b|server|express|rest|graphql|endpoint|node\.js|nodejs/i,
@@ -137,6 +140,7 @@ const skillRoots = () => [
   path.join(HOME, '.claude', 'plugins', 'cache', 'impeccable', 'impeccable', '4.3.1', 'skills'),
   path.join(HOME, '.claude', 'plugins', 'cache', 'claude-plugins-official', 'frontend-design', '94258c5913c4', 'skills'),
   path.join(HOME, '.claude', 'plugins', 'cache', 'everything-claude-code', 'everything-claude-code', '1.10.0', 'skills'),
+  path.join(HOME, '.claude', 'plugins', 'cache', 'claude-plugins-official', 'superpowers', '6.0.3', 'skills'),
 ]
 async function loadCatalog() {
   const seen = new Map()
@@ -146,12 +150,12 @@ async function loadCatalog() {
       if (seen.has(d.name) || DENY.test(d.name)) continue
       if (!(await stat(path.join(root, d.name)).then((s) => s.isDirectory(), () => false))) continue   // links simbólicos (npx skills add) não passam em isDirectory()
       const file = path.join(root, d.name, 'SKILL.md')
-      let body; try { body = await readFile(file, 'utf8') } catch { continue }
+      let body; try { body = (await readFile(file, 'utf8')).split(String.fromCharCode(13)).join('') } catch { continue }
       const fm = /^---\n([\s\S]*?)\n---/.exec(body)
       const desc = (fm && /description:\s*(.*)/.exec(fm[1])?.[1] || '').replace(/^["']|["']$/g, '').slice(0, 220)
       const text = `${d.name} ${desc}`
       const tags = Object.entries(TAGS).filter(([, re]) => re.test(text)).map(([t]) => t)
-      const source = root.includes('plugins') ? (root.includes('impeccable') ? 'impeccable' : root.includes('frontend-design') ? 'anthropic' : 'ecc') : 'local'
+      const source = root.includes('plugins') ? (root.includes('impeccable') ? 'impeccable' : root.includes('superpowers') ? 'superpowers' : root.includes('frontend-design') ? 'anthropic' : 'ecc') : 'local'
       seen.set(d.name, { id: d.name, description: desc, tags, source, bytes: body.length, path: file, body })
     }
   }
@@ -245,7 +249,14 @@ async function runTests(project) {
   }
   return { ok: false, total: 0, failed: 0, tests: [], runner: 'none' }
 }
-async function gitDiff(dir) { await run('git', ['add', '-N', '--', '.'], { cwd: dir }); return (await run('git', ['diff', '--', '.'], { cwd: dir })).out }
+const DIFF_EXCLUDES = [':!node_modules', ':!**/node_modules/**', ':!package-lock.json', ':!.ade-vitest.json', ':!dist', ':!build', ':!__pycache__', ':!.venv']
+async function ensureIgnore(dir) {
+  const f = path.join(dir, '.gitignore')
+  if (await exists(f)) return
+  await writeFile(f, ['node_modules/', '.ade-vitest.json', 'dist/', '__pycache__/', '.venv/', ''].join(String.fromCharCode(10)))
+  await run('git', ['add', '.gitignore'], { cwd: dir }); await run('git', ['-c', 'user.name=TL-ADE', '-c', 'user.email=ade@local', 'commit', '-q', '-m', 'ade: .gitignore', '--', '.gitignore'], { cwd: dir })
+}
+async function gitDiff(dir) { await run('git', ['add', '-N', '--', '.', ...DIFF_EXCLUDES], { cwd: dir }); return (await run('git', ['diff', '--', '.', ...DIFF_EXCLUDES], { cwd: dir })).out }
 async function gitDiscard(dir) { await run('git', ['reset', '-q', '--', '.'], { cwd: dir }); await run('git', ['checkout', '--', '.'], { cwd: dir }); await run('git', ['clean', '-fd', '.'], { cwd: dir }) }
 async function gitCommit(dir, msg) {
   await run('git', ['add', '-A', '--', '.'], { cwd: dir })
@@ -271,7 +282,7 @@ async function claudeCall({ role, prompt, model, tools, skipPermissions, schema,
   const m = state.mission, dir = state.project.dir
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--safe-mode', '--max-turns', String(maxTurns), '--model', model]
   // shell:true no Windows concatena argumentos: aspas internas precisam de escape estilo MSVC.
-  if (schema) args.push('--json-schema', IS_WIN ? '"' + JSON.stringify(schema).replace(/(\\*)"/g, '$1$1\\"') + '"' : JSON.stringify(schema))
+  if (schema) args.push('--json-schema', JSON.stringify(schema))
   if (skipPermissions) args.push('--dangerously-skip-permissions')
   else { args.push('--permission-mode', 'acceptEdits'); if (tools) args.push('--tools', ...tools) }
   log('engine', `claude (${role}, ${model})${schema ? ' com saída estruturada' : ''}`)
@@ -341,7 +352,7 @@ async function checker(diff, tests, st) {
     'Regras: toda mudança de comportamento vem com uma prova (teste) que falha antes e passa depois; sem mudanças fora do escopo; sem quebrar acessibilidade; sem segredos em código; interface sem cara de template (cores saturadas, gradiente roxo, três cards iguais).',
     `Pedido do usuário: ${m.request}`, `Story em revisão: ${st.title}. Critérios de aceite: ${(st.acceptance || []).join('; ')}`,
     `Skills que o autor tinha de seguir: ${(m.skills.maker || []).map((s) => s.id).join(', ') || 'nenhuma'}.`,
-    `Resultado das provas após a alteração: ${tests.failed} falharam de ${tests.total} (runner: ${tests.runner}).`,
+    `O harness JÁ RODOU as provas fora da sandbox: ${tests.failed} falharam de ${tests.total} (runner: ${tests.runner}); a prova nova falhou antes da implementação e passou depois. Não tente rodar provas nem instalar nada (sua sandbox é somente leitura e isso vai falhar); avalie o código e o diff. Arquivos de lock (package-lock.json) e dependências não fazem parte do escopo revisado.`,
     'Responda em português no formato JSON exigido. verdict = "approve" só se não houver achado high.',
     '--- DIFF ---', diff.slice(0, 60000),
   ].join('\n') + skillsBlock(m.skills.checker || [])
@@ -542,7 +553,10 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     if (st.red_tests.length === 0 || regress.length > 0) { setStep('red', 'failed'); st.tests_after = after; st.diff = await gitDiff(state.project.dir); return stop(regress.length ? 'tests_red' : 'no_red_test') }
     setStep('red', 'done')
   }
-  setStep('fix', 'running', { round }); await claudeCall({ role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual), model: state.settings.roles.maker.model, tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands }); await refreshProject(); setStep('fix', 'done', { round })
+  // Autonomia: a partir da 3ª rodada o maker sobe para o modelo do planejador (mais forte) antes de parar.
+  const makerModel = round >= 3 && state.settings.roles.planner.model !== state.settings.roles.maker.model ? state.settings.roles.planner.model : state.settings.roles.maker.model
+  if (round >= 3) log('engine', `rodada ${round}: escalando o maker para ${makerModel}`)
+  setStep('fix', 'running', { round }); await claudeCall({ role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual), model: makerModel, tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands }); await refreshProject(); setStep('fix', 'done', { round })
   setStep('tests', 'running'); st.tests_after = await runTests(state.project); st.diff = await gitDiff(state.project.dir)
   log('engine', `provas depois: ${st.tests_after.total} no total, ${st.tests_after.failed} vermelha(s)`); setStep('tests', st.tests_after.ok ? 'done' : 'failed')
   if (!st.diff.trim()) { setStep('checker', 'skipped'); return stop('no_changes') }
@@ -559,7 +573,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   }
   setStep('checker', 'running'); st.review = await checker(st.diff, st.tests_after, st); setStep('checker', st.review ? (st.review.verdict === 'approve' ? 'done' : 'failed') : 'failed')
   if (st.review?.verdict === 'approve') return true
-  if (st.review && round < 3) { log('engine', `revisor pediu mudanças; rodada ${round + 1} automática`); return runStory(st, round + 1, st.review, null) }
+  if (st.review && round < 4) { log('engine', `revisor pediu mudanças; rodada ${round + 1} automática`); return runStory(st, round + 1, st.review, null) }
   return stop('review_changes')
 }
 
@@ -583,7 +597,7 @@ async function startMission(request) {
   if (fresh.dirty) return 'A pasta tem alterações não commitadas. Commite ou descarte antes, para a ADE poder desfazer só o que ela mesma fizer.'
   const s = state.settings
   if (vendorOf(s.roles.maker.family, s.roles.maker.model) === vendorOf(s.roles.checker.family, s.roles.checker.model)) return 'Quem escreve e quem revisa precisam ser de empresas diferentes. Ajuste em Modelos.'
-  state.project = fresh; state.log = []; currentPhase = 'intent'
+  await ensureIgnore(fresh.dir); state.project = await discover(fresh.dir); state.log = []; currentPhase = 'intent'
   state.mission = {
     id: 'm-' + Date.now().toString(36), request, state: 'planning', reason: null, current: null,
     allow_commands: !!s.allow_commands, roles: JSON.parse(JSON.stringify(s.roles)),
