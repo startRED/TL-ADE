@@ -1039,6 +1039,16 @@ http.createServer(async (req, res) => {
       const e = engineFor(info.dir); e.project = info; activeDir = path.resolve(info.dir); await saveRecent(info.dir); broadcast(); return json(res, 200, info)
     }
     if (url.pathname === '/api/select' && req.method === 'POST') { const { dir } = await body(req); const e = dir && engines.get(path.resolve(dir)); if (!e) return json(res, 404, { error: 'Projeto não aberto.' }); activeDir = path.resolve(dir); broadcast(); return json(res, 200, { ok: true }) }
+    if (url.pathname === '/api/close' && req.method === 'POST') {
+      // fecha a pasta no painel; missão pausada/esperando continua salva em .ade/missions e volta pelo histórico ("Continuar")
+      const { dir } = await body(req); const key = dir && path.resolve(dir); const e = key && engines.get(key)
+      if (!e) return json(res, 404, { error: 'Pasta não está aberta.' })
+      if (busyOf(e)) return json(res, 409, { error: 'Essa pasta tem um pedido rodando. Pause ou espere terminar antes de fechar.' })
+      if (e.mission && ['awaiting_plan', 'awaiting_operator', 'paused'].includes(e.mission.state)) { if (e.mission.state !== 'paused') { e.mission.state = 'paused'; e.mission.reason = null } await withEngine(e, () => persistMission().catch(() => {})) }
+      engines.delete(key)
+      if (activeDir === key) activeDir = [...engines.keys()].find((k) => engines.get(k).project) || null
+      broadcast(); return json(res, 200, { ok: true })
+    }
     if (url.pathname === '/api/pause' && req.method === 'POST') { const b = await body(req); const e = await targetEngine(req, url, b); if (!e) return json(res, 400, { error: 'Sem projeto.' }); const err = await withEngine(e, pauseMission); return err ? json(res, 400, { error: err }) : json(res, 202, { ok: true }) }
     if (url.pathname === '/api/resume' && req.method === 'POST') {
       const { id, dir } = await body(req)

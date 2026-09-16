@@ -768,3 +768,7 @@ button { font: inherit; color: inherit; }
 
 .errbar.ask { align-items: center; gap: 12px; }
 .errbar .btn.primary.sm { margin-left: auto; padding: 6px 12px; font-size: 12.5px; white-space: nowrap; }
+
+.eng-close { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-left: 4px; border-radius: 6px; color: var(--gray-9); opacity: 0; transition: opacity .15s, background .15s; }
+.hist-item:hover .eng-close, .eng-close:focus-visible { opacity: 1; }
+.eng-close:hover { background: var(--bg-3, var(--bg-2)); color: var(--gray-12); }
