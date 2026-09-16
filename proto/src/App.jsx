@@ -2,13 +2,20 @@ import { useEffect, useRef, useState } from 'react'
 import { Badge, Box, Button, Callout, Code, Flex, Heading, ScrollArea, Separator, Tabs, Text, TextField, Card } from '@radix-ui/themes'
 import { Play, CheckCircle, Warning, ArrowCounterClockwise, Trash, Robot, Flask, GitDiff, ChatCircleText, Terminal, HourglassMedium } from '@phosphor-icons/react'
 
-const STEP_LABEL = { prepare: 'Preparar', test: 'Claude escreve o teste', red: 'Teste falha antes (prova)', fix: 'Claude corrige o código', tests: 'Teste passa depois', checker: 'Codex revisa' }
-const STEP_HELP = { prepare: 'Roda os testes que já existem para saber o ponto de partida.', test: 'A IA escreve só um teste novo que descreve o que você pediu.', red: 'O teste novo tem de FALHAR no código atual. Se já passasse, não estaria testando nada de novo.', fix: 'Só agora a IA mexe no código, o mínimo para o teste passar.', tests: 'Todos os testes, o novo e os antigos, precisam passar.', checker: 'Outra IA (Codex, da OpenAI) lê a alteração e aprova ou pede mudanças.' }
+const STEP_LABEL = { prepare: '1. Conferir o projeto', test: '2. Escrever a prova', red: '3. Prova falha no código antigo', fix: '4. Corrigir o código', tests: '5. Prova passa no código novo', checker: '6. Segunda IA revisa' }
+const STEP_HELP = {
+  prepare: 'Roda o que o projeto já tem de verificação, para saber o ponto de partida.',
+  test: 'Uma "prova" é um mini-programa que checa se o que você pediu funciona. Ex.: "clica em Entrar duas vezes e confere se o botão travou". A IA escreve só isso, sem mexer no código ainda.',
+  red: 'A ADE roda a prova ANTES de qualquer correção. Ela tem de falhar, porque o que você pediu ainda não existe. Se passasse agora, a prova estaria checando a coisa errada.',
+  fix: 'Só agora a IA muda o código, o mínimo necessário.',
+  tests: 'Roda a prova de novo. Agora tem de passar. Falhou antes e passou depois: é isso que garante que a mudança funciona de verdade, e não só "parece" que funciona.',
+  checker: 'Uma segunda IA, de outra empresa (Codex), lê a mudança e aprova ou aponta problemas. Quem escreve nunca é quem aprova.',
+}
 const STATE_LABEL = { running: 'Em andamento', awaiting_operator: 'Aguardando você', complete: 'Pronta', discarded: 'Descartada' }
 const REASON_LABEL = {
   tests_red: 'Algum teste ficou vermelho.',
   no_new_test: 'A IA não escreveu um teste novo que prove a correção.',
-  no_red_test: 'O teste novo não falhou no código antigo (ou não foi criado). Um teste que já passava antes da correção não prova que a correção funciona. Veja a aba Testes.',
+  no_red_test: 'A prova que a IA escreveu já passava no código antigo (ou ela não escreveu prova nenhuma). Então ela não serve para provar a mudança. Veja a aba Testes.',
   review_changes: 'O revisor (Codex) pediu mudanças.',
   no_changes: 'A IA não alterou nenhum arquivo.',
   engine_error: 'O engine falhou. Veja o log.',
@@ -68,16 +75,17 @@ export default function App() {
       </Card>
 
       <Flex gap="3" style={{ flex: 1, minHeight: 0 }} wrap={{ initial: 'wrap', md: 'nowrap' }}>
-        <Card size="2" className="pane" style={{ width: 300, flexShrink: 0, display: "flex", flexDirection: "column" }}>
+        <Card size="2" className="pane" style={{ width: 340, flexShrink: 0, display: "flex", flexDirection: "column", overflow: "auto" }}>
           <Heading size="2" color="gray" mb="3">Missão</Heading>
           {!m ? (
-            <Flex direction="column" gap="2" align="center" justify="center" style={{ flex: 1, textAlign: 'center' }}>
-              <Robot size={36} color="var(--gray-8)" />
-              <Text size="2" color="gray">Nenhuma missão ainda. Escreva um pedido acima e clique em Rodar.</Text>
+            <Flex direction="column" gap="3">
+              <Text size="2" color="gray">Nenhuma missão ainda. Escreva um pedido acima e clique em Rodar. Toda missão passa por estes 6 passos:</Text>
+              {['prepare', 'test', 'red', 'fix', 'tests', 'checker'].map((name) => <StepRow key={name} label={STEP_LABEL[name]} step={null} help={STEP_HELP[name]} />)}
             </Flex>
           ) : (
             <Flex direction="column" gap="3">
               <Text size="2" weight="medium">{m.request}</Text>
+              <Text size="1" color="gray">A missão passa por 6 passos. O ponto aceso é onde ela está agora.</Text>
               <Flex gap="2" align="center">
                 <StateBadge state={m.state} />
                 <Text size="1" color="gray">rodada {m.round || 1}</Text>
@@ -90,7 +98,7 @@ export default function App() {
                 })}
               </Flex>
               <Separator size="4" />
-              <Flex direction="column" gap="2">
+              <Flex direction="column" gap="3">
                 {['prepare', 'test', 'red', 'fix', 'tests', 'checker'].map((name) => {
                   const s = m.steps.find((x) => x.name === name)
                   return <StepRow key={name} label={STEP_LABEL[name]} step={s} help={STEP_HELP[name]} />
@@ -121,7 +129,7 @@ export default function App() {
             <Tabs.List>
               <Tabs.Trigger value="activity"><Terminal /> Atividade</Tabs.Trigger>
               <Tabs.Trigger value="diff"><GitDiff /> Alterações {m?.diff ? <Badge ml="1" size="1" variant="soft">{m.diff.split('\n').filter((l) => /^diff --git/.test(l)).length}</Badge> : null}</Tabs.Trigger>
-              <Tabs.Trigger value="tests"><Flask /> Testes {m?.tests_after ? <Badge ml="1" size="1" variant="soft" color={m.tests_after.ok ? 'green' : 'red'}>{m.tests_after.total - m.tests_after.failed}/{m.tests_after.total}</Badge> : null}</Tabs.Trigger>
+              <Tabs.Trigger value="tests"><Flask /> Provas {m?.tests_after ? <Badge ml="1" size="1" variant="soft" color={m.tests_after.ok ? 'green' : 'red'}>{m.tests_after.total - m.tests_after.failed}/{m.tests_after.total}</Badge> : null}</Tabs.Trigger>
               <Tabs.Trigger value="review"><ChatCircleText /> Revisão</Tabs.Trigger>
             </Tabs.List>
             <Box pt="3" style={{ flex: 1, minHeight: 0 }}>
@@ -183,13 +191,16 @@ function StepRow({ label, step, help }) {
   useEffect(() => { if (status !== 'running') return; const id = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(id) }, [status])
   const color = { pending: 'var(--gray-7)', running: 'var(--teal-9)', done: 'var(--green-9)', failed: 'var(--amber-9)', skipped: 'var(--gray-7)' }[status]
   const secs = step?.started_at ? Math.max(0, Math.round(((step.finished_at ? new Date(step.finished_at) : new Date()) - new Date(step.started_at)) / 1000)) : null
-  const text = { pending: 'na fila', running: `${secs ?? 0} s`, done: `${secs ?? 0} s`, failed: 'atenção', skipped: 'pulado' }[status]
+  const text = { pending: 'na fila', running: `${secs ?? 0} s`, done: `ok · ${secs ?? 0} s`, failed: 'parou aqui', skipped: 'pulado' }[status]
   return (
-    <Flex align="center" gap="2">
-      <Box style={{ width: 8, height: 8, borderRadius: 4, background: color, boxShadow: status === 'running' ? `0 0 8px ${color}` : 'none' }} />
-      <Text size="2" style={{ flex: 1 }} color={status === 'pending' ? 'gray' : undefined} title={help}>{label}</Text>
-      <Text size="1" color="gray">{text}</Text>
-    </Flex>
+    <Box>
+      <Flex align="center" gap="2">
+        <Box style={{ width: 8, height: 8, borderRadius: 4, background: color, boxShadow: status === 'running' ? `0 0 8px ${color}` : 'none', flexShrink: 0 }} />
+        <Text size="2" weight={status === 'running' || status === 'failed' ? 'medium' : 'regular'} style={{ flex: 1 }} color={status === 'pending' ? 'gray' : undefined}>{label}</Text>
+        <Text size="1" color={status === 'failed' ? 'amber' : 'gray'}>{text}</Text>
+      </Flex>
+      <Text size="1" color="gray" as="p" style={{ marginLeft: 16, lineHeight: 1.4 }}>{help}</Text>
+    </Box>
   )
 }
 
