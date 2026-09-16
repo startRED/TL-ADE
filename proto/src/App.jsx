@@ -250,7 +250,7 @@ function SkillsPanel({ state, save }) {
   return (
     <div className="panel">
       <div className="steps-head"><span className="lbl" style={{ margin: 0 }}>Skills · {catalog.length} no catálogo</span><label className="sw"><Switch size="1" checked={s.skills.auto} onCheckedChange={(v) => save({ skills: { auto: v } })} /> automático</label></div>
-      <p className="dim small">Skills são manuais de qualidade que a IA recebe junto com o pedido. A ADE escolhe sozinha pelas regras (interface ou design: sempre <b>impeccable</b> + <b>design-taste-frontend</b>; backend: padrões de API) e por afinidade com o pedido. Até {s.skills.max} por missão, cada uma cortada em 7,5k tokens.</p>
+      <p className="dim small">Skills são manuais de qualidade que a IA recebe junto com o pedido. A ADE escolhe sozinha pelas regras (interface ou design: sempre <b>impeccable</b> + <b>design-taste-frontend</b>; backend: padrões de API) e por afinidade com o pedido. Até {s.skills.max} por missão, entregues inteiras (sem corte, por decisão sua).</p>
       {m?.skills?.length > 0 && <div className="chips">{m.skills.map((x) => <span key={x.id} className="chip-skill on" title={x.reason}>{x.id}<small>{x.reason}</small></span>)}</div>}
       <TextField.Root size="1" value={q} onChange={(e) => setQ(e.target.value)} placeholder="filtrar…" style={{ marginTop: 8 }}><TextField.Slot><MagnifyingGlass /></TextField.Slot></TextField.Root>
       <ul className="skill-list">

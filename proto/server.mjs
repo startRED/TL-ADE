@@ -156,8 +156,8 @@ async function loadCatalog() {
   }
   state.catalog = [...seen.values()].sort((a, b) => a.id.localeCompare(b.id))
 }
-const SKILL_MAX_CHARS = 30000      // ≈7,5k tokens por skill (E70)
-const SKILL_TOTAL_CHARS = 80000    // ≈20k tokens no bloco (E70)
+// Decisão de Erick (2026-09-16): skills entram INTEIRAS, sem corte. O plano (E70) fixa 7,5k/20k tokens
+// para a ADE real; a demonstração só mede e mostra o tamanho.
 function selectSkills(plan) {
   const s = state.settings.skills
   const domains = new Set(plan.domains || [])
@@ -180,10 +180,8 @@ function selectSkills(plan) {
   for (const p of picks) {
     if (out.length >= s.max) break
     const c = state.catalog.find((x) => x.id === p.id)
-    const bytes = Math.min(c.bytes, SKILL_MAX_CHARS)
-    if (total + bytes > SKILL_TOTAL_CHARS) continue
-    total += bytes
-    out.push({ ...p, bytes, truncated: c.bytes > SKILL_MAX_CHARS, source: c.source })
+    total += c.bytes
+    out.push({ ...p, bytes: c.bytes, truncated: false, source: c.source })
   }
   return out
 }
@@ -192,7 +190,7 @@ function skillsBlock(selected) {
   return '\n\n=== SKILLS ATIVAS (siga-as; são o padrão de qualidade deste projeto) ===\n' + selected.map((s) => {
     const c = state.catalog.find((x) => x.id === s.id)
     const body = c.body.replace(/^---\n[\s\S]*?\n---\n/, '')
-    return `\n--- skill: ${s.id} ---\n${body.slice(0, SKILL_MAX_CHARS)}${c.bytes > SKILL_MAX_CHARS ? '\n[...skill cortada no teto de 7,5k tokens]' : ''}`
+    return `\n--- skill: ${s.id} ---\n${body}`
   }).join('\n')
 }
 
@@ -349,7 +347,8 @@ async function checker(diff, tests, st) {
     'Responda em português no formato JSON exigido. verdict = "approve" só se não houver achado high.',
     '--- DIFF ---', diff.slice(0, 60000),
   ].join('\n')
-  const args = ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '-C', dir, '-m', model, '--output-schema', REVIEW_SCHEMA, '-']
+  // Receita de chamada curta (architecture.md E16): sem config, regras e skills do usuário; sessão efêmera.
+  const args = ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '--ephemeral', '-c', 'skills.max_context_tokens=0', '-C', dir, '-m', model, '--output-schema', REVIEW_SCHEMA, '-']
   log('engine', `codex (revisão, ${model})`)
   let lastMessage = null, usage = null
   const r = await run('codex', args, {
