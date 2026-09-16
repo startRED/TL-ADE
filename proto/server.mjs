@@ -154,12 +154,12 @@ function setStep(name, status, extra = {}) {
 }
 
 // ---------- processos ----------
-function run(cmd, args, { cwd, stdin, onLine, timeoutMs = 20 * 60 * 1000 } = {}) {
+function run(cmd, args, { cwd, stdin, onLine, timeoutMs = 20 * 60 * 1000, env = {} } = {}) {
   return new Promise((resolve) => {
     // shell:true no Windows concatena os argumentos sem aspas: qualquer argumento com espaço ou aspas
     // (mensagem de commit, prompt do agy, schema JSON) precisa de escape estilo MSVC aqui, uma vez só.
     const quoted = IS_WIN ? args.map((a) => /[\s"&|<>^()]/.test(a) ? '"' + a.replace(/(\\*)"/g, '$1$1\\"') + '"' : a) : args
-    const child = spawn(cmd, quoted, { cwd, shell: IS_WIN, env: process.env, windowsHide: true })
+    const child = spawn(cmd, quoted, { cwd, shell: IS_WIN, env: { ...process.env, ...env }, windowsHide: true })
     let out = '', err = '', buf = ''
     const timer = setTimeout(() => { try { child.kill() } catch {} }, timeoutMs)
     child.stdout.on('data', (d) => {
@@ -390,8 +390,9 @@ async function claudeCall({ role, prompt, model, tools, skipPermissions, schema,
   log('engine', `claude (${role}, ${model})${schema ? ' com saída estruturada' : ''}`)
   let result = null, liveBuf = null
   const touched = new Set()
+  const t0 = Date.now()
   const r = await run('claude', args, {
-    cwd: dir, stdin: prompt,
+    cwd: dir, stdin: prompt, env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
     onLine: (line) => {
       let ev; try { ev = JSON.parse(line) } catch { return }
       if (ev.type === 'system' && ev.subtype === 'init') log('claude', `sessão iniciada · modelo ${ev.model}`)
@@ -423,6 +424,7 @@ async function claudeCall({ role, prompt, model, tools, skipPermissions, schema,
     c.cache_read += result.usage?.cache_read_input_tokens || 0; c.tokens_out += result.usage?.output_tokens || 0
     c.by_model[model] = (c.by_model[model] || 0) + (result.total_cost_usd || 0)
     log('engine', `claude terminou · ${result.num_turns} turnos · US$ ${(result.total_cost_usd || 0).toFixed(2)} · ${Math.round((result.duration_ms || 0) / 1000)} s`)
+    journal({ type: 'model_call', family: 'claude', role, model, story: m.current, turns: result.num_turns || 0, usd: result.total_cost_usd || 0, tokens_in: result.usage?.input_tokens || 0, cache_write: result.usage?.cache_creation_input_tokens || 0, cache_read: result.usage?.cache_read_input_tokens || 0, tokens_out: result.usage?.output_tokens || 0, prompt_chars: prompt.length, wall_ms: Date.now() - t0, max_turns: maxTurns }).catch(() => {})
     readQuota().then(broadcastSoon)
     if (result.is_error) log('engine', `claude reportou erro: ${result.result || result.subtype}`, 'error')
   } else log('engine', `claude saiu com código ${r.code}: ${(r.err || r.out).slice(0, 300)}`, 'error')
@@ -486,6 +488,7 @@ async function checker(diff, tests, st) {
   try { review = lastMessage ? JSON.parse(lastMessage) : null } catch {}
   if (!review) log('engine', `codex falhou (código ${r.code}): ${(lastMessage || r.err || r.out).trim().slice(0, 300)}`, 'error')
   m.cost.calls += 1
+  journal({ type: 'model_call', family: 'codex', role: 'checker', model, story: m.current, tokens_in: usage?.input_tokens || 0, cache_read: usage?.cached_input_tokens || 0, tokens_out: usage?.output_tokens || 0, prompt_chars: prompt.length, verdict: review?.verdict || null }).catch(() => {})
   readQuota().then(broadcastSoon)
   if (usage) { m.cost.tokens_in += usage.input_tokens || 0; m.cost.tokens_out += usage.output_tokens || 0 }
   if (review) log('codex', `${review.verdict === 'approve' ? 'aprovou' : 'pediu mudanças'}: ${review.summary}`, 'text')
