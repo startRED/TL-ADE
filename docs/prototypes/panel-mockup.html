@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
+<title>TL-ADE Painel</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f3f4f6;--panel:#ffffff;--panel2:#eef0f3;--line:#d9dde3;--text:#1b1f27;--muted:#5d6572;
+  --accent:#0f6b8f;--accent-soft:#dbeef6;--amber:#b8730a;--amber-soft:#fbeed2;--green:#1f7a3f;--green-soft:#dcefe2;
+  --red:#b3261e;--red-soft:#f9dedb;--diff-add:#e3f4e8;--diff-del:#fbe4e2;--sel:#e8eef4;
+  --mono:'IBM Plex Mono',ui-monospace,Consolas,monospace;--sans:'IBM Plex Sans',system-ui,Segoe UI,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#15181d;--panel:#1c2026;--panel2:#22272e;--line:#2f353d;--text:#e6e8eb;--muted:#9aa3ad;
+  --accent:#5fb3d6;--accent-soft:#183542;--amber:#e3a23a;--amber-soft:#3a2c12;--green:#5cc27c;--green-soft:#173424;
+  --red:#ef7a72;--red-soft:#3d1c1a;--diff-add:#1b3524;--diff-del:#3b1f1d;--sel:#262d36;}}
+:root[data-theme="dark"]{
+  --bg:#15181d;--panel:#1c2026;--panel2:#22272e;--line:#2f353d;--text:#e6e8eb;--muted:#9aa3ad;
+  --accent:#5fb3d6;--accent-soft:#183542;--amber:#e3a23a;--amber-soft:#3a2c12;--green:#5cc27c;--green-soft:#173424;
+  --red:#ef7a72;--red-soft:#3d1c1a;--diff-add:#1b3524;--diff-del:#3b1f1d;--sel:#262d36;}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font:14px/1.45 var(--sans);padding-inline:16px;padding-block:12px;box-sizing:border-box}
+*{box-sizing:border-box}
+.app{display:grid;grid-template-rows:auto 1fr;gap:10px;height:100%;max-width:1500px;margin:0 auto}
+.top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+.brand{font-weight:600;letter-spacing:.02em}
+.brand small{color:var(--muted);font-weight:400;margin-left:6px}
+.run{display:flex;flex:1;min-width:260px;gap:6px}
+.run input{flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel2);color:var(--text);font:inherit}
+.run button,.btn{padding:8px 12px;border:1px solid var(--line);border-radius:6px;background:var(--panel2);color:var(--text);font:inherit;cursor:pointer}
+.btn.primary,.run button{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn:focus-visible,.run input:focus-visible,.run button:focus-visible,.story:focus-visible,.tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.status{display:flex;gap:14px;color:var(--muted);font-variant-numeric:tabular-nums;flex-wrap:wrap}
+.status b{color:var(--text);font-weight:500}
+.cols{display:grid;grid-template-columns:270px minmax(0,1fr) 320px;gap:10px;min-height:0}
+@media (max-width:980px){.cols{grid-template-columns:1fr}}
+.pane{background:var(--panel);border:1px solid var(--line);border-radius:8px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.pane h2{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0;padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600}
+.scroll{overflow:auto;min-height:0;flex:1}
+.mission{padding:10px 12px;border-bottom:1px solid var(--line)}
+.mission .t{font-weight:600}
+.mission .m{color:var(--muted);font-size:12px;margin-top:2px}
+.story{display:grid;grid-template-columns:8px 1fr auto;gap:10px;align-items:start;padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer;width:100%;text-align:left;background:none;border-left:0;border-right:0;border-top:0;color:inherit;font:inherit}
+.story[aria-selected="true"]{background:var(--sel)}
+.stripe{width:8px;height:100%;min-height:36px;border-radius:2px;background:var(--line)}
+.s-complete .stripe{background:var(--green)}.s-running .stripe{background:var(--accent)}.s-await .stripe{background:var(--amber)}.s-queued .stripe{background:var(--line)}
+.story .id{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.story .title{font-weight:500}
+.pill{font-size:11px;padding:2px 7px;border-radius:999px;white-space:nowrap;font-weight:500}
+.p-complete{background:var(--green-soft);color:var(--green)}.p-running{background:var(--accent-soft);color:var(--accent)}.p-await{background:var(--amber-soft);color:var(--amber)}.p-queued{background:var(--panel2);color:var(--muted)}
+.tabs{display:flex;gap:2px;padding:6px 8px 0;border-bottom:1px solid var(--line);overflow-x:auto}
+.tab{padding:7px 12px;border:1px solid transparent;border-bottom:0;border-radius:6px 6px 0 0;background:none;color:var(--muted);font:inherit;cursor:pointer;white-space:nowrap}
+.tab[aria-selected="true"]{background:var(--panel2);color:var(--text);border-color:var(--line)}
+.body{padding:12px;overflow:auto;flex:1;min-height:0}
+.head{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline;margin-bottom:10px}
+.head h3{margin:0;font-size:16px;text-wrap:balance}
+.head .meta{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+pre{margin:0;font:12.5px/1.5 var(--mono);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:10px;overflow-x:auto}
+.diff .file{font-family:var(--mono);font-size:12px;color:var(--muted);margin:10px 0 4px}
+.diff pre span{display:block;padding-inline:6px;margin-inline:-6px}
+.diff .a{background:var(--diff-add)}.diff .d{background:var(--diff-del)}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+.ok{color:var(--green);font-weight:500}.bad{color:var(--red);font-weight:500}.warn{color:var(--amber);font-weight:500}
+.shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.shot{border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--panel2)}
+.shot .cap{padding:6px 8px;font-size:12px;color:var(--muted);border-top:1px solid var(--line)}
+.shot svg{display:block;width:100%;height:auto}
+.report{padding:12px;display:flex;flex-direction:column;gap:12px}
+.card{border:1px solid var(--line);border-radius:6px;padding:10px;background:var(--panel2)}
+.card h4{margin:0 0 6px;font-size:13px}
+.card p{margin:0;color:var(--muted);font-size:13px}
+.decide{display:grid;gap:6px}
+.decide .btn{text-align:left}
+.decide .btn small{display:block;color:var(--muted);font-weight:400}
+.btn.primary small{color:#dfe9ef}
+.await-box{border-left:3px solid var(--amber)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:13px;font-variant-numeric:tabular-nums}
+.kv dt{color:var(--muted)}.kv dd{margin:0}
+.journal{font:11.5px/1.5 var(--mono);color:var(--muted);padding:10px 12px;border-top:1px solid var(--line);white-space:pre;overflow-x:auto}
+.toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:8px 14px;border-radius:6px;font-size:13px;opacity:0;transition:opacity .2s}
+.toast.on{opacity:1}
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}
+.note{font-size:12px;color:var(--muted);padding:6px 12px;border-top:1px solid var(--line)}
+</style>
+
+<div class="app">
+  <div class="top">
+    <div class="brand">TL-ADE <small>maquete · dados de exemplo</small></div>
+    <form class="run" id="runForm">
+      <input id="runInput" placeholder='ade run "corrija o botão de login que fica ativo durante o envio"' aria-label="Pedido em linguagem natural">
+      <button type="submit">Rodar</button>
+    </form>
+    <div class="status">
+      <span>Missão <b>m-0417</b></span>
+      <span>Autonomia <b>safe</b></span>
+      <span>Gasto <b>US$ 1,84</b> de 8,00</span>
+      <span>IAs <b>Claude · Codex</b></span>
+    </div>
+  </div>
+
+  <div class="cols">
+    <section class="pane" aria-label="Missão e stories">
+      <h2>Stories</h2>
+      <div class="mission">
+        <div class="t">Botão de login sem estado de envio</div>
+        <div class="m">4 stories · 1 concluída · 1 aguardando você · início 09:12</div>
+      </div>
+      <div class="scroll" id="storyList" role="listbox" aria-label="Stories"></div>
+      <div class="note">Verde: pronta e provada por teste. Âmbar: precisa de você. Azul: a IA está trabalhando.</div>
+    </section>
+
+    <section class="pane" aria-label="Evidências">
+      <div class="tabs" role="tablist" id="tabs"></div>
+      <div class="body" id="center"></div>
+    </section>
+
+    <section class="pane" aria-label="Relatório e decisões">
+      <h2>Relatório</h2>
+      <div class="scroll"><div class="report" id="report"></div></div>
+      <div class="journal" id="journal"></div>
+    </section>
+  </div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+const shot=(label,busy)=>`<svg viewBox="0 0 240 150" role="img" aria-label="${label}"><rect width="240" height="150" fill="#f7f8fa"/><rect x="60" y="28" width="120" height="14" rx="3" fill="#cfd6de"/><rect x="60" y="52" width="120" height="16" rx="3" fill="#e4e8ed" stroke="#c6ccd4"/><rect x="60" y="76" width="120" height="16" rx="3" fill="#e4e8ed" stroke="#c6ccd4"/><rect x="60" y="102" width="120" height="20" rx="4" fill="${busy?'#9fb4c4':'#0f6b8f'}"/>${busy?'<circle cx="120" cy="112" r="5" fill="none" stroke="#fff" stroke-width="2" stroke-dasharray="20 8"/>':'<rect x="105" y="108" width="30" height="8" rx="2" fill="#fff"/>'}</svg>`;
+
+const stories=[
+ {id:'s1',state:'complete',title:'Desabilitar o botão enquanto o envio está em curso',cls:'trivial',calls:2,cost:'0,31',
+  diff:[{file:'src/components/LoginButton.tsx',lines:[['c','  const { submitting } = useLogin();'],['d','  <button type="submit">Entrar</button>'],['a','  <button type="submit" disabled={submitting} aria-busy={submitting}>'],['a','    {submitting ? "Entrando…" : "Entrar"}'],['a','  </button>']]},
+        {file:'src/components/LoginButton.test.tsx',lines:[['a','test("botão fica desabilitado durante o envio", async () => {'],['a','  render(<LoginButton />); await user.click(screen.getByRole("button"));'],['a','  expect(screen.getByRole("button")).toBeDisabled();'],['a','});']]}],
+  tests:[['LoginButton.test.tsx › botão fica desabilitado durante o envio','vermelho antes','verde depois'],['LoginButton.test.tsx › envia credenciais','verde','verde'],['typecheck','—','ok']],
+  visual:null,review:{who:'Codex (gpt-5.3-codex)',verdict:'aprovado',notes:['Sem regressão de acessibilidade: aria-busy acompanha disabled.','Sem alteração fora do escopo (1 arquivo de fonte, 1 de teste).']},
+  report:'Pronta. O teste novo falhou antes da correção e passou depois; revisor de outra família aprovou. Já está na sua branch.'},
+ {id:'s2',state:'running',title:'Mostrar erro de credencial inválida sem recarregar a página',cls:'bounded',calls:3,cost:'0,72',
+  diff:[{file:'src/hooks/useLogin.ts',lines:[['c','  } catch (err) {'],['d','    window.location.reload();'],['a','    setError(mapAuthError(err));']]}],
+  tests:[['useLogin.test.ts › mostra mensagem em credencial inválida','vermelho antes','rodando…'],['typecheck','—','rodando…']],
+  visual:null,review:null,
+  report:'A IA está na segunda rodada: o teste ainda falha porque a mensagem de erro não aparece no primeiro render. Nada para você fazer agora.'},
+ {id:'s3',state:'await',title:'Estado visual de carregamento no botão (spinner e texto)',cls:'bounded',calls:5,cost:'0,81',
+  diff:[{file:'src/components/LoginButton.tsx',lines:[['c','  <button type="submit" disabled={submitting} aria-busy={submitting}>'],['a','    {submitting && <Spinner size="sm" />}'],['c','    {submitting ? "Entrando…" : "Entrar"}']]}],
+  tests:[['LoginButton.test.tsx › mostra spinner durante o envio','vermelho antes','verde depois'],['a11y (axe) na rota /login','—','0 violações'],['console sem erro','—','ok'],['responsivo 390 e 1280','—','ok']],
+  visual:{score:7.2,cut:7.5,judge:'Codex (multimodal)',issues:['Spinner e texto competem: dois indicadores do mesmo estado.','Contraste do botão desabilitado 3,1:1, abaixo de 4,5:1.'],shots:[['Antes (rodada 1)',false],['Depois (rodada 2)',true]]},
+  review:{who:'Codex (gpt-5.3-codex)',verdict:'aprovado com ressalva',notes:['Código correto; a ressalva é visual, não funcional.']},
+  report:'Os testes passam, mas o juiz visual deu nota 7,2 e o corte é 7,5. Já foram 2 rodadas (o máximo). Decida: aceitar como está, tentar mais uma rodada ou pular.'},
+ {id:'s4',state:'queued',title:'Bloquear duplo clique no botão por 1 s após o envio',cls:'trivial',calls:0,cost:'0,00',
+  diff:[],tests:[['(a definir pela IA na hora)','','']],visual:null,review:null,
+  report:'Na fila. Começa quando a story 3 for decidida.'}
+];
+const pill={complete:'Pronta',running:'Em andamento',await:'Aguardando você',queued:'Na fila'};
+let sel='s3', tab='diff';
+const $=id=>document.getElementById(id);
+
+function renderList(){
+  $('storyList').innerHTML=stories.map(s=>`<button class="story s-${s.state}" role="option" aria-selected="${s.id===sel}" data-id="${s.id}">
+    <span class="stripe"></span><span><span class="id">${s.id.toUpperCase()} · ${s.cls}</span><br><span class="title">${s.title}</span></span>
+    <span class="pill p-${s.state}">${pill[s.state]}</span></button>`).join('');
+  $('storyList').querySelectorAll('.story').forEach(b=>b.onclick=()=>{sel=b.dataset.id;tab='diff';render();});
+}
+function renderTabs(s){
+  const tabs=[['diff','Alterações'],['tests','Testes'],['visual','Visual'],['review','Revisão']];
+  $('tabs').innerHTML=tabs.map(([k,l])=>`<button class="tab" role="tab" aria-selected="${tab===k}" data-k="${k}">${l}</button>`).join('');
+  $('tabs').querySelectorAll('.tab').forEach(b=>b.onclick=()=>{tab=b.dataset.k;render();});
+}
+function renderCenter(s){
+  let h=`<div class="head"><h3>${s.title}</h3><div class="meta">${s.calls} chamadas · US$ ${s.cost} · Maker Claude Sonnet</div></div>`;
+  if(tab==='diff'){
+    h+=s.diff.length?`<div class="diff">`+s.diff.map(f=>`<div class="file">${f.file}</div><pre>${f.lines.map(([t,l])=>`<span class="${t}">${t==='a'?'+ ':t==='d'?'- ':'  '}${l.replace(/</g,'&lt;')}</span>`).join('')}</pre>`).join('')+`</div>`:`<p>Ainda sem alterações.</p>`;
+  }else if(tab==='tests'){
+    h+=`<table><thead><tr><th>Prova</th><th>Antes</th><th>Depois</th></tr></thead><tbody>`+s.tests.map(([n,a,b])=>`<tr><td>${n}</td><td class="${/vermelho/.test(a)?'bad':''}">${a}</td><td class="${/verde|ok|0 viol/.test(b)?'ok':/rodando/.test(b)?'warn':''}">${b}</td></tr>`).join('')+`</tbody></table><p style="color:var(--muted);font-size:12px;margin-top:8px">"Vermelho antes" prova que o teste pegaria o bug; "verde depois" prova que a correção resolve.</p>`;
+  }else if(tab==='visual'){
+    h+=s.visual?`<p>Nota do juiz: <b class="${s.visual.score>=s.visual.cut?'ok':'warn'}">${s.visual.score.toFixed(1)}</b> (corte ${s.visual.cut}) · ${s.visual.judge}</p><ul>${s.visual.issues.map(i=>`<li>${i}</li>`).join('')}</ul><div class="shots">${s.visual.shots.map(([c,b])=>`<div class="shot">${shot(c,b)}<div class="cap">${c}</div></div>`).join('')}</div>`:`<p>Esta story não tem interface; o juiz visual não roda.</p>`;
+  }else{
+    h+=s.review?`<p><b>${s.review.who}</b>: <span class="${/aprovado$/.test(s.review.verdict)?'ok':'warn'}">${s.review.verdict}</span></p><ul>${s.review.notes.map(n=>`<li>${n}</li>`).join('')}</ul><p style="color:var(--muted);font-size:12px">Quem revisa é sempre uma IA de outra empresa que a que escreveu.</p>`:`<p>Revisão ainda não aconteceu.</p>`;
+  }
+  $('center').innerHTML=h;
+}
+function renderReport(s){
+  let h=`<div class="card ${s.state==='await'?'await-box':''}"><h4>${pill[s.state]}</h4><p>${s.report}</p></div>`;
+  if(s.state==='await'){
+    h+=`<div class="decide">
+      <button class="btn primary" data-d="accept">Aceitar como está<small>Fecha a story; a nota 7,2 fica registrada.</small></button>
+      <button class="btn" data-d="retry">Mais uma rodada<small>~US$ 0,40 e 3 min. Passa o teto de 2 rodadas.</small></button>
+      <button class="btn" data-d="skip">Pular esta story<small>Segue para a story 4; esta volta para o backlog.</small></button>
+      <button class="btn" data-d="takeover">Assumir no terminal<small>Abre a sessão da IA para você mesmo mexer.</small></button>
+    </div>`;
+  }
+  h+=`<div class="card"><h4>Missão</h4><dl class="kv"><dt>Início</dt><dd>09:12</dd><dt>Tempo</dt><dd>41 min</dd><dt>Chamadas</dt><dd>10 de 32</dd><dt>Gasto</dt><dd>US$ 1,84 de 8,00</dd><dt>Skills usadas</dt><dd>frontend-design, accessibility</dd><dt>Branch</dt><dd style="font-family:var(--mono);font-size:12px">ade/m-0417</dd></dl></div>`;
+  $('report').innerHTML=h;
+  $('report').querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>decide(b.dataset.d));
+}
+function renderJournal(){
+  $('journal').textContent=`09:53:12 s3 judge score=7.2 cut=7.5 round=2
+09:53:13 s3 awaiting_operator reason=visual_below_cut
+09:53:40 s2 eval_run red=assertion round=2
+09:54:02 s2 model_call maker tokens_in=18.4k cache=71%`;
+}
+function toast(m){const t=$('toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),2200);}
+function decide(d){
+  const s=stories.find(x=>x.id==='s3');
+  if(d==='accept'){s.state='complete';s.report='Aceita por você às 09:58 com nota 7,2. Registrado no diário como decisão do operador.';toast('Story 3 aceita');}
+  if(d==='retry'){s.state='running';s.report='Rodada 3 em curso (autorizada por você). A IA recebeu os 2 problemas do juiz.';toast('Mais uma rodada iniciada');}
+  if(d==='skip'){s.state='queued';s.report='Pulada. Volta ao backlog; a story 4 começa agora.';stories[3].state='running';stories[3].report='A IA começou. Primeiro passo: escrever o teste que falha.';toast('Story 3 pulada');}
+  if(d==='takeover'){toast('Na versão real: abre o terminal com o comando pronto');return;}
+  render();
+}
+$('runForm').onsubmit=e=>{e.preventDefault();const v=$('runInput').value.trim();toast(v?'Na versão real: a ADE lê o repo e propõe as stories em ~30 s':'Escreva o pedido primeiro');};
+function render(){const s=stories.find(x=>x.id===sel);renderList();renderTabs(s);renderCenter(s);renderReport(s);renderJournal();}
+render();
+</script>
+
+</body></html>
