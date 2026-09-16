@@ -142,7 +142,8 @@ async function loadCatalog() {
   for (const root of skillRoots()) {
     let dirs = []; try { dirs = await readdir(root, { withFileTypes: true }) } catch { continue }
     for (const d of dirs) {
-      if (!d.isDirectory() || seen.has(d.name) || DENY.test(d.name)) continue
+      if (seen.has(d.name) || DENY.test(d.name)) continue
+      if (!(await stat(path.join(root, d.name)).then((s) => s.isDirectory(), () => false))) continue   // links simbólicos (npx skills add) não passam em isDirectory()
       const file = path.join(root, d.name, 'SKILL.md')
       let body; try { body = await readFile(file, 'utf8') } catch { continue }
       const fm = /^---\n([\s\S]*?)\n---/.exec(body)
@@ -273,7 +274,8 @@ function describeTool(c, dir) {
 async function claudeCall({ role, prompt, model, tools, skipPermissions, schema, maxTurns = 40 }) {
   const m = state.mission, dir = state.project.dir
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--safe-mode', '--max-turns', String(maxTurns), '--model', model]
-  if (schema) args.push('--json-schema', JSON.stringify(schema))
+  // shell:true no Windows concatena argumentos: aspas internas precisam de escape estilo MSVC.
+  if (schema) args.push('--json-schema', IS_WIN ? '"' + JSON.stringify(schema).replace(/(\\*)"/g, '$1$1\\"') + '"' : JSON.stringify(schema))
   if (skipPermissions) args.push('--dangerously-skip-permissions')
   else { args.push('--permission-mode', 'acceptEdits'); if (tools) args.push('--tools', ...tools) }
   log('engine', `claude (${role}, ${model})${schema ? ' com saída estruturada' : ''}`)
