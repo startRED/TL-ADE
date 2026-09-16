@@ -1,0 +1,26 @@
+@import "tailwindcss";
+@import "@radix-ui/themes/styles.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+.radix-themes {
+  --default-font-family: "Geist Variable", system-ui, "Segoe UI", sans-serif;
+  --code-font-family: "Geist Mono Variable", ui-monospace, Consolas, monospace;
+  --cursor-button: pointer;
+}
+
+html, body, #root, .radix-themes { height: 100%; margin: 0; }
+.pane { height: 100%; }
+@media (max-width: 1024px) { .pane { height: auto; width: 100% !important; } }
+body { background: var(--color-background); color: var(--gray-12); font-variant-numeric: tabular-nums; }
+
+.diff-line { display: block; padding: 0 12px; white-space: pre; }
+.diff-add { background: color-mix(in oklab, var(--green-9) 14%, transparent); color: var(--green-11); }
+.diff-del { background: color-mix(in oklab, var(--red-9) 14%, transparent); color: var(--red-11); }
+.diff-hdr { color: var(--gray-11); }
+.diff-ctx { color: var(--gray-12); }
+
+.log-line { display: grid; grid-template-columns: 62px 84px 1fr; gap: 10px; padding: 3px 0; border-bottom: 1px solid var(--gray-a3); font-family: var(--code-font-family); font-size: 12px; }
+.log-line time { color: var(--gray-9); }
+
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
