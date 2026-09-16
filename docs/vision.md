@@ -108,7 +108,7 @@ SKILL.md brutos sobram ~320 de qualidade e ~60–80 relevantes para a stack (dig
 otimização: o mecanismo nativo do Claude Code trunca descrições a 1.536 chars.
 **Reinterpretado:** "lazy loading" não é possível de forma uniforme — não existe diretório de skills
 comum às três CLIs (digest #14); a injeção é bloco fixo do pack ordenado por id estável (cacheável),
-com ≤7,5k tokens por skill e soma ≤15k (architecture.md §11 E14).
+com ≤7,5k tokens por skill e soma ≤20k (architecture.md §11 E14).
 Supply chain: sanitização estática em build time é a defesa medida (ASR 36 % → 7,2 %, digest #34),
 melhor que interceptação em runtime. **Cumpre:** precedência local > catálogo, quarentena, allowlist
 por licença, scripts nunca executados pelo engine (ADR 0009). Essa precedência vale dentro do
@@ -178,7 +178,7 @@ estimativa silenciosa (architecture.md §4, I45) — e nessas famílias o teto d
 `mission_budget` (§12 E61). **[hipótese]** o teto do pack é contado em **bytes** (`limits.max_pack_bytes`,
 default 120 000), com seção de rodada própria de 24 000 bytes e diff do Checker em
 `review.max_diff_bytes` 60 000 chars (architecture.md §11 E13); "40k tokens" é alvo de projeto por
-estimativa, e os tetos por seção (15k skills, ≤7,5k por skill, E70; 6k contexto recuperado; 1,5k
+estimativa, e os tetos por seção (20k skills, ≤7,5k por skill, E70; 6k contexto recuperado; 1,5k
 invariantes em forma "Must Always / Must Never") são chute calibrável: o dogfood ajusta por p90. A
 seção `contract` do pack tem teto próprio de **32 000 bytes** (≈8k tokens) **[hipótese]**, dentro de
 `max_pack_bytes`; estouro é `story_pack_overflow` e reabre a divisão da story (§12 E50).

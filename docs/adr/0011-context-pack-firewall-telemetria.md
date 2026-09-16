@@ -61,7 +61,7 @@ doctor (E17). Doctor v1 apenas coleta e relata.
 - `ref-affaan-mustafa-ecc.md` (A1, A2): extrato de ferramenta com forma fixa e telemetria com
   `approval_decisions` / `network_attempts` / `files_touched` vêm dos guias do ECC, lidos como
   referência pinada por commit, nunca como dependência de runtime.
-- Digest #13: corpo de 3 skills ≈6–7k tokens — origem do teto original de 7,5k da seção de skills (elevado a 15k por E70).
+- Digest #13: corpo de 3 skills ≈6–7k tokens — origem do teto original de 7,5k da seção de skills (elevado a 20k por E70).
 
 ## Trade-offs
 

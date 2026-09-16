@@ -364,7 +364,7 @@ de paridade custa ~11,7 s/caso em série (≈18 min): paraleliza por worker (J1 
 | R9 | A ADE se atualiza durante a própria missão (dogfood) | J1 §5.6 | `runtime_stamp` = engine + digest da config; divergência em intenção aberta = `stale_workflow_version` até `--accept-stale-version` (ADR 0021) |
 | R10 | Worker morre com o engine (não-detached): uma chamada paga perdida por crash | `architecture.md` §6 | árvore suja vira checkpoint, chamada vira `ambiguous`, próximo Maker continua; detached + recibo anexável é upgrade |
 | R11 | Windows: MAX_PATH em `.ade/wt/<id>` com `node_modules` profundo; handle preso em `git worktree remove` | J1 §5.7 | worktree em caminho curto, `core.longpaths=true` no doctor, retry com backoff na remoção, sweep de órfãs |
-| R12 | Tetos de pack são chute | digest, "Hipóteses assumidas" | corte em bytes: `max_pack_bytes` 120 000 [hipótese], seção de rodada 24 000, skills ≤7,5k tokens por skill e soma ≤15k (E13, E14); telemetria por seção; ajustar por p90 no dogfood [hipótese] |
+| R12 | Tetos de pack são chute | digest, "Hipóteses assumidas" | corte em bytes: `max_pack_bytes` 120 000 [hipótese], seção de rodada 24 000, skills ≤7,5k tokens por skill e soma ≤20k (E13, E14); telemetria por seção; ajustar por p90 no dogfood [hipótese] |
 
 ---
 
