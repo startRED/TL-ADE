@@ -73,7 +73,7 @@ export default function App() {
             </TextField.Slot>
           </TextField.Root>
         </form>
-        <div className="topright">{m && <MissionChip m={m} />}<a className="open-app" href="/api/app" target="_blank" rel="noreferrer"><ArrowSquareOut /> Abrir o app</a></div>
+        <div className="topright">{m && <MissionChip m={m} />}<a className="open-app" href="/api/app/" target="_blank" rel="noreferrer"><ArrowSquareOut /> Abrir o app</a></div>
       </header>
 
       <div className="body">
@@ -378,7 +378,7 @@ function Report({ m, decide }) {
     <div className="rpt">
       <span className="lbl">Sua parte</span>
       {m.state === 'running' && <div className="card calm"><Pulse /><div><b>Trabalhando</b><p>Nada para fazer agora. Acompanhe pela atividade ou vá tomar um café.</p></div></div>}
-      {m.state === 'complete' && <div className="card good"><CheckCircle weight="fill" /><div><b>Pronta</b><p>{m.reason === 'accepted_by_operator' ? 'Aceita por você.' : 'A prova falhou antes, passou depois, e o Codex aprovou.'} As alterações estão em <Code>proto/example</Code>. <a href="/api/app" target="_blank" rel="noreferrer">Abrir o app</a> para ver funcionando.</p></div></div>}
+      {m.state === 'complete' && <div className="card good"><CheckCircle weight="fill" /><div><b>Pronta</b><p>{m.reason === 'accepted_by_operator' ? 'Aceita por você.' : 'A prova falhou antes, passou depois, e o Codex aprovou.'} As alterações estão em <Code>proto/example</Code>. <a href="/api/app/" target="_blank" rel="noreferrer">Abrir o app</a> para ver funcionando.</p></div></div>}
       {m.state === 'discarded' && <div className="card"><Trash /><div><b>Descartada</b><p>Os arquivos voltaram ao que eram.</p></div></div>}
       {m.state === 'awaiting_operator' && (
         <>

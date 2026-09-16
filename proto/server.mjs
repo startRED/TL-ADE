@@ -376,7 +376,8 @@ http.createServer(async (req, res) => {
   }
   if (url.pathname === '/api/app' || url.pathname.startsWith('/api/app/')) {
     // Página do projeto alvo, servida do disco (ES modules precisam de HTTP).
-    const rel = url.pathname === '/api/app' || url.pathname === '/api/app/' ? 'index.html' : url.pathname.slice(9)
+    if (url.pathname === '/api/app') { res.writeHead(302, { Location: '/api/app/' }); return res.end() }
+    const rel = url.pathname === '/api/app/' ? 'index.html' : url.pathname.slice(9)
     const file = path.join(EXAMPLE, rel)
     if (!file.startsWith(EXAMPLE) || rel.includes('node_modules')) { res.writeHead(403); return res.end() }
     try {
