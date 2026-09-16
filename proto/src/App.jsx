@@ -30,10 +30,25 @@ const STATE = {
   complete: { label: 'Pronta', color: 'green' },
   discarded: { label: 'Descartada', color: 'gray' },
 }
+const fmtTok = (n) => n >= 1e6 ? `${(n / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n || 0)
+const fmtUsd = (n) => `US$ ${(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const fmtWhen = (iso) => iso ? new Date(iso).toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : ''
+function Quota({ q }) {
+  const c = q?.claude, x = q?.codex
+  const win = (w, name) => w ? <span className="quota-win"><b>{w.used}%</b> {name}{w.resets_at ? <small> · zera {fmtWhen(w.resets_at)}</small> : null}</span> : null
+  return (
+    <div className="quota">
+      <div className="quota-row"><span className="quota-vendor">Claude</span>{c ? <>{win(c.five_hour, 'da sessão de 5 h')}{win(c.seven_day, 'da semana')}<small className="dim">lido {fmtWhen(c.at)}</small></> : <small className="dim">sem leitura ainda: abra o Claude Code uma vez (a linha de status grava a cota)</small>}</div>
+      <div className="quota-row"><span className="quota-vendor">Codex</span>{x ? <>{win(x.five_hour, 'da sessão de 5 h')}{win(x.seven_day, 'da semana')}<small className="dim">lido {fmtWhen(x.at)}</small></> : <small className="dim">sem sessão do Codex ainda</small>}</div>
+      <div className="quota-row"><span className="quota-vendor">Antigravity</span><small className="dim">não expõe: abra o agy → Models &amp; Quota</small></div>
+    </div>
+  )
+}
 const REASON = {
   tests_red: 'Alguma prova ficou vermelha depois da implementação.',
   no_red_test: 'A prova que a IA escreveu já passava no código antigo (ou ela não escreveu prova). Então não serve para provar a mudança.',
-  review_changes: 'A segunda IA (Codex) pediu mudanças e a IA não convergiu em 3 rodadas.',
+  review_changes: 'A segunda IA (Codex) pediu mudanças e a IA não convergiu em 4 rodadas.',
+  review_failed: 'O revisor (Codex) não respondeu. Veja o erro na atividade; "Mais uma rodada" tenta de novo.',
   no_changes: 'A IA não alterou nenhum arquivo.',
   engine_error: 'O motor falhou. Veja a atividade.',
   plan_failed: 'Não deu para transformar o pedido em plano. Reescreva o pedido com mais contexto.',
@@ -158,7 +173,7 @@ export default function App() {
         <span title={p?.dir}>{p ? p.dir : 'sem pasta'}</span>
         {s && <span>{s.roles.intent?.model || s.roles.planner.model} entende · {s.roles.planner.model} planeja · {s.roles.maker.model} escreve · {s.roles.checker.model} revisa</span>}
         <span className="grow" />
-        {m && <span>{m.cost.calls} chamadas · {Math.round((m.cost.tokens_in + m.cost.tokens_out) / 1000)}k tokens · US$ {m.cost.usd.toFixed(2)} no Claude</span>}
+        {m && <span>{m.cost.calls} chamadas · {fmtTok(m.cost.tokens_in + m.cost.tokens_out)} tokens · {fmtUsd(m.cost.usd)} no Claude</span>}
       </footer>
     </div>
   )
@@ -218,10 +233,11 @@ function Progress({ m }) {
       </ol>
       <div className="stats">
         <Stat k="Chamadas de IA" v={m.cost.calls} />
-        <Stat k="Tokens" v={`${(m.cost.tokens_in / 1000).toFixed(0)}k novos · ${((m.cost.cache_read || 0) / 1000).toFixed(0)}k cache`} />
-        <Stat k="Custo no Claude" v={`US$ ${m.cost.usd.toFixed(3)}`} />
-        <Stat k="Cota do plano" v="indisponível nas CLIs" />
+        <Stat k="Tokens" v={`${fmtTok(m.cost.tokens_in)} novos · ${fmtTok(m.cost.cache_read || 0)} cache`} />
+        <Stat k="Custo no Claude" v={fmtUsd(m.cost.usd)} />
       </div>
+      <span className="lbl">Cota do plano</span>
+      <Quota q={state.quota} />
     </div>
   )
 }
@@ -319,7 +335,7 @@ function History({ history, current }) {
     <div key={h.id} className={`hist-row ${h.id === current?.id ? 'now' : ''}`}>
       <Badge size="1" color={STATE[h.state]?.color || 'gray'} variant="soft">{STATE[h.state]?.label || h.state}</Badge>
       <p style={{ marginTop: 4 }}>{h.title || h.request}</p>
-      <p className="dim small">{h.project?.split(/[\\/]/).pop()} · {h.stories || 0} partes · {h.finished_at?.slice(11, 16)} · US$ {(h.usd || 0).toFixed(2)}</p>
+      <p className="dim small">{h.project?.split(/[\\/]/).pop()} · {h.stories || 0} partes · {h.finished_at?.slice(11, 16)} · {fmtUsd(h.usd)}</p>
     </div>
   ))}</div>
 }

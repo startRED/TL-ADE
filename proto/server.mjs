@@ -60,7 +60,32 @@ const DEFAULT_SETTINGS = {
 }
 
 // ---------- estado ----------
-const state = { project: null, mission: null, log: [], history: [], live: null, recent: [], settings: DEFAULT_SETTINGS, catalog: [], registry: REGISTRY }
+const state = { project: null, mission: null, log: [], history: [], live: null, recent: [], settings: DEFAULT_SETTINGS, catalog: [], registry: REGISTRY, quota: { claude: null, codex: null } }
+
+// ---------- cota do plano ----------
+// Claude: a linha de status do Claude Code recebe rate_limits em cada turno interativo e grava em ~/.claude/ade-usage.json (ver README).
+// Codex: cada sessão (sem --ephemeral) grava token_count com rate_limits em ~/.codex/sessions. Antigravity não deixa nada legível: abrir o agy → Models & Quota.
+async function readQuota() {
+  try {
+    const j = JSON.parse(await readFile(path.join(HOME, '.claude/ade-usage.json'), 'utf8'))
+    const rl = j.rate_limits || {}
+    const pick = (w) => w ? { used: Math.round(w.used_percentage ?? w.used_percent ?? 0), resets_at: w.resets_at ? new Date(typeof w.resets_at === 'number' ? w.resets_at * 1000 : w.resets_at).toISOString() : null } : null
+    state.quota.claude = { at: j.t ? new Date(j.t * 1000).toISOString() : null, five_hour: pick(rl.five_hour), seven_day: pick(rl.seven_day) }
+  } catch { state.quota.claude = null }
+  try {
+    const root = path.join(HOME, '.codex/sessions')
+    let newest = null
+    for (const y of await readdir(root)) for (const mo of await readdir(path.join(root, y))) for (const d of await readdir(path.join(root, y, mo))) for (const f of await readdir(path.join(root, y, mo, d))) {
+      const full = path.join(root, y, mo, d, f); const st = await stat(full)
+      if (!newest || st.mtimeMs > newest.m) newest = { full, m: st.mtimeMs }
+    }
+    const lines = (await readFile(newest.full, 'utf8')).split('\n').filter((l) => l.includes('"rate_limits"'))
+    const ev = JSON.parse(lines[lines.length - 1]); const rl = ev.payload?.rate_limits || {}
+    const win = (w) => w ? { used: Math.round(w.used_percent || 0), minutes: w.window_minutes, resets_at: w.resets_at ? new Date(w.resets_at * 1000).toISOString() : null } : null
+    const wins = [rl.primary, rl.secondary].filter(Boolean).map(win)
+    state.quota.codex = { at: new Date(newest.m).toISOString(), five_hour: wins.find((w) => w.minutes <= 300) || null, seven_day: wins.find((w) => w.minutes > 300) || null, plan: rl.plan_type || null }
+  } catch { state.quota.codex = null }
+}
 let currentPhase = null
 let pending = null
 const clients = new Set()
@@ -324,7 +349,8 @@ async function claudeCall({ role, prompt, model, tools, skipPermissions, schema,
     c.tokens_in += (result.usage?.input_tokens || 0) + (result.usage?.cache_creation_input_tokens || 0)
     c.cache_read += result.usage?.cache_read_input_tokens || 0; c.tokens_out += result.usage?.output_tokens || 0
     c.by_model[model] = (c.by_model[model] || 0) + (result.total_cost_usd || 0)
-    log('engine', `claude terminou · ${result.num_turns} turnos · US$ ${(result.total_cost_usd || 0).toFixed(3)} · ${Math.round((result.duration_ms || 0) / 1000)} s`)
+    log('engine', `claude terminou · ${result.num_turns} turnos · US$ ${(result.total_cost_usd || 0).toFixed(2)} · ${Math.round((result.duration_ms || 0) / 1000)} s`)
+    readQuota().then(broadcastSoon)
     if (result.is_error) log('engine', `claude reportou erro: ${result.result || result.subtype}`, 'error')
   } else log('engine', `claude saiu com código ${r.code}: ${(r.err || r.out).slice(0, 300)}`, 'error')
   return result
@@ -363,7 +389,8 @@ async function checker(diff, tests, st) {
     '--- DIFF ---', diff.slice(0, 60000),
   ].join('\n') + skillsBlock(m.skills.checker || [])
   // Receita de chamada curta (architecture.md E16): sem config, regras e skills do usuário; sessão efêmera.
-  const args = ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '--ephemeral', '-c', 'skills.max_context_tokens=0', '-C', dir, '-m', model, '--output-schema', REVIEW_SCHEMA, '-']
+  // skills.max_context_tokens=0 é rejeitado ("expected a nonzero usize"); 1 remove todas as skills do usuário. Sem --ephemeral: a sessão gravada em ~/.codex/sessions é de onde a cota é lida.
+  const args = ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-C', dir, '-m', model, '--output-schema', REVIEW_SCHEMA, '-']
   log('engine', `codex (revisão, ${model})`)
   let lastMessage = null, usage = null
   const r = await run('codex', args, {
@@ -380,8 +407,10 @@ async function checker(diff, tests, st) {
   })
   setLive(null)
   let review = null
-  try { review = JSON.parse(lastMessage) } catch { log('engine', `codex não devolveu JSON válido (código ${r.code}): ${(lastMessage || r.err || r.out).slice(0, 300)}`, 'error') }
+  try { review = lastMessage ? JSON.parse(lastMessage) : null } catch {}
+  if (!review) log('engine', `codex falhou (código ${r.code}): ${(lastMessage || r.err || r.out).trim().slice(0, 300)}`, 'error')
   m.cost.calls += 1
+  readQuota().then(broadcastSoon)
   if (usage) { m.cost.tokens_in += usage.input_tokens || 0; m.cost.tokens_out += usage.output_tokens || 0 }
   if (review) log('codex', `${review.verdict === 'approve' ? 'aprovou' : 'pediu mudanças'}: ${review.summary}`, 'text')
   return review
@@ -395,8 +424,18 @@ async function visualGate() {
   let findings = []
   try { findings = JSON.parse(r.out || '[]') } catch { return { available: true, findings: [], error: (r.err || r.out).slice(0, 300) } }
   const flat = findings.flatMap((f) => f.findings ? f.findings.map((x) => ({ file: f.file || f.path, ...x })) : [f])
-  return { available: true, findings: flat.slice(0, 40).map((f) => ({ file: f.file || f.path || '', line: f.line || null, rule: f.rule || f.id || '', message: f.message || f.description || JSON.stringify(f).slice(0, 160) })) }
+  const seen = new Set(), out = []
+  for (const f of flat) {
+    const file = path.relative(dir, f.file || f.path || '') || '', rule = f.antipattern || f.rule || f.id || '', snippet = (f.snippet || '').trim()
+    const key = `${file}|${rule}|${snippet}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({ key, file, line: f.line || null, rule, severity: f.severity || '', message: `${f.name || f.message || f.description || rule}${snippet ? ' — ' + snippet : ''}${f.name && f.description ? ' (' + f.description + ')' : ''}`.slice(0, 400) })
+  }
+  return { available: true, findings: out.slice(0, 40) }
 }
+// só o que esta story introduziu: o que já existia antes dela não é culpa dela
+function newFindings(after, before) { const old = new Set((before?.findings || []).map((f) => f.key)); return { ...after, findings: after.findings.filter((f) => !old.has(f.key)), pre_existing: (after.findings || []).length - after.findings.filter((f) => !old.has(f.key)).length } }
 
 // ---------- entendimento do pedido (escolhe skills por papel) ----------
 const INTENT_JSON_SCHEMA = {
@@ -556,6 +595,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   const stop = (reason) => { m.state = 'awaiting_operator'; m.reason = reason; st.state = 'blocked'; log('engine', `parada: ${reason}`, 'error'); return false }
   st.round = round
   if (round === 1) {
+    if (m.plan.needs_ui && state.settings.visual_gate) st.visual_before = await visualGate()
     setStep('test', 'running'); await claudeCall({ role: 'prova', prompt: testPrompt(st), model: state.settings.roles.maker.model, tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands }); await refreshProject(); setStep('test', 'done')
     setStep('red', 'running')
     const after = await runTests(state.project)
@@ -576,10 +616,10 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   if (!st.diff.trim()) { setStep('checker', 'skipped'); return stop('no_changes') }
   if (!st.tests_after.ok) return stop('tests_red')
   if (m.plan.needs_ui && state.settings.visual_gate) {
-    setStep('visual', 'running'); st.visual = await visualGate()
+    setStep('visual', 'running'); st.visual = newFindings(await visualGate(), st.visual_before)
     if (!st.visual.available) { setStep('visual', 'skipped'); log('engine', 'portão visual indisponível (Impeccable não encontrado)') }
     else {
-      log('engine', `portão visual: ${st.visual.findings.length} achado(s)`)
+      log('engine', `portão visual: ${st.visual.findings.length} achado(s) novo(s)${st.visual.pre_existing ? ` (${st.visual.pre_existing} já existiam antes desta parte)` : ''}`)
       for (const f of st.visual.findings.slice(0, 12)) log('impeccable', `${f.file}${f.line ? ':' + f.line : ''} [${f.rule}] ${f.message}`, 'text')
       if (st.visual.findings.length && !previousVisual) { setStep('visual', 'failed'); log('engine', 'rodada de retoque visual'); return runStory(st, round + 1, null, st.visual.findings) }
       setStep('visual', st.visual.findings.length ? 'warn' : 'done')
@@ -588,7 +628,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   setStep('checker', 'running'); st.review = await checker(st.diff, st.tests_after, st); setStep('checker', st.review ? (st.review.verdict === 'approve' ? 'done' : 'failed') : 'failed')
   if (st.review?.verdict === 'approve') return true
   if (st.review && round < 4) { log('engine', `revisor pediu mudanças; rodada ${round + 1} automática`); return runStory(st, round + 1, st.review, null) }
-  return stop('review_changes')
+  return stop(st.review ? 'review_changes' : 'review_failed')
 }
 
 function finish() {
@@ -712,6 +752,7 @@ http.createServer(async (req, res) => {
   if (saved) state.settings = { ...DEFAULT_SETTINGS, ...saved, roles: { ...DEFAULT_SETTINGS.roles, ...(saved.roles || {}) }, skills: { ...DEFAULT_SETTINGS.skills, ...(saved.skills || {}) } }
   if (!state.settings.roles.intent) state.settings.roles.intent = DEFAULT_SETTINGS.roles.intent
   await loadCatalog()
+  await readQuota()
   state.project = await discover(state.recent[0] || path.join(ROOT, 'example'))
   console.log(`TL-ADE: http://127.0.0.1:${PORT}  projeto: ${state.project.dir}  skills no catálogo: ${state.catalog.length}`)
 })
