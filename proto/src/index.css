@@ -54,7 +54,21 @@ button { font: inherit; color: inherit; }
 .rail-badge { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--amber-9); box-shadow: 0 0 0 2px var(--bg-1); }
 
 .side { background: var(--bg-1); border-right: 1px solid var(--line); overflow: auto; display: flex; flex-direction: column; }
-.side-head { display: flex; gap: 10px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.side-head { display: flex; gap: 10px; align-items: center; padding: 12px 14px; border: 0; border-bottom: 1px solid var(--line); background: none; width: 100%; text-align: left; cursor: pointer; transition: background .15s; }
+.side-head:hover { background: var(--bg-2); }
+.projects { padding: 14px; }
+.projects form { margin-top: 4px; }
+.proj-info { display: grid; gap: 6px; margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--bg-2); border: 1px solid var(--line); font-size: 12.5px; }
+.proj-info div { display: flex; justify-content: space-between; gap: 10px; }
+.proj-info span { color: var(--gray-10); }
+.proj-info b { font-weight: 500; text-align: right; }
+.recent { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: center; width: 100%; text-align: left; padding: 8px 10px; border: 1px solid transparent; border-radius: 6px; background: none; cursor: pointer; font-size: 13px; }
+.recent .small { grid-column: 2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recent:hover:not(:disabled) { background: var(--bg-2); border-color: var(--line); }
+.recent:disabled { opacity: .5; cursor: default; }
+.errbar { display: flex; gap: 8px; align-items: center; margin: 12px 20px 0; padding: 10px 12px; border-radius: 8px; background: var(--amber-a3); border: 1px solid var(--amber-a7); color: var(--amber-11); font-size: 13px; }
+.toggle { display: flex; gap: 8px; align-items: flex-start; margin-top: 14px; font-size: 12.5px; color: var(--gray-11); cursor: pointer; }
+.toggle input { margin-top: 3px; accent-color: var(--teal-9); }
 .side-head p { margin: 0; line-height: 1.3; }
 .side-empty { padding: 16px 14px; }
 .side-empty p { margin: 0; }

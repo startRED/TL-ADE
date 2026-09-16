@@ -1,39 +1,40 @@
 // Protótipo descartável da TL-ADE. Orquestra Claude Code (maker) e Codex (revisor)
-// sobre o projeto em ./example e publica o estado ao vivo por SSE.
+// sobre QUALQUER pasta escolhida pelo operador e publica o estado ao vivo por SSE.
 // Sem durabilidade real: o estado vive em memória; o journal é só um registro.
 
 import http from 'node:http'
 import { spawn } from 'node:child_process'
-import { readFile, writeFile, mkdir, appendFile, rm } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, appendFile, rm, stat, access } from 'node:fs/promises'
 import path from 'node:path'
+import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
-const EXAMPLE = path.join(ROOT, 'example')
 const ADE_DIR = path.join(ROOT, '.ade')
 const SCHEMA = path.join(ROOT, 'review.schema.json')
 const PORT = 4317
 const IS_WIN = process.platform === 'win32'
 
 // ---------- estado ----------
-const state = { mission: null, log: [], history: [], live: null }
+const state = { project: null, mission: null, log: [], history: [], live: null, recent: [] }
 let currentPhase = null
 let pending = null
-function broadcastSoon() { if (pending) return; pending = setTimeout(() => { pending = null; broadcast() }, 150) }
-function setLive(live) { state.live = live; broadcastSoon() }
 const clients = new Set()
 
 function now() { return new Date().toISOString() }
+function broadcast() { const data = `data: ${JSON.stringify(state)}\n\n`; for (const res of clients) res.write(data) }
+function broadcastSoon() { if (pending) return; pending = setTimeout(() => { pending = null; broadcast() }, 150) }
+function setLive(live) { state.live = live; broadcastSoon() }
 
 async function journal(event) {
   await mkdir(ADE_DIR, { recursive: true })
-  await appendFile(path.join(ADE_DIR, 'journal.jsonl'), JSON.stringify({ ts: now(), ...event }) + '\n')
+  await appendFile(path.join(ADE_DIR, 'journal.jsonl'), JSON.stringify({ ts: now(), project: state.project?.dir, ...event }) + '\n')
 }
 
 function log(source, text, kind = 'info') {
   const line = { ts: now(), source, text: String(text).slice(0, 4000), kind, phase: currentPhase }
   state.log.push(line)
-  if (state.log.length > 400) state.log.shift()
+  if (state.log.length > 500) state.log.shift()
   journal({ type: 'log', ...line }).catch(() => {})
   broadcast()
 }
@@ -49,16 +50,12 @@ function setStep(name, status, extra = {}) {
   broadcast()
 }
 
-function broadcast() {
-  const data = `data: ${JSON.stringify(state)}\n\n`
-  for (const res of clients) res.write(data)
-}
-
 // ---------- processos ----------
-function run(cmd, args, { cwd, stdin, onLine } = {}) {
+function run(cmd, args, { cwd, stdin, onLine, timeoutMs = 20 * 60 * 1000 } = {}) {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { cwd, shell: IS_WIN, env: process.env, windowsHide: true })
     let out = '', err = '', buf = ''
+    const timer = setTimeout(() => { try { child.kill() } catch {} }, timeoutMs)
     child.stdout.on('data', (d) => {
       out += d
       if (!onLine) return
@@ -68,52 +65,93 @@ function run(cmd, args, { cwd, stdin, onLine } = {}) {
       for (const l of lines) if (l.trim()) onLine(l)
     })
     child.stderr.on('data', (d) => { err += d })
-    child.on('close', (code) => { if (onLine && buf.trim()) onLine(buf); resolve({ code, out, err }) })
-    child.on('error', (e) => resolve({ code: -1, out, err: String(e) }))
+    child.on('close', (code) => { clearTimeout(timer); if (onLine && buf.trim()) onLine(buf); resolve({ code, out, err }) })
+    child.on('error', (e) => { clearTimeout(timer); resolve({ code: -1, out, err: String(e) }) })
     if (stdin != null) { child.stdin.write(stdin); child.stdin.end() } else child.stdin.end()
   })
 }
+const exists = (p) => access(p).then(() => true, () => false)
 
-async function runTests() {
-  const outFile = path.join(EXAMPLE, '.vitest.json')
-  await rm(outFile, { force: true })
-  const r = await run('node', ['node_modules/vitest/vitest.mjs', 'run', '--reporter=json', `--outputFile=${outFile}`], { cwd: EXAMPLE })
-  try {
-    const j = JSON.parse(await readFile(outFile, 'utf8'))
-    const tests = j.testResults.flatMap((f) => {
-      // Arquivo de prova que nem chega a rodar (importa módulo que ainda não existe, erro de sintaxe)
-      // conta como prova vermelha do tipo "alvo ausente" (architecture.md E12), com o nome do arquivo.
-      if (f.assertionResults.length === 0 && f.status === 'failed') {
-        return [{ name: `${path.basename(f.name)} (arquivo ainda não roda)`, status: 'failed', file: path.basename(f.name), message: (f.message || '').split('\n')[0].slice(0, 200) }]
-      }
-      return f.assertionResults.map((a) => ({
-        name: a.fullName, status: a.status, file: path.basename(f.name), message: (a.failureMessages || [])[0]?.split('\n')[0] || '',
-      }))
-    })
-    const failed = tests.filter((t) => t.status !== 'passed').length
-    return { ok: failed === 0 && tests.length > 0, total: tests.length, failed, tests }
-  } catch {
-    return { ok: false, total: 0, failed: 0, tests: [], error: (r.err || r.out).slice(0, 500) }
+// ---------- projeto ----------
+async function loadRecent() {
+  try { state.recent = JSON.parse(await readFile(path.join(ADE_DIR, 'projects.json'), 'utf8')) } catch { state.recent = [] }
+}
+async function saveRecent(dir) {
+  state.recent = [dir, ...state.recent.filter((d) => d !== dir)].slice(0, 8)
+  await mkdir(ADE_DIR, { recursive: true })
+  await writeFile(path.join(ADE_DIR, 'projects.json'), JSON.stringify(state.recent, null, 2))
+}
+
+// Descobre como o projeto roda provas. Só o suficiente para o protótipo.
+async function discover(dir) {
+  const info = { dir, name: path.basename(dir), git: false, dirty: false, branch: null, runner: 'none', test_cmd: null, has_index: false, language: null }
+  const st = await stat(dir).catch(() => null)
+  if (!st?.isDirectory()) return { ...info, error: 'A pasta não existe.' }
+  const g = await run('git', ['rev-parse', '--is-inside-work-tree'], { cwd: dir })
+  info.git = g.code === 0 && g.out.trim() === 'true'
+  if (info.git) {
+    info.dirty = (await run('git', ['status', '--porcelain'], { cwd: dir })).out.trim().length > 0
+    info.branch = (await run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir })).out.trim() || null
   }
+  info.has_index = await exists(path.join(dir, 'index.html'))
+  const pkgPath = path.join(dir, 'package.json')
+  if (await exists(pkgPath)) {
+    info.language = 'js'
+    let pkg = {}; try { pkg = JSON.parse(await readFile(pkgPath, 'utf8')) } catch {}
+    if (await exists(path.join(dir, 'node_modules', 'vitest'))) { info.runner = 'vitest'; info.test_cmd = 'node node_modules/vitest/vitest.mjs run' }
+    else if (pkg.scripts?.test && !/no test specified/.test(pkg.scripts.test)) { info.runner = 'npm'; info.test_cmd = 'npm test' }
+  } else if (await exists(path.join(dir, 'pyproject.toml')) || await exists(path.join(dir, 'pytest.ini')) || await exists(path.join(dir, 'requirements.txt'))) {
+    info.language = 'python'; info.runner = 'pytest'; info.test_cmd = 'python -m pytest -q'
+  }
+  return info
 }
 
-async function gitDiff() {
-  await run('git', ['add', '-N', '.'], { cwd: EXAMPLE })
-  const r = await run('git', ['diff', '--', '.'], { cwd: EXAMPLE })
-  return r.out
+async function runTests(project) {
+  const dir = project.dir
+  if (project.runner === 'vitest') {
+    const outFile = path.join(dir, '.ade-vitest.json')
+    await rm(outFile, { force: true })
+    const r = await run('node', ['node_modules/vitest/vitest.mjs', 'run', '--reporter=json', `--outputFile=${outFile}`], { cwd: dir, timeoutMs: 5 * 60 * 1000 })
+    try {
+      const j = JSON.parse(await readFile(outFile, 'utf8'))
+      await rm(outFile, { force: true })
+      const tests = j.testResults.flatMap((f) => {
+        // Arquivo de prova que nem chega a rodar (importa módulo que ainda não existe) conta como prova vermelha "alvo ausente" (E12).
+        if (f.assertionResults.length === 0 && f.status === 'failed') return [{ name: `${path.basename(f.name)} (arquivo ainda não roda)`, status: 'failed', message: (f.message || '').split('\n')[0].slice(0, 200) }]
+        return f.assertionResults.map((a) => ({ name: a.fullName, status: a.status, message: (a.failureMessages || [])[0]?.split('\n')[0] || '' }))
+      })
+      const failed = tests.filter((t) => t.status !== 'passed').length
+      return { ok: failed === 0 && tests.length > 0, total: tests.length, failed, tests, runner: 'vitest' }
+    } catch { return { ok: false, total: 0, failed: 0, tests: [], runner: 'vitest', error: (r.err || r.out).slice(-600) } }
+  }
+  if (project.runner === 'npm' || project.runner === 'pytest') {
+    const [cmd, ...args] = project.test_cmd.split(' ')
+    const r = await run(cmd, args, { cwd: dir, timeoutMs: 5 * 60 * 1000 })
+    const tail = (r.out + '\n' + r.err).trim().split('\n').slice(-12).join('\n')
+    // Runner genérico: a "prova" é o comando inteiro; vermelho = saiu com erro.
+    return { ok: r.code === 0, total: 1, failed: r.code === 0 ? 0 : 1, tests: [{ name: project.test_cmd, status: r.code === 0 ? 'passed' : 'failed', message: r.code === 0 ? '' : tail.slice(-300) }], runner: project.runner, output: tail }
+  }
+  return { ok: false, total: 0, failed: 0, tests: [], runner: 'none' }
 }
 
-async function gitDiscard() {
-  await run('git', ['checkout', '--', '.'], { cwd: EXAMPLE })
-  await run('git', ['clean', '-fd', '.'], { cwd: EXAMPLE })
+async function gitDiff(dir) {
+  await run('git', ['add', '-N', '.'], { cwd: dir })
+  return (await run('git', ['diff', '--', '.'], { cwd: dir })).out
+}
+async function gitDiscard(dir) {
+  // Seguro porque a missão só começa com a árvore limpa: desfaz apenas o que a missão criou.
+  await run('git', ['reset', '-q', '--', '.'], { cwd: dir })
+  await run('git', ['checkout', '--', '.'], { cwd: dir })
+  await run('git', ['clean', '-fd', '.'], { cwd: dir })
 }
 
-function describeTool(c) {
+function describeTool(c, dir) {
   const i = c.input || {}
-  const f = i.file_path ? path.relative(EXAMPLE, i.file_path) || path.basename(i.file_path) : ''
+  const f = i.file_path ? (path.relative(dir, i.file_path) || path.basename(i.file_path)) : ''
   if (c.name === 'Edit') return `Edit ${f}\n- ${(i.old_string || '').split('\n')[0].slice(0, 100)}\n+ ${(i.new_string || '').split('\n')[0].slice(0, 100)}`
   if (c.name === 'MultiEdit') return `MultiEdit ${f} (${(i.edits || []).length} edições)`
   if (c.name === 'Write') return `Write ${f} (${(i.content || '').length} caracteres)`
+  if (c.name === 'Bash') return `$ ${(i.command || '').slice(0, 200)}`
   if (c.name === 'Read') return `Read ${f}`
   if (c.name === 'Glob') return `Glob ${i.pattern || ''}`
   if (c.name === 'Grep') return `Grep ${i.pattern || ''}`
@@ -122,15 +160,16 @@ function describeTool(c) {
 
 // ---------- maker: Claude Code ----------
 async function maker(prompt) {
-  const m = state.mission
+  const m = state.mission, dir = state.project.dir
   // --safe-mode: sem CLAUDE.md/hooks/skills/MCP do usuário (isolamento, architecture.md E15).
-  // --tools: só leitura e edição; o harness roda os testes. Prompt vai por stdin, então nada
-  // é engolido pela flag variádica (E24).
-  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--safe-mode', '--permission-mode', 'acceptEdits', '--max-turns', '25', '--model', 'sonnet', '--tools', 'Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep']
+  // Prompt vai por stdin, então nada é engolido pela flag variádica (E24).
+  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--safe-mode', '--max-turns', '40', '--model', m.model]
+  if (m.allow_commands) args.push('--dangerously-skip-permissions')
+  else args.push('--permission-mode', 'acceptEdits', '--tools', 'Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep')
   log('engine', `claude ${args.join(' ')}`)
   let result = null, liveBuf = null
   const r = await run('claude', args, {
-    cwd: EXAMPLE, stdin: prompt,
+    cwd: dir, stdin: prompt,
     onLine: (line) => {
       let ev; try { ev = JSON.parse(line) } catch { return }
       if (ev.type === 'system' && ev.subtype === 'init') log('claude', `sessão iniciada · modelo ${ev.model}`)
@@ -148,7 +187,7 @@ async function maker(prompt) {
         for (const c of ev.message?.content || []) {
           if (c.type === 'thinking' && c.thinking?.trim()) log('claude', c.thinking.trim(), 'thinking')
           if (c.type === 'text' && c.text.trim()) log('claude', c.text.trim(), 'text')
-          if (c.type === 'tool_use') log('claude', describeTool(c), 'tool')
+          if (c.type === 'tool_use') log('claude', describeTool(c, dir), 'tool')
         }
       }
       if (ev.type === 'user') {
@@ -181,20 +220,20 @@ async function maker(prompt) {
 
 // ---------- checker: Codex ----------
 async function checker(diff, tests) {
-  const m = state.mission
+  const m = state.mission, dir = state.project.dir
   const prompt = [
     'Você é o revisor. Outra IA (Claude) fez a alteração abaixo no projeto. Não escreva código; só avalie.',
-    'Regras do projeto: toda correção vem com um teste que falha antes e passa depois; sem mudanças fora do escopo do pedido; sem quebrar acessibilidade.',
+    'Regras: toda mudança de comportamento vem com uma prova (teste) que falha antes e passa depois; sem mudanças fora do escopo do pedido; sem quebrar acessibilidade; sem segredos em código.',
     `Pedido do usuário: ${m.request}`,
-    `Resultado dos testes após a alteração: ${tests.failed} falharam de ${tests.total}.`,
+    `Resultado das provas após a alteração: ${tests.failed} falharam de ${tests.total} (runner: ${tests.runner}).`,
     'Responda em português no formato JSON exigido. verdict = "approve" só se não houver achado high.',
     '--- DIFF ---', diff.slice(0, 60000),
   ].join('\n')
-  const args = ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '-C', EXAMPLE, '--output-schema', SCHEMA, '-']
+  const args = ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '-C', dir, '--output-schema', SCHEMA, '-']
   log('engine', `codex ${args.slice(0, 5).join(' ')} …`)
   let lastMessage = null, usage = null
   const r = await run('codex', args, {
-    cwd: EXAMPLE, stdin: prompt,
+    cwd: dir, stdin: prompt,
     onLine: (line) => {
       let ev; try { ev = JSON.parse(line) } catch { return }
       if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') lastMessage = ev.item.text
@@ -207,9 +246,7 @@ async function checker(diff, tests) {
   })
   setLive(null)
   let review = null
-  try { review = JSON.parse(lastMessage) } catch {
-    log('engine', `codex não devolveu JSON válido (código ${r.code}): ${(lastMessage || r.err || r.out).slice(0, 300)}`, 'error')
-  }
+  try { review = JSON.parse(lastMessage) } catch { log('engine', `codex não devolveu JSON válido (código ${r.code}): ${(lastMessage || r.err || r.out).slice(0, 300)}`, 'error') }
   m.cost.calls += 1
   if (usage) { m.cost.tokens_in += usage.input_tokens || 0; m.cost.tokens_out += usage.output_tokens || 0 }
   if (review) log('codex', `${review.verdict === 'approve' ? 'aprovou' : 'pediu mudanças'}: ${review.summary}`, 'text')
@@ -217,20 +254,27 @@ async function checker(diff, tests) {
 }
 
 // ---------- pipeline ----------
-// Duas fases de Maker, como na arquitetura (prova vermelha antes da correção):
-//   test: a IA escreve só o teste novo -> harness roda -> tem de haver teste novo VERMELHO
-//   fix:  a IA corrige o código -> harness roda -> tudo verde -> Codex revisa
-const COMMON = [
-  'Projeto: JavaScript puro em src/, testes Vitest em src/*.test.js (ambiente happy-dom).',
-  'Você só tem ferramentas de leitura e edição; o harness roda os testes e te devolve o resultado. Trabalhe só dentro do diretório atual (src/ já existe: leia antes de escrever); não suba para diretórios acima.',
-  'Página do app: src/main.js monta cada módulo listado em src/components.json; todo componente visual exporta `mount(container)`. Se criar um componente novo, exporte `mount` e acrescente o arquivo em src/components.json (com um título curto) para ele aparecer na página.',
-]
+// Duas fases de Maker (prova vermelha antes da correção):
+//   test: a IA escreve só a prova -> harness roda -> tem de haver prova nova VERMELHA
+//   fix:  a IA implementa -> harness roda -> tudo verde -> Codex revisa
+function common() {
+  const p = state.project
+  const lines = [
+    `Projeto: ${p.name} (${p.language || 'linguagem a descobrir'}); runner de provas detectado: ${p.runner === 'none' ? 'nenhum' : p.test_cmd}.`,
+    'Trabalhe só dentro do diretório atual; não suba para diretórios acima. Leia antes de escrever.',
+  ]
+  if (state.mission.allow_commands) lines.push('Você pode rodar comandos (instalar dependências, inicializar projeto). Não rode servidores que fiquem abertos; não use git.')
+  else lines.push('Você só tem ferramentas de leitura e edição; o harness roda as provas e te devolve o resultado.')
+  if (p.runner === 'none') lines.push('Não há runner de provas. Na fase 1, crie o mínimo para rodar provas (em JS: package.json com vitest e `"test": "vitest run"`; em Python: pytest) antes de escrever a prova.')
+  if (p.has_index) lines.push('Há um index.html na raiz; se criar algo visual, ligue nele para aparecer na página.')
+  return lines
+}
 
 function testPrompt() {
   return [
-    `Pedido do usuário: ${state.mission.request}`, ...COMMON,
-    'FASE 1 de 2: escreva APENAS um teste novo (em um arquivo src/*.test.js existente ou novo) que descreva o comportamento pedido e que FALHE no código atual, porque o comportamento ainda não existe ou está errado. Não altere nenhum outro arquivo e não implemente nada ainda.',
-    'Ao terminar, escreva uma frase com o nome exato do teste novo.',
+    `Pedido do usuário: ${state.mission.request}`, ...common(),
+    'FASE 1 de 2: escreva APENAS uma prova nova (teste automatizado) que descreva o comportamento pedido e que FALHE no código atual, porque o comportamento ainda não existe ou está errado. Não implemente o comportamento ainda.',
+    'Ao terminar, escreva uma frase com o nome exato da prova nova e como rodá-la.',
   ].join('\n')
 }
 
@@ -238,9 +282,9 @@ function fixPrompt(round, review) {
   const m = state.mission
   const red = m.red_tests.map((t) => `- ${t.name}: ${t.message}`).join('\n')
   const base = [
-    `Pedido do usuário: ${m.request}`, ...COMMON,
-    `FASE 2 de 2: o harness rodou os testes e o teste novo está vermelho, como esperado:\n${red}`,
-    'Agora escreva o código mínimo em src/ para o teste passar (altere arquivo existente ou crie um novo). Não modifique os testes. Não toque em nada fora do escopo do pedido.',
+    `Pedido do usuário: ${m.request}`, ...common(),
+    `FASE 2 de 2: o harness rodou as provas e a prova nova está vermelha, como esperado:\n${red}`,
+    'Agora implemente o mínimo para a prova passar. Não modifique a prova. Não toque em nada fora do escopo do pedido.',
     'Ao terminar, escreva uma frase dizendo o que mudou.',
   ]
   if (round > 1 && review) {
@@ -256,24 +300,28 @@ async function pipeline(round = 1, previousReview = null) {
   try {
     if (round === 1) {
       setStep('prepare', 'running')
-      m.tests_before = await runTests()
-      log('engine', `linha de base: ${m.tests_before.total} testes, ${m.tests_before.failed} vermelhos`)
+      m.tests_before = await runTests(state.project)
+      log('engine', state.project.runner === 'none' ? 'ponto de partida: sem runner de provas (a IA vai criar um)' : `ponto de partida: ${m.tests_before.total} provas, ${m.tests_before.failed} vermelhas`)
       setStep('prepare', 'done')
 
       setStep('test', 'running')
       await maker(testPrompt())
+      state.project = { ...state.project, ...(await discover(state.project.dir)) }   // runner pode ter nascido agora
       setStep('test', 'done')
 
       setStep('red', 'running')
-      const afterTest = await runTests()
+      const afterTest = await runTests(state.project)
       const before = new Set(m.tests_before.tests.map((t) => t.name))
-      m.red_tests = afterTest.tests.filter((t) => !before.has(t.name) && t.status !== 'passed')
-      m.new_tests = afterTest.tests.filter((t) => !before.has(t.name)).map((t) => t.name)
-      const regress = afterTest.tests.filter((t) => before.has(t.name) && t.status !== 'passed')
-      log('engine', `prova vermelha: ${m.new_tests.length} teste(s) novo(s), ${m.red_tests.length} vermelho(s), ${regress.length} antigo(s) quebrado(s)`)
+      const generic = afterTest.runner !== 'vitest'
+      m.red_tests = generic
+        ? afterTest.tests.filter((t) => t.status !== 'passed')   // runner genérico: vermelho = comando falhou
+        : afterTest.tests.filter((t) => !before.has(t.name) && t.status !== 'passed')
+      m.new_tests = generic ? [] : afterTest.tests.filter((t) => !before.has(t.name)).map((t) => t.name)
+      const regress = generic ? [] : afterTest.tests.filter((t) => before.has(t.name) && t.status !== 'passed')
+      log('engine', `prova vermelha: ${m.red_tests.length} vermelha(s)${generic ? ' (runner genérico)' : `, ${m.new_tests.length} nova(s), ${regress.length} antiga(s) quebrada(s)`}`)
       if (m.red_tests.length === 0 || regress.length > 0) {
         setStep('red', 'failed')
-        m.tests_after = afterTest; m.diff = await gitDiff()
+        m.tests_after = afterTest; m.diff = await gitDiff(state.project.dir)
         m.state = 'awaiting_operator'; m.reason = regress.length ? 'tests_red' : 'no_red_test'
         log('engine', `parada: ${m.reason}`, 'error')
         return finish()
@@ -283,12 +331,13 @@ async function pipeline(round = 1, previousReview = null) {
 
     setStep('fix', 'running', { round })
     await maker(fixPrompt(round, previousReview))
+    state.project = { ...state.project, ...(await discover(state.project.dir)) }
     setStep('fix', 'done', { round })
 
     setStep('tests', 'running')
-    m.tests_after = await runTests()
-    m.diff = await gitDiff()
-    log('engine', `testes depois: ${m.tests_after.total} no total, ${m.tests_after.failed} vermelhos`)
+    m.tests_after = await runTests(state.project)
+    m.diff = await gitDiff(state.project.dir)
+    log('engine', `provas depois: ${m.tests_after.total} no total, ${m.tests_after.failed} vermelha(s)`)
     setStep('tests', m.tests_after.ok ? 'done' : 'failed')
 
     if (!m.diff.trim()) {
@@ -303,7 +352,7 @@ async function pipeline(round = 1, previousReview = null) {
 
     if (m.tests_after.ok && m.review?.verdict === 'approve') {
       m.state = 'complete'; m.reason = null
-      log('engine', 'pronta: teste novo ficou vermelho antes e verde depois; revisor de outra família aprovou')
+      log('engine', 'pronta: prova vermelha antes, verde depois; revisor de outra família aprovou')
     } else {
       m.state = 'awaiting_operator'
       m.reason = !m.tests_after.ok ? 'tests_red' : 'review_changes'
@@ -317,31 +366,35 @@ async function pipeline(round = 1, previousReview = null) {
 }
 
 function finish() {
-  state.mission.finished_at = now()
-  const h = state.history.find((x) => x.id === state.mission.id)
-  const entry = { id: state.mission.id, request: state.mission.request, state: state.mission.state, reason: state.mission.reason, usd: state.mission.cost.usd, finished_at: state.mission.finished_at }
+  const m = state.mission
+  m.finished_at = now()
+  const entry = { id: m.id, project: state.project.dir, request: m.request, state: m.state, reason: m.reason, usd: m.cost.usd, finished_at: m.finished_at }
+  const h = state.history.find((x) => x.id === m.id)
   if (h) Object.assign(h, entry); else state.history.unshift(entry)
-  journal({ type: 'mission', state: state.mission.state, reason: state.mission.reason }).catch(() => {})
+  journal({ type: 'mission', state: m.state, reason: m.reason }).catch(() => {})
   broadcast()
 }
 
-async function startMission(request) {
-  // A linha de base precisa estar commitada: `git clean` apaga arquivos não rastreados.
-  const st = await run('git', ['status', '--porcelain', '--', '.'], { cwd: EXAMPLE })
-  if (st.out.trim() && state.mission?.state !== 'complete') {
-    log('engine', 'example/ tem alterações não commitadas de uma missão anterior; restaurando a linha de base')
-  }
-  await gitDiscard()
+async function startMission(request, opts) {
+  const p = state.project
+  if (!p) return 'Escolha uma pasta primeiro.'
+  const fresh = await discover(p.dir)
+  if (fresh.error) return fresh.error
+  if (!fresh.git) return 'A pasta precisa ser um repositório git: é assim que a ADE mostra e desfaz alterações. Use "Iniciar git nesta pasta".'
+  if (fresh.dirty) return 'A pasta tem alterações não commitadas. Commite ou descarte antes, para a ADE poder desfazer só o que ela mesma fizer.'
+  state.project = fresh
   state.log = []
   currentPhase = 'prepare'
   state.mission = {
     id: 'm-' + Date.now().toString(36), request, state: 'running', reason: null, round: 0,
+    model: opts.model || 'sonnet', allow_commands: !!opts.allow_commands,
     steps: [], tests_before: null, tests_after: null, new_tests: [], red_tests: [], diff: '', review: null,
     cost: { usd: 0, calls: 0, turns: 0, tokens_in: 0, tokens_out: 0, cache_read: 0 }, started_at: now(), finished_at: null,
   }
   journal({ type: 'mission_start', id: state.mission.id, request }).catch(() => {})
-  log('engine', `missão ${state.mission.id}: "${request}"`)
+  log('engine', `missão ${state.mission.id} em ${p.dir}: "${request}"`)
   pipeline(1)
+  return null
 }
 
 async function decide(option) {
@@ -350,45 +403,69 @@ async function decide(option) {
   journal({ type: 'decision', option }).catch(() => {})
   if (option === 'accept') { m.state = 'complete'; m.reason = 'accepted_by_operator'; log('operador', 'aceitou como está'); finish() }
   if (option === 'retry') { log('operador', 'pediu mais uma rodada'); pipeline(m.round + 1, m.review) }
-  if (option === 'discard') { await gitDiscard(); m.state = 'discarded'; log('operador', 'descartou; arquivos restaurados'); finish() }
+  if (option === 'discard') { await gitDiscard(state.project.dir); m.state = 'discarded'; log('operador', 'descartou; arquivos restaurados'); finish() }
 }
 
 // ---------- HTTP ----------
-async function body(req) {
-  let s = ''; for await (const c of req) s += c
-  return s ? JSON.parse(s) : {}
-}
+async function body(req) { let s = ''; for await (const c of req) s += c; return s ? JSON.parse(s) : {} }
+const json = (res, code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)) }
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x')
   res.setHeader('Access-Control-Allow-Origin', '*')
-  if (url.pathname === '/api/events') {
-    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' })
-    res.write(`data: ${JSON.stringify(state)}\n\n`)
-    clients.add(res); req.on('close', () => clients.delete(res)); return
-  }
-  if (url.pathname === '/api/state') { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify(state)) }
-  if (url.pathname === '/api/run' && req.method === 'POST') {
-    const { request } = await body(req)
-    if (!request?.trim()) { res.writeHead(400); return res.end('pedido vazio') }
-    if (state.mission?.state === 'running') { res.writeHead(409); return res.end('já há uma missão rodando') }
-    startMission(request.trim()); res.writeHead(202); return res.end()
-  }
-  if (url.pathname === '/api/app' || url.pathname.startsWith('/api/app/')) {
-    // Página do projeto alvo, servida do disco (ES modules precisam de HTTP).
-    if (url.pathname === '/api/app') { res.writeHead(302, { Location: '/api/app/' }); return res.end() }
-    const rel = url.pathname === '/api/app/' ? 'index.html' : url.pathname.slice(9)
-    const file = path.join(EXAMPLE, rel)
-    if (!file.startsWith(EXAMPLE) || rel.includes('node_modules')) { res.writeHead(403); return res.end() }
-    try {
-      const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.css': 'text/css' }
-      const data = await readFile(file)
-      res.writeHead(200, { 'Content-Type': types[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' })
-      return res.end(data)
-    } catch { res.writeHead(404); return res.end('não encontrado') }
-  }
-  if (url.pathname === '/api/decide' && req.method === 'POST') {
-    const { option } = await body(req); await decide(option); res.writeHead(202); return res.end()
-  }
-  res.writeHead(404); res.end()
-}).listen(PORT, '127.0.0.1', () => console.log(`TL-ADE proto: http://127.0.0.1:${PORT}  (alvo: ${EXAMPLE})`))
+  try {
+    if (url.pathname === '/api/events') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' })
+      res.write(`data: ${JSON.stringify(state)}\n\n`)
+      clients.add(res); req.on('close', () => clients.delete(res)); return
+    }
+    if (url.pathname === '/api/state') return json(res, 200, state)
+    if (url.pathname === '/api/project' && req.method === 'POST') {
+      const { dir } = await body(req)
+      if (state.mission?.state === 'running') return json(res, 409, { error: 'Há uma missão rodando.' })
+      if (!String(dir || '').trim()) return json(res, 400, { error: 'Informe o caminho da pasta.' })
+      const info = await discover(path.resolve(String(dir || '').trim().replace(/^~/, os.homedir())))
+      if (info.error) return json(res, 400, info)
+      state.project = info; state.mission = null; state.log = []
+      await saveRecent(info.dir); broadcast()
+      return json(res, 200, info)
+    }
+    if (url.pathname === '/api/project/git-init' && req.method === 'POST') {
+      if (!state.project) return json(res, 400, { error: 'Sem pasta.' })
+      const d = state.project.dir
+      await run('git', ['init', '-q'], { cwd: d })
+      await run('git', ['add', '-A'], { cwd: d })
+      await run('git', ['-c', 'user.name=TL-ADE', '-c', 'user.email=ade@local', 'commit', '-q', '-m', 'base: antes da TL-ADE', '--allow-empty'], { cwd: d })
+      state.project = await discover(d); broadcast()
+      return json(res, 200, state.project)
+    }
+    if (url.pathname === '/api/run' && req.method === 'POST') {
+      const { request, model, allow_commands } = await body(req)
+      if (!request?.trim()) return json(res, 400, { error: 'Pedido vazio.' })
+      if (state.mission?.state === 'running') return json(res, 409, { error: 'Já há uma missão rodando.' })
+      const err = await startMission(request.trim(), { model, allow_commands })
+      return err ? json(res, 400, { error: err }) : json(res, 202, { ok: true })
+    }
+    if (url.pathname === '/api/decide' && req.method === 'POST') { const { option } = await body(req); await decide(option); return json(res, 202, { ok: true }) }
+    if (url.pathname === '/api/app' || url.pathname.startsWith('/api/app/')) {
+      // Página do projeto alvo (index.html na raiz), servida do disco: ES modules precisam de HTTP.
+      if (!state.project) { res.writeHead(404); return res.end('sem projeto') }
+      if (url.pathname === '/api/app') { res.writeHead(302, { Location: '/api/app/' }); return res.end() }
+      const rel = url.pathname === '/api/app/' ? 'index.html' : decodeURIComponent(url.pathname.slice(9))
+      const file = path.join(state.project.dir, rel)
+      if (!file.startsWith(state.project.dir) || rel.includes('node_modules')) { res.writeHead(403); return res.end() }
+      const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png' }
+      try {
+        const data = await readFile(file)
+        res.writeHead(200, { 'Content-Type': types[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' })
+        return res.end(data)
+      } catch { res.writeHead(404); return res.end('não encontrado') }
+    }
+    res.writeHead(404); res.end()
+  } catch (e) { json(res, 500, { error: e.message }) }
+}).listen(PORT, '127.0.0.1', async () => {
+  await loadRecent()
+  const first = state.recent[0] || path.join(ROOT, 'example')
+  state.project = await discover(first)
+  console.log(`TL-ADE proto: http://127.0.0.1:${PORT}  (projeto: ${state.project.dir})`)
+})
