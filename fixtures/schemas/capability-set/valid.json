@@ -1,0 +1,32 @@
+{
+  "format_version": 1,
+  "launch": [
+    "claude"
+  ],
+  "transport": "cli",
+  "models": [
+    {
+      "id": "claude-sonnet-5",
+      "context_window": 200000,
+      "effort": "medium",
+      "vendor": "anthropic"
+    }
+  ],
+  "resume": true,
+  "fork": false,
+  "preminted_session_id": true,
+  "structured_output": true,
+  "budget_cap_native": true,
+  "image_in": false,
+  "image_out": false,
+  "sandbox": "none",
+  "cost_report": "reported",
+  "advisor": false,
+  "unattended_flags": [
+    "--safe-mode"
+  ],
+  "probe_ok": true,
+  "probe_mode": "real",
+  "bootstrap_cost_tokens": 0,
+  "probed_at": "2026-09-17T12:00:00.000Z"
+}

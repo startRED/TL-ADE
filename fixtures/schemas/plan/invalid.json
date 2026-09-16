@@ -1,0 +1,33 @@
+{
+  "format_version": 1,
+  "id": "plan-1",
+  "mission_id": "mission-1",
+  "immutable_digest": "0123456789abcdef",
+  "authorization": {
+    "autonomy": "safe",
+    "permitted_effects": [
+      "prepare",
+      "gate"
+    ],
+    "eligible_skills": []
+  },
+  "phases": [
+    {
+      "epics": [
+        {
+          "stories": [
+            "ADE-S1"
+          ]
+        }
+      ]
+    }
+  ],
+  "mission_budget": {
+    "max_usd": 20
+  },
+  "budget": {
+    "max_model_calls": 6,
+    "max_rework_rounds": 2
+  },
+  "__unexpected__": true
+}

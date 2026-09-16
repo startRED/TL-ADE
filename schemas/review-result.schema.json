@@ -1,0 +1,33 @@
+{
+  "$id": "https://tl-ade.dev/schemas/review-result.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "review-result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "verdict", "action_items", "deferred", "rejected", "sources", "summary"],
+  "properties": {
+    "format_version": { "type": "integer", "minimum": 1 },
+    "verdict": { "type": "string" },
+    "action_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "category", "target_role", "location", "problem", "evidence", "required_action"],
+        "properties": {
+          "severity": { "type": "string" },
+          "category": { "type": "string" },
+          "target_role": { "type": "string" },
+          "location": { "type": "string" },
+          "problem": { "type": "string" },
+          "evidence": { "type": "string" },
+          "required_action": { "type": "string" }
+        }
+      }
+    },
+    "deferred": { "type": "array", "items": { "type": "object", "additionalProperties": false } },
+    "rejected": { "type": "array", "items": { "type": "object", "additionalProperties": false } },
+    "sources": { "type": "array", "items": { "type": "string" } },
+    "summary": { "type": "string" }
+  }
+}

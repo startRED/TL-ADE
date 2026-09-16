@@ -1,0 +1,24 @@
+{
+  "format_version": 1,
+  "story_id": "ADE-S1",
+  "state": "done",
+  "phase": "green",
+  "round": 1,
+  "tree_before": "0123456789abcdef",
+  "tree_after": "fedcba9876543210",
+  "eval_records": [
+    {
+      "id": "E1",
+      "phase": "red",
+      "passed": false,
+      "red_reason": "assertion_failed"
+    }
+  ],
+  "gate_records": [],
+  "passes": true,
+  "reason": "eval verde após implementação",
+  "sources": [
+    "0123456789abcdef"
+  ],
+  "__unexpected__": true
+}

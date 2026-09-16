@@ -1,0 +1,68 @@
+{
+  "format_version": 1,
+  "adapters": {
+    "claude": {
+      "enabled": true
+    },
+    "codex": {
+      "enabled": true
+    },
+    "agy": {
+      "enabled": false
+    }
+  },
+  "roles": {
+    "maker": {
+      "primary": {
+        "family": "claude",
+        "model_id": "claude-sonnet-5"
+      },
+      "fallbacks": []
+    }
+  },
+  "gates": [],
+  "evals": {
+    "default_timeout_s": 120,
+    "default_max_output_bytes": 65536,
+    "strictness_default": "must_fail_before",
+    "allow_additive_classes": []
+  },
+  "limits": {
+    "max_model_calls_per_story": 6,
+    "max_rework_rounds": 2,
+    "max_usd_per_mission": 10,
+    "max_wall_clock_seconds": 3600,
+    "max_parked_units": 5,
+    "max_pack_bytes": 120000
+  },
+  "fast_lane": {
+    "checker_threshold_files": 1
+  },
+  "autonomy": {
+    "default": "safe",
+    "ask_operator": [],
+    "unattended": false
+  },
+  "visual": {
+    "enabled": false
+  },
+  "research": {
+    "enabled": false,
+    "trigger": "external_fact",
+    "team_size": 0,
+    "tie_becomes_question": true
+  },
+  "catalog": {
+    "sources": [],
+    "trust_default": "trusted",
+    "max_skills_per_story": 3,
+    "bm25_top_k": 8,
+    "local_skills_win": true
+  },
+  "harness": {
+    "telemetry": true,
+    "collect_citation": true,
+    "doctor_probe_real_calls": false,
+    "ablation": false
+  }
+}

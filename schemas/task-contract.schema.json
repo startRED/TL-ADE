@@ -1,0 +1,112 @@
+{
+  "$id": "https://tl-ade.dev/schemas/task-contract.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "task-contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "id", "title", "complexity", "task", "guardrails", "requirements", "scenarios", "evals", "skills", "roles", "budget"],
+  "properties": {
+    "format_version": { "type": "integer", "minimum": 1 },
+    "id": { "type": "string" },
+    "title": { "type": "string" },
+    "complexity": { "enum": ["trivial", "bounded", "feature", "subsystem", "project"] },
+    "task": { "type": "string" },
+    "guardrails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope_paths", "do_not_touch", "autonomy"],
+      "properties": {
+        "scope_paths": { "type": "array", "items": { "type": "string" } },
+        "do_not_touch": { "type": "array", "items": { "type": "string" } },
+        "sensitive_paths": { "type": "array", "items": { "type": "string" } },
+        "autonomy": { "enum": ["safe", "controlled", "restricted"] },
+        "ask_operator": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "requirements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "ears"],
+        "properties": {
+          "id": { "type": "string" },
+          "ears": { "type": "string" }
+        }
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "given", "when", "then", "evals"],
+        "properties": {
+          "id": { "type": "string" },
+          "given": { "type": "string" },
+          "when": { "type": "string" },
+          "then": { "type": "string" },
+          "evals": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "evals": { "type": "array", "items": { "$ref": "#/definitions/eval" } },
+    "skills": { "type": "array", "items": { "type": "string" } },
+    "roles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maker", "checker_round"],
+      "properties": {
+        "maker": { "$ref": "#/definitions/model_ref" },
+        "checker_round": { "$ref": "#/definitions/model_ref" },
+        "checker_gate": { "$ref": "#/definitions/model_ref" },
+        "judge": { "$ref": "#/definitions/model_ref" }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_model_calls", "max_rework_rounds"],
+      "properties": {
+        "max_model_calls": { "type": "integer" },
+        "max_rework_rounds": { "type": "integer" },
+        "max_usd": { "type": "number" }
+      }
+    }
+  },
+  "definitions": {
+    "model_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "model_id"],
+      "properties": {
+        "family": { "type": "string" },
+        "model_id": { "type": "string" },
+        "effort": { "type": "string" }
+      }
+    },
+    "eval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format_version", "kind", "cmd", "expect_exit", "timeout_s", "max_output_bytes", "evidence", "strictness", "author"],
+      "properties": {
+        "format_version": { "type": "integer" },
+        "kind": { "type": "string" },
+        "cmd": { "type": "array", "items": { "type": "string" } },
+        "expect_exit": { "type": "integer" },
+        "timeout_s": { "type": "integer" },
+        "max_output_bytes": { "type": "integer" },
+        "evidence": { "type": "array", "items": { "type": "string" } },
+        "strictness": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": {
+            "mode": { "type": "string" }
+          }
+        },
+        "author": { "type": "string" }
+      }
+    }
+  }
+}

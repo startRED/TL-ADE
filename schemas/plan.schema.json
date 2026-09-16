@@ -1,0 +1,62 @@
+{
+  "$id": "https://tl-ade.dev/schemas/plan.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "id", "mission_id", "immutable_digest", "authorization", "phases", "mission_budget", "budget"],
+  "properties": {
+    "format_version": { "type": "integer", "minimum": 1 },
+    "id": { "type": "string" },
+    "mission_id": { "type": "string" },
+    "immutable_digest": { "type": "string" },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["autonomy", "permitted_effects", "eligible_skills"],
+      "properties": {
+        "autonomy": { "enum": ["safe", "controlled", "restricted"] },
+        "permitted_effects": { "type": "array", "items": { "type": "string" } },
+        "eligible_skills": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "phases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["epics"],
+        "properties": {
+          "epics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["stories"],
+              "properties": {
+                "stories": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "mission_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_usd"],
+      "properties": {
+        "max_usd": { "type": "number" }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_model_calls", "max_rework_rounds"],
+      "properties": {
+        "max_model_calls": { "type": "integer" },
+        "max_rework_rounds": { "type": "integer" }
+      }
+    }
+  }
+}

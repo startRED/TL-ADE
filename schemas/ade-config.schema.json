@@ -1,0 +1,185 @@
+{
+  "$id": "https://tl-ade.dev/schemas/ade-config.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ade-config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "adapters",
+    "roles",
+    "gates",
+    "evals",
+    "limits",
+    "fast_lane",
+    "autonomy",
+    "visual",
+    "research",
+    "catalog",
+    "harness"
+  ],
+  "properties": {
+    "format_version": { "type": "integer", "minimum": 1 },
+    "adapters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claude", "codex", "agy"],
+      "properties": {
+        "claude": { "$ref": "#/definitions/adapter" },
+        "codex": { "$ref": "#/definitions/adapter" },
+        "agy": { "$ref": "#/definitions/adapter" }
+      }
+    },
+    "roles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maker"],
+      "properties": {
+        "intent_compiler": { "$ref": "#/definitions/role" },
+        "classifier": { "$ref": "#/definitions/role" },
+        "maker": { "$ref": "#/definitions/role" },
+        "checker_round": { "$ref": "#/definitions/role" },
+        "checker_gate": { "$ref": "#/definitions/role" },
+        "judge": { "$ref": "#/definitions/role" },
+        "research": { "$ref": "#/definitions/role" }
+      }
+    },
+    "gates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "cmd", "when", "timeout_s", "max_output_bytes"],
+        "properties": {
+          "id": { "type": "string" },
+          "cmd": { "type": "array", "items": { "type": "string" } },
+          "when": { "enum": ["always", "flag"] },
+          "flag": { "type": "string" },
+          "timeout_s": { "type": "integer" },
+          "max_output_bytes": { "type": "integer" },
+          "cache_by_tree": { "type": "boolean" }
+        }
+      }
+    },
+    "evals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default_timeout_s", "default_max_output_bytes", "strictness_default", "allow_additive_classes"],
+      "properties": {
+        "default_timeout_s": { "type": "integer" },
+        "default_max_output_bytes": { "type": "integer" },
+        "strictness_default": { "type": "string" },
+        "allow_additive_classes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_model_calls_per_story",
+        "max_rework_rounds",
+        "max_usd_per_mission",
+        "max_wall_clock_seconds",
+        "max_parked_units",
+        "max_pack_bytes"
+      ],
+      "properties": {
+        "max_model_calls_per_story": { "type": "integer" },
+        "max_rework_rounds": { "type": "integer" },
+        "max_usd_per_mission": { "type": "number" },
+        "max_wall_clock_seconds": { "type": "integer" },
+        "max_parked_units": { "type": "integer" },
+        "max_pack_bytes": { "type": "integer" }
+      }
+    },
+    "fast_lane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checker_threshold_files"],
+      "properties": {
+        "checker_threshold_files": { "type": "integer" }
+      }
+    },
+    "autonomy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default", "ask_operator", "unattended"],
+      "properties": {
+        "default": { "enum": ["safe", "controlled", "restricted"] },
+        "ask_operator": { "type": "array", "items": { "type": "string" } },
+        "unattended": { "type": "boolean" }
+      }
+    },
+    "visual": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "research": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "trigger", "team_size", "tie_becomes_question"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "trigger": { "type": "string" },
+        "team_size": { "type": "integer" },
+        "tie_becomes_question": { "type": "boolean" }
+      }
+    },
+    "catalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sources", "trust_default", "max_skills_per_story", "bm25_top_k", "local_skills_win"],
+      "properties": {
+        "sources": { "type": "array", "items": { "type": "string" } },
+        "trust_default": { "type": "string" },
+        "max_skills_per_story": { "type": "integer" },
+        "bm25_top_k": { "type": "integer" },
+        "local_skills_win": { "type": "boolean" }
+      }
+    },
+    "harness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["telemetry", "collect_citation", "doctor_probe_real_calls", "ablation"],
+      "properties": {
+        "telemetry": { "type": "boolean" },
+        "collect_citation": { "type": "boolean" },
+        "doctor_probe_real_calls": { "type": "boolean" },
+        "ablation": { "type": "boolean" }
+      }
+    }
+  },
+  "definitions": {
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "model_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "model_id"],
+      "properties": {
+        "family": { "type": "string" },
+        "model_id": { "type": "string" },
+        "effort": { "type": "string" }
+      }
+    },
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary", "fallbacks"],
+      "properties": {
+        "primary": { "$ref": "#/definitions/model_ref" },
+        "fallbacks": { "type": "array", "items": { "$ref": "#/definitions/model_ref" } }
+      }
+    }
+  }
+}

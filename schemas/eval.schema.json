@@ -1,0 +1,26 @@
+{
+  "$id": "https://tl-ade.dev/schemas/eval.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "eval",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "kind", "cmd", "expect_exit", "timeout_s", "max_output_bytes", "evidence", "strictness", "author"],
+  "properties": {
+    "format_version": { "type": "integer", "minimum": 1 },
+    "kind": { "type": "string" },
+    "cmd": { "type": "array", "items": { "type": "string" } },
+    "expect_exit": { "type": "integer" },
+    "timeout_s": { "type": "integer" },
+    "max_output_bytes": { "type": "integer" },
+    "evidence": { "type": "array", "items": { "type": "string" } },
+    "strictness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "type": "string" }
+      }
+    },
+    "author": { "type": "string" }
+  }
+}

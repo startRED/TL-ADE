@@ -1,0 +1,72 @@
+{
+  "format_version": 1,
+  "id": "ADE-S1",
+  "title": "Fundação",
+  "complexity": "bounded",
+  "task": "Publicar os oito contratos e o carregador ajv.",
+  "guardrails": {
+    "scope_paths": [
+      "schemas/**",
+      "src/schema/**"
+    ],
+    "do_not_touch": [
+      ".ade/**"
+    ],
+    "autonomy": "safe"
+  },
+  "requirements": [
+    {
+      "id": "R1",
+      "ears": "WHEN um exemplo inválido é validado THE SYSTEM SHALL recusar apontando o caminho do campo."
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "C1",
+      "given": "uma fixture inválida",
+      "when": "ajv valida",
+      "then": "recusa com o caminho do erro",
+      "evals": [
+        "E1"
+      ]
+    }
+  ],
+  "evals": [
+    {
+      "format_version": 1,
+      "kind": "test",
+      "cmd": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--reporter=json",
+        "tests/schema.test.ts"
+      ],
+      "expect_exit": 0,
+      "timeout_s": 120,
+      "max_output_bytes": 65536,
+      "evidence": [
+        "tests/schema.test.ts"
+      ],
+      "strictness": {
+        "mode": "must_fail_before"
+      },
+      "author": "operator"
+    }
+  ],
+  "skills": [],
+  "roles": {
+    "maker": {
+      "family": "claude",
+      "model_id": "claude-sonnet-5"
+    },
+    "checker_round": {
+      "family": "codex",
+      "model_id": "codex-1"
+    }
+  },
+  "budget": {
+    "max_model_calls": 6,
+    "max_rework_rounds": 2
+  }
+}

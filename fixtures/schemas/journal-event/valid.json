@@ -1,0 +1,14 @@
+{
+  "format_version": 1,
+  "seq": 1,
+  "at": "2026-09-17T12:00:00.000Z",
+  "prev": null,
+  "kind": "step_intent",
+  "effect_class": "prepare",
+  "input_digest": "0123456789abcdef",
+  "intent_context": {},
+  "worktree": ".ade/wt/ADE-S1",
+  "receipt_path": ".ade/missions/m1/jobs/step-1.json",
+  "session_ref": null,
+  "runtime_stamp": "1:abcdef0123456789:0123456789abcdef"
+}

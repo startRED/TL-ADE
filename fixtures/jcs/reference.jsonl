@@ -1,0 +1,8 @@
+{"input":{"b":2,"a":1},"expected":"{\"a\":1,\"b\":2}"}
+{"input":{"z":[3,2,1],"a":{"y":true,"x":null}},"expected":"{\"a\":{\"x\":null,\"y\":true},\"z\":[3,2,1]}"}
+{"input":{"name":"héllo wörld ☃"},"expected":"{\"name\":\"héllo wörld ☃\"}"}
+{"input":{"empty_obj":{},"empty_arr":[]},"expected":"{\"empty_arr\":[],\"empty_obj\":{}}"}
+{"input":{"neg":-5,"zero":0},"expected":"{\"neg\":-5,\"zero\":0}"}
+{"input":{"quote":"she said \"hi\" then left"},"expected":"{\"quote\":\"she said \\\"hi\\\" then left\"}"}
+{"input":{"big":9007199254740991},"expected":"{\"big\":9007199254740991}"}
+{"input":{"arr":[1,"two",false,null,{"k":"v"}]},"expected":"{\"arr\":[1,\"two\",false,null,{\"k\":\"v\"}]}"}
