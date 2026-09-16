@@ -47,6 +47,7 @@ const vendorOf = (family, model) => family === 'agy' && /^claude/.test(model) ? 
 
 const DEFAULT_SETTINGS = {
   roles: {
+    intent: { family: 'claude', model: 'opus' },
     planner: { family: 'claude', model: 'opus' },
     maker: { family: 'claude', model: 'sonnet' },
     checker: { family: 'codex', model: 'gpt-5.6-terra' },
@@ -83,7 +84,7 @@ function log(source, text, kind = 'info') {
 }
 function story() { const m = state.mission; return m && m.current != null ? m.stories[m.current] : null }
 function setStep(name, status, extra = {}) {
-  const target = name === 'plan' || name === 'research' || name === 'prepare' ? state.mission : story()
+  const target = ['intent', 'plan', 'research', 'prepare'].includes(name) ? state.mission : story()
   if (!target) return
   const step = target.steps.find((s) => s.name === name)
   const stamp = status === 'running' ? { started_at: now() } : { finished_at: now() }
@@ -120,7 +121,7 @@ async function saveJson(file, data) { await mkdir(ADE_DIR, { recursive: true });
 async function saveRecent(dir) { state.recent = [dir, ...state.recent.filter((d) => d !== dir)].slice(0, 8); await saveJson('projects.json', state.recent) }
 
 // ---------- catálogo de skills ----------
-const DENY = /email-ops|enterprise|inventory|hipaa|llm-trading|nutrient|pytorch|springboot|jpa-|foundation-models|github-ops|exa-search|rules-distill|gan-style|eval-harness|ecc-tools|connections-optimizer|content-hash|continuous-agent|click-path|security-bounty|security-scan|caveman|cavecrew|closeout|stocktake|humanizer|^bro$|eli5|revisor|tl-orchestrator|graphify|everything-claude|configure-ecc|hookify|instinct|continuous-learning|^agent-|autonomous|dmux|devfleet|council|crosspost|article|brand-voice|content-engine|customer|customs|carrier|energy|finance-billing|healthcare|investor|jira|knowledge-ops|lead-|logistics|market-research|messages-ops|nanoclaw|openclaw|opensource|production-|project-flow|quality-nonconformance|returns|unified-notifications|visa|workspace|x-api|videodb|video|remotion|manim|fal-ai|minecraft|voxy|prism|neoforge|mod-backport|spark|log-crash|chunk|proxmox|iridium|safe-change|stitch|imagegen|image-to-code|brandkit|full-output|gpt-taste|design-taste-frontend-v1|frontend-slides|ui-demo|claw|^ck$|cost-aware|benchmark|blueprint|browser-qa|canary|code-tour|codebase-onboarding|context-budget|deep-research|data-scraper|defi|evm|iterative|liquid-glass|nodejs-keccak|regex-vs|repo-scan|research-ops|search-first|skill-|social-graph|strategic|team-builder|terminal-ops|token-budget|prompt-optim|plankton|santa|ralphinho|gateguard|safety-guard|product-|automation-audit|api-connector|api-payment|agentic|ai-first|ai-regression|android|compose-multi|dart|flutter|kotlin|swift|rust|golang|java|laravel|django|perl|csharp|cpp|dotnet|nestjs|nuxt|nextjs|bun-runtime|clickhouse|docker|deployment|mcp-server|hexagonal|git-workflow|architecture-decision|claude-api|claude-md|documentation|writing-|using-|dispatching|executing|finishing|receiving|requesting|subagent|systematic|verification|brainstorming|test-driven|redesign-existing|industrial|minimalist|high-end/i
+const DENY = /email-ops|enterprise|inventory|hipaa|llm-trading|nutrient|pytorch|springboot|jpa-|foundation-models|github-ops|exa-search|rules-distill|gan-style|eval-harness|ecc-tools|connections-optimizer|content-hash|continuous-agent|click-path|security-bounty|security-scan|caveman|cavecrew|closeout|stocktake|humanizer|^bro$|eli5|revisor|tl-orchestrator|graphify|everything-claude|configure-ecc|hookify|instinct|continuous-learning|^agent-|autonomous|dmux|devfleet|council|crosspost|article|brand-voice|content-engine|customer|customs|carrier|energy|finance-billing|healthcare|investor|jira|knowledge-ops|lead-|logistics|market-research|messages-ops|nanoclaw|openclaw|opensource|production-|project-flow|quality-nonconformance|returns|unified-notifications|visa|workspace|x-api|videodb|video|remotion|manim|fal-ai|minecraft|voxy|prism|neoforge|mod-backport|spark|log-crash|chunk|proxmox|iridium|safe-change|stitch|imagegen|image-to-code|brandkit|full-output|gpt-taste|design-taste-frontend-v1|frontend-slides|ui-demo|claw|^ck$|cost-aware|benchmark|blueprint|browser-qa|canary|code-tour|codebase-onboarding|context-budget|deep-research|data-scraper|defi|evm|iterative|liquid-glass|nodejs-keccak|regex-vs|repo-scan|research-ops|search-first|skill-|social-graph|strategic|team-builder|terminal-ops|token-budget|prompt-optim|plankton|santa|ralphinho|gateguard|safety-guard|product-|automation-audit|api-connector|api-payment|agentic|ai-first|ai-regression|android|compose-multi|dart|flutter|kotlin|swift|rust|golang|java|laravel|django|perl|csharp|cpp|dotnet|nestjs|nuxt|nextjs|bun-runtime|clickhouse|docker|deployment|mcp-server|hexagonal|^git-workflow$|architecture-decision|claude-api|claude-md|documentation-lookup|writing-|using-|dispatching|executing|finishing|receiving|requesting|subagent|systematic|verification|brainstorming|test-driven|redesign-existing|industrial|minimalist|high-end/i
 const TAGS = {
   frontend: /frontend|\bui\b|design|landing|css|tailwind|react|visual|interface|layout|typograph|web page|website|component/i,
   backend: /backend|\bapi\b|server|express|rest|graphql|endpoint|node\.js|nodejs/i,
@@ -158,30 +159,27 @@ async function loadCatalog() {
 }
 // Decisão de Erick (2026-09-16): skills entram INTEIRAS, sem corte. O plano (E70) fixa 7,5k/20k tokens
 // para a ADE real; a demonstração só mede e mostra o tamanho.
-function selectSkills(plan) {
+const ROLES = ['planner', 'maker', 'checker', 'research']
+function catalogListing() {
+  return state.catalog.map((c) => `- ${c.id} [${c.tags.join(',') || 'geral'}] (${Math.round(c.bytes / 4 / 1000)}k tok): ${c.description || 'sem descrição'}`).join('\n')
+}
+// O modelo de entendimento escolhe skills por papel; o motor valida contra o catálogo, aplica as regras
+// fixas de Erick (interface/design => taste + impeccable no maker) e as fixações/exclusões do operador.
+function selectSkills(intent) {
   const s = state.settings.skills
-  const domains = new Set(plan.domains || [])
-  const picks = []
-  const add = (id, reason) => { if (!picks.find((p) => p.id === id) && state.catalog.find((c) => c.id === id) && !s.excluded.includes(id)) picks.push({ id, reason }) }
-  for (const id of s.forced) add(id, 'você fixou')
-  if (s.auto) {
-    // Regras fixas (decisão de Erick): frontend/design => taste + impeccable sempre.
-    if (domains.has('frontend') || domains.has('design') || plan.needs_ui) { add('impeccable', 'regra: interface ou design'); add('design-taste-frontend', 'regra: interface ou design'); add('frontend-design', 'regra: interface') }
-    if (domains.has('backend') || domains.has('api') || plan.needs_backend) { add('backend-patterns', 'regra: backend'); add('api-design', 'regra: API') }
-    if (domains.has('database')) { add('postgres-patterns', 'regra: banco de dados'); add('database-migrations', 'regra: banco de dados') }
-    if (domains.has('python')) { add('python-patterns', 'regra: Python') }
-    if (domains.has('security') || /login|senha|auth|pagamento|token/i.test(plan.summary || '')) add('security-review', 'regra: dados sensíveis')
-    if (domains.has('a11y') || plan.needs_ui) add('accessibility', 'regra: acessibilidade')
-    const kws = (plan.keywords || []).map((k) => k.toLowerCase()).filter((k) => k.length > 3)
-    const scored = state.catalog.map((c) => ({ c, score: kws.filter((k) => `${c.id} ${c.description}`.toLowerCase().includes(k)).length })).filter((x) => x.score >= 2).sort((a, b) => b.score - a.score)
-    for (const { c, score } of scored) add(c.id, `afinidade: ${score} palavras do pedido`)
-  }
-  const out = []; let total = 0
-  for (const p of picks) {
-    if (out.length >= s.max) break
-    const c = state.catalog.find((x) => x.id === p.id)
-    total += c.bytes
-    out.push({ ...p, bytes: c.bytes, truncated: false, source: c.source })
+  const domains = new Set(intent.domains || [])
+  const out = {}
+  for (const role of ROLES) {
+    const picks = []
+    const add = (id, reason) => { const c = state.catalog.find((x) => x.id === id); if (c && !picks.find((p) => p.id === id) && !s.excluded.includes(id)) picks.push({ id, reason, bytes: c.bytes, source: c.source }) }
+    if (role === 'maker') for (const id of s.forced) add(id, 'você fixou')
+    if (s.auto) {
+      for (const p of (intent.skills?.[role] || [])) add(p.id, p.reason ? `IA: ${p.reason}` : 'escolha da IA')
+      if (role === 'maker' && (domains.has('frontend') || domains.has('design') || intent.needs_ui)) { add('design-taste-frontend', 'regra: interface ou design'); add('impeccable', 'regra: interface ou design') }
+      if (role === 'checker' && (domains.has('frontend') || intent.needs_ui)) add('impeccable', 'regra: revisor de interface conhece o detector')
+      if (role === 'checker') add('code-review-and-quality', 'regra: critérios de revisão')
+    }
+    out[role] = picks.slice(0, role === 'maker' ? s.max : 3)
   }
   return out
 }
@@ -342,11 +340,11 @@ async function checker(diff, tests, st) {
     'Você é o revisor. Outra IA (Claude) fez a alteração abaixo no projeto. Não escreva código; só avalie.',
     'Regras: toda mudança de comportamento vem com uma prova (teste) que falha antes e passa depois; sem mudanças fora do escopo; sem quebrar acessibilidade; sem segredos em código; interface sem cara de template (cores saturadas, gradiente roxo, três cards iguais).',
     `Pedido do usuário: ${m.request}`, `Story em revisão: ${st.title}. Critérios de aceite: ${(st.acceptance || []).join('; ')}`,
-    `Skills que o autor tinha de seguir: ${m.skills.map((s) => s.id).join(', ') || 'nenhuma'}.`,
+    `Skills que o autor tinha de seguir: ${(m.skills.maker || []).map((s) => s.id).join(', ') || 'nenhuma'}.`,
     `Resultado das provas após a alteração: ${tests.failed} falharam de ${tests.total} (runner: ${tests.runner}).`,
     'Responda em português no formato JSON exigido. verdict = "approve" só se não houver achado high.',
     '--- DIFF ---', diff.slice(0, 60000),
-  ].join('\n')
+  ].join('\n') + skillsBlock(m.skills.checker || [])
   // Receita de chamada curta (architecture.md E16): sem config, regras e skills do usuário; sessão efêmera.
   const args = ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '--ephemeral', '-c', 'skills.max_context_tokens=0', '-C', dir, '-m', model, '--output-schema', REVIEW_SCHEMA, '-']
   log('engine', `codex (revisão, ${model})`)
@@ -383,12 +381,40 @@ async function visualGate() {
   return { available: true, findings: flat.slice(0, 40).map((f) => ({ file: f.file || f.path || '', line: f.line || null, rule: f.rule || f.id || '', message: f.message || f.description || JSON.stringify(f).slice(0, 160) })) }
 }
 
+// ---------- entendimento do pedido (escolhe skills por papel) ----------
+const INTENT_JSON_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    summary: { type: 'string' }, complexity: { type: 'string', enum: ['trivial', 'bounded', 'feature', 'subsystem'] },
+    domains: { type: 'array', items: { type: 'string' } }, keywords: { type: 'array', items: { type: 'string' } },
+    needs_ui: { type: 'boolean' }, needs_backend: { type: 'boolean' },
+    research_questions: { type: 'array', items: { type: 'string' } }, questions: { type: 'array', items: { type: 'string' } },
+    skills: { type: 'object', additionalProperties: false, properties: Object.fromEntries(['planner', 'maker', 'checker', 'research'].map((r) => [r, { type: 'array', items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, reason: { type: 'string' } }, required: ['id', 'reason'] } }])), required: ['planner', 'maker', 'checker', 'research'] },
+  },
+  required: ['summary', 'complexity', 'domains', 'keywords', 'needs_ui', 'needs_backend', 'research_questions', 'questions', 'skills'],
+}
+function intentPrompt() {
+  const p = state.project, s = state.settings
+  return [
+    'Você é a primeira IA da TL-ADE: entende o pedido do usuário e decide o que cada papel precisa. Responda em português no formato JSON exigido. Não explore o projeto além de 2 leituras; o planejador explora depois.',
+    `Pedido: ${state.mission.request}`,
+    `Projeto: ${p.name}; ${p.files} itens na raiz; linguagem: ${p.language || 'nenhuma'}; runner de provas: ${p.runner === 'none' ? 'nenhum' : p.test_cmd}; index.html: ${p.has_index ? 'sim' : 'não'}.`,
+    `Papéis e modelos: planejador ${s.roles.planner.model} (monta stories); maker ${s.roles.maker.model} (escreve provas e código); revisor ${s.roles.checker.model} (Codex, lê o diff, não escreve); pesquisador ${s.roles.research.model} (Google, só fatos externos).`,
+    'Escolha, para cada papel, as skills do catálogo abaixo que elevam a qualidade daquele papel neste pedido (ids exatos; até 4 para o maker, até 3 para os outros; lista vazia é válida). Regras fixas: se há interface ou design, o maker recebe design-taste-frontend e impeccable (pode acrescentar frontend-design e accessibility); backend/API recebe backend-patterns e api-design; banco recebe postgres-patterns; o revisor recebe skills de revisão/segurança, não de estilo; o pesquisador raramente precisa de skill.',
+    '- summary: 2 frases do que será entregue e das escolhas feitas por você quando o pedido é vago.',
+    '- complexity, domains (subconjunto de frontend, design, backend, api, database, testing, python, security, a11y, docs, devops), keywords (5 a 12, pt e en), needs_ui, needs_backend.',
+    '- research_questions: só fatos externos que mudariam a implementação; normalmente vazio. questions: só se vago a ponto de gerar trabalho errado; máximo 2; normalmente vazio.',
+    'CATÁLOGO DE SKILLS:', catalogListing(),
+  ].join('\n')
+}
+
 // ---------- plano (Intent Compiler) ----------
 function planPrompt() {
   const p = state.project
   return [
     'Você é o Intent Compiler da TL-ADE. Transforme o pedido do usuário em um plano executável por outra IA, em português, no formato JSON exigido.',
     `Pedido: ${state.mission.request}`,
+    `Entendimento prévio (outra IA): ${state.mission.intent?.summary || ''} Domínios: ${(state.mission.intent?.domains || []).join(', ')}.`,
     `Projeto: ${p.name} em ${p.dir}; ${p.files} itens na raiz; linguagem detectada: ${p.language || 'nenhuma'}; runner de provas: ${p.runner === 'none' ? 'nenhum' : p.test_cmd}; index.html na raiz: ${p.has_index ? 'sim' : 'não'}.`,
     'Explore o projeto só o necessário (Glob/Read/Grep). Depois produza:',
     '- title (≤8 palavras), summary (2 frases, o que será entregue), complexity (trivial|bounded|feature|subsystem).',
@@ -401,7 +427,7 @@ function planPrompt() {
     p.runner === 'none' ? '- Não há runner de provas: a primeira story deve incluir criar o mínimo para rodar provas (JS: package.json + vitest; Python: pytest).' : '',
     '- Se o pedido é visual e não há index.html, uma story deve entregar index.html na raiz funcionando como arquivos estáticos (ES modules, sem build), para abrir no navegador.',
     'Pedidos simples viram 1 ou 2 stories. Não invente escopo além do pedido.',
-  ].filter(Boolean).join('\n')
+  ].filter(Boolean).join('\n') + skillsBlock(state.mission.skills.planner || [])
 }
 const PLAN_JSON_SCHEMA = {
   type: 'object', additionalProperties: false,
@@ -443,26 +469,34 @@ function fixPrompt(st, round, review, visual) {
     'Ao terminar, escreva uma frase dizendo o que mudou.']
   if (round > 1 && review) { base.push(`Rodada ${round}. O revisor (outra IA) pediu mudanças: ${review.summary}`); for (const f of review.findings) base.push(`- [${f.severity}] ${f.file}: ${f.problem} Correção sugerida: ${f.fix}`) }
   if (visual?.length) { base.push('O portão visual (Impeccable detect) apontou; corrija:'); for (const f of visual) base.push(`- ${f.file}${f.line ? ':' + f.line : ''} [${f.rule}] ${f.message}`) }
-  return base.join('\n') + skillsBlock(state.mission.skills)
+  return base.join('\n') + skillsBlock(state.mission.skills.maker || [])
 }
 
 // ---------- pipeline ----------
 async function planMission() {
   const m = state.mission
+  setStep('intent', 'running')
+  const ri = await claudeCall({ role: 'entender', prompt: intentPrompt(), model: state.settings.roles.intent.model, tools: ['Read', 'Glob'], schema: INTENT_JSON_SCHEMA, maxTurns: 4 })
+  const intent = ri?.structured_output
+  if (!intent) { setStep('intent', 'failed'); m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'o entendimento não veio no formato esperado', 'error'); return finish() }
+  m.intent = intent
+  m.skills = selectSkills(intent)
+  setStep('intent', 'done')
+  log('engine', `entendido: ${intent.complexity} · ${intent.domains.join(', ')} · skills — planejador: ${m.skills.planner.map((s) => s.id).join(', ') || 'nenhuma'}; maker: ${m.skills.maker.map((s) => s.id).join(', ') || 'nenhuma'}; revisor: ${m.skills.checker.map((s) => s.id).join(', ') || 'nenhuma'}; pesquisa: ${m.skills.research.map((s) => s.id).join(', ') || 'nenhuma'}`)
+  if (intent.questions?.length) { m.plan = { title: m.request.slice(0, 60), summary: intent.summary, complexity: intent.complexity, domains: intent.domains, needs_ui: intent.needs_ui, needs_backend: intent.needs_backend, questions: intent.questions, research_questions: [], stories: [] }; m.state = 'awaiting_plan'; m.reason = 'questions'; broadcast(); return }
+  if (intent.research_questions?.length && state.settings.research_enabled) {
+    setStep('research', 'running'); m.research = await research(intent.research_questions.slice(0, 3)); setStep('research', m.research ? 'done' : 'failed')
+  }
   setStep('plan', 'running')
   const r = await claudeCall({ role: 'plano', prompt: planPrompt(), model: state.settings.roles.planner.model, tools: ['Read', 'Glob', 'Grep'], schema: PLAN_JSON_SCHEMA, maxTurns: 10 })
   const plan = r?.structured_output
   if (!plan?.stories?.length) { setStep('plan', 'failed'); m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'o plano não veio no formato esperado', 'error'); return finish() }
-  m.plan = plan
+  m.plan = { ...plan, needs_ui: plan.needs_ui || intent.needs_ui, needs_backend: plan.needs_backend || intent.needs_backend, domains: [...new Set([...(intent.domains || []), ...(plan.domains || [])])] }
   m.stories = plan.stories.map((s) => ({ ...s, state: 'queued', steps: [], round: 0, red_tests: [], tests_after: null, diff: '', review: null, visual: null }))
-  m.skills = selectSkills(plan)
   setStep('plan', 'done')
-  log('engine', `plano: ${plan.title} · ${plan.complexity} · ${m.stories.length} story(s) · skills: ${m.skills.map((s) => s.id).join(', ') || 'nenhuma'}`)
-  if (plan.research_questions?.length && state.settings.research_enabled) {
-    setStep('research', 'running'); m.research = await research(plan.research_questions.slice(0, 3)); setStep('research', m.research ? 'done' : 'failed')
-  }
+  log('engine', `plano: ${plan.title} · ${m.plan.complexity} · ${m.stories.length} story(s)`)
   if (plan.questions?.length) { m.state = 'awaiting_plan'; m.reason = 'questions'; broadcast(); return }
-  if (m.stories.length > 2 || plan.complexity === 'subsystem') { m.state = 'awaiting_plan'; m.reason = 'approve_plan'; broadcast(); return }
+  if (m.stories.length > 2 || m.plan.complexity === 'subsystem') { m.state = 'awaiting_plan'; m.reason = 'approve_plan'; broadcast(); return }
   return runStories()
 }
 
@@ -549,11 +583,11 @@ async function startMission(request) {
   if (fresh.dirty) return 'A pasta tem alterações não commitadas. Commite ou descarte antes, para a ADE poder desfazer só o que ela mesma fizer.'
   const s = state.settings
   if (vendorOf(s.roles.maker.family, s.roles.maker.model) === vendorOf(s.roles.checker.family, s.roles.checker.model)) return 'Quem escreve e quem revisa precisam ser de empresas diferentes. Ajuste em Modelos.'
-  state.project = fresh; state.log = []; currentPhase = 'plan'
+  state.project = fresh; state.log = []; currentPhase = 'intent'
   state.mission = {
     id: 'm-' + Date.now().toString(36), request, state: 'planning', reason: null, current: null,
     allow_commands: !!s.allow_commands, roles: JSON.parse(JSON.stringify(s.roles)),
-    plan: null, stories: [], skills: [], research: null, steps: [], tests_before: null,
+    plan: null, intent: null, stories: [], skills: { planner: [], maker: [], checker: [], research: [] }, research: null, steps: [], tests_before: null,
     cost: { usd: 0, calls: 0, turns: 0, tokens_in: 0, tokens_out: 0, cache_read: 0, by_model: {} }, started_at: now(), finished_at: null,
   }
   journal({ type: 'mission_start', request }).catch(() => {})
@@ -647,6 +681,7 @@ http.createServer(async (req, res) => {
   state.history = await loadJson('history.json', [])
   const saved = await loadJson('settings.json', null)
   if (saved) state.settings = { ...DEFAULT_SETTINGS, ...saved, roles: { ...DEFAULT_SETTINGS.roles, ...(saved.roles || {}) }, skills: { ...DEFAULT_SETTINGS.skills, ...(saved.skills || {}) } }
+  if (!state.settings.roles.intent) state.settings.roles.intent = DEFAULT_SETTINGS.roles.intent
   await loadCatalog()
   state.project = await discover(state.recent[0] || path.join(ROOT, 'example'))
   console.log(`TL-ADE: http://127.0.0.1:${PORT}  projeto: ${state.project.dir}  skills no catálogo: ${state.catalog.length}`)

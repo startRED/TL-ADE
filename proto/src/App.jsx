@@ -5,10 +5,13 @@ import {
   FolderSimple, ClockCounterClockwise, GearSix, Pulse, Circle, CheckFat, X, Lightning, Sparkle, Cpu, ListChecks, Eye, SkipForward, MagnifyingGlass,
 } from '@phosphor-icons/react'
 
-const MISSION_STEPS = ['plan', 'research', 'prepare']
+const MISSION_STEPS = ['intent', 'plan', 'research', 'prepare']
+const ROLES_PT = { planner: 'planejador', maker: 'maker', checker: 'revisor', research: 'pesquisador' }
+const allSkills = (m) => m?.skills ? Object.entries(m.skills).flatMap(([role, list]) => (list || []).map((x) => ({ ...x, role }))) : []
 const STORY_STEPS = ['test', 'red', 'fix', 'tests', 'visual', 'checker']
 const STEP = {
-  plan: { title: 'Entender o pedido', help: 'Uma IA lê o pedido e o projeto e transforma em um plano: o que entregar, em quais partes (stories), e como provar cada uma.' },
+  intent: { title: 'Entender o pedido', help: 'Uma IA lê o seu pedido, decide o tamanho, os domínios e quais skills cada papel (planejador, maker, revisor, pesquisador) vai receber.' },
+  plan: { title: 'Montar o plano', help: 'O planejador, já com as skills dele, explora o projeto e divide o trabalho em partes (stories), cada uma com critérios de aceite e como provar.' },
   research: { title: 'Pesquisar fatos', help: 'Só quando o plano depende de algo externo (versão de API, regra pública). O Google (agy) responde com fontes.' },
   prepare: { title: 'Conferir o projeto', help: 'Roda o que o projeto já tem de verificação, para saber o ponto de partida.' },
   test: { title: 'Escrever a prova', help: 'Uma "prova" é um mini-programa que checa se o que você pediu funciona. A IA escreve só isso, sem mexer no código ainda.' },
@@ -36,7 +39,7 @@ const REASON = {
   approve_plan: 'O plano tem várias partes. Confira e aprove.',
   questions: 'A IA precisa de uma resposta sua antes de começar.',
 }
-const ROLE_LABEL = { planner: 'Planejar (entender o pedido)', maker: 'Escrever código e provas', checker: 'Revisar (outra empresa)', research: 'Pesquisar fatos' }
+const ROLE_LABEL = { intent: 'Entender o pedido e escolher skills', planner: 'Planejar (entender o pedido)', maker: 'Escrever código e provas', checker: 'Revisar (outra empresa)', research: 'Pesquisar fatos' }
 const SUGGESTIONS = [
   'Crie uma planilha financeira de gastos pessoais, com categorias, total por mês e visual profissional.',
   'Crie a página inicial de um site de uma cafeteria, com cardápio, horário e um formulário de reserva.',
@@ -152,7 +155,7 @@ export default function App() {
       <footer className="status">
         <span className={connected ? 'ok' : 'bad'}>{connected ? '● servidor ligado' : '○ sem servidor'}</span>
         <span title={p?.dir}>{p ? p.dir : 'sem pasta'}</span>
-        {s && <span>{s.roles.maker.model} escreve · {s.roles.checker.model} revisa · {s.roles.planner.model} planeja</span>}
+        {s && <span>{s.roles.intent?.model || s.roles.planner.model} entende · {s.roles.planner.model} planeja · {s.roles.maker.model} escreve · {s.roles.checker.model} revisa</span>}
         <span className="grow" />
         {m && <span>{m.cost.calls} chamadas · {Math.round((m.cost.tokens_in + m.cost.tokens_out) / 1000)}k tokens · US$ {m.cost.usd.toFixed(2)} no Claude</span>}
       </footer>
@@ -242,7 +245,7 @@ function SkillsPanel({ state, save }) {
   const [open, setOpen] = useState(null)
   const [body, setBody] = useState('')
   if (!s) return null
-  const active = new Map((m?.skills || []).map((x) => [x.id, x]))
+  const active = new Map(allSkills(m).map((x) => [x.id, x]))
   const list = catalog.filter((c) => !q || `${c.id} ${c.description}`.toLowerCase().includes(q.toLowerCase()))
   const toggleForce = (id) => save({ skills: { forced: s.skills.forced.includes(id) ? s.skills.forced.filter((x) => x !== id) : [...s.skills.forced, id], excluded: s.skills.excluded.filter((x) => x !== id) } })
   const toggleExclude = (id) => save({ skills: { excluded: s.skills.excluded.includes(id) ? s.skills.excluded.filter((x) => x !== id) : [...s.skills.excluded, id], forced: s.skills.forced.filter((x) => x !== id) } })
@@ -250,8 +253,8 @@ function SkillsPanel({ state, save }) {
   return (
     <div className="panel">
       <div className="steps-head"><span className="lbl" style={{ margin: 0 }}>Skills · {catalog.length} no catálogo</span><label className="sw"><Switch size="1" checked={s.skills.auto} onCheckedChange={(v) => save({ skills: { auto: v } })} /> automático</label></div>
-      <p className="dim small">Skills são manuais de qualidade que a IA recebe junto com o pedido. A ADE escolhe sozinha pelas regras (interface ou design: sempre <b>impeccable</b> + <b>design-taste-frontend</b>; backend: padrões de API) e por afinidade com o pedido. Até {s.skills.max} por missão, entregues inteiras (sem corte, por decisão sua).</p>
-      {m?.skills?.length > 0 && <div className="chips">{m.skills.map((x) => <span key={x.id} className="chip-skill on" title={x.reason}>{x.id}<small>{x.reason}</small></span>)}</div>}
+      <p className="dim small">Skills são manuais de qualidade que cada papel recebe junto com o pedido. A IA que entende o pedido escolhe as skills do planejador, do maker, do revisor e do pesquisador; o motor garante as regras fixas (interface ou design: sempre <b>design-taste-frontend</b> + <b>impeccable</b> no maker). Até {s.skills.max} no maker, 3 nos outros, entregues inteiras (sem corte, por decisão sua).</p>
+      {allSkills(m).length > 0 && <div className="chips">{allSkills(m).map((x) => <span key={x.role + x.id} className="chip-skill on" title={x.reason}>{x.id}<small>{ROLES_PT[x.role]} · {x.reason}</small></span>)}</div>}
       <TextField.Root size="1" value={q} onChange={(e) => setQ(e.target.value)} placeholder="filtrar…" style={{ marginTop: 8 }}><TextField.Slot><MagnifyingGlass /></TextField.Slot></TextField.Root>
       <ul className="skill-list">
         {list.map((c) => {
@@ -384,8 +387,8 @@ function Plan({ m, catalog }) {
           </li>
         ))}
       </ol>
-      <span className="lbl">Skills ativas</span>
-      {m.skills.length ? <div className="chips">{m.skills.map((x) => <span key={x.id} className="chip-skill on">{x.id}<small>{x.reason}{x.truncated ? ' · cortada em 7,5k' : ''}</small></span>)}</div> : <p className="dim small">Nenhuma skill se aplica a este pedido.</p>}
+      <span className="lbl">Skills por papel</span>
+      {Object.entries(m.skills || {}).map(([role, list]) => <div key={role} className="role-skills"><span className="role-name">{ROLES_PT[role]}</span>{list?.length ? <div className="chips">{list.map((x) => <span key={x.id} className="chip-skill on">{x.id}<small>{x.reason} · {Math.round(x.bytes / 4 / 1000)}k tok</small></span>)}</div> : <span className="dim small">nenhuma</span>}</div>)}
       {m.research?.findings?.length > 0 && <><span className="lbl">Pesquisa</span>{m.research.findings.map((f) => <div key={f.question} className="explain"><b>{f.question}</b><p>{f.answer}</p>{f.sources?.length > 0 && <p className="dim small">{f.sources.join(' · ')}</p>}</div>)}</>}
     </div>
   )
@@ -486,7 +489,7 @@ function Report({ m, decide }) {
   return (
     <div className="rpt">
       <span className="lbl">Sua parte</span>
-      {m.state === 'planning' && <div className="card calm"><Pulse /><div><b>Entendendo o pedido</b><p>A IA está lendo o projeto e montando o plano. Leva menos de um minuto.</p></div></div>}
+      {m.state === 'planning' && <div className="card calm"><Pulse /><div><b>Entendendo o pedido</b><p>Primeiro uma IA entende o pedido e escolhe as skills de cada papel; depois o planejador monta as partes. Uns dois minutos.</p></div></div>}
       {m.state === 'running' && <div className="card calm"><Pulse /><div><b>Trabalhando</b><p>{st ? `Parte ${m.current + 1} de ${m.stories.length}: ${st.title}.` : 'Preparando.'} Nada para fazer agora.</p></div></div>}
       {m.state === 'complete' && <div className="card good"><CheckCircle weight="fill" /><div><b>Pronta</b><p>{m.stories.length} parte(s) provadas, revisadas e commitadas na sua pasta.{m.plan?.needs_ui ? ' Abra o app pelo botão no topo.' : ''}</p></div></div>}
       {m.state === 'discarded' && <div className="card"><Trash /><div><b>Descartada</b><p>Os arquivos voltaram ao que eram.</p></div></div>}
@@ -516,8 +519,8 @@ function Report({ m, decide }) {
         </>
       )}
       {st?.review && <div className="block"><span className="lbl">O revisor disse</span><p>{st.review.summary}</p></div>}
-      {m.skills?.length > 0 && <div className="block"><span className="lbl">Skills nesta missão</span><div className="chips">{m.skills.map((x) => <span key={x.id} className="chip-skill on" title={x.reason}>{x.id}</span>)}</div></div>}
-      {m.roles && <div className="block"><span className="lbl">Quem fez</span><p className="small">{m.roles.planner.model} planejou · {m.roles.maker.model} escreveu · {m.roles.checker.model} revisou</p></div>}
+      {allSkills(m).length > 0 && <div className="block"><span className="lbl">Skills nesta missão</span><div className="chips">{allSkills(m).map((x) => <span key={x.role + x.id} className="chip-skill on" title={x.reason}>{x.id}<small>{ROLES_PT[x.role]}</small></span>)}</div></div>}
+      {m.roles && <div className="block"><span className="lbl">Quem fez</span><p className="small">{m.roles.intent?.model || m.roles.planner.model} entendeu · {m.roles.planner.model} planejou · {m.roles.maker.model} escreveu · {m.roles.checker.model} revisou</p></div>}
     </div>
   )
 }
