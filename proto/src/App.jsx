@@ -435,6 +435,7 @@ function Plan({ m, catalog }) {
       {pl.assets?.length > 0 && (
         <>
           <span className="lbl">Imagens do plano</span>
+          {pl.assets_style && <p className="dim small" style={{ margin: '0 0 8px' }}>Direção de arte: {pl.assets_style}</p>}
           <div className="assets-grid">
             {pl.assets.map((a) => { const done = (m.assets_done || []).some((d) => d.file === a.file); return (
               <figure key={a.file} className={done ? 'done' : ''}>
