@@ -17,6 +17,7 @@ const IS_WIN = process.platform === 'win32'
 
 // ---------- estado ----------
 const state = { mission: null, log: [], history: [], live: null }
+let currentPhase = null
 let pending = null
 function broadcastSoon() { if (pending) return; pending = setTimeout(() => { pending = null; broadcast() }, 150) }
 function setLive(live) { state.live = live; broadcastSoon() }
@@ -30,7 +31,7 @@ async function journal(event) {
 }
 
 function log(source, text, kind = 'info') {
-  const line = { ts: now(), source, text: String(text).slice(0, 4000), kind }
+  const line = { ts: now(), source, text: String(text).slice(0, 4000), kind, phase: currentPhase }
   state.log.push(line)
   if (state.log.length > 400) state.log.shift()
   journal({ type: 'log', ...line }).catch(() => {})
@@ -41,6 +42,7 @@ function setStep(name, status, extra = {}) {
   const m = state.mission
   const step = m.steps.find((s) => s.name === name)
   const stamp = status === 'running' ? { started_at: now() } : { finished_at: now() }
+  if (status === 'running') currentPhase = name
   if (step) Object.assign(step, { status, ...stamp, ...extra })
   else m.steps.push({ name, status, ...stamp, ...extra })
   journal({ type: 'step', name, status }).catch(() => {})
@@ -330,6 +332,7 @@ async function startMission(request) {
   }
   await gitDiscard()
   state.log = []
+  currentPhase = 'prepare'
   state.mission = {
     id: 'm-' + Date.now().toString(36), request, state: 'running', reason: null, round: 0,
     steps: [], tests_before: null, tests_after: null, new_tests: [], red_tests: [], diff: '', review: null,
