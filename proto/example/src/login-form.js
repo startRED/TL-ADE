@@ -27,3 +27,11 @@ export function createLoginForm({ login }) {
 
   return { form, button, error }
 }
+
+// Monta o formulário na página do app (src/main.js). O login aqui é simulado.
+export function mount(container) {
+  const { form } = createLoginForm({
+    login: ({ email }) => new Promise((resolve, reject) => setTimeout(() => (email.endsWith('@exemplo.com') ? resolve() : reject(new Error('Credenciais inválidas'))), 1200)),
+  })
+  container.appendChild(form)
+}
