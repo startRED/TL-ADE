@@ -3,6 +3,7 @@ import { Badge, Button, Code, Heading, ScrollArea, Switch, TextField, Tooltip } 
 import {
   ArrowSquareOut, Play, CheckCircle, Warning, ArrowCounterClockwise, Trash, Flask, GitDiff, ChatCircleText, Terminal,
   FolderSimple, ClockCounterClockwise, GearSix, Pulse, Circle, CheckFat, X, Lightning, Sparkle, Cpu, ListChecks, Eye, SkipForward, MagnifyingGlass,
+  Plus, Paperclip, FolderOpen, Image as ImageIcon, File as FileIcon,
 } from '@phosphor-icons/react'
 
 const MISSION_STEPS = ['intent', 'plan', 'research', 'prepare', 'assets']
@@ -66,7 +67,17 @@ const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Typ
 const secsBetween = (a, b) => Math.max(0, Math.round(((b ? new Date(b) : new Date()) - new Date(a)) / 1000))
 
 export default function App() {
-  const [state, setState] = useState({ project: null, mission: null, log: [], history: [], live: null, recent: [], settings: null, catalog: [], registry: {} })
+  const [state, setState] = useState({ project: null, mission: null, log: [], history: [], live: null, recent: [], settings: null, catalog: [], registry: {}, attachments: [] })
+  const [menu, setMenu] = useState(false)
+  const [attachErr, setAttachErr] = useState(null)
+  async function attachFiles(payload) { setAttachErr(null); const r = await post('/api/attach', payload); if (!r.ok) { const j = await r.json().catch(() => ({})); setAttachErr(j.error || 'Não anexou.') } }
+  async function pick(kind) { setMenu(false); const r = await post('/api/pick', { kind }); const j = await r.json().catch(() => ({})); const paths = j.paths || []; if (!paths.length) return; if (kind === 'folder') { const pr = await post('/api/project', { dir: paths[0] }); if (!pr.ok) { const e = await pr.json().catch(() => ({})); setError(e.error || 'Não abriu a pasta.') } else { setView('mission'); setError(null) } } else await attachFiles({ paths }) }
+  async function onPaste(e) {
+    const files = [...(e.clipboardData?.files || [])]; if (!files.length) return
+    e.preventDefault()
+    const encoded = await Promise.all(files.map((f) => new Promise((res) => { const rd = new FileReader(); rd.onload = () => res({ name: f.name && f.name !== 'image.png' ? f.name : `colado-${Date.now().toString(36)}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`, data: rd.result }); rd.readAsDataURL(f) })))
+    await attachFiles({ files: encoded })
+  }
   const [request, setRequest] = useState('')
   const [tab, setTab] = useState('plan')
   const [connected, setConnected] = useState(false)
@@ -98,11 +109,31 @@ export default function App() {
     <div className="shell">
       <header className="topbar">
         <div className="brand"><span className="logo" /><span>TL-ADE</span><span className="dim">demonstração</span></div>
-        <form className="cmd" onSubmit={(e) => { e.preventDefault(); run() }}>
-          <TextField.Root size="2" value={request} onChange={(e) => setRequest(e.target.value)} placeholder={p ? `O que construir em ${p.name}? Escreva do seu jeito.` : 'Escolha uma pasta primeiro'} disabled={busy}>
-            <TextField.Slot><Lightning weight="fill" color="var(--teal-9)" /></TextField.Slot>
+        <form className="cmd" onSubmit={(e) => { e.preventDefault(); run() }} onDrop={(e) => { e.preventDefault(); onPaste({ clipboardData: e.dataTransfer, preventDefault() {} }) }} onDragOver={(e) => e.preventDefault()}>
+          <div className="plus-wrap">
+            <button type="button" className="plus" title="Anexar" onClick={() => setMenu((v) => !v)} disabled={busy}><Plus weight="bold" /></button>
+            {menu && (
+              <div className="menu" onMouseLeave={() => setMenu(false)}>
+                <button type="button" onClick={() => pick('files')}><Paperclip /> Adicionar arquivos ou fotos <kbd>Ctrl+V</kbd></button>
+                <button type="button" onClick={() => pick('folder')}><FolderOpen /> Escolher a pasta do projeto</button>
+              </div>
+            )}
+          </div>
+          <TextField.Root size="2" value={request} onChange={(e) => setRequest(e.target.value)} onPaste={onPaste} placeholder={p ? `O que construir em ${p.name}? Escreva do seu jeito; cole imagens com Ctrl+V.` : 'Escolha uma pasta primeiro (botão +)'} disabled={busy}>
             <TextField.Slot><Button size="1" type="submit" disabled={busy || !request.trim()}>{busy ? 'Rodando' : 'Rodar'}</Button></TextField.Slot>
           </TextField.Root>
+          {(state.attachments?.length > 0 || attachErr) && (
+            <div className="attachments">
+              {state.attachments.map((a) => (
+                <span className="chip" key={a.name} title={a.path}>
+                  {a.image ? <img src={`/api/app/${a.path}`} alt="" /> : <FileIcon />}
+                  <span>{a.name}</span>
+                  <button type="button" onClick={() => post('/api/attach/remove', { name: a.name })} title="Remover"><X /></button>
+                </span>
+              ))}
+              {attachErr && <span className="chip bad">{attachErr}</span>}
+            </div>
+          )}
         </form>
         <div className="topright">
           {m && <MissionChip m={m} />}
@@ -390,7 +421,8 @@ function Projects({ p, recent, busy, onChanged }) {
         <TextField.Root size="2" value={dir} onChange={(e) => setDir(e.target.value)} placeholder="E:\meus-projetos\minha-app" disabled={busy} />
         <Button size="2" type="submit" disabled={busy || !dir.trim()} style={{ marginTop: 6, width: '100%' }}>Usar esta pasta</Button>
       </form>
-      <p className="dim small">Cole o caminho de qualquer pasta do seu PC. Se não existir, a ADE cria. Pasta vazia: a IA monta o projeto do zero.</p>
+      <Button size="2" variant="soft" type="button" disabled={busy} style={{ marginTop: 8, width: '100%' }} onClick={async () => { const r = await post('/api/pick', { kind: 'folder' }); const j = await r.json().catch(() => ({})); if (j.paths?.[0]) choose(j.paths[0]) }}><FolderOpen /> Procurar no Explorer (ou criar pasta nova)</Button>
+      <p className="dim small">Ou cole o caminho de qualquer pasta do seu PC. Se não existir, a ADE cria. Pasta vazia: a IA monta o projeto do zero.</p>
       {msg && <p className="small" style={{ color: 'var(--amber-11)' }}>{msg}</p>}
       {p && (
         <div className="proj-info">
