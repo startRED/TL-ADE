@@ -25,4 +25,17 @@ describe('formulário de login', () => {
     expect(error.hidden).toBe(false)
     expect(error.textContent).toBe('Credenciais inválidas')
   })
+
+  it('desabilita o botão Entrar enquanto o envio está em curso', async () => {
+    let resolveLogin
+    const login = vi.fn(() => new Promise((resolve) => { resolveLogin = resolve }))
+    const { form, button } = createLoginForm({ login })
+    fill(form)
+    form.dispatchEvent(new Event('submit', { cancelable: true }))
+    await Promise.resolve()
+    expect(button.disabled).toBe(true)
+    resolveLogin()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(button.disabled).toBe(false)
+  })
 })
