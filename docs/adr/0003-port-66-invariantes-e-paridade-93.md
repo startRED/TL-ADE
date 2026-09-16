@@ -71,3 +71,7 @@ um invariante) exige ADR próprio.
 
 `docs/roadmap.md` (aceite do slice 1 e da v0.2), `parity-name-map.json`, `docs/specs/` (durabilidade e
 reconciliação), ADR 0002, ADR 0006 (forma rica do `review-result` e os nomes que mudam), ADR 0021, ADR 0022.
+
+## Emendas (2026-09-17)
+
+- E42: `takeover_open` acrescenta um teste próprio fora do lote portado — `dispatch_into_open_takeover_is_refused`, cobrindo a recusa de despacho em worktree com `takeover.json` presente (`prepare` recusa, a story para em `awaiting_operator{reason:'takeover_open'}`); não altera a paridade 93/93 nem o subconjunto de 44 casos nomeados do slice 1.

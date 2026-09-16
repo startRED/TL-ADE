@@ -70,3 +70,8 @@ remover a fase vermelha exige ADR novo, porque destrói a evidência central.
 `schemas/unit-result.schema.json` (`sources[]`), `schemas/journal-event.schema.json` (classe
 `eval_run`), `docs/specs/` (eval runner, ciclo por story, `ade eval`), ADR 0008 (quem escreve o eval por
 classe), ADR 0010 (evals visuais), ADR 0017 (correlação eval/rework na telemetria).
+
+## Emendas (2026-09-17)
+
+- E51: emenda a E12 para `trivial` — `red_reason != 'assertion'` não rebaixa a story para `additive` (que exige eval `negative`/`mutate`, inexistentes em `trivial`); a story para em `awaiting_operator{reason:'red_unproven'}` com o diff pronto, e `ade decide --option accept_unproven` fecha a story como `complete` com a decisão gravada. Caminho feliz da jornada 1 continua com 0 interações.
+- E58: o eval runner (C9) passa a exigir reporter estruturado (`--reporter=json` no Vitest/Jest, equivalente por runner) e `numTotalTests ≥ 1`; zero testes executados é `red_reason: 'missing_target'`, nunca verde.

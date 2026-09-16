@@ -6,6 +6,12 @@ decisão dela, com a evidência que a sustenta (digest `docs/research/README.md`
 (`architecture.md` §10, A1–A14) e a arbitragem das divergências (§11, E1–E40) prevalecem sobre qualquer
 trecho anterior, aqui inclusive.
 
+As emendas pós-revisão adversarial (`architecture.md` §12, E41–E69, 2026-09-17) e as decisões de
+Erick (§9, mesma data) também prevalecem sobre qualquer trecho anterior. Onde uma emenda mudou ou
+complementou a decisão registrada, o ADR correspondente carrega, ao final, uma seção "## Emendas
+(2026-09-17)" citando o E-número: ADR 0012, 0013, 0015, 0017, 0019, 0021 e 0022. Os demais ADRs não
+tiveram decisão alterada por essa rodada.
+
 Formato fixo: título · Status · Contexto · Decisão · Evidência · Trade-offs · Alternativas rejeitadas ·
 Como reverter · Consequências para outros documentos.
 
@@ -28,8 +34,8 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | [0009](0009-skill-fabric-catalogo-curado-selecao-12-controles.md) | Skill Fabric: catálogo curado, seleção externa e 12 controles de supply chain | aceito 2026-09-17 |
 | [0010](0010-frontend-quality-engine-impeccable-juiz-2-rodadas.md) | Frontend Quality Engine: portões determinísticos, Impeccable, juiz de outra família, 2 rodadas | aceito 2026-09-17, pendente de confirmação do Erick |
 | [0011](0011-context-pack-firewall-telemetria.md) | Context Pack com tetos, Tool Output Firewall e telemetria por chamada | aceito 2026-09-17 |
-| [0012](0012-engine-dono-de-worktree-e-processo.md) | O engine é dono do worktree e do processo | aceito 2026-09-17, pendente de confirmação do Erick |
-| [0013](0013-painel-projecao-takeover-por-comando-pty-depois.md) | Painel como projeção, takeover por comando, PTY depois | aceito 2026-09-17, pendente de confirmação do Erick |
+| [0012](0012-engine-dono-de-worktree-e-processo.md) | O engine é dono do worktree e do processo | Aceito (confirmado por Erick em 2026-09-17) |
+| [0013](0013-painel-projecao-takeover-por-comando-pty-depois.md) | Painel como projeção, takeover por comando, PTY depois | Aceito (confirmado por Erick em 2026-09-17) |
 | [0014](0014-concorrencia-1-git-por-worktree.md) | Concorrência N=1 na v1, Git por worktree desde o dia 1 | aceito 2026-09-17 |
 | [0015](0015-autonomia-niveis-flags-desatendidas.md) | Três níveis de autonomia, flags desatendidas por família, `contain` como única fronteira | aceito 2026-09-17 |
 | [0016](0016-pesquisa-como-subsistema.md) | Pesquisa como subsistema: um step, uma incógnita declarada, achado é dado | aceito 2026-09-17 |

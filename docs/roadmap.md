@@ -234,7 +234,7 @@ evidência e screenshots lado a lado — e Erick vê a missão acontecendo.
 
 | | Escopo v0.4b (painel, projeção, workspaces) |
 | :--- | :--- |
-| **Must** | painel somente-leitura como projeção + índice SQLite reconstruível; token aleatório por sessão do `ade serve` impresso no terminal + checagem de `Origin`; `visual-eval` promovido a **9º schema publicado** (dois consumidores); npm workspaces criados no mesmo commit que cria `packages/web`; `ade serve`, `ade index --rebuild` |
+| **Must** | lançador de 2 cliques (`ade.bat` gerado por `ade init`) que sobe `ade serve` e abre o navegador na página pronta; interface com aparência de IDE, familiar (decisão de Erick, `architecture.md` §9.1; esforço adicional [hipótese]); painel somente-leitura como projeção + índice SQLite reconstruível; token aleatório por sessão do `ade serve` impresso no terminal + checagem de `Origin`; `visual-eval` promovido a **9º schema publicado** (dois consumidores); npm workspaces criados no mesmo commit que cria `packages/web`; `ade serve`, `ade index --rebuild` |
 | **Should** | — |
 | **Experimental** | — |
 

@@ -351,13 +351,14 @@ engine ser o único a rodar git/gh); Codex `--sandbox workspace-write --approve-
 | Paridade "10 falham no Windows" | 93/93 nos dois SOs, com tabela de mapeamento de nomes onde o schema mudou | suíte passa 93/93 (#1) |
 | `review-result` copiado | forma rica, `summary` derivado, defeito latente corrigido | (#32) |
 
-## 9. Decisões que precisam de Erick
+## 9. Decisões de Erick (confirmadas em 2026-09-17)
 
-1. **Painel e PTY fora da v1** (contraria decisão prévia): v1 entrega `ade report` + `ade takeover` por comando; painel somente-leitura na v0.4; PTY embutido na v0.5+. Recomendação: aceitar; o custo do PTY hoje é o node-pty beta e ~40 % do código.
-2. **Duas famílias na v1** (Claude + Codex); Gemini via `agy` só para pesquisa e só quando o canário de isolamento passar. Recomendação: aceitar.
-3. **Sem chave de API obrigatória** mantém-se; consequência: sem 4º provider (OpenCode). Família Google só via `agy` (assinatura), nunca via Gemini CLI. Confirmar.
-4. **Corte visual 7,5 e teto de 2 rodadas** (contra 8 e 4 da entrevista). Recomendação: aceitar e calibrar no dogfood.
-5. **Worker morre com o engine na v1** (uma chamada perdida em crash do engine) em troca de contenção de processos de graça. Recomendação: aceitar.
+1. **Painel ao vivo na v1, no navegador, com abertura por 2 cliques.** Decisão: a v0.4b entrega um lançador (`ade.bat`/`ade.cmd` na raiz do repositório ou atalho gerado por `ade init`) que sobe `ade serve` e abre o navegador na página local já pronta para uso. A interface deve parecer uma IDE, familiar e fácil de entender (painel de missões/stories à esquerda, diff e evidências no centro, relatório e decisões à direita) — critério de aceite de UX da v0.4b, medido no dogfood D4. Continua somente-leitura + ações que viram steps no journal (E32); terminal embutido (PTY) fica na v0.5. Esta decisão amplia o escopo da v0.4b em relação a "projeção mínima": o roadmap registra o acréscimo como [hipótese] de esforço até a medição.
+2. **Três famílias na v1**: Claude Code e Codex desde o slice 1; Google via `agy` entra na v0.5 (dentro da v1) para pesquisa e fallback de Checker, condicionada ao canário de isolamento. Sem chave de API obrigatória: só as assinaturas existentes. Sem 4º provider.
+3. **Corte visual 7,5 e teto de 2 rodadas** mantidos como [hipótese], calibrados no dogfood (E39).
+4. **Worker morre com o engine** (fechar o terminal ou Ctrl-C para o trabalho; nada roda escondido em segundo plano). Confirmado.
+5. **Pacote único** desde o slice 1 (E29). Confirmado.
+6. **Defaults numéricos** (lease, pack, orçamentos E4/E65, `max_parked_units`) ficam como [hipótese]: o engine mede nas primeiras semanas e ajusta sem consulta; toda mudança vira ADR curto ou nota no roadmap, e Erick é avisado só quando o custo subir.
 
 ## 10. Adendos incorporados após o painel
 

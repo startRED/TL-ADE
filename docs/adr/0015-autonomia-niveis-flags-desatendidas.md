@@ -99,3 +99,25 @@ operador; não é reversão, é decisão nova.
 (deny-list no `env` filtrado, no canário e no doctor),
 `docs/specs/` (`contain` com `maxBuffer` explícito em todo `execFile`), ADR 0006 (Checker que não
 escreve torna I28 impossível), ADR 0012, ADR 0013, ADR 0022.
+
+## Emendas (2026-09-17)
+
+Fonte: `architecture.md` §12 (revisão adversarial). Prevalecem sobre o texto acima onde houver conflito.
+
+- **E44** `deploy` e `dependency_install` são valores exclusivos do enum de `ask_operator` (E5); não
+  entram em `effect_class`. A menção em operations §1 é vocabulário de aprovação, não de
+  `permitted_effects`.
+- **E46** O literal canônico de `--disallowedTools` (E24) passa a
+  `"Bash(git push *),Bash(gh pr *),Bash(gh release *)"`. `WebFetch` fica fora (leitura sem efeito
+  externo; a pesquisa depende dela). Sede normativa: adapters §2.
+- **E47** Tabela única de exit codes (master-spec §4, herdada do runtime): 0 ok/idle; 2 recusa ou parada
+  final (inclui `stale_workflow_version` e trabalho vermelho final); 3 concluído com paradas
+  (`awaiting_operator`, orçamento esgotado, `parked`); 4 entrada inválida; 5 lease. Não existem 1 nem 6.
+- **E43/E68** Reafirmam E7: só `core_version` bloqueia despacho e `--unattended`. `config_digest`
+  divergente não ganha `--accept-config-change` (mitigação: argv congelado no `batch_open` e hash de
+  `.ade/**` verificado pelo doctor); `capabilities_digest` divergente não bloqueia `--unattended` — vai
+  ao relatório e ao `mission_summary`.
+- **E56** Confiança em repositório: a v1 assume repositórios do próprio operador. `catalog.sources`
+  permanece em `.ade/config.json` do repositório (sem `~/.ade/config.json`, que não existe no layout).
+  "Modo repositório de terceiros" (allowlist de remotos; `.ade/config.json` não confiado) é backlog da
+  v0.5 com ADR próprio quando chegar.

@@ -1,7 +1,7 @@
 # ADR 0012 — O engine é dono do worktree e do processo
 
-**Status:** aceito 2026-09-17, pendente de confirmação do Erick quanto ao worker não-detached (item 5 de
-`architecture.md` §9: uma chamada paga perdida por crash do engine em troca de contenção de graça).
+**Status:** Aceito (confirmado por Erick em 2026-09-17) — worker não-detached: uma chamada paga perdida
+por crash do engine em troca de contenção de graça (`architecture.md` §9.4).
 
 ## Contexto
 
@@ -77,3 +77,21 @@ nesta máquina) e CI multiplataforma para prebuilds. `receipt_path`, `fingerprin
 `schemas/capability-set.schema.json` (`probe_ok` do canário de contenção), `docs/specs/` (Runner,
 BinaryResolver, GitPort, `ade doctor`), `docs/roadmap.md` (matriz de crash como aceite do slice 1),
 ADR 0013 (takeover é transferência de posse do worktree), ADR 0014, ADR 0015, ADR 0022.
+
+## Emendas (2026-09-17)
+
+Fonte: `architecture.md` §12 (revisão adversarial) e §9 (decisões de Erick). Prevalecem sobre o texto
+acima onde houver conflito.
+
+- **§9.4** Confirmado por Erick: o worker morre com o engine (fechar o terminal ou Ctrl-C encerra o
+  trabalho; nada roda escondido em segundo plano). O status deste ADR deixa de estar pendente.
+- **E42** `prepare` recusa despacho em worktree com `takeover.json` presente: a story para em
+  `awaiting_operator{reason:'takeover_open'}`; `ade decide --option retry` sobre essa story devolve a
+  mesma parada; sem exit code novo (exit 3).
+- **E49** `node_modules` por worktree: o `prepare` cria junction (Windows) ou symlink apontando para o
+  checkout base quando o hash do lockfile do worktree é igual ao do base; se diverge, classe ≥ `bounded`
+  roda o instalador do discovery como step `prepare`; `trivial` com lockfile divergente para em
+  `awaiting_operator{reason:'environment'}`.
+- **E64** `local_merge` fast-forward da branch da story para a base entra em `safe` quando a base não
+  mudou desde o `prepare` (ff-only, ref de origem preservada em `refs/ade/`); se a base mudou, o commit
+  fica na branch da story e o `report.md` imprime o comando de merge.

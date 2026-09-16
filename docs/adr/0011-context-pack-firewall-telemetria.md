@@ -99,3 +99,11 @@ próprio. Exportar OTel depois é aditivo sobre o mesmo evento de telemetria.
 `schemas/review-result.schema.json` (`sources[]`), `docs/specs/` (Pack compiler, Firewall, `ade show`),
 `~/.ade/prices.json`, ADR 0006 (`review.max_diff_bytes` do Checker), ADR 0009 (`cited` e o teto de
 skills), ADR 0017, ADR 0019, ADR 0022.
+
+## Emendas (2026-09-17)
+
+- E50: teto da seção `contract` do pack fixado em 32 000 bytes (≈8k tokens) [hipótese], dentro de `max_pack_bytes`; estouro é `story_pack_overflow` e reabre a divisão da story. Substitui os valores divergentes citados alhures (2 000 tok em context §1.1; 18 000 tok em intent-compiler §9).
+- E53: `ade steer` ganha consumidor — a seção `task` do pack recebe `operator_notes` (≤600 bytes, mais recente primeiro), fila drenada no `prepare` da story seguinte; a nota é contexto, não requisito, e o contrato continua imutável.
+- E59: `skills_injected[]` ganha `sha256` (do conteúdo injetado) e `source` (`catalog@<commit>` ou `local`).
+- E66: o campo `model` da telemetria de `model_call` vira `models: { role: 'executor' | 'advisor'; model_id }[]`.
+- E67: `compaction_events` sai da telemetria (sessão nova por chamada, turno único, pack com teto: nunca há compactação); `capabilities_digest` passa a ter dois leitores nomeados — relatório do doctor e `mission_summary`.
