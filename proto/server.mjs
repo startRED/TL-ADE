@@ -56,6 +56,7 @@ const DEFAULT_SETTINGS = {
   allow_commands: true,
   research_enabled: true,
   visual_gate: true,
+  fast_lane: true, // faixa rápida (ADR 0008 / E18): pedido curto de correção num projeto existente pula entrevista e plano no Opus
   max_usd_per_story: 4, // orçamento por parte (spec E4): estourou com provas verdes → aceita; sem provas verdes → para
   autonomy: 'auto', // auto: após 4 rodadas com provas verdes e sem achado grave do revisor, aceita e segue; ask: para e pergunta
   interview: 'auto', // auto | always | never — entrevista de múltipla escolha antes do plano (spec: ≤5 perguntas, recomendação primeiro)
@@ -239,6 +240,8 @@ function selectSkills(intent) {
     if (s.auto) {
       for (const p of (intent.skills?.[role] || [])) add(p.id, p.reason ? `IA: ${p.reason}` : 'escolha da IA')
       if (role === 'maker' && (domains.has('frontend') || domains.has('design') || intent.needs_ui)) { add('design-taste-frontend', 'regra: interface ou design'); add('impeccable', 'regra: interface ou design') }
+      if (role === 'maker' && (domains.has('backend') || domains.has('api') || intent.needs_backend)) { add('backend-patterns', 'regra: backend'); add('api-design', 'regra: API') }
+      if (role === 'maker' && domains.has('python')) add('python-patterns', 'regra: Python')
       if (role === 'checker' && (domains.has('frontend') || intent.needs_ui)) add('impeccable', 'regra: revisor de interface conhece o detector')
       if (role === 'checker') add('code-review-and-quality', 'regra: critérios de revisão')
     }
@@ -705,8 +708,31 @@ function fixPrompt(st, round, review, visual, pack) {
 }
 
 // ---------- pipeline ----------
+// Faixa rápida (spec ADR 0008, E18): classificador determinístico ANTES de qualquer modelo. Pedido curto, com verbo de correção,
+// em projeto que já tem arquivos → trivial: sem entrevista, sem plano no Opus, uma story direto para prova + correção. Revisor continua.
+const FIX_VERBS = /\b(corrija|conserte|arrume|ajuste|troque|mude|altere|renomeie|remova|tire|apague|aumente|diminua|esconda|mostre|inverta|centralize|alinhe|traduza|substitua)\b/i
+const BIG_WORDS = /\b(e tamb[ée]m|al[ée]m disso|tela nova|p[áa]gina nova|sistema|m[óo]dulo|refa[çc]a|reescreva|redesign|do zero|completo|inteir[oa])\b/i
+function fastLane(request) {
+  const p = state.project
+  if (state.settings.fast_lane === false || !p || p.files === 0) return null
+  if (request.length > 220 || /\n/.test(request) || !FIX_VERBS.test(request) || BIG_WORDS.test(request)) return null
+  const ui = /\b(bot[ãa]o|cor|cores|css|tela|p[áa]gina|layout|fonte|imagem|menu|link|t[íi]tulo|texto|estilo)\b/i.test(request) || (p.has_index && !/\b(api|rota|endpoint|servidor|banco)\b/i.test(request))
+  const be = /\b(api|rota|endpoint|banco|sql|servidor|valida[çc][ãa]o)\b/i.test(request)
+  const domains = new Set(['testing']); if (ui) { domains.add('frontend'); domains.add('design') } if (be) { domains.add('backend'); domains.add('api') } if (p.language === 'python') domains.add('python')
+  return { complexity: 'trivial', summary: request, domains: [...domains], keywords: [], needs_ui: ui, needs_backend: be, research_questions: [], questions: [], skills: { planner: [], maker: [], checker: [], research: [] } }
+}
 async function planMission() {
   const m = state.mission
+  const fl = fastLane(m.request)
+  if (fl) {
+    m.intent = fl; m.skills = selectSkills(fl); setStep('intent', 'done', { fast: true })
+    log('engine', `faixa rápida: pedido pequeno de correção; sem entrevista e sem plano no ${state.settings.roles.planner.model}; skills do maker: ${m.skills.maker.map((x) => x.id).join(', ') || 'nenhuma'}`)
+    m.plan = { title: m.request.slice(0, 60), summary: m.request, explanation: 'Pedido pequeno: a ADE vai direto para a prova e a correção, sem entrevista nem plano longo. O revisor confere no fim.', complexity: 'trivial', domains: fl.domains, keywords: [], needs_ui: fl.needs_ui, needs_backend: fl.needs_backend, research_questions: [], questions: [], assets_style: '', assets: [],
+      stories: [{ id: 's1', title: m.request.slice(0, 72), request: m.request, acceptance: ['O que o usuário pediu acontece de forma observável', 'Nada que funcionava antes quebrou (provas antigas continuam verdes)'], test_hint: 'uma prova que falha hoje e passa quando o pedido estiver atendido' }] }
+    m.stories = m.plan.stories.map((st) => ({ ...st, state: 'queued', steps: [], round: 0, red_tests: [], tests_after: null, diff: '', review: null, visual: null }))
+    setStep('plan', 'done', { fast: true }); broadcast()
+    return runStories()
+  }
   setStep('intent', 'running')
   const ri = await claudeCall({ role: 'entender', prompt: intentPrompt(), model: state.settings.roles.intent.model, tools: ['Read', 'Glob'], schema: INTENT_JSON_SCHEMA, maxTurns: 4 })
   const intent = ri?.structured_output
