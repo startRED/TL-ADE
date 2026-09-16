@@ -886,7 +886,10 @@ async function runStories() {
           st.auto_accepted = true; ok = true; log('engine', `modo noturno: ${m.reason} com provas verdes e nada grave; parte aceita`, 'warn')
         } else {
           log('engine', `modo noturno: parada "${m.reason}" sem saída; parte pulada e arquivos dela desfeitos; segue para a próxima`, 'warn')
-          st.state = 'skipped'; st.skipped_reason = m.reason; await gitDiscard(state.project.dir); await refreshProject(); m.state = 'running'; m.reason = null; broadcast(); continue
+          st.state = 'skipped'; st.skipped_reason = m.reason; await gitDiscard(state.project.dir); await refreshProject(); m.state = 'running'; m.reason = null; broadcast()
+          // duas partes puladas em sequência = base que as próximas precisam não existe; continuar só queima dinheiro. Pausa e espera você (ADR 0015).
+          if (m.stories[i - 1]?.state === 'skipped') { m.state = 'paused'; m.reason = 'skips'; log('engine', 'modo noturno: duas partes seguidas puladas; as próximas dependem delas. Missão pausada para você replanejar.', 'error'); await persistMission().catch(() => {}); return finish() }
+          continue
         }
         m.state = 'running'; m.reason = null; st.state = 'running'
       }

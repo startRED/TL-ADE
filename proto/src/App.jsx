@@ -47,6 +47,7 @@ const REASON = {
   review_changes: 'A segunda IA pediu mudanças e quem escreve não conseguiu fechar em 4 rodadas.',
   review_failed: 'O revisor não respondeu. Veja o erro na atividade completa; "Mais uma rodada" tenta de novo.',
   budget: 'A missão passou do teto de gasto definido em Opções. Continue se quiser gastar mais, ou descarte.',
+  skips: 'Duas partes seguidas foram puladas; as próximas dependem delas. Peça mudanças no plano ou mande um pedido menor.',
   no_changes: 'A IA não alterou nenhum arquivo.',
   engine_error: 'O motor falhou. Veja a atividade completa.',
   plan_failed: 'Não deu para transformar o pedido em plano. Reescreva o pedido com mais contexto.',
