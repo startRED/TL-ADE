@@ -186,7 +186,7 @@ Contract, caminhos de `scope_paths`, família do Maker.
 (1) BM25 local           top-8, ~80 linhas TS, sem rede, sem modelo   ~5 ms, $0
 (2) seletor barato       spec + 8 descrições → --json-schema, ≤3      ~1,5–2k in / ~200 out
 (3) fecho                precedência §6, dedup, teto 3, poda gulosa
-                         por score até a soma caber em 25k (E70), journal
+                         por score até a soma caber em 15k (E70), journal
 ```
 
 **Campos e pesos do BM25** (k1 = 1,2; b = 0,75; tokenização por `\W+` com case-folding, sem stemming —
@@ -211,7 +211,7 @@ escolhendo sobe de 87,1 % para 93,1 % (arXiv 2605.24660), que é a etapa (2). Up
 quando o catálogo passar de ~500 skills ou `precision@3` cair abaixo de 0,70
 (`landscape-routing-skills-terminal.md` §2.3).
 
-**Tetos** (`architecture.md` §11 E14): ≤3 skills por story; **≤10k tokens por skill**; **≤25k somados** (E70)
+**Tetos** (`architecture.md` §11 E14): ≤3 skills por story; **≤7,5k tokens por skill**; **≤15k somados** (E70)
 na seção do pack, resolvidos por **poda gulosa pelo score do BM25** no fecho (3) — 1 de 5k + 1 de 2,5k é
 legal, 3 de 3,5k não. O filtro duro (0) **não** elimina por tamanho antes do BM25; skill acima de 5k fica
 `oversized` no índice, sai do conjunto de candidatas e aparece em `ade doctor` (`claude-api`, 21,7k tok,
@@ -306,7 +306,7 @@ indexada é motivo de `awaiting_operator` no lote desatendido.
 toda mudança de política **rejeitada por evidência de eval** vira uma linha com data, proposta, métrica
 que caiu e commit do run. Custo: uma linha. Retorno: ninguém re-propõe a mesma ideia a cada dogfood.
 Entradas de abertura: "ingerir `hooks/` de `addyosmani`" (rejeitado por execução automática), "subir o
-teto por skill para 5k" (**aceito**, `architecture.md` §11 E14, elevado por §12 E70 a ≤10k por skill com soma ≤25k), "usar
+teto por skill para 5k" (**aceito**, `architecture.md` §11 E14, elevado por §12 E70 a ≤7,5k por skill com soma ≤15k), "usar
 `npx skills add`" (rejeitado pelo controle 1).
 
 **Telemetria.** Cada `model_call` — inclusive a chamada do seletor barato (§7, etapa 2) — grava
@@ -354,7 +354,7 @@ decisão humana na v1.
 
 ## 13. Divergências resolvidas
 
-**D1 → aceita** (`architecture.md` §11 E14). O teto vira **≤10k tokens por skill com soma ≤25k** (E70),
+**D1 → aceita** (`architecture.md` §11 E14). O teto vira **≤7,5k tokens por skill com soma ≤15k** (E70),
 resolvido por poda gulosa pelo score do BM25 no fecho (3), e o filtro duro (0) deixa de eliminar por
 tamanho antes do BM25. Base medida que sustentou a objeção: mediana do ECC 1.890 tok (p90 4.461),
 mediana da Anthropic 2.136 (p90 8.247), média de `addyosmani` 3.535 (`ref-skill-sources.md` §5;

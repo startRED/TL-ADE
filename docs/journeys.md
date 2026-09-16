@@ -18,7 +18,7 @@ Aritmética sobre os únicos pisos medidos. Tudo derivado é **[hipótese]** at�
 | Teto da seção de rodada no pack | 24 000 bytes | architecture.md §11 E13 |
 | Teto da seção `contract` no pack | 32 000 bytes | architecture.md §12 E50 ([hipótese]; estouro é `story_pack_overflow` e reabre a divisão da story) |
 | Diff entregue ao Checker | 60 000 chars | architecture.md §11 E13 (`review.max_diff_bytes`) |
-| Teto do bloco de skills no pack | ≤10k tok por skill, soma ≤25k | architecture.md §11 E14 |
+| Teto do bloco de skills no pack | ≤7,5k tok por skill, soma ≤15k | architecture.md §11 E14 |
 | Teto de invariantes do repo no pack | 1,5k tok | architecture.md §7, §10 A11 |
 | Julgamento visual (screenshot + rubrica) | ~US$ 0,04 | `landscape-evals-visual.md` §anti-padrões |
 
@@ -110,7 +110,7 @@ fica medida por `eval_authored_by: 'maker'`.
 | **Interpretação** | `bounded`. Escopo espacial fechado (uma rota), sem novo comportamento, mas com julgamento estético → 1–3 stories. |
 | **Context discovery** | Rota e componentes da página; `DESIGN.md`/`PRODUCT.md` (presente ou ausente decide a pergunta 2); framework de estilo; script de build e de dev server; `impeccable` instalado; Playwright presente. |
 | **Pesquisa** | Não: nenhuma incógnita `external_fact` declarada (o gatilho é a incógnita, não a classe — §11 E19; em `bounded` o teto seria ≤1 consulta sem time). |
-| **Skills** | ≤3, após filtro duro (domínio `frontend`, linguagem `ts`) → BM25 top-8 → seletor barato: `frontend-design` (local, vence por nome), `improve-ui` (`ibelick/ui-skills`), `accessibility`. Soma ≤25k tokens, cada skill ≤10k (§11 E14, §12 E70); o filtro duro não elimina por tamanho antes do BM25. |
+| **Skills** | ≤3, após filtro duro (domínio `frontend`, linguagem `ts`) → BM25 top-8 → seletor barato: `frontend-design` (local, vence por nome), `improve-ui` (`ibelick/ui-skills`), `accessibility`. Soma ≤15k tokens, cada skill ≤7,5k (§11 E14, §12 E70); o filtro duro não elimina por tamanho antes do BM25. |
 | **Papéis** | Intent Compiler: `claude` forte. Maker: `claude` Sonnet 5. Checker de rodada: `codex exec --json --output-schema review-result.schema.json --sandbox read-only --ignore-user-config --ignore-rules --ephemeral -c skills.max_context_tokens=0` (§11 E16), vendor diferente do Maker (§11 E10). Juiz visual: `codex` (multimodal por `-i, --image`, `capabilities-codex.md` §6) — família diferente do Maker, pinado por `model_id` no contrato (§11 E9). |
 
 **Perguntas (≤2, múltipla escolha, recomendação primeiro)**

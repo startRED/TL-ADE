@@ -11,7 +11,7 @@ saída de ferramenta vire instrução, e medir o que cada byte injetado produziu
 ## Decisão
 
 **Pack**: seções em ordem fixa por volatilidade (ferramentas → papel → invariantes do repo ≤1,5k, em
-forma canônica "Must Always / Must Never", imperativo curto (A11) → skills por id, ≤10k por skill e soma
+forma canônica "Must Always / Must Never", imperativo curto (A11) → skills por id, ≤7,5k por skill e soma
 ≤15k (E14) → contexto recuperado ≤6k → contrato → rodada → tarefa). O **corte é em bytes**:
 `limits.max_pack_bytes`, default **120 000** **[hipótese]**, calibrado por p90; "40k tokens" continua
 como alvo de projeto por estimativa, não como portão. A seção de rodada (achados, falhas de gate,
@@ -61,7 +61,7 @@ doctor (E17). Doctor v1 apenas coleta e relata.
 - `ref-affaan-mustafa-ecc.md` (A1, A2): extrato de ferramenta com forma fixa e telemetria com
   `approval_decisions` / `network_attempts` / `files_touched` vêm dos guias do ECC, lidos como
   referência pinada por commit, nunca como dependência de runtime.
-- Digest #13: corpo de 3 skills ≈6–7k tokens — origem do teto original de 7,5k da seção de skills (elevado a 25k por E70).
+- Digest #13: corpo de 3 skills ≈6–7k tokens — origem do teto original de 7,5k da seção de skills (elevado a 15k por E70).
 
 ## Trade-offs
 
