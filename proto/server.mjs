@@ -56,6 +56,7 @@ const DEFAULT_SETTINGS = {
   allow_commands: true,
   research_enabled: true,
   visual_gate: true,
+  max_usd_per_story: 4, // orçamento por parte (spec E4): estourou com provas verdes → aceita; sem provas verdes → para
   autonomy: 'auto', // auto: após 4 rodadas com provas verdes e sem achado grave do revisor, aceita e segue; ask: para e pergunta
   interview: 'auto', // auto | always | never — entrevista de múltipla escolha antes do plano (spec: ≤5 perguntas, recomendação primeiro)
   assets_enabled: true, // imagens geradas pelo Codex ($imagegen) quando o plano pede
@@ -592,7 +593,7 @@ function fixPrompt(st, round, review, visual) {
   const red = st.red_tests.map((t) => `- ${t.name}: ${t.message}`).join('\n')
   const base = [`Pedido original do usuário: ${state.mission.request}`, ...common(st),
     `FASE 2 de 2: a prova nova está vermelha, como esperado:\n${red}`,
-    'Agora implemente o necessário para a prova passar e os critérios de aceite valerem. Não modifique a prova. Não toque em nada fora do escopo da story.',
+    'Agora implemente o necessário para a prova passar e os critérios de aceite valerem. Não modifique a prova. Não toque em nada fora do escopo da story. Seja direto: você tem no máximo 30 ações; não investigue ferramentas do harness, não reescreva provas antigas, não amplie o escopo.',
     'Ao terminar, escreva uma frase dizendo o que mudou.']
   if (round > 1 && review) { base.push(`Rodada ${round}. O revisor (outra IA) pediu mudanças: ${review.summary}`); for (const f of review.findings) base.push(`- [${f.severity}] ${f.file}: ${f.problem} Correção sugerida: ${f.fix}`) }
   if (visual?.length) { base.push('O portão visual (Impeccable detect) apontou; corrija. Se um achado conflita com um detalhe decorativo de um critério de aceite (borda lateral, gradiente, cor), o portão vence: satisfaça a intenção do critério de outro jeito, sem investigar o detector, e diga isso na frase final.'); for (const f of visual) base.push(`- ${f.file}${f.line ? ':' + f.line : ''} [${f.rule}] ${f.message}`) }
@@ -670,7 +671,8 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   st.round = round
   if (round === 1) {
     if (m.plan.needs_ui && state.settings.visual_gate) st.visual_before = await visualGate()
-    setStep('test', 'running'); await claudeCall({ role: 'prova', prompt: testPrompt(st), model: state.settings.roles.maker.model, tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands }); await refreshProject(); setStep('test', 'done')
+    st.usd_start = m.cost.usd
+    setStep('test', 'running'); await claudeCall({ role: 'prova', prompt: testPrompt(st), model: state.settings.roles.maker.model, tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: 20 }); await refreshProject(); setStep('test', 'done')
     setStep('red', 'running')
     const after = await runTests(state.project)
     const before = new Set(m.tests_before.tests.map((t) => t.name))
@@ -684,7 +686,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   // Autonomia: a partir da 3ª rodada o maker sobe para o modelo do planejador (mais forte) antes de parar.
   const makerModel = round >= 3 && state.settings.roles.planner.model !== state.settings.roles.maker.model ? state.settings.roles.planner.model : state.settings.roles.maker.model
   if (round >= 3) log('engine', `rodada ${round}: escalando o maker para ${makerModel}`)
-  setStep('fix', 'running', { round }); await claudeCall({ role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual), model: makerModel, tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands }); await refreshProject(); setStep('fix', 'done', { round })
+  setStep('fix', 'running', { round }); await claudeCall({ role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual), model: makerModel, tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: 30 }); await refreshProject(); setStep('fix', 'done', { round })
   setStep('tests', 'running'); st.tests_after = await runTests(state.project); st.diff = await gitDiff(state.project.dir)
   log('engine', `provas depois: ${st.tests_after.total} no total, ${st.tests_after.failed} vermelha(s)`); setStep('tests', st.tests_after.ok ? 'done' : 'failed')
   if (!st.diff.trim()) { setStep('checker', 'skipped'); return stop('no_changes') }
@@ -695,13 +697,15 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     else {
       log('engine', `portão visual: ${st.visual.findings.length} achado(s) novo(s)${st.visual.pre_existing ? ` (${st.visual.pre_existing} já existiam antes desta parte)` : ''}`)
       for (const f of st.visual.findings.slice(0, 12)) log('impeccable', `${f.file}${f.line ? ':' + f.line : ''} [${f.rule}] ${f.message}`, 'text')
-      if (st.visual.findings.length && !previousVisual) { setStep('visual', 'failed'); log('engine', 'rodada de retoque visual'); return runStory(st, round + 1, null, st.visual.findings) }
+      if (st.visual.findings.length && !previousVisual && (m.cost.usd - (st.usd_start || 0)) <= (state.settings.max_usd_per_story || 4)) { setStep('visual', 'failed'); log('engine', 'rodada de retoque visual'); return runStory(st, round + 1, null, st.visual.findings) }
       setStep('visual', st.visual.findings.length ? 'warn' : 'done')
     }
   }
   setStep('checker', 'running'); st.review = await checker(st.diff, st.tests_after, st); setStep('checker', st.review ? (st.review.verdict === 'approve' ? 'done' : 'failed') : 'failed')
   if (st.review?.verdict === 'approve') return true
-  if (st.review && round < 4) { log('engine', `revisor pediu mudanças; rodada ${round + 1} automática`); return runStory(st, round + 1, st.review, null) }
+  const spent = m.cost.usd - (st.usd_start || 0), budget = state.settings.max_usd_per_story || 4
+  if (st.review && round < 4 && spent > budget) log('engine', `orçamento da parte estourado (US$ ${spent.toFixed(2)} > ${budget}); sem novas rodadas`, 'warn')
+  if (st.review && round < 4 && spent <= budget) { log('engine', `revisor pediu mudanças; rodada ${round + 1} automática`); return runStory(st, round + 1, st.review, null) }
   if (st.review && state.settings.autonomy !== 'ask' && st.tests_after.ok && !(st.review.findings || []).some((f) => f.severity === 'high')) {
     st.auto_accepted = true; log('engine', 'autonomia: 4 rodadas, provas verdes e nenhum achado grave; aceita e segue (o pedido do revisor fica registrado na aba Revisão)', 'warn'); return true
   }
