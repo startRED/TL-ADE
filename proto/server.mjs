@@ -5,7 +5,7 @@
 
 import http from 'node:http'
 import { spawn } from 'node:child_process'
-import { readFile, writeFile, mkdir, appendFile, rm, stat, access, readdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, appendFile, rm, stat, access, readdir, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -237,7 +237,9 @@ async function discover(dir) {
     info.branch = (await run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir })).out.trim() || null
     const root = (await run('git', ['rev-parse', '--show-toplevel'], { cwd: dir })).out.trim()
     info.root = root ? path.resolve(root) : null
-    info.nested = !!info.root && path.resolve(dir) !== info.root
+    // realpath: pasta que é junction/symlink (ex.: Skin-Sniper → "Skin Sniper/original") não é subpasta de outro repo
+    const real = await realpath(dir).catch(() => path.resolve(dir))
+    info.nested = !!info.root && real.toLowerCase() !== info.root.toLowerCase()
   }
   info.has_index = await exists(path.join(dir, 'index.html'))
   try { info.files = (await readdir(dir)).filter((f) => f !== 'node_modules' && f !== '.git').length } catch {}
