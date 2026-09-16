@@ -362,7 +362,7 @@ pertencentes à story consomem um piso previsível; o que sobra é o orçamento 
 | :--- | :--- | :--- |
 | ferramentas + papel | ~1,0k | engine |
 | invariantes do repo | 1,5k ("Must Always / Must Never") | repo |
-| skills (≤3) | ≤10k por skill, soma ≤15k (E14, E70) | Skill Fabric |
+| skills (≤3) | ≤10k por skill, soma ≤25k (E14, E70) | Skill Fabric |
 | contexto recuperado | 6,0k | prepare |
 | rodada (achados, falhas, checkpoint) | teto próprio de 24 000 bytes com ponteiro (E13) | ciclo |
 | **contrato + tarefa** | **32 000 bytes** (≈8k tokens) [hipótese] — `limits.max_contract_bytes` (E50) | **story** |

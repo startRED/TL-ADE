@@ -28,13 +28,13 @@ messages`) e mudança num nível invalida os seguintes — `landscape-context-ob
 | 1 | `tools` | família (nunca por story) | — | montado pela CLI, fora do controle da ADE |
 | 2 | `role` | papel | 1.000 tok | não trunca: papel acima do teto é defeito de prompt |
 | 3 | `repo_invariants` | repositório | 1.500 tok | `ade show repo:invariants` |
-| 4 | `skills` | story (≤3 ids) | 10.000/skill, 15.000 total | `ade show skill:<id>` |
+| 4 | `skills` | story (≤3 ids) | 10.000/skill, 25.000 total | `ade show skill:<id>` |
 | 5 | `retrieved_context` | story | 6.000 tok | `ade show art:<ref>` |
 | 6 | `contract` | story | 18.000 tok (contrato + tarefa, `intent-compiler.md §9`) | não trunca: estouro reabre a divisão da story (`§11 E20`) |
 | 7 | `round` | rodada | 24.000 bytes (achados / falhas de gate / checkpoint) | `ade show art:<ref>` |
 | 8 | `task` | papel | 300 tok | não trunca |
 
-O teto por skill é 10.000 tokens e a soma do bloco é 15.000 (`architecture.md §11 E14`); o filtro duro
+O teto por skill é 10.000 tokens e a soma do bloco é 25.000 (`architecture.md §11 E14`); o filtro duro
 não elimina candidata por tamanho antes do BM25. A seção 7 tem teto próprio em bytes (24.000, com
 ponteiro) porque é a seção que mais cresce por rodada (`§11 E13`).
 
