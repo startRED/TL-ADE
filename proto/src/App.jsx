@@ -178,12 +178,17 @@ export default function App() {
     })))
     await attachFiles({ files: encoded })
   }
-  async function run(text) {
+  const [dirtyReq, setDirtyReq] = useState(null) // pedido que esbarrou em alterações pendentes; "Commitar e continuar" reenvia com commit_first
+  async function run(text, opts = {}) {
     const req = (text ?? request).trim()
     if (!req || busy) return
-    setPage(null); setError(null); setCleared(null); setRequest('')
-    const r = await post('/api/run', { request: req, dir: state.dir })
-    if (!r.ok) { const j = await r.json().catch(() => ({})); setRequest(req); setError(j.error || 'Não deu para começar.'); if (/git|pasta/i.test(j.error || '')) setPage('projects'); if (/Modelos/.test(j.error || '')) setPage('models') }
+    setPage(null); setError(null); setCleared(null); setRequest(''); setDirtyReq(null)
+    const r = await post('/api/run', { request: req, dir: state.dir, ...(opts.commitFirst ? { commit_first: true } : {}) })
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({})); setRequest(req)
+      if (j.code === 'dirty') { setDirtyReq(req); setError(j.error); return }
+      setError(j.error || 'Não deu para começar.'); if (/git|pasta/i.test(j.error || '')) setPage('projects'); if (/Modelos/.test(j.error || '')) setPage('models')
+    }
   }
   const decide = (option, extra) => post('/api/decide', typeof extra === 'object' ? { option, ...extra, dir: state.dir } : { option, text: extra, dir: state.dir })
   async function pause() {
@@ -293,7 +298,9 @@ export default function App() {
           {!page && <button className={`ghost-btn${drawer ? ' on' : ''}`} onClick={() => setDrawer((v) => !v)}><Terminal /> Atividade completa</button>}
         </header>
 
-        {error && <div className="errbar"><Warning weight="fill" /><span>{error}</span><button onClick={() => setError(null)} aria-label="Fechar"><X /></button></div>}
+        {error && <div className={'errbar' + (dirtyReq ? ' ask' : '')}><Warning weight="fill" /><span>{error}</span>
+          {dirtyReq && <button className="btn primary sm" onClick={() => run(dirtyReq, { commitFirst: true })}>Commitar e continuar</button>}
+          <button onClick={() => { setError(null); setDirtyReq(null) }} aria-label="Fechar"><X /></button></div>}
 
         {page ? (
           <div className="page">
@@ -985,6 +992,7 @@ function ProjectsPage({ p, recent, busy, onChanged }) {
           </div>
           {p.nested && <p className="dim small">Fica dentro de {p.root}; o histórico vai para lá, só com arquivos desta pasta.</p>}
           {!p.git && <button className="btn" disabled={busy} onClick={async () => { const r = await post('/api/project/git-init', {}); if (r.ok) setMsg('Histórico iniciado com um ponto de partida.') }}>Iniciar o histórico nesta pasta</button>}
+          {p.git && p.dirty && <button className="btn" disabled={busy} onClick={async () => { const r = await post('/api/project/commit', { dir: p.dir }); const j = await r.json().catch(() => ({})); setMsg(r.ok ? 'Alterações pendentes commitadas; a pasta está limpa.' : (j.error || 'Não deu para commitar.')) }}>Commitar as alterações pendentes</button>}
         </Card>
       )}
       <Card title="Abrir outra pasta">
