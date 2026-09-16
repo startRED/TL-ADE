@@ -249,14 +249,20 @@ async function runTests(project) {
   }
   return { ok: false, total: 0, failed: 0, tests: [], runner: 'none' }
 }
-const DIFF_EXCLUDES = [':!node_modules', ':!**/node_modules/**', ':!package-lock.json', ':!.ade-vitest.json', ':!dist', ':!build', ':!__pycache__', ':!.venv']
+// forma longa: ':!__pycache__' falha no git ("Unimplemented pathspec magic '_'")
+const DIFF_EXCLUDES = ['node_modules', '**/node_modules/**', 'package-lock.json', '.ade-vitest.json', 'dist', 'build', '__pycache__', '.venv'].map((x) => `:(exclude)${x}`)
 async function ensureIgnore(dir) {
   const f = path.join(dir, '.gitignore')
   if (await exists(f)) return
   await writeFile(f, ['node_modules/', '.ade-vitest.json', 'dist/', '__pycache__/', '.venv/', ''].join(String.fromCharCode(10)))
   await run('git', ['add', '.gitignore'], { cwd: dir }); await run('git', ['-c', 'user.name=TL-ADE', '-c', 'user.email=ade@local', 'commit', '-q', '-m', 'ade: .gitignore', '--', '.gitignore'], { cwd: dir })
 }
-async function gitDiff(dir) { await run('git', ['add', '-N', '--', '.', ...DIFF_EXCLUDES], { cwd: dir }); return (await run('git', ['diff', '--', '.', ...DIFF_EXCLUDES], { cwd: dir })).out }
+async function gitDiff(dir) {
+  const a = await run('git', ['add', '-N', '--', '.'], { cwd: dir }) // ignorados pelo .gitignore ficam fora sozinhos; pathspec de exclusão aqui faz o git reclamar
+  const d = await run('git', ['diff', '--', '.', ...DIFF_EXCLUDES], { cwd: dir })
+  if (a.code !== 0 || d.code !== 0) throw new Error(`git diff falhou: ${(a.err || d.err).trim().split('\n')[0]}`)
+  return d.out
+}
 async function gitDiscard(dir) { await run('git', ['reset', '-q', '--', '.'], { cwd: dir }); await run('git', ['checkout', '--', '.'], { cwd: dir }); await run('git', ['clean', '-fd', '.'], { cwd: dir }) }
 async function gitCommit(dir, msg) {
   await run('git', ['add', '-A', '--', '.'], { cwd: dir })
@@ -421,7 +427,7 @@ function intentPrompt() {
 
 // ---------- plano (Intent Compiler) ----------
 function planPrompt() {
-  const p = state.project
+  const p = state.project, m = state.mission
   return [
     'Você é o Intent Compiler da TL-ADE. Transforme o pedido do usuário em um plano executável por outra IA, em português, no formato JSON exigido.',
     `Pedido: ${state.mission.request}`,
@@ -429,6 +435,7 @@ function planPrompt() {
     `Projeto: ${p.name} em ${p.dir}; ${p.files} itens na raiz; linguagem detectada: ${p.language || 'nenhuma'}; runner de provas: ${p.runner === 'none' ? 'nenhum' : p.test_cmd}; index.html na raiz: ${p.has_index ? 'sim' : 'não'}.`,
     'Explore o projeto só o necessário (Glob/Read/Grep). Depois produza:',
     '- title (≤8 palavras), summary (2 frases, o que será entregue), complexity (trivial|bounded|feature|subsystem).',
+    '- explanation: 4 a 8 linhas curtas para um usuário leigo, sem termos técnicos (nada de JSON, vitest, ES modules, tokens): o que ele vai ter no fim, o que cada parte entrega em uma frase, e o que foi assumido por conta própria.',
     '- domains: subconjunto de [frontend, design, backend, api, database, testing, python, security, a11y, docs].',
     '- keywords: 5 a 12 palavras técnicas do pedido (em inglês e português) para escolher skills.',
     '- needs_ui, needs_backend: booleanos.',
@@ -438,18 +445,20 @@ function planPrompt() {
     p.runner === 'none' ? '- Não há runner de provas: a primeira story deve incluir criar o mínimo para rodar provas (JS: package.json + vitest; Python: pytest).' : '',
     '- Se o pedido é visual e não há index.html, uma story deve entregar index.html na raiz funcionando como arquivos estáticos (ES modules, sem build), para abrir no navegador.',
     'Pedidos simples viram 1 ou 2 stories. Não invente escopo além do pedido.',
+    m.plan_feedback?.length ? `PLANO ANTERIOR (para revisar, não para repetir):\n${JSON.stringify({ title: m.plan.title, summary: m.plan.summary, stories: m.stories.map((s) => ({ id: s.id, title: s.title, request: s.request })) })}` : '',
+    m.plan_feedback?.length ? `O usuário pediu estas mudanças no plano, em ordem: ${m.plan_feedback.map((f, i) => `(${i + 1}) ${f}`).join(' ')} Aplique-as e mantenha o resto.` : '',
   ].filter(Boolean).join('\n') + skillsBlock(state.mission.skills.planner || [])
 }
 const PLAN_JSON_SCHEMA = {
   type: 'object', additionalProperties: false,
   properties: {
-    title: { type: 'string' }, summary: { type: 'string' }, complexity: { type: 'string', enum: ['trivial', 'bounded', 'feature', 'subsystem'] },
+    title: { type: 'string' }, summary: { type: 'string' }, explanation: { type: 'string' }, complexity: { type: 'string', enum: ['trivial', 'bounded', 'feature', 'subsystem'] },
     domains: { type: 'array', items: { type: 'string' } }, keywords: { type: 'array', items: { type: 'string' } },
     needs_ui: { type: 'boolean' }, needs_backend: { type: 'boolean' },
     research_questions: { type: 'array', items: { type: 'string' } }, questions: { type: 'array', items: { type: 'string' } },
     stories: { type: 'array', minItems: 1, maxItems: 6, items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, title: { type: 'string' }, request: { type: 'string' }, acceptance: { type: 'array', items: { type: 'string' } }, test_hint: { type: 'string' } }, required: ['id', 'title', 'request', 'acceptance', 'test_hint'] } },
   },
-  required: ['title', 'summary', 'complexity', 'domains', 'keywords', 'needs_ui', 'needs_backend', 'research_questions', 'questions', 'stories'],
+  required: ['title', 'summary', 'explanation', 'complexity', 'domains', 'keywords', 'needs_ui', 'needs_backend', 'research_questions', 'questions', 'stories'],
 }
 
 // ---------- prompts do maker ----------
@@ -498,7 +507,11 @@ async function planMission() {
   if (intent.research_questions?.length && state.settings.research_enabled) {
     setStep('research', 'running'); m.research = await research(intent.research_questions.slice(0, 3)); setStep('research', m.research ? 'done' : 'failed')
   }
-  setStep('plan', 'running')
+  return makePlan()
+}
+async function makePlan() {
+  const m = state.mission, intent = m.intent
+  m.state = 'planning'; setStep('plan', 'running')
   const r = await claudeCall({ role: 'plano', prompt: planPrompt(), model: state.settings.roles.planner.model, tools: ['Read', 'Glob', 'Grep'], schema: PLAN_JSON_SCHEMA, maxTurns: 10 })
   const plan = r?.structured_output
   if (!plan?.stories?.length) { setStep('plan', 'failed'); m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'o plano não veio no formato esperado', 'error'); return finish() }
@@ -507,7 +520,8 @@ async function planMission() {
   setStep('plan', 'done')
   log('engine', `plano: ${plan.title} · ${m.plan.complexity} · ${m.stories.length} story(s)`)
   if (plan.questions?.length) { m.state = 'awaiting_plan'; m.reason = 'questions'; broadcast(); return }
-  if (m.stories.length > 2 || m.plan.complexity === 'subsystem') { m.state = 'awaiting_plan'; m.reason = 'approve_plan'; broadcast(); return }
+  // depois de um pedido de mudança o usuário sempre confere de novo
+  if (m.plan_feedback?.length || m.stories.length > 2 || m.plan.complexity === 'subsystem') { m.state = 'awaiting_plan'; m.reason = 'approve_plan'; broadcast(); return }
   return runStories()
 }
 
@@ -617,6 +631,7 @@ async function decide(option, payload = {}) {
   if (m.state === 'awaiting_plan') {
     if (option === 'start') { log('operador', 'aprovou o plano'); return runStories() }
     if (option === 'answer') { const req = `${m.request}\n\nRespostas do usuário: ${payload.text}`; log('operador', `respondeu: ${payload.text}`); return startMission(req) }
+    if (option === 'revise' && payload.text?.trim()) { m.plan_feedback = [...(m.plan_feedback || []), payload.text.trim()]; log('operador', `pediu mudanças no plano: ${payload.text.trim()}`); return makePlan() }
     if (option === 'discard') { m.state = 'discarded'; log('operador', 'descartou o plano'); return finish() }
     return
   }

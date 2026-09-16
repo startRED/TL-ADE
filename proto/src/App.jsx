@@ -375,6 +375,7 @@ function Plan({ m, catalog }) {
         {pl.needs_ui && <Badge variant="soft" color="teal">interface</Badge>}{pl.needs_backend && <Badge variant="soft" color="violet">backend</Badge>}
         {pl.domains.map((d) => <Badge key={d} variant="outline" color="gray">{d}</Badge>)}
       </div>
+      {pl.explanation && <div className="explain"><b>Em palavras simples</b><p style={{ whiteSpace: 'pre-line', margin: '6px 0 0' }}>{pl.explanation}</p></div>}
       <p className="plan-summary">{pl.summary}</p>
       {pl.questions?.length > 0 && <div className="explain bad"><b>A IA precisa saber:</b><ul>{pl.questions.map((q) => <li key={q}>{q}</li>)}</ul></div>}
       <span className="lbl">Partes do trabalho</span>
@@ -504,7 +505,12 @@ function Report({ m, decide }) {
               <div className="decide"><button className="act primary" disabled={!answer.trim()} onClick={() => decide('answer', answer)}><CheckCircle weight="fill" /><span><b>Responder e replanejar</b></span></button><button className="act" onClick={() => decide('start')}><Play weight="fill" /><span><b>Seguir sem responder</b><small>A IA usa a escolha que já registrou no plano.</small></span></button></div>
             </>
           ) : (
-            <div className="decide"><button className="act primary" onClick={() => decide('start')}><Play weight="fill" /><span><b>Começar</b><small>{m.stories.length} partes, uma de cada vez.</small></span></button><button className="act danger" onClick={() => decide('discard')}><Trash /><span><b>Descartar plano</b></span></button></div>
+            <>
+              {m.plan.explanation && <div className="explain"><b>Em palavras simples</b><p style={{ whiteSpace: 'pre-line', margin: '6px 0 0' }}>{m.plan.explanation}</p></div>}
+              <div className="decide"><button className="act primary" onClick={() => decide('start')}><Play weight="fill" /><span><b>Começar</b><small>{m.stories.length} parte(s), uma de cada vez.</small></span></button></div>
+              <textarea className="ta" rows={3} value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Quer mudar algo? Escreva do seu jeito: tirar uma parte, juntar, trocar cores, adicionar…" />
+              <div className="decide"><button className="act" disabled={!answer.trim()} onClick={() => { decide('revise', answer); setAnswer('') }}><ArrowCounterClockwise /><span><b>Pedir mudanças</b><small>O planejador refaz o plano com o seu pedido e você confere de novo.</small></span></button><button className="act danger" onClick={() => decide('discard')}><Trash /><span><b>Descartar plano</b></span></button></div>
+            </>
           )}
         </>
       )}

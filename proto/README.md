@@ -9,21 +9,21 @@ Duplo clique em `abrir.bat`. Na primeira vez instala as dependências (1 a 2 min
 1. Escolha a pasta do projeto (ícone de pasta). Qualquer pasta serve; se não existir, a ADE cria; se não for git, o botão "Iniciar git" resolve.
 2. Escreva o pedido em português, do seu jeito, e clique em Rodar.
 3. Acompanhe: plano, atividade ao vivo, alterações, provas, portão visual, revisão.
-4. Decida só quando a ADE pedir: aprovar um plano grande, responder uma dúvida, aceitar/repetir/pular/descartar uma parte.
+4. Decida só quando a ADE pedir: aprovar um plano grande (ou pedir mudanças nele, do seu jeito, e conferir de novo), responder uma dúvida, aceitar/repetir/pular/descartar uma parte. Todo plano vem com uma explicação em palavras simples.
 
 ## O que acontece por baixo
 
 | Passo | Quem | O que faz |
 | --- | --- | --- |
-| Entender o pedido | Claude Opus (planejador) | Lê o pedido e a pasta; devolve um plano com partes (stories), critérios de aceite e dica de prova, em JSON validado. |
-| Skills | motor | Escolhe até 4 skills do catálogo (as suas em `~/.claude/skills` + plugins instalados). Regras fixas: interface ou design ativam `impeccable` + `design-taste-frontend` + `frontend-design`; backend ativa `backend-patterns` + `api-design`; banco ativa `postgres-patterns`; mais afinidade por palavras do pedido. Cada skill cortada em 7,5k tokens; bloco de até 20k. |
+| Entender o pedido | Claude Opus (entendedor) | Lê o pedido e a pasta; classifica o pedido e escolhe, do catálogo (84 skills: as suas em `~/.claude/skills` + plugins), as skills de cada papel: planejador, maker, revisor, pesquisador. Regras fixas por cima: interface ou design ⇒ maker com `design-taste-frontend` + `impeccable`; revisor sempre com `code-review-and-quality`. Skills entram inteiras, sem corte. |
+| Montar o plano | Claude Opus (planejador) + suas skills | Devolve partes (stories), critérios de aceite, dica de prova e uma explicação leiga, em JSON validado. Plano com mais de 2 partes espera aprovação; "Pedir mudanças" replaneja com o seu texto. |
 | Pesquisa | Antigravity (Gemini) | Só quando o plano depende de um fato externo. Resposta com fontes, em JSON. |
 | Escrever a prova | Claude Sonnet (maker) | Escreve só o teste da parte, sem implementar. |
 | Prova falha antes | motor | Roda o runner (Vitest, `npm test` ou pytest). A prova nova tem de falhar. |
 | Implementar | Claude Sonnet + skills | Implementa até a prova passar e os critérios valerem. |
 | Prova passa depois | motor | Todas as provas verdes. |
 | Portão visual | Impeccable detect | Em pedidos com interface: varre o código atrás de cara de template; se achar, força uma rodada de retoque. |
-| Revisão | Codex GPT-5.6 Terra (revisor) | Lê o diff em modo somente leitura e aprova ou pede mudanças (até 3 rodadas automáticas). |
+| Revisão | Codex GPT-5.6 Terra (revisor) | Lê o diff (sem `node_modules`) em modo somente leitura, isolado da sua configuração pessoal, e recebe o resultado das provas já rodadas pelo motor (não roda nada). Aprova ou pede mudanças: até 4 rodadas automáticas; da 3ª em diante o maker sobe para o modelo do planejador. |
 | Entrega | motor | Cada parte aprovada vira um commit `ade: <parte>` na sua pasta. |
 
 Quem escreve e quem revisa têm de ser de empresas diferentes. Modelos por papel em "Modelos": Claude (Sonnet, Opus, Fable, Haiku), Codex (GPT-5.6 Terra/Sol/Luna, GPT-6 Astra, GPT-5.5), Antigravity (Gemini 3.1 Pro, 3.8 Flash, e Claude/GPT-OSS via Google).
