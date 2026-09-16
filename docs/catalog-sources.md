@@ -37,7 +37,7 @@ há o que sincronizar nem o que validar.
 | `ibelick/ui-skills` | MIT | `c5bcd86` | skill | **ADOPT** | 7 skills de design engineering; zero scripts no escopo de skill; `improve-ui` declara fronteira inviolável no corpo ("Never modify product source"), que casa com `contain` e com o FQE |
 | `ayghri/i-have-adhd` | MIT | `0a84de4` | skill | **ADOPT** | Disciplina de saída. Precedente de `metadata: {tags, category}` + `disable-model-invocation: true` — os campos que o `SkillIndexEntry` lê |
 | `UditAkhourii/adhd` | MIT | `16dc239` | skill | **ADOPT** (a skill) / **REFERENCE** (o runtime TS) | Descrição com **gate negativo explícito** ("Skip for syntax, lookups, bugs with known root cause"): o modelo de descrição acionável que o detector de colisão premia |
-| `img2threejs/img2threejs` | Apache-2.0 | `6e60b5e` | skill | **ADAPT**, dormente | Gate de qualidade objetivo antes de aceitar resultado é padrão reaproveitável. Corpo de 8,2k tokens estoura o teto por skill (≤5k, soma ≤7,5k, §11 E14): só entra se o domínio 3D aparecer e depois de progressive disclosure |
+| `img2threejs/img2threejs` | Apache-2.0 | `6e60b5e` | skill | **ADAPT**, dormente | Gate de qualidade objetivo antes de aceitar resultado é padrão reaproveitável. Corpo de 8,2k tokens estoura o teto por skill (≤10k, soma ≤15k, §11 E14): só entra se o domínio 3D aparecer e depois de progressive disclosure |
 | `FloWritesCode/fwc-swiftui-skills` | MIT | `c2454e6` | skill | **ADOPT**, dormente | Fonte mais limpa medida (**zero scripts**). Fora do índice até existir projeto Apple |
 | `superpowers` + skills locais de Erick (`impeccable`, `tl-impeccable-design`, `frontend-design`) | local | — | skill | **trust: local** | Lidas in-place em `~/.claude/skills/`; não sincronizam, não têm sha256 de pin (não há upstream a verificar), mas o evento de telemetria grava o `sha256` do corpo injetado e `source: 'local'` (E59). Skills de `<repo>/.claude/skills/` **não entram no pack** na v1 (só o catálogo curado) e não são carregadas pela CLI, porque a chamada despachada roda sob `--safe-mode`; em `codex`/`agy` a supressão equivalente é provada pela sonda (E56). Precedência **acima** do catálogo |
 | `openai/skills` | **ausente** | — | skill | **REFERENCE** — fora do catálogo até resolver | 39 skills em `.curated` + 5 em `.system`, já instaladas localmente em `~/.codex/skills/.system/`. Sem licença declarada = mesmo bloqueio legal do Composio. **Uso in-place da instalação oficial do fornecedor (`$imagegen`) é permitido — a denylist é sobre redistribuição, não sobre uso** |
@@ -48,7 +48,7 @@ há o que sincronizar nem o que validar.
 (TS/React/Node/design/agentic). ~75 % do volume bruto é ruído: espelho, template, cópia.
 
 **Custo.** Índice completo: ~59.800 tokens **por turno** (inviável). Núcleo curado (~87 skills): ~7.500
-tokens. Corpo injetado de ≤3 skills: ~6–7k tokens, dentro da soma ≤7,5k (§11 E14). O gargalo é o índice, nunca o corpo — é o que
+tokens. Corpo injetado de ≤3 skills: ~6–7k tokens, dentro da soma ≤15k (§11 E14, §12 E70). O gargalo é o índice, nunca o corpo — é o que
 justifica a seleção externa como requisito e não como otimização.
 
 ---
