@@ -47,7 +47,7 @@ const vendorOf = (family, model) => family === 'agy' && /^claude/.test(model) ? 
 
 const DEFAULT_SETTINGS = {
   roles: {
-    intent: { family: 'claude', model: 'opus' },
+    intent: { family: 'claude', model: 'sonnet' },
     planner: { family: 'claude', model: 'opus' },
     maker: { family: 'claude', model: 'sonnet' },
     checker: { family: 'codex', model: 'gpt-5.6-terra' },
@@ -64,7 +64,37 @@ const DEFAULT_SETTINGS = {
 }
 
 // ---------- estado ----------
-const state = { project: null, mission: null, log: [], history: [], live: null, recent: [], settings: DEFAULT_SETTINGS, catalog: [], registry: REGISTRY, quota: { claude: null, codex: null } }
+const state = { project: null, mission: null, log: [], history: [], live: null, recent: [], settings: DEFAULT_SETTINGS, catalog: [], registry: REGISTRY, quota: { claude: null, codex: null }, attachments: [] }
+
+// ---------- anexos e diálogos do Explorer ----------
+const ATTACH_DIR = '.ade-attachments'
+async function pickNative(kind) {
+  const script = kind === 'folder'
+    ? "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.Form -Property @{TopMost=$true; Width=0; Height=0; ShowInTaskbar=$false}; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Pasta do projeto (pode criar uma nova)'; $d.ShowNewFolderButton = $true; if ($d.ShowDialog($f) -eq 'OK') { [Console]::Out.Write($d.SelectedPath) }"
+    : "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.Form -Property @{TopMost=$true; Width=0; Height=0; ShowInTaskbar=$false}; $d = New-Object System.Windows.Forms.OpenFileDialog; $d.Title = 'Anexar arquivos ou fotos'; $d.Multiselect = $true; $d.Filter = 'Tudo (*.*)|*.*|Imagens|*.png;*.jpg;*.jpeg;*.webp;*.gif|Documentos|*.pdf;*.md;*.txt;*.docx;*.xlsx;*.csv;*.json'; if ($d.ShowDialog($f) -eq 'OK') { [Console]::Out.Write(($d.FileNames -join [char]10)) }"
+  const r = await run('powershell', ['-STA', '-NoProfile', '-NonInteractive', '-Command', script], { timeoutMs: 10 * 60 * 1000 })
+  return r.out.split('\n').map((x) => x.trim()).filter(Boolean)
+}
+function safeName(name) { return name.replace(/[^\w.\-() ]+/g, '_').slice(0, 120) || 'anexo' }
+async function addAttachments({ paths = [], files = [] }) {
+  if (!state.project) throw new Error('Escolha uma pasta primeiro.')
+  const dir = path.join(state.project.dir, ATTACH_DIR); await mkdir(dir, { recursive: true }); await ensureIgnore(state.project.dir)
+  const added = []
+  const put = async (name, data) => {
+    let target = safeName(name), i = 1
+    while (await exists(path.join(dir, target))) target = target.replace(/(\.[^.]*)?$/, (ext) => `-${i++}${ext}`)
+    await writeFile(path.join(dir, target), data)
+    const item = { name: target, path: `${ATTACH_DIR}/${target}`, bytes: data.length, image: /\.(png|jpe?g|webp|gif)$/i.test(target) }
+    state.attachments.push(item); added.push(item)
+  }
+  for (const f of files) { const data = Buffer.from(String(f.data || '').replace(/^data:[^,]*,/, ''), 'base64'); if (data.length > 25e6) throw new Error(`${f.name}: acima de 25 MB`); await put(f.name || 'colado.png', data) }
+  for (const src of paths) { const st = await stat(src).catch(() => null); if (!st?.isFile()) continue; if (st.size > 25e6) throw new Error(`${path.basename(src)}: acima de 25 MB`); await put(path.basename(src), await readFile(src)) }
+  broadcast(); return added
+}
+function attachBlock(list) {
+  if (!list?.length) return ''
+  return `ANEXOS DO USUÁRIO (abra com Read; imagens e PDF o Read mostra; trate como referência do que ele quer): ${list.map((a) => `${a.path} (${a.image ? 'imagem' : 'arquivo'}, ${Math.round(a.bytes / 1024)} KB)`).join('; ')}`
+}
 
 // ---------- cota do plano ----------
 // Claude: a linha de status do Claude Code recebe rate_limits em cada turno interativo e grava em ~/.claude/ade-usage.json (ver README).
@@ -278,12 +308,15 @@ async function runTests(project) {
   }
   if (project.runner === 'pytest') {
     const py = await ensurePython(dir)
-    const r = await run(py, ['-m', 'pytest', '-q', '-p', 'no:cacheprovider'], { cwd: dir, timeoutMs: 5 * 60 * 1000 })
+    const r = await run(py, ['-m', 'pytest', '-v', '-p', 'no:cacheprovider', '--no-header'], { cwd: dir, timeoutMs: 5 * 60 * 1000 })
     const out = (r.out + '\n' + r.err).trim()
     const tests = []
-    for (const line of out.split('\n')) { const m1 = /^(FAILED|ERROR) (\S+?)(?: - (.*))?$/.exec(line.trim()); if (m1) tests.push({ name: m1[2], status: 'failed', message: (m1[3] || '').slice(0, 300) }) }
-    const sum = /(\d+) passed/.exec(out), nfail = tests.length
-    const total = (sum ? Number(sum[1]) : 0) + nfail
+    for (const line of out.split('\n')) {
+      const v = /^(\S+::\S+) (PASSED|FAILED|ERROR)/.exec(line.trim()); if (v && v[2] === 'PASSED') tests.push({ name: v[1], status: 'passed', message: '' })
+      const m1 = /^(FAILED|ERROR) (\S+?)(?: - (.*))?$/.exec(line.trim()); if (m1) tests.push({ name: m1[2], status: 'failed', message: (m1[3] || '').slice(0, 300) })
+    }
+    const nfail = tests.filter((t) => t.status !== 'passed').length
+    const total = tests.length
     if (!tests.length && r.code !== 0) tests.push({ name: 'pytest', status: 'failed', message: out.split('\n').slice(-6).join(' ').slice(-300) })
     return { ok: r.code === 0 && total > 0, total: total || tests.length, failed: r.code === 0 ? 0 : Math.max(nfail, 1), tests, runner: 'pytest', output: out.split('\n').slice(-12).join('\n') }
   }
@@ -309,11 +342,15 @@ async function ensurePython(dir) {
   return py
 }
 // forma longa: ':!__pycache__' falha no git ("Unimplemented pathspec magic '_'")
-const DIFF_EXCLUDES = ['node_modules', '**/node_modules/**', 'package-lock.json', '.ade-vitest.json', 'dist', 'build', '__pycache__', '.venv'].map((x) => `:(exclude)${x}`)
+const DIFF_EXCLUDES = ['node_modules', '**/node_modules/**', 'package-lock.json', '.ade-vitest.json', 'dist', 'build', '__pycache__', '.venv', '.ade-attachments'].map((x) => `:(exclude)${x}`)
+const IGNORE_LINES = ['node_modules/', '.ade-vitest.json', 'dist/', '__pycache__/', '.venv/', '.ade-attachments/']
 async function ensureIgnore(dir) {
   const f = path.join(dir, '.gitignore')
-  if (await exists(f)) return
-  await writeFile(f, ['node_modules/', '.ade-vitest.json', 'dist/', '__pycache__/', '.venv/', ''].join(String.fromCharCode(10)))
+  let cur = ''; try { cur = await readFile(f, 'utf8') } catch {}
+  const have = new Set(cur.split(/\r?\n/).map((l) => l.trim()))
+  const missing = IGNORE_LINES.filter((l) => !have.has(l) && !have.has(l.replace(/\/$/, '')))
+  if (!missing.length) return
+  await writeFile(f, (cur.trimEnd() ? cur.trimEnd() + '\n' : '') + missing.join('\n') + '\n')
   await run('git', ['add', '.gitignore'], { cwd: dir }); await run('git', ['-c', 'user.name=TL-ADE', '-c', 'user.email=ade@local', 'commit', '-q', '-m', 'ade: .gitignore', '--', '.gitignore'], { cwd: dir })
 }
 async function gitDiff(dir) {
@@ -352,6 +389,7 @@ async function claudeCall({ role, prompt, model, tools, skipPermissions, schema,
   else { args.push('--permission-mode', 'acceptEdits'); if (tools) args.push('--tools', ...tools) }
   log('engine', `claude (${role}, ${model})${schema ? ' com saída estruturada' : ''}`)
   let result = null, liveBuf = null
+  const touched = new Set()
   const r = await run('claude', args, {
     cwd: dir, stdin: prompt,
     onLine: (line) => {
@@ -366,7 +404,7 @@ async function claudeCall({ role, prompt, model, tools, skipPermissions, schema,
       if (ev.type === 'assistant') for (const c of ev.message?.content || []) {
         if (c.type === 'thinking' && c.thinking?.trim()) log('claude', c.thinking.trim(), 'thinking')
         if (c.type === 'text' && c.text.trim()) log('claude', c.text.trim(), 'text')
-        if (c.type === 'tool_use') log('claude', describeTool(c, dir), 'tool')
+        if (c.type === 'tool_use') { log('claude', describeTool(c, dir), 'tool'); if (['Read', 'Edit', 'Write', 'MultiEdit'].includes(c.name) && c.input?.file_path) touched.add(path.relative(dir, c.input.file_path) || c.input.file_path) }
       }
       if (ev.type === 'user') for (const c of ev.message?.content || []) if (c.type === 'tool_result') {
         const body = typeof c.content === 'string' ? c.content : (c.content || []).map((x) => x.text || '').join('\n')
@@ -378,6 +416,7 @@ async function claudeCall({ role, prompt, model, tools, skipPermissions, schema,
   })
   setLive(null)
   if (result) {
+    result.touched = [...touched]
     const c = m.cost
     c.usd += result.total_cost_usd || 0; c.calls += 1; c.turns += result.num_turns || 0
     c.tokens_in += (result.usage?.input_tokens || 0) + (result.usage?.cache_creation_input_tokens || 0)
@@ -419,6 +458,7 @@ async function checker(diff, tests, st) {
     `Pedido do usuário: ${m.request}`, `Story em revisão: ${st.title}. Critérios de aceite: ${(st.acceptance || []).join('; ')}`,
     `Skills que o autor tinha de seguir: ${(m.skills.maker || []).map((s) => s.id).join(', ') || 'nenhuma'}.`,
     `O harness JÁ RODOU as provas fora da sandbox: ${tests.failed} falharam de ${tests.total} (runner: ${tests.runner}); a prova nova falhou antes da implementação e passou depois. Não tente rodar provas nem instalar nada (sua sandbox é somente leitura e isso vai falhar); avalie o código e o diff. Arquivos de lock (package-lock.json) e dependências não fazem parte do escopo revisado.`,
+    tests.tests?.length ? `Provas que rodaram e passaram (nomes): ${tests.tests.filter((t) => t.status === 'passed').map((t) => t.name).slice(0, 60).join(' | ')}. Um critério coberto por uma dessas provas está provado; não peça prova extra para ele.` : '',
     'Critérios de aceite sobre detalhe decorativo (borda lateral colorida, gradiente, cor exata) cedem ao portão visual (Impeccable): não peça mudanças para reintroduzir isso; avalie a intenção do critério.',
     'Severidade: high = comportamento errado, critério de aceite não atendido, segurança, acessibilidade quebrada, mudança fora do escopo. Cobertura de prova além do necessário, estilo de código, nomes e refatorações são low e NÃO impedem approve: registre como achado low e aprove.',
     'Responda em português no formato JSON exigido. verdict = "approve" só se não houver achado high.',
@@ -526,8 +566,10 @@ function intentPrompt() {
   return [
     'Você é a primeira IA da TL-ADE: entende o pedido do usuário e decide o que cada papel precisa. Responda em português no formato JSON exigido. Não explore o projeto além de 2 leituras; o planejador explora depois.',
     `Pedido: ${state.mission.request}`,
+    attachBlock(state.mission.attachments),
     `Projeto: ${p.name}; ${p.files} itens na raiz; linguagem: ${p.language || 'nenhuma'}; runner de provas: ${p.runner === 'none' ? 'nenhum' : p.test_cmd}; index.html: ${p.has_index ? 'sim' : 'não'}.`,
     `Papéis e modelos: planejador ${s.roles.planner.model} (monta stories); maker ${s.roles.maker.model} (escreve provas e código); revisor ${s.roles.checker.model} (Codex, lê o diff, não escreve); pesquisador ${s.roles.research.model} (Google, só fatos externos).`,
+    'Se há anexos, abra-os antes de decidir (uma imagem de referência muda domínios, skills e perguntas).',
     'Escolha, para cada papel, as skills do catálogo abaixo que elevam a qualidade daquele papel neste pedido (ids exatos; até 4 para o maker, até 3 para os outros; lista vazia é válida). Regras fixas: se há interface ou design, o maker recebe design-taste-frontend e impeccable (pode acrescentar frontend-design e accessibility); backend/API recebe backend-patterns e api-design; banco recebe postgres-patterns; o revisor recebe skills de revisão/segurança, não de estilo; o pesquisador raramente precisa de skill.',
     '- summary: 2 frases do que será entregue e das escolhas feitas por você quando o pedido é vago.',
     '- complexity, domains (subconjunto de frontend, design, backend, api, database, testing, python, security, a11y, docs, devops), keywords (5 a 12, pt e en), needs_ui, needs_backend.',
@@ -554,6 +596,7 @@ function planPrompt() {
   return [
     'Você é o Intent Compiler da TL-ADE. Transforme o pedido do usuário em um plano executável por outra IA, em português, no formato JSON exigido.',
     `Pedido: ${state.mission.request}`,
+    attachBlock(m.attachments),
     `Entendimento prévio (outra IA): ${state.mission.intent?.summary || ''} Domínios: ${(state.mission.intent?.domains || []).join(', ')}.`,
     m.answers?.length ? `ESCOLHAS DO USUÁRIO NA ENTREVISTA (obrigatórias): ${m.answers.map((a) => `${a.question} → ${a.answer}`).join(' | ')}` : '',
     `Projeto: ${p.name} em ${p.dir}; ${p.files} itens na raiz; linguagem detectada: ${p.language || 'nenhuma'}; runner de provas: ${p.runner === 'none' ? 'nenhum' : p.test_cmd}; index.html na raiz: ${p.has_index ? 'sim' : 'não'}.`,
@@ -594,6 +637,35 @@ const PLAN_JSON_SCHEMA = {
   required: ['title', 'summary', 'explanation', 'complexity', 'domains', 'keywords', 'needs_ui', 'needs_backend', 'research_questions', 'questions', 'assets_style', 'assets', 'stories'],
 }
 
+// ---------- pacote de contexto (sessão nova do Claude sem releitura) ----------
+// Cada fase abre um processo novo (decisão de Erick: sessões novas, não uma só). Para o maker não gastar turnos relendo,
+// o prompt já traz a árvore do projeto e o conteúdo atual dos arquivos que a story tocou (ou que a story cita).
+const PACK_FILE_MAX = 12000, PACK_TOTAL_MAX = 48000, PACK_FILES_MAX = 10
+const TEXT_EXT = /\.(html?|css|m?js|jsx|tsx?|json|md|py|toml|txt|yml|yaml|go|rs|sql|env\.example|cfg|ini)$/i
+async function projectTree(dir) {
+  const a = await run('git', ['ls-files', '--', '.'], { cwd: dir }), b = await run('git', ['ls-files', '--others', '--exclude-standard', '--', '.'], { cwd: dir })
+  const all = [...new Set((a.out + '\n' + b.out).split('\n').map((x) => x.trim()).filter((x) => x && !/(^|\/)(node_modules|\.venv|dist|build|__pycache__|\.ade-attachments)(\/|$)/.test(x)))]
+  return all.length > 200 ? [...all.slice(0, 200), `… e mais ${all.length - 200}`] : all
+}
+function citedFiles(st, tree) { const text = `${st.request} ${(st.acceptance || []).join(' ')} ${st.test_hint || ''}`; return tree.filter((f) => f.length > 3 && text.includes(f)) }
+async function contextPack(st, extra = []) {
+  const dir = state.project.dir
+  const tree = await projectTree(dir)
+  const want = [...new Set([...(st.files || []).slice().reverse(), ...extra, ...citedFiles(st, tree)])].filter((f) => TEXT_EXT.test(f)).slice(0, PACK_FILES_MAX)
+  const parts = [`ARQUIVOS DO PROJETO (${tree.length}): ${tree.join(', ')}`]
+  let total = 0
+  for (const f of want) {
+    let body; try { body = await readFile(path.join(dir, f), 'utf8') } catch { continue }
+    if (body.length > PACK_FILE_MAX) body = body.slice(0, PACK_FILE_MAX) + `\n… (cortado; ${body.length} caracteres no total; use Read com offset se precisar do resto)`
+    if (total + body.length > PACK_TOTAL_MAX) break
+    total += body.length
+    parts.push(`=== ${f} (estado atual) ===\n${body}`)
+  }
+  if (want.length) parts.push('Os arquivos acima já estão no estado atual: NÃO os releia; edite direto com Edit. Leia só o que não está aqui.')
+  if (st.last_summary) parts.push(`Resumo da sessão anterior desta parte: ${st.last_summary.slice(0, 1200)}`)
+  return parts.join('\n')
+}
+
 // ---------- prompts do maker ----------
 function common(st) {
   const p = state.project, m = state.mission
@@ -601,6 +673,7 @@ function common(st) {
     `Projeto: ${p.name} (${p.language || 'linguagem a definir'}); runner de provas: ${p.runner === 'none' ? 'nenhum' : p.test_cmd}.`,
     `Objetivo da missão: ${m.plan.title}. ${m.plan.summary}`,
     `Story atual: ${st.title}. Instrução: ${st.request}`,
+    attachBlock(m.attachments),
     `Critérios de aceite: ${(st.acceptance || []).map((a, i) => `(${i + 1}) ${a}`).join(' ')}`,
     'Trabalhe só dentro do diretório atual; não suba para diretórios acima. Leia antes de escrever.',
     m.allow_commands ? 'Você pode rodar comandos (instalar dependências, inicializar projeto). Não rode servidores que fiquem abertos; não use git.' : 'Você só tem ferramentas de leitura e edição; o harness roda as provas.',
@@ -612,14 +685,14 @@ function common(st) {
     m.answers?.length ? `Escolhas do usuário na entrevista: ${m.answers.map((a) => `${a.question} → ${a.answer}`).join(' | ')}` : '',
   ].filter(Boolean)
 }
-function testPrompt(st) {
+function testPrompt(st, pack) {
   return [`Pedido original do usuário: ${state.mission.request}`, ...common(st),
-    `FASE 1 de 2: escreva APENAS uma prova nova (teste automatizado) para esta story, que FALHE no código atual porque o comportamento ainda não existe. Dica de prova: ${st.test_hint}. Não implemente o comportamento ainda.`,
-    'Ao terminar, escreva uma frase com o nome exato da prova nova.'].join('\n')
+    `FASE 1 de 2: escreva APENAS as provas novas (testes automatizados) desta story: uma função de teste por critério de aceite, todas no mesmo arquivo, com nomes que digam o critério. Todas devem FALHAR (ou nem carregar) no código atual, porque o comportamento ainda não existe. Dica de prova: ${st.test_hint}. Não implemente o comportamento ainda.`,
+    pack, 'Ao terminar, escreva uma frase com o nome do arquivo de prova e os nomes das provas novas.'].filter(Boolean).join('\n')
 }
-function fixPrompt(st, round, review, visual) {
+function fixPrompt(st, round, review, visual, pack) {
   const red = st.red_tests.map((t) => `- ${t.name}: ${t.message}`).join('\n')
-  const base = [`Pedido original do usuário: ${state.mission.request}`, ...common(st),
+  const base = [`Pedido original do usuário: ${state.mission.request}`, ...common(st), pack,
     `FASE 2 de 2: a prova nova está vermelha, como esperado:\n${red}`,
     'Agora implemente o necessário para a prova passar e os critérios de aceite valerem. Não modifique a prova. Não toque em nada fora do escopo da story. Seja direto: você tem no máximo 30 ações; não investigue ferramentas do harness, não reescreva provas antigas, não amplie o escopo.',
     'Ao terminar, escreva uma frase dizendo o que mudou.']
@@ -693,6 +766,7 @@ async function runStories() {
   return finish()
 }
 
+function remember(st, r) { if (!r) return; st.files = [...new Set([...(st.files || []), ...(r.touched || [])])]; if (typeof r.result === 'string' && r.result.trim()) st.last_summary = r.result.trim() }
 async function runStory(st, round = 1, previousReview = null, previousVisual = null) {
   const m = state.mission
   const stop = (reason) => { m.state = 'awaiting_operator'; m.reason = reason; st.state = 'blocked'; log('engine', `parada: ${reason}`, 'error'); return false }
@@ -700,7 +774,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   if (round === 1) {
     if (m.plan.needs_ui && state.settings.visual_gate) st.visual_before = await visualGate()
     st.usd_start = m.cost.usd
-    setStep('test', 'running'); await claudeCall({ role: 'prova', prompt: testPrompt(st), model: state.settings.roles.maker.model, tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: 20 }); await refreshProject(); setStep('test', 'done')
+    setStep('test', 'running'); const rt = await claudeCall({ role: 'prova', prompt: testPrompt(st, await contextPack(st)), model: state.settings.roles.maker.model, tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: 20 }); remember(st, rt); await refreshProject(); setStep('test', 'done')
     setStep('red', 'running')
     const after = await runTests(state.project)
     const before = new Set(m.tests_before.tests.map((t) => t.name))
@@ -711,10 +785,12 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     if (st.red_tests.length === 0 || regress.length > 0) { setStep('red', 'failed'); st.tests_after = after; st.diff = await gitDiff(state.project.dir); return stop(regress.length ? 'tests_red' : 'no_red_test') }
     setStep('red', 'done')
   }
-  // Autonomia: a partir da 3ª rodada o maker sobe para o modelo do planejador (mais forte) antes de parar.
-  const makerModel = round >= 3 && state.settings.roles.planner.model !== state.settings.roles.maker.model ? state.settings.roles.planner.model : state.settings.roles.maker.model
-  if (round >= 3) log('engine', `rodada ${round}: escalando o maker para ${makerModel}`)
-  setStep('fix', 'running', { round }); await claudeCall({ role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual), model: makerModel, tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: 30 }); await refreshProject(); setStep('fix', 'done', { round })
+  // Escalada: só na 3ª rodada em diante E quando sobrou problema grave (achado high do revisor ou prova vermelha). Pedido de cobertura/estilo continua no maker barato.
+  const grave = (previousReview?.findings || []).some((f) => f.severity === 'high') || (st.tests_after && !st.tests_after.ok)
+  const escalate = round >= 3 && grave && state.settings.roles.planner.model !== state.settings.roles.maker.model
+  const makerModel = escalate ? state.settings.roles.planner.model : state.settings.roles.maker.model
+  if (escalate) log('engine', `rodada ${round}: problema grave persiste; maker sobe para ${makerModel} (teto 20 ações)`)
+  setStep('fix', 'running', { round }); const rf = await claudeCall({ role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), model: makerModel, tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 }); remember(st, rf); await refreshProject(); setStep('fix', 'done', { round })
   setStep('tests', 'running'); st.tests_after = await runTests(state.project); st.diff = await gitDiff(state.project.dir)
   log('engine', `provas depois: ${st.tests_after.total} no total, ${st.tests_after.failed} vermelha(s)`); setStep('tests', st.tests_after.ok ? 'done' : 'failed')
   if (!st.diff.trim()) { setStep('checker', 'skipped'); return stop('no_changes') }
@@ -770,7 +846,7 @@ async function startMission(request) {
   if (vendorOf(s.roles.maker.family, s.roles.maker.model) === vendorOf(s.roles.checker.family, s.roles.checker.model)) return 'Quem escreve e quem revisa precisam ser de empresas diferentes. Ajuste em Modelos.'
   await ensureIgnore(fresh.dir); state.project = await discover(fresh.dir); state.log = []; currentPhase = 'intent'
   state.mission = {
-    id: 'm-' + Date.now().toString(36), request, state: 'planning', reason: null, current: null,
+    id: 'm-' + Date.now().toString(36), request, attachments: state.attachments.splice(0), state: 'planning', reason: null, current: null,
     allow_commands: !!s.allow_commands, roles: JSON.parse(JSON.stringify(s.roles)),
     plan: null, intent: null, stories: [], skills: { planner: [], maker: [], checker: [], research: [] }, research: null, steps: [], tests_before: null,
     cost: { usd: 0, calls: 0, turns: 0, tokens_in: 0, tokens_out: 0, cache_read: 0, by_model: {} }, started_at: now(), finished_at: null,
@@ -847,6 +923,9 @@ http.createServer(async (req, res) => {
       await run('git', ['-c', 'user.name=TL-ADE', '-c', 'user.email=ade@local', 'commit', '-q', '-m', 'base: antes da TL-ADE', '--allow-empty'], { cwd: d })
       state.project = await discover(d); broadcast(); return json(res, 200, state.project)
     }
+    if (url.pathname === '/api/pick' && req.method === 'POST') { const { kind } = await body(req); return json(res, 200, { paths: await pickNative(kind) }) }
+    if (url.pathname === '/api/attach' && req.method === 'POST') { try { return json(res, 200, { added: await addAttachments(await body(req)), attachments: state.attachments }) } catch (e) { return json(res, 400, { error: e.message }) } }
+    if (url.pathname === '/api/attach/remove' && req.method === 'POST') { const { name } = await body(req); const i = state.attachments.findIndex((a) => a.name === name); if (i >= 0) { const [a] = state.attachments.splice(i, 1); await rm(path.join(state.project.dir, a.path), { force: true }); broadcast() } return json(res, 200, { attachments: state.attachments }) }
     if (url.pathname === '/api/run' && req.method === 'POST') {
       const { request } = await body(req)
       if (!request?.trim()) return json(res, 400, { error: 'Pedido vazio.' })
