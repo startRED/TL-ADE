@@ -223,6 +223,7 @@ async function checker(diff, tests) {
 const COMMON = [
   'Projeto: JavaScript puro em src/, testes Vitest em src/*.test.js (ambiente happy-dom).',
   'Você só tem ferramentas de leitura e edição; o harness roda os testes e te devolve o resultado. Trabalhe só dentro do diretório atual (src/ já existe: leia antes de escrever); não suba para diretórios acima.',
+  'Página do app: src/main.js monta cada módulo listado em src/components.json; todo componente visual exporta `mount(container)`. Se criar um componente novo, exporte `mount` e acrescente o arquivo em src/components.json (com um título curto) para ele aparecer na página.',
 ]
 
 function testPrompt() {
@@ -372,6 +373,18 @@ http.createServer(async (req, res) => {
     if (!request?.trim()) { res.writeHead(400); return res.end('pedido vazio') }
     if (state.mission?.state === 'running') { res.writeHead(409); return res.end('já há uma missão rodando') }
     startMission(request.trim()); res.writeHead(202); return res.end()
+  }
+  if (url.pathname === '/api/app' || url.pathname.startsWith('/api/app/')) {
+    // Página do projeto alvo, servida do disco (ES modules precisam de HTTP).
+    const rel = url.pathname === '/api/app' || url.pathname === '/api/app/' ? 'index.html' : url.pathname.slice(9)
+    const file = path.join(EXAMPLE, rel)
+    if (!file.startsWith(EXAMPLE) || rel.includes('node_modules')) { res.writeHead(403); return res.end() }
+    try {
+      const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.css': 'text/css' }
+      const data = await readFile(file)
+      res.writeHead(200, { 'Content-Type': types[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' })
+      return res.end(data)
+    } catch { res.writeHead(404); return res.end('não encontrado') }
   }
   if (url.pathname === '/api/decide' && req.method === 'POST') {
     const { option } = await body(req); await decide(option); res.writeHead(202); return res.end()

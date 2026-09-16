@@ -35,7 +35,10 @@ button { font: inherit; color: inherit; }
 .logo { width: 20px; height: 20px; border-radius: 6px; background: linear-gradient(135deg, var(--teal-9), var(--teal-11)); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); }
 .cmd .rt-TextFieldRoot { background: var(--bg-2); box-shadow: inset 0 0 0 1px var(--line-2); transition: box-shadow .2s; }
 .cmd .rt-TextFieldRoot:focus-within { box-shadow: inset 0 0 0 1px var(--teal-8), 0 0 0 3px var(--teal-a3); }
-.topright { display: flex; justify-content: flex-end; }
+.topright { display: flex; justify-content: flex-end; align-items: center; gap: 14px; }
+.open-app { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--gray-11); text-decoration: none; padding: 5px 10px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--bg-2); transition: border-color .15s, color .15s; }
+.open-app:hover { color: var(--gray-12); border-color: var(--teal-8); }
+.card a { color: var(--teal-11); }
 
 .body { display: grid; grid-template-columns: 44px 320px minmax(0, 1fr) 340px; min-height: 0; }
 @media (max-width: 1180px) { .body { grid-template-columns: 44px 280px minmax(0, 1fr); } .right { display: none; } }
