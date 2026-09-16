@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { Badge, Box, Button, Callout, Code, Flex, Heading, ScrollArea, Separator, Tabs, Text, TextField, Card } from '@radix-ui/themes'
 import { Play, CheckCircle, Warning, ArrowCounterClockwise, Trash, Robot, Flask, GitDiff, ChatCircleText, Terminal, HourglassMedium } from '@phosphor-icons/react'
 
-const STEP_LABEL = { prepare: 'Preparar', maker: 'Claude escreve', tests: 'Testes', checker: 'Codex revisa' }
+const STEP_LABEL = { prepare: 'Preparar', test: 'Claude escreve o teste', red: 'Prova vermelha', fix: 'Claude corrige', tests: 'Testes verdes', checker: 'Codex revisa' }
 const STATE_LABEL = { running: 'Em andamento', awaiting_operator: 'Aguardando você', complete: 'Pronta', discarded: 'Descartada' }
 const REASON_LABEL = {
   tests_red: 'Algum teste ficou vermelho.',
   no_new_test: 'A IA não escreveu um teste novo que prove a correção.',
+  no_red_test: 'O teste novo não ficou vermelho no código atual, então não prova nada.',
   review_changes: 'O revisor (Codex) pediu mudanças.',
   no_changes: 'A IA não alterou nenhum arquivo.',
   engine_error: 'O engine falhou. Veja o log.',
@@ -82,7 +83,7 @@ export default function App() {
               </Flex>
               <Separator size="4" />
               <Flex direction="column" gap="2">
-                {['prepare', 'maker', 'tests', 'checker'].map((name) => {
+                {['prepare', 'test', 'red', 'fix', 'tests', 'checker'].map((name) => {
                   const s = m.steps.find((x) => x.name === name)
                   return <StepRow key={name} label={STEP_LABEL[name]} status={s?.status || 'pending'} />
                 })}
@@ -91,11 +92,19 @@ export default function App() {
               <Flex direction="column" gap="1">
                 <KV k="Chamadas" v={m.cost.calls} />
                 <KV k="Turnos do Claude" v={m.cost.turns} />
-                <KV k="Tokens" v={`${(m.cost.tokens_in / 1000).toFixed(1)}k entrada · ${(m.cost.tokens_out / 1000).toFixed(1)}k saída`} />
+                <KV k="Tokens" v={`${(m.cost.tokens_in / 1000).toFixed(1)}k novos · ${((m.cost.cache_read || 0) / 1000).toFixed(0)}k cache · ${(m.cost.tokens_out / 1000).toFixed(1)}k saída`} />
                 <KV k="Custo Claude" v={`US$ ${m.cost.usd.toFixed(3)}`} />
                 <KV k="Custo Codex" v="não reportado" />
               </Flex>
             </Flex>
+          )}
+          {state.history?.length > 1 && (
+            <Box mt="4">
+              <Text size="1" color="gray">Missões anteriores neste projeto</Text>
+              {state.history.filter((h) => h.id !== m?.id).map((h) => (
+                <Flex key={h.id} justify="between" gap="2" mt="1"><Text size="1" truncate style={{ maxWidth: 200 }}>{h.request}</Text><StateBadge state={h.state} /></Flex>
+              ))}
+            </Box>
           )}
         </Card>
 
