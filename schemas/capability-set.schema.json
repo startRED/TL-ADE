@@ -1,0 +1,62 @@
+{
+  "$id": "https://tl-ade.dev/schemas/capability-set.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "capability-set",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "launch",
+    "transport",
+    "models",
+    "resume",
+    "fork",
+    "preminted_session_id",
+    "structured_output",
+    "budget_cap_native",
+    "image_in",
+    "image_out",
+    "sandbox",
+    "cost_report",
+    "advisor",
+    "unattended_flags",
+    "probe_ok",
+    "probe_mode",
+    "bootstrap_cost_tokens",
+    "probed_at"
+  ],
+  "properties": {
+    "format_version": { "type": "integer", "minimum": 1 },
+    "launch": { "type": "array", "items": { "type": "string" } },
+    "transport": { "type": "string" },
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "context_window", "effort", "vendor"],
+        "properties": {
+          "id": { "type": "string" },
+          "context_window": { "type": "integer" },
+          "effort": { "type": "string" },
+          "vendor": { "type": "string" }
+        }
+      }
+    },
+    "resume": { "type": "boolean" },
+    "fork": { "type": "boolean" },
+    "preminted_session_id": { "type": "boolean" },
+    "structured_output": { "type": "boolean" },
+    "budget_cap_native": { "type": "boolean" },
+    "image_in": { "type": "boolean" },
+    "image_out": { "type": "boolean" },
+    "sandbox": { "type": "string" },
+    "cost_report": { "type": "string" },
+    "advisor": { "type": "boolean" },
+    "unattended_flags": { "type": "array", "items": { "type": "string" } },
+    "probe_ok": { "type": "boolean" },
+    "probe_mode": { "type": "string" },
+    "bootstrap_cost_tokens": { "type": "integer" },
+    "probed_at": { "type": "string" }
+  }
+}

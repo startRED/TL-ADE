@@ -1,0 +1,38 @@
+{
+  "$id": "https://tl-ade.dev/schemas/unit-result.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "unit-result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "story_id", "state", "phase", "round", "tree_before", "tree_after", "eval_records", "gate_records", "passes", "reason", "sources"],
+  "properties": {
+    "format_version": { "type": "integer", "minimum": 1 },
+    "story_id": { "type": "string" },
+    "state": { "type": "string" },
+    "phase": { "type": "string" },
+    "round": { "type": "integer" },
+    "tree_before": { "type": "string" },
+    "tree_after": { "type": "string" },
+    "eval_records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "phase", "passed"],
+        "properties": {
+          "id": { "type": "string" },
+          "phase": { "type": "string" },
+          "passed": { "type": "boolean" },
+          "red_reason": { "type": "string" }
+        }
+      }
+    },
+    "gate_records": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": false }
+    },
+    "passes": { "type": "boolean" },
+    "reason": { "type": "string" },
+    "sources": { "type": "array", "items": { "type": "string" } }
+  }
+}

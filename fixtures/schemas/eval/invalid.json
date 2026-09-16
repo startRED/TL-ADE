@@ -1,0 +1,22 @@
+{
+  "format_version": 1,
+  "kind": "test",
+  "cmd": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "--reporter=json",
+    "tests/canonical.test.ts"
+  ],
+  "expect_exit": 0,
+  "timeout_s": 120,
+  "max_output_bytes": 65536,
+  "evidence": [
+    "tests/canonical.test.ts"
+  ],
+  "strictness": {
+    "mode": "must_fail_before"
+  },
+  "author": "operator",
+  "__unexpected__": true
+}

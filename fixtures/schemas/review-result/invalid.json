@@ -1,0 +1,22 @@
+{
+  "format_version": 1,
+  "verdict": "approved",
+  "action_items": [
+    {
+      "severity": "minor",
+      "category": "style",
+      "target_role": "maker",
+      "location": "src/journal/canonical.ts:10",
+      "problem": "nome poderia ser mais claro",
+      "evidence": "trecho do diff",
+      "required_action": "renomear variável"
+    }
+  ],
+  "deferred": [],
+  "rejected": [],
+  "sources": [
+    "0123456789abcdef"
+  ],
+  "summary": "aprovado com uma observação menor",
+  "__unexpected__": true
+}
