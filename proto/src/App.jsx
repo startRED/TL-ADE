@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Badge, Button, Code, Heading, ScrollArea, Switch, TextField, Tooltip } from '@radix-ui/themes'
+import { Badge, Button, Code, Heading, ScrollArea, Switch, TextField } from '@radix-ui/themes'
 import {
-  ArrowSquareOut, Play, CheckCircle, Warning, ArrowCounterClockwise, Trash, Flask, GitDiff, ChatCircleText, Terminal,
-  FolderSimple, ClockCounterClockwise, GearSix, Pulse, Circle, CheckFat, X, Lightning, Sparkle, Cpu, ListChecks, Eye, SkipForward, MagnifyingGlass,
-  Plus, Paperclip, FolderOpen, Image as ImageIcon, File as FileIcon,
+  ArrowSquareOut, Play, CheckCircle, Warning, ArrowCounterClockwise, Trash, GitDiff,
+  FolderSimple, ClockCounterClockwise, GearSix, Pulse, Circle, CheckFat, X, Sparkle, Cpu, ListChecks, SkipForward, MagnifyingGlass,
+  Plus, Paperclip, FolderOpen, File as FileIcon,
 } from '@phosphor-icons/react'
 
 const MISSION_STEPS = ['intent', 'plan', 'research', 'prepare', 'assets']
@@ -57,6 +57,7 @@ const REASON = {
   approve_plan: 'O plano tem várias partes. Confira e aprove.',
   questions: 'A IA precisa de uma resposta sua antes de começar.',
 }
+const VIEW_TITLE = { mission: 'Missão', skills: 'Skills', models: 'Modelos', history: 'Histórico', projects: 'Projetos', options: 'Opções' }
 const ROLE_LABEL = { intent: 'Entender o pedido e escolher skills', planner: 'Planejar (entender o pedido)', maker: 'Escrever código e provas', checker: 'Revisar (outra empresa)', research: 'Pesquisar fatos' }
 const SUGGESTIONS = [
   'Crie uma planilha financeira de gastos pessoais, com categorias, total por mês e visual profissional.',
@@ -105,105 +106,129 @@ export default function App() {
   const decide = (option, text) => post('/api/decide', typeof text === 'object' ? { option, ...text } : { option, text })
   const saveSettings = (patch) => post('/api/settings', patch)
 
+  const showReport = view === 'mission' && !!m
+
   return (
     <div className="shell">
-      <header className="topbar">
-        <div className="brand"><span className="logo" /><span>TL-ADE</span><span className="dim">demonstração</span></div>
-        <form className="cmd" onSubmit={(e) => { e.preventDefault(); run() }} onDrop={(e) => { e.preventDefault(); onPaste({ clipboardData: e.dataTransfer, preventDefault() {} }) }} onDragOver={(e) => e.preventDefault()}>
-          <div className="plus-wrap">
-            <button type="button" className="plus" title="Anexar" onClick={() => setMenu((v) => !v)} disabled={busy}><Plus weight="bold" /></button>
-            {menu && (
-              <div className="menu" onMouseLeave={() => setMenu(false)}>
-                <button type="button" onClick={() => pick('files')}><Paperclip /> Adicionar arquivos ou fotos <kbd>Ctrl+V</kbd></button>
-                <button type="button" onClick={() => pick('folder')}><FolderOpen /> Escolher a pasta do projeto</button>
-              </div>
-            )}
-          </div>
-          <TextField.Root size="2" value={request} onChange={(e) => setRequest(e.target.value)} onPaste={onPaste} placeholder={p ? `O que construir em ${p.name}? Escreva do seu jeito; cole imagens com Ctrl+V.` : 'Escolha uma pasta primeiro (botão +)'} disabled={busy}>
-            <TextField.Slot><Button size="1" type="submit" disabled={busy || !request.trim()}>{busy ? 'Rodando' : 'Rodar'}</Button></TextField.Slot>
-          </TextField.Root>
-          {(state.attachments?.length > 0 || attachErr) && (
-            <div className="attachments">
-              {state.attachments.map((a) => (
-                <span className="chip" key={a.name} title={a.path}>
-                  {a.image ? <img src={`/api/app/${a.path}`} alt="" /> : <FileIcon />}
-                  <span>{a.name}</span>
-                  <button type="button" onClick={() => post('/api/attach/remove', { name: a.name })} title="Remover"><X /></button>
-                </span>
-              ))}
-              {attachErr && <span className="chip bad">{attachErr}</span>}
-            </div>
-          )}
-        </form>
-        <div className="topright">
-          {m && <MissionChip m={m} />}
-          {p?.has_index && <a className="open-app" href="/api/app/" target="_blank" rel="noreferrer"><ArrowSquareOut /> Abrir o app</a>}
-        </div>
-      </header>
-
-      <div className="body">
-        <nav className="rail" aria-label="Seções">
-          <RailButton icon={<Pulse />} label="Missão" active={view === 'mission'} onClick={() => setView('mission')} badge={m && ['awaiting_operator', 'awaiting_plan'].includes(m.state)} />
-          <RailButton icon={<Sparkle />} label="Skills" active={view === 'skills'} onClick={() => setView('skills')} />
-          <RailButton icon={<Cpu />} label="Modelos" active={view === 'models'} onClick={() => setView('models')} />
-          <RailButton icon={<ClockCounterClockwise />} label="Histórico" active={view === 'history'} onClick={() => setView('history')} />
-          <RailButton icon={<FolderSimple />} label="Projetos" active={view === 'projects'} onClick={() => setView('projects')} />
-          <span className="grow" />
-          <RailButton icon={<GearSix />} label="Opções" active={view === 'options'} onClick={() => setView('options')} />
+      <div className={`body${showReport ? '' : ' wide'}`}>
+        <nav className="sidebar" aria-label="Seções">
+          <div className="brand"><span className="logo" />TL-ADE<span className="dim small">demonstração</span></div>
+          <button className="proj-btn" onClick={() => setView('projects')} title={p?.dir || ''}>
+            <FolderSimple size={15} />
+            <span className="proj-txt">
+              <b>{p?.name || 'Nenhuma pasta'}</b>
+              <small>{p ? `${p.branch || 'sem git'} · ${p.runner === 'none' ? 'sem provas' : p.runner}${p.files === 0 ? ' · vazia' : ''}` : 'escolha uma pasta'}</small>
+            </span>
+            <span className="proj-swap">trocar</span>
+          </button>
+          <ul className="nav">
+            <NavItem icon={<Pulse />} label="Missão" active={view === 'mission'} onClick={() => setView('mission')} badge={m && ['awaiting_operator', 'awaiting_plan'].includes(m.state)} />
+            <NavItem icon={<Sparkle />} label="Skills" active={view === 'skills'} onClick={() => setView('skills')} />
+            <NavItem icon={<Cpu />} label="Modelos" active={view === 'models'} onClick={() => setView('models')} />
+            <NavItem icon={<ClockCounterClockwise />} label="Histórico" active={view === 'history'} onClick={() => setView('history')} />
+            <NavItem icon={<FolderSimple />} label="Projetos" active={view === 'projects'} onClick={() => setView('projects')} />
+            <NavItem icon={<GearSix />} label="Opções" active={view === 'options'} onClick={() => setView('options')} />
+          </ul>
+          {view === 'mission' && <div className="side-scroll"><Progress m={m} quota={state.quota} /></div>}
         </nav>
 
-        <aside className="side">
-          <button className="side-head" onClick={() => setView('projects')} title={p?.dir || ''}>
-            <FolderSimple size={16} color="var(--gray-10)" />
-            <div>
-              <p className="side-title">{p?.name || 'Nenhuma pasta'}</p>
-              <p className="dim small">{p ? `${p.branch || 'sem git'} · ${p.runner === 'none' ? 'sem provas' : p.runner}${p.files === 0 ? ' · vazia' : ''}` : 'escolha uma pasta'}</p>
-            </div>
-            <span className="dim small" style={{ marginLeft: 'auto' }}>trocar</span>
-          </button>
-          {view === 'mission' && <Progress m={m} quota={state.quota} />}
-          {view === 'skills' && <SkillsPanel state={state} save={saveSettings} />}
-          {view === 'models' && <ModelsPanel state={state} save={saveSettings} />}
-          {view === 'history' && <History history={state.history} current={m} />}
-          {view === 'projects' && <Projects p={p} recent={state.recent} busy={busy} onChanged={() => { setView('mission'); setError(null) }} />}
-          {view === 'options' && <Options s={s} save={saveSettings} />}
-        </aside>
-
         <main className="main">
+          <header className="head">
+            <span className="head-title">{VIEW_TITLE[view]}</span>
+            <span className="grow" />
+            {showReport && <MissionChip m={m} />}
+            {p?.has_index && <a className="open-app" href="/api/app/" target="_blank" rel="noreferrer"><ArrowSquareOut /> Abrir o app</a>}
+          </header>
+
           {error && <div className="errbar"><Warning weight="fill" /> {error}</div>}
-          {!m ? <Empty onPick={(t) => { setRequest(t); run(t) }} busy={busy} p={p} s={s} /> : (
+
+          {view !== 'mission' ? (
+            <div className="page">
+              {view === 'skills' && <SkillsPanel state={state} save={saveSettings} />}
+              {view === 'models' && <ModelsPanel state={state} save={saveSettings} />}
+              {view === 'history' && <History history={state.history} current={m} />}
+              {view === 'projects' && <Projects p={p} recent={state.recent} busy={busy} onChanged={() => { setView('mission'); setError(null) }} />}
+              {view === 'options' && <Options s={s} save={saveSettings} />}
+            </div>
+          ) : (
             <>
-              <div className="main-head">
-                <Heading size="4" style={{ letterSpacing: '-0.01em' }}>{m.plan?.title || m.request}</Heading>
-                <p className="dim small">{m.plan ? m.request : `${m.id} · começou às ${m.started_at.slice(11, 16)}`}</p>
+              <div className="center">
+                {!m ? <Empty onPick={(t) => { setRequest(t); run(t) }} busy={busy} p={p} /> : (
+                  <>
+                    <div className="main-head reading">
+                      <Heading size="5" style={{ letterSpacing: '-0.02em' }}>{m.plan?.title || m.request}</Heading>
+                      <p className="dim small">{m.plan ? m.request : `${m.id} · começou às ${m.started_at.slice(11, 16)}`}</p>
+                    </div>
+                    <div className="tabs">
+                      <div className="tabs-inner reading" role="tablist">
+                        <Tab active={tab === 'plan'} onClick={() => setTab('plan')} count={m.stories.length || null}>Plano</Tab>
+                        <Tab active={tab === 'activity'} onClick={() => setTab('activity')}>Atividade</Tab>
+                        <Tab active={tab === 'diff'} onClick={() => setTab('diff')}>Alterações</Tab>
+                        <Tab active={tab === 'tests'} onClick={() => setTab('tests')} {...testsBadge(m)}>Provas</Tab>
+                        <Tab active={tab === 'visual'} onClick={() => setTab('visual')} {...visualBadge(m)}>Visual</Tab>
+                        <Tab active={tab === 'review'} onClick={() => setTab('review')} {...reviewBadge(m)}>Revisão</Tab>
+                      </div>
+                    </div>
+                    <ScrollArea className="main-body" scrollbars="vertical">
+                      {tab === 'plan' && <Plan m={m} catalog={state.catalog} />}
+                      {tab === 'activity' && <Console log={state.log} busy={busy} live={state.live} />}
+                      {tab === 'diff' && <Diff m={m} />}
+                      {tab === 'tests' && <Tests m={m} />}
+                      {tab === 'visual' && <Visual m={m} />}
+                      {tab === 'review' && <Review m={m} />}
+                    </ScrollArea>
+                  </>
+                )}
               </div>
-              <div className="tabs" role="tablist">
-                <Tab active={tab === 'plan'} onClick={() => setTab('plan')} icon={<ListChecks />} count={m.stories.length || null}>Plano</Tab>
-                <Tab active={tab === 'activity'} onClick={() => setTab('activity')} icon={<Terminal />}>Atividade</Tab>
-                <Tab active={tab === 'diff'} onClick={() => setTab('diff')} icon={<GitDiff />}>Alterações</Tab>
-                <Tab active={tab === 'tests'} onClick={() => setTab('tests')} icon={<Flask />} {...testsBadge(m)}>Provas</Tab>
-                <Tab active={tab === 'visual'} onClick={() => setTab('visual')} icon={<Eye />} {...visualBadge(m)}>Visual</Tab>
-                <Tab active={tab === 'review'} onClick={() => setTab('review')} icon={<ChatCircleText />} {...reviewBadge(m)}>Revisão</Tab>
-              </div>
-              <ScrollArea className="main-body" scrollbars="vertical">
-                {tab === 'plan' && <Plan m={m} catalog={state.catalog} />}
-                {tab === 'activity' && <Console log={state.log} busy={busy} live={state.live} />}
-                {tab === 'diff' && <Diff m={m} />}
-                {tab === 'tests' && <Tests m={m} />}
-                {tab === 'visual' && <Visual m={m} />}
-                {tab === 'review' && <Review m={m} />}
-              </ScrollArea>
+
+              <form className="composer" onSubmit={(e) => { e.preventDefault(); run() }} onDrop={(e) => { e.preventDefault(); onPaste({ clipboardData: e.dataTransfer, preventDefault() {} }) }} onDragOver={(e) => e.preventDefault()}>
+                <div className="composer-inner">
+                  <div className="composer-box">
+                    {(state.attachments?.length > 0 || attachErr) && (
+                      <div className="attachments">
+                        {state.attachments.map((a) => (
+                          <span className="chip" key={a.name} title={a.path}>
+                            {a.image ? <img src={`/api/app/${a.path}`} alt="" /> : <FileIcon />}
+                            <span>{a.name}</span>
+                            <button type="button" onClick={() => post('/api/attach/remove', { name: a.name })} title="Remover"><X /></button>
+                          </span>
+                        ))}
+                        {attachErr && <span className="chip bad">{attachErr}</span>}
+                      </div>
+                    )}
+                    <div className="composer-row">
+                      <div className="plus-wrap">
+                        <button type="button" className="plus" title="Anexar" onClick={() => setMenu((v) => !v)} disabled={busy}><Plus weight="bold" /></button>
+                        {menu && (
+                          <div className="menu" onMouseLeave={() => setMenu(false)}>
+                            <button type="button" onClick={() => pick('files')}><Paperclip /> Adicionar arquivos ou fotos <kbd>Ctrl+V</kbd></button>
+                            <button type="button" onClick={() => pick('folder')}><FolderOpen /> Escolher a pasta do projeto</button>
+                          </div>
+                        )}
+                      </div>
+                      <textarea
+                        className="ask" rows={1} value={request} disabled={busy}
+                        onChange={(e) => setRequest(e.target.value)} onPaste={onPaste}
+                        onInput={(e) => { e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 176)}px` }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run() } }}
+                        placeholder={p ? `O que construir em ${p.name}? Escreva do seu jeito; cole imagens com Ctrl+V.` : 'Escolha uma pasta primeiro (botão +)'}
+                      />
+                      <button className="run" type="submit" disabled={busy || !request.trim()}>{busy ? 'Rodando' : 'Rodar'}</button>
+                    </div>
+                  </div>
+                  {s && <p className="composer-hint">{s.roles.planner.model} planeja · {s.roles.maker.model} escreve · {s.roles.checker.model} revisa · comandos {s.allow_commands ? 'liberados' : 'bloqueados'}</p>}
+                </div>
+              </form>
             </>
           )}
         </main>
 
-        <aside className="right"><Report m={m} decide={decide} /></aside>
+        {showReport && <aside className="right"><Report m={m} decide={decide} /></aside>}
       </div>
 
       <footer className="status">
         <span className={connected ? 'ok' : 'bad'}>{connected ? '● servidor ligado' : '○ sem servidor'}</span>
         <span title={p?.dir}>{p ? p.dir : 'sem pasta'}</span>
-        {s && <span>{s.roles.intent?.model || s.roles.planner.model} entende · {s.roles.planner.model} planeja · {s.roles.maker.model} escreve · {s.roles.checker.model} revisa</span>}
         <span className="grow" />
         {m && <span>{m.cost.calls} chamadas · {fmtTok(m.cost.tokens_in + m.cost.tokens_out)} tokens · {fmtUsd(m.cost.usd)} no Claude</span>}
       </footer>
@@ -224,11 +249,11 @@ function MissionChip({ m }) {
   const secs = secsBetween(m.started_at, m.finished_at)
   return <div className="chip"><Badge color={s.color} variant={m.state.startsWith('awaiting') ? 'solid' : 'soft'} size="2">{s.label}</Badge><span className="dim small">{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}</span></div>
 }
-function RailButton({ icon, label, active, onClick, badge }) {
-  return <Tooltip content={label} side="right"><button className={`rail-btn ${active ? 'active' : ''}`} onClick={onClick} aria-label={label} aria-current={active ? 'page' : undefined}>{icon}{badge && <span className="rail-badge" />}</button></Tooltip>
+function NavItem({ icon, label, active, onClick, badge }) {
+  return <li><button className={`nav-btn ${active ? 'active' : ''}`} onClick={onClick} aria-current={active ? 'page' : undefined}>{icon}<span>{label}</span>{badge && <span className="nav-dot" />}</button></li>
 }
-function Tab({ active, onClick, icon, children, count, tone }) {
-  return <button role="tab" aria-selected={active} className={`tab ${active ? 'active' : ''}`} onClick={onClick}>{icon}<span>{children}</span>{count != null && <span className={`tab-count ${tone || ''}`}>{count}</span>}</button>
+function Tab({ active, onClick, children, count, tone }) {
+  return <button role="tab" aria-selected={active} className={`tab ${active ? 'active' : ''}`} onClick={onClick}><span>{children}</span>{count != null && <span className={`tab-count ${tone || ''}`}>{count}</span>}</button>
 }
 
 /* ---------- lateral: progresso (épicos = stories) ---------- */
@@ -391,6 +416,7 @@ function Options({ s, save }) {
       <label className="opt"><Switch checked={s.visual_gate} onCheckedChange={(v) => save({ visual_gate: v })} /><span><b>Portão visual (Impeccable)</b><small>Varre a interface atrás de cara de template e força uma rodada de retoque.</small></span></label>
       <label className="opt"><Switch checked={s.research_enabled} onCheckedChange={(v) => save({ research_enabled: v })} /><span><b>Pesquisa com Google (agy)</b><small>Só quando o plano depende de um fato externo.</small></span></label>
       <label className="opt"><Switch checked={s.assets_enabled !== false} onCheckedChange={(v) => save({ assets_enabled: v })} /><span><b>Imagens geradas pelo Codex</b><small>Quando o plano pede fotos ou ilustrações, o Codex gera ($imagegen) antes das partes começarem. Consome cota do Codex.</small></span></label>
+      <label className="opt"><Switch checked={s.fast_lane !== false} onCheckedChange={(v) => save({ fast_lane: v })} /><span><b>Faixa rápida para correções pequenas</b><small>Pedido curto com "corrija, ajuste, troque, mude…" num projeto existente pula a entrevista e o plano: vai direto para prova, correção e revisão.</small></span></label>
       <label className="opt"><input className="ta" style={{ width: 80 }} type="number" min={1} step={1} value={s.max_usd_per_story ?? 4} onChange={(e) => save({ max_usd_per_story: Number(e.target.value) || 4 })} /><span><b>Orçamento por parte (US$ no Claude)</b><small>Estourou: sem novas rodadas. Com provas verdes e nada grave, aceita e segue; senão para e pergunta.</small></span></label>
       <label className="opt"><select className="ta" style={{ width: 'auto' }} value={s.autonomy || 'auto'} onChange={(e) => save({ autonomy: e.target.value })}><option value="auto">segue sozinha</option><option value="ask">para e pergunta</option></select><span><b>Depois de 4 rodadas de revisão</b><small>Segue sozinha: se as provas estão verdes e o revisor não apontou nada grave, aceita e vai para a próxima parte. Para e pergunta: você decide.</small></span></label>
       <label className="opt"><select className="ta" style={{ width: 'auto' }} value={s.interview || 'auto'} onChange={(e) => save({ interview: e.target.value })}><option value="auto">automática</option><option value="always">sempre</option><option value="never">nunca</option></select><span><b>Entrevista antes do plano</b><small>Perguntas fáceis de múltipla escolha para escolher o jeito do programa. Automática: só em pedidos médios e grandes.</small></span></label>
@@ -439,13 +465,12 @@ function Projects({ p, recent, busy, onChanged }) {
 }
 
 /* ---------- centro ---------- */
-function Empty({ onPick, busy, p, s }) {
+function Empty({ onPick, busy, p }) {
   return (
     <div className="empty"><div className="empty-inner">
-      <Heading size="6" style={{ letterSpacing: '-0.02em' }}>O que você quer construir{p ? ` em ${p.name}` : ''}?</Heading>
+      <Heading size="7" style={{ letterSpacing: '-0.03em' }}>O que você quer construir{p ? ` em ${p.name}` : ''}?</Heading>
       <p className="dim">Escreva em português, do seu jeito: uma correção, uma tela, um app inteiro. A ADE entende o pedido, escolhe as skills, escreve as provas, implementa, confere o visual e manda outra IA revisar. Você só decide no fim.</p>
-      {s && <p className="dim small">Agora: {s.roles.planner.model} planeja · {s.roles.maker.model} escreve · {s.roles.checker.model} revisa · comandos {s.allow_commands ? 'liberados' : 'bloqueados'}.</p>}
-      <span className="lbl" style={{ marginTop: 18 }}>Experimente</span>
+      <span className="lbl" style={{ marginTop: 26 }}>Experimente</span>
       <div className="sugs">{SUGGESTIONS.map((t) => <button key={t} className="sug" onClick={() => onPick(t)} disabled={busy || !p}><Play weight="fill" />{t}</button>)}</div>
     </div></div>
   )
@@ -458,7 +483,7 @@ function Plan({ m, catalog }) {
     <div className="plan">
       <div className="plan-head">
         <Badge variant="soft" color="gray">{({ trivial: 'trivial', bounded: 'pequeno', feature: 'funcionalidade', subsystem: 'grande' })[pl.complexity] || pl.complexity}</Badge>
-        {pl.needs_ui && <Badge variant="soft" color="teal">interface</Badge>}{pl.needs_backend && <Badge variant="soft" color="violet">backend</Badge>}
+        {pl.needs_ui && <Badge variant="outline" color="gray">interface</Badge>}{pl.needs_backend && <Badge variant="outline" color="gray">backend</Badge>}
         {pl.domains.map((d) => <Badge key={d} variant="outline" color="gray">{d}</Badge>)}
       </div>
       {pl.explanation && <div className="explain"><b>Em palavras simples</b><p style={{ whiteSpace: 'pre-line', margin: '6px 0 0' }}>{pl.explanation}</p></div>}
