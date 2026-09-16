@@ -365,9 +365,16 @@ async function pipeline(round = 1, previousReview = null) {
   return finish()
 }
 
-function finish() {
+async function finish() {
   const m = state.mission
   m.finished_at = now()
+  if (m.state === 'complete') {
+    // Missão pronta vira um commit no projeto (E64): a árvore volta a ficar limpa para a próxima.
+    await run('git', ['add', '-A'], { cwd: state.project.dir })
+    const c = await run('git', ['-c', 'user.name=TL-ADE', '-c', 'user.email=ade@local', 'commit', '-q', '-m', 'ade: ' + m.request.slice(0, 72)], { cwd: state.project.dir })
+    log('engine', c.code === 0 ? 'commit feito no projeto com as alterações da missão' : 'nada a commitar')
+    state.project = await discover(state.project.dir)
+  }
   const entry = { id: m.id, project: state.project.dir, request: m.request, state: m.state, reason: m.reason, usd: m.cost.usd, finished_at: m.finished_at }
   const h = state.history.find((x) => x.id === m.id)
   if (h) Object.assign(h, entry); else state.history.unshift(entry)
