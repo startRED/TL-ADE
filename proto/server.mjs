@@ -59,6 +59,8 @@ const DEFAULT_SETTINGS = {
   visual_gate: true,
   fast_lane: true, // faixa rápida (ADR 0008 / E18): pedido curto de correção num projeto existente pula entrevista e plano no Opus
   max_usd_per_story: 4, // orçamento por parte (spec E4): estourou com provas verdes → aceita; sem provas verdes → para
+  unattended: false, // modo noturno (ADR 0015): responde a entrevista com as recomendações, aprova o plano, e em parada sem saída pula a parte e segue
+  max_usd_per_mission: 60, // teto por missão (US$ no Claude): estourou → pausa em vez de continuar gastando
   autonomy: 'auto', // auto: após 4 rodadas com provas verdes e sem achado grave do revisor, aceita e segue; ask: para e pergunta
   interview: 'auto', // auto | always | never — entrevista de múltipla escolha antes do plano (spec: ≤5 perguntas, recomendação primeiro)
   assets_enabled: true, // imagens geradas pelo Codex ($imagegen) quando o plano pede
@@ -223,7 +225,7 @@ function persistSoon() { if (persistTimer) return; persistTimer = setTimeout(() 
 async function guard(fn) {
   try { return await fn() } catch (err) {
     const m = state.mission; if (!m) return
-    if (err === PAUSE) {
+    if (err === PAUSE || (m.reason === 'budget' && state.settings.unattended)) {
       m.pause_requested = false; m.state = 'paused'; m.reason = null
       if (m.current != null && m.stories[m.current] && m.stories[m.current].state !== 'done') { const st = m.stories[m.current]; Object.assign(st, { state: 'queued', round: 0, steps: [], red_tests: [], tests_after: null, diff: '', review: null, visual: null }); if (state.project) await gitDiscard(state.project.dir).catch(() => {}); await refreshProject().catch(() => {}) }
       state.live = null; log('operador', 'pausou; a parte em andamento volta do começo quando continuar')
@@ -835,7 +837,8 @@ async function planMission() {
   m.skills = selectSkills(intent)
   setStep('intent', 'done')
   log('engine', `entendido: ${intent.complexity} · ${intent.domains.join(', ')} · skills — planejador: ${m.skills.planner.map((s) => s.id).join(', ') || 'nenhuma'}; maker: ${m.skills.maker.map((s) => s.id).join(', ') || 'nenhuma'}; revisor: ${m.skills.checker.map((s) => s.id).join(', ') || 'nenhuma'}; pesquisa: ${m.skills.research.map((s) => s.id).join(', ') || 'nenhuma'}`)
-  if (intent.questions?.length) { m.plan = { title: m.request.slice(0, 60), summary: intent.summary, complexity: intent.complexity, domains: intent.domains, needs_ui: intent.needs_ui, needs_backend: intent.needs_backend, questions: intent.questions, research_questions: [], stories: [] }; m.state = 'awaiting_plan'; m.reason = 'questions'; broadcast(); await persistMission().catch(() => {}); return }
+  if (intent.questions?.length && state.settings.unattended) { m.answers = intent.questions.map((q) => ({ id: q.id, question: q.question, answer: q.options?.[0]?.label || 'não sei' })); log('engine', `modo noturno: entrevista respondida com as recomendações (${m.answers.length} pergunta(s))`, 'warn') }
+  else if (intent.questions?.length) { m.plan = { title: m.request.slice(0, 60), summary: intent.summary, complexity: intent.complexity, domains: intent.domains, needs_ui: intent.needs_ui, needs_backend: intent.needs_backend, questions: intent.questions, research_questions: [], stories: [] }; m.state = 'awaiting_plan'; m.reason = 'questions'; broadcast(); await persistMission().catch(() => {}); return }
   return continuePlanning()
 }
 async function continuePlanning() {
@@ -858,7 +861,8 @@ async function makePlan() {
   log('engine', `plano: ${plan.title} · ${m.plan.complexity} · ${m.stories.length} story(s)`)
   if (plan.questions?.length) { m.state = 'awaiting_plan'; m.reason = 'questions'; broadcast(); return }
   // depois de um pedido de mudança o usuário sempre confere de novo
-  if (m.plan_feedback?.length || m.stories.length > 2 || m.plan.complexity === 'subsystem') { m.state = 'awaiting_plan'; m.reason = 'approve_plan'; broadcast(); await persistMission().catch(() => {}); return }
+  if (state.settings.unattended) log('engine', `modo noturno: plano com ${m.stories.length} parte(s) aprovado automaticamente`, 'warn')
+  else if (m.plan_feedback?.length || m.stories.length > 2 || m.plan.complexity === 'subsystem') { m.state = 'awaiting_plan'; m.reason = 'approve_plan'; broadcast(); await persistMission().catch(() => {}); return }
   return runStories()
 }
 
@@ -876,7 +880,16 @@ async function runStories() {
       const st = m.stories[i]
       if (st.state === 'done' || st.state === 'skipped') continue
       m.current = i; st.state = 'running'; broadcast()
-      const ok = await runStory(st)
+      let ok = await runStory(st)
+      if (!ok && state.settings.unattended && m.reason !== 'budget' && m.reason !== 'engine_error') {
+        if (['review_failed', 'review_changes'].includes(m.reason) && st.tests_after?.ok && !(st.review?.findings || []).some((f) => f.severity === 'high')) {
+          st.auto_accepted = true; ok = true; log('engine', `modo noturno: ${m.reason} com provas verdes e nada grave; parte aceita`, 'warn')
+        } else {
+          log('engine', `modo noturno: parada "${m.reason}" sem saída; parte pulada e arquivos dela desfeitos; segue para a próxima`, 'warn')
+          st.state = 'skipped'; st.skipped_reason = m.reason; await gitDiscard(state.project.dir); await refreshProject(); m.state = 'running'; m.reason = null; broadcast(); continue
+        }
+        m.state = 'running'; m.reason = null; st.state = 'running'
+      }
       if (!ok) return finish()
       await gitCommit(state.project.dir, `ade: ${st.title.slice(0, 72)}`)
       await refreshProject()
@@ -884,7 +897,8 @@ async function runStories() {
       st.state = 'done'; broadcast(); await persistMission().catch(() => {})
     }
     m.state = 'complete'; m.reason = null; m.current = null
-    log('engine', 'missão pronta: todas as stories provadas, revisadas e commitadas')
+    const skipped = m.stories.filter((x) => x.state === 'skipped').length
+    log('engine', skipped ? `missão pronta com ${skipped} parte(s) pulada(s) (veja o motivo em cada uma)` : 'missão pronta: todas as stories provadas, revisadas e commitadas', skipped ? 'warn' : 'info')
   } catch (e) { if (e === PAUSE) throw e; m.state = 'awaiting_operator'; m.reason = 'engine_error'; log('engine', `erro do engine: ${e.message}`, 'error') }
   return finish()
 }
@@ -893,6 +907,7 @@ function remember(st, r) { if (!r) return; st.files = [...new Set([...(st.files 
 async function runStory(st, round = 1, previousReview = null, previousVisual = null) {
   const m = state.mission
   const stop = (reason) => { m.state = 'awaiting_operator'; m.reason = reason; st.state = 'blocked'; log('engine', `parada: ${reason}`, 'error'); return false }
+  if (m.cost.usd > (state.settings.max_usd_per_mission || 60)) return stop('budget')
   st.round = round
   if (round === 1) {
     if (m.plan.needs_ui && state.settings.visual_gate) st.visual_before = await visualGate()
