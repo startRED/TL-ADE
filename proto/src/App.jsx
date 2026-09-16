@@ -1,412 +1,478 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Badge, Button, Code, Heading, ScrollArea, Text, TextField, Tooltip } from '@radix-ui/themes'
+import { Badge, Button, Code, Heading, ScrollArea, Switch, TextField, Tooltip } from '@radix-ui/themes'
 import {
   ArrowSquareOut, Play, CheckCircle, Warning, ArrowCounterClockwise, Trash, Flask, GitDiff, ChatCircleText, Terminal,
-  FolderSimple, ClockCounterClockwise, GearSix, Pulse, Circle, CheckFat, X, Lightning,
+  FolderSimple, ClockCounterClockwise, GearSix, Pulse, Circle, CheckFat, X, Lightning, Sparkle, Cpu, ListChecks, Eye, SkipForward, MagnifyingGlass,
 } from '@phosphor-icons/react'
 
-const PHASES = ['prepare', 'test', 'red', 'fix', 'tests', 'checker']
+const MISSION_STEPS = ['plan', 'research', 'prepare']
+const STORY_STEPS = ['test', 'red', 'fix', 'tests', 'visual', 'checker']
 const STEP = {
+  plan: { title: 'Entender o pedido', help: 'Uma IA lê o pedido e o projeto e transforma em um plano: o que entregar, em quais partes (stories), e como provar cada uma.' },
+  research: { title: 'Pesquisar fatos', help: 'Só quando o plano depende de algo externo (versão de API, regra pública). O Google (agy) responde com fontes.' },
   prepare: { title: 'Conferir o projeto', help: 'Roda o que o projeto já tem de verificação, para saber o ponto de partida.' },
-  test: { title: 'Escrever a prova', help: 'Uma "prova" é um mini-programa que checa se o que você pediu funciona. Ex.: "clica em Entrar duas vezes e confere se o botão travou". A IA escreve só isso, sem mexer no código ainda.' },
-  red: { title: 'Prova falha no código antigo', help: 'A ADE roda a prova ANTES de qualquer correção. Ela tem de falhar, porque o que você pediu ainda não existe. Se passasse agora, a prova estaria checando a coisa errada.' },
-  fix: { title: 'Corrigir o código', help: 'Só agora a IA muda o código, o mínimo necessário.' },
-  tests: { title: 'Prova passa no código novo', help: 'Roda a prova de novo. Agora tem de passar. Falhou antes e passou depois: é isso que garante que a mudança funciona de verdade.' },
-  checker: { title: 'Segunda IA revisa', help: 'Uma segunda IA, de outra empresa (Codex), lê a mudança e aprova ou aponta problemas. Quem escreve nunca é quem aprova.' },
+  test: { title: 'Escrever a prova', help: 'Uma "prova" é um mini-programa que checa se o que você pediu funciona. A IA escreve só isso, sem mexer no código ainda.' },
+  red: { title: 'Prova falha no código antigo', help: 'A ADE roda a prova ANTES de qualquer mudança. Ela tem de falhar, porque o que você pediu ainda não existe. Se passasse agora, a prova estaria checando a coisa errada.' },
+  fix: { title: 'Implementar', help: 'Só agora a IA muda o código, seguindo as skills ativas, o mínimo para a prova passar e os critérios valerem.' },
+  tests: { title: 'Prova passa no código novo', help: 'Roda a prova de novo. Agora tem de passar. Falhou antes e passou depois: é isso que garante que funciona.' },
+  visual: { title: 'Portão visual', help: 'Quando há interface, o Impeccable varre o código atrás de cara de template (cores gritantes, fontes batidas, layout genérico). Se achar algo, a IA faz uma rodada de retoque.' },
+  checker: { title: 'Segunda IA revisa', help: 'Uma IA de outra empresa (Codex) lê a mudança e aprova ou aponta problemas. Quem escreve nunca é quem aprova.' },
 }
 const STATE = {
+  planning: { label: 'Entendendo o pedido', color: 'teal' },
+  awaiting_plan: { label: 'Plano pronto', color: 'amber' },
   running: { label: 'Em andamento', color: 'teal' },
   awaiting_operator: { label: 'Precisa de você', color: 'amber' },
   complete: { label: 'Pronta', color: 'green' },
   discarded: { label: 'Descartada', color: 'gray' },
 }
 const REASON = {
-  tests_red: 'Alguma prova ficou vermelha depois da correção.',
-  no_red_test: 'A prova que a IA escreveu já passava no código antigo (ou ela não escreveu prova nenhuma). Então ela não serve para provar a mudança.',
-  review_changes: 'A segunda IA (Codex) pediu mudanças.',
+  tests_red: 'Alguma prova ficou vermelha depois da implementação.',
+  no_red_test: 'A prova que a IA escreveu já passava no código antigo (ou ela não escreveu prova). Então não serve para provar a mudança.',
+  review_changes: 'A segunda IA (Codex) pediu mudanças e a IA não convergiu em 3 rodadas.',
   no_changes: 'A IA não alterou nenhum arquivo.',
   engine_error: 'O motor falhou. Veja a atividade.',
-  accepted_by_operator: 'Aceita por você.',
+  plan_failed: 'Não deu para transformar o pedido em plano. Reescreva o pedido com mais contexto.',
+  approve_plan: 'O plano tem várias partes. Confira e aprove.',
+  questions: 'A IA precisa de uma resposta sua antes de começar.',
 }
+const ROLE_LABEL = { planner: 'Planejar (entender o pedido)', maker: 'Escrever código e provas', checker: 'Revisar (outra empresa)', research: 'Pesquisar fatos' }
 const SUGGESTIONS = [
-  'O botão Entrar tem de ficar desabilitado enquanto o envio está em curso, para evitar duplo clique.',
-  'Antes de enviar, avisar se o e-mail está em formato inválido, sem chamar o servidor.',
-  'Quando o usuário volta a digitar, a mensagem de erro anterior tem de sumir.',
+  'Crie uma planilha financeira de gastos pessoais, com categorias, total por mês e visual profissional.',
+  'Crie a página inicial de um site de uma cafeteria, com cardápio, horário e um formulário de reserva.',
+  'Crie uma lista de tarefas com prioridade e filtro, salvando no navegador.',
 ]
-
 const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+const secsBetween = (a, b) => Math.max(0, Math.round(((b ? new Date(b) : new Date()) - new Date(a)) / 1000))
 
 export default function App() {
-  const [state, setState] = useState({ project: null, mission: null, log: [], history: [], live: null, recent: [] })
-  const [allowCommands, setAllowCommands] = useState(true)
-  const [error, setError] = useState(null)
+  const [state, setState] = useState({ project: null, mission: null, log: [], history: [], live: null, recent: [], settings: null, catalog: [], registry: {} })
   const [request, setRequest] = useState('')
-  const [tab, setTab] = useState('activity')
+  const [tab, setTab] = useState('plan')
   const [connected, setConnected] = useState(false)
   const [view, setView] = useState('mission')
+  const [error, setError] = useState(null)
 
   useEffect(() => {
     const es = new EventSource('/api/events')
-    es.onopen = () => setConnected(true)
-    es.onerror = () => setConnected(false)
+    es.onopen = () => setConnected(true); es.onerror = () => setConnected(false)
     es.onmessage = (e) => setState(JSON.parse(e.data))
     return () => es.close()
   }, [])
 
-  const m = state.mission
-  const p = state.project
-  const running = m?.state === 'running'
+  const m = state.mission, p = state.project, s = state.settings
+  const busy = m && ['running', 'planning'].includes(m.state)
+  useEffect(() => { if (m?.state === 'planning') setTab('activity'); if (m?.state === 'awaiting_plan') setTab('plan') }, [m?.state])
 
   async function run(text) {
     const req = (text ?? request).trim()
-    if (!req || running) return
-    setTab('activity'); setView('mission'); setError(null)
-    const r = await post('/api/run', { request: req, model: 'sonnet', allow_commands: allowCommands })
-    if (!r.ok) { const j = await r.json().catch(() => ({})); setError(j.error || 'Não deu para começar.'); if (j.error?.includes('git')) setView('projects') }
+    if (!req || busy) return
+    setView('mission'); setError(null)
+    const r = await post('/api/run', { request: req })
+    if (!r.ok) { const j = await r.json().catch(() => ({})); setError(j.error || 'Não deu para começar.'); if (/git|pasta/i.test(j.error || '')) setView('projects'); if (/Modelos/.test(j.error || '')) setView('models') }
   }
+  const decide = (option, text) => post('/api/decide', { option, text })
+  const saveSettings = (patch) => post('/api/settings', patch)
 
   return (
     <div className="shell">
       <header className="topbar">
-        <div className="brand"><span className="logo" /><span>TL-ADE</span><span className="dim">protótipo</span></div>
+        <div className="brand"><span className="logo" /><span>TL-ADE</span><span className="dim">demonstração</span></div>
         <form className="cmd" onSubmit={(e) => { e.preventDefault(); run() }}>
-          <TextField.Root size="2" value={request} onChange={(e) => setRequest(e.target.value)} placeholder="Descreva o que você quer que seja feito no projeto…" disabled={running}>
+          <TextField.Root size="2" value={request} onChange={(e) => setRequest(e.target.value)} placeholder={p ? `O que construir em ${p.name}? Escreva do seu jeito.` : 'Escolha uma pasta primeiro'} disabled={busy}>
             <TextField.Slot><Lightning weight="fill" color="var(--teal-9)" /></TextField.Slot>
-            <TextField.Slot>
-              <Button size="1" type="submit" disabled={running || !request.trim()}>{running ? 'Rodando' : 'Rodar'}</Button>
-            </TextField.Slot>
+            <TextField.Slot><Button size="1" type="submit" disabled={busy || !request.trim()}>{busy ? 'Rodando' : 'Rodar'}</Button></TextField.Slot>
           </TextField.Root>
         </form>
-        <div className="topright">{m && <MissionChip m={m} />}{p?.has_index && <a className="open-app" href="/api/app/" target="_blank" rel="noreferrer"><ArrowSquareOut /> Abrir o app</a>}</div>
+        <div className="topright">
+          {m && <MissionChip m={m} />}
+          {p?.has_index && <a className="open-app" href="/api/app/" target="_blank" rel="noreferrer"><ArrowSquareOut /> Abrir o app</a>}
+        </div>
       </header>
 
       <div className="body">
         <nav className="rail" aria-label="Seções">
-          <RailButton icon={<Pulse />} label="Missão atual" active={view === 'mission'} onClick={() => setView('mission')} badge={m?.state === 'awaiting_operator'} />
+          <RailButton icon={<Pulse />} label="Missão" active={view === 'mission'} onClick={() => setView('mission')} badge={m && ['awaiting_operator', 'awaiting_plan'].includes(m.state)} />
+          <RailButton icon={<Sparkle />} label="Skills" active={view === 'skills'} onClick={() => setView('skills')} />
+          <RailButton icon={<Cpu />} label="Modelos" active={view === 'models'} onClick={() => setView('models')} />
           <RailButton icon={<ClockCounterClockwise />} label="Histórico" active={view === 'history'} onClick={() => setView('history')} />
           <RailButton icon={<FolderSimple />} label="Projetos" active={view === 'projects'} onClick={() => setView('projects')} />
           <span className="grow" />
-          <RailButton icon={<GearSix />} label="Configurações" disabled />
+          <RailButton icon={<GearSix />} label="Opções" active={view === 'options'} onClick={() => setView('options')} />
         </nav>
 
         <aside className="side">
           <button className="side-head" onClick={() => setView('projects')} title={p?.dir || ''}>
             <FolderSimple size={16} color="var(--gray-10)" />
             <div>
-              <Text size="2" weight="medium" as="p">{p?.name || 'Nenhuma pasta'}</Text>
-              <Text size="1" color="gray" as="p">{p ? `${p.branch || 'sem git'} · ${p.runner === 'none' ? 'sem provas' : p.runner}` : 'escolha uma pasta'}</Text>
+              <p className="side-title">{p?.name || 'Nenhuma pasta'}</p>
+              <p className="dim small">{p ? `${p.branch || 'sem git'} · ${p.runner === 'none' ? 'sem provas' : p.runner}${p.files === 0 ? ' · vazia' : ''}` : 'escolha uma pasta'}</p>
             </div>
             <span className="dim small" style={{ marginLeft: 'auto' }}>trocar</span>
           </button>
-          {view === 'mission' && <Steps m={m} />}
+          {view === 'mission' && <Progress m={m} />}
+          {view === 'skills' && <SkillsPanel state={state} save={saveSettings} />}
+          {view === 'models' && <ModelsPanel state={state} save={saveSettings} />}
           {view === 'history' && <History history={state.history} current={m} />}
-          {view === 'projects' && <Projects p={p} recent={state.recent} running={running} onChanged={() => { setView('mission'); setError(null) }} />}
+          {view === 'projects' && <Projects p={p} recent={state.recent} busy={busy} onChanged={() => { setView('mission'); setError(null) }} />}
+          {view === 'options' && <Options s={s} save={saveSettings} />}
         </aside>
 
         <main className="main">
           {error && <div className="errbar"><Warning weight="fill" /> {error}</div>}
-          {!m ? <Empty onPick={(s) => { setRequest(s); run(s) }} running={running} p={p} allowCommands={allowCommands} setAllowCommands={setAllowCommands} /> : (
+          {!m ? <Empty onPick={(t) => { setRequest(t); run(t) }} busy={busy} p={p} s={s} /> : (
             <>
               <div className="main-head">
-                <Heading size="4" style={{ letterSpacing: '-0.01em' }}>{m.request}</Heading>
-                <Text size="1" color="gray" as="p">{m.id} · rodada {m.round || 1} · começou às {m.started_at.slice(11, 16)}</Text>
+                <Heading size="4" style={{ letterSpacing: '-0.01em' }}>{m.plan?.title || m.request}</Heading>
+                <p className="dim small">{m.plan ? m.request : `${m.id} · começou às ${m.started_at.slice(11, 16)}`}</p>
               </div>
               <div className="tabs" role="tablist">
+                <Tab active={tab === 'plan'} onClick={() => setTab('plan')} icon={<ListChecks />} count={m.stories.length || null}>Plano</Tab>
                 <Tab active={tab === 'activity'} onClick={() => setTab('activity')} icon={<Terminal />}>Atividade</Tab>
-                <Tab active={tab === 'diff'} onClick={() => setTab('diff')} icon={<GitDiff />} count={m.diff ? m.diff.split('\n').filter((l) => l.startsWith('diff --git')).length : null}>Alterações</Tab>
-                <Tab active={tab === 'tests'} onClick={() => setTab('tests')} icon={<Flask />} count={m.tests_after ? `${m.tests_after.total - m.tests_after.failed}/${m.tests_after.total}` : null} tone={m.tests_after ? (m.tests_after.ok ? 'green' : 'red') : null}>Provas</Tab>
-                <Tab active={tab === 'review'} onClick={() => setTab('review')} icon={<ChatCircleText />} count={m.review ? (m.review.verdict === 'approve' ? 'ok' : m.review.findings.length) : null} tone={m.review ? (m.review.verdict === 'approve' ? 'green' : 'amber') : null}>Revisão</Tab>
+                <Tab active={tab === 'diff'} onClick={() => setTab('diff')} icon={<GitDiff />}>Alterações</Tab>
+                <Tab active={tab === 'tests'} onClick={() => setTab('tests')} icon={<Flask />} {...testsBadge(m)}>Provas</Tab>
+                <Tab active={tab === 'visual'} onClick={() => setTab('visual')} icon={<Eye />} {...visualBadge(m)}>Visual</Tab>
+                <Tab active={tab === 'review'} onClick={() => setTab('review')} icon={<ChatCircleText />} {...reviewBadge(m)}>Revisão</Tab>
               </div>
               <ScrollArea className="main-body" scrollbars="vertical">
-                {tab === 'activity' && <Console log={state.log} running={running} live={state.live} />}
-                {tab === 'diff' && <Diff diff={m.diff} />}
+                {tab === 'plan' && <Plan m={m} catalog={state.catalog} />}
+                {tab === 'activity' && <Console log={state.log} busy={busy} live={state.live} />}
+                {tab === 'diff' && <Diff m={m} />}
                 {tab === 'tests' && <Tests m={m} />}
-                {tab === 'review' && <Review review={m.review} />}
+                {tab === 'visual' && <Visual m={m} />}
+                {tab === 'review' && <Review m={m} />}
               </ScrollArea>
             </>
           )}
         </main>
 
-        <aside className="right">
-          <Report m={m} decide={(o) => post('/api/decide', { option: o })} />
-        </aside>
+        <aside className="right"><Report m={m} decide={decide} /></aside>
       </div>
 
       <footer className="status">
         <span className={connected ? 'ok' : 'bad'}>{connected ? '● servidor ligado' : '○ sem servidor'}</span>
         <span title={p?.dir}>{p ? p.dir : 'sem pasta'}</span>
-        <span>Claude Sonnet escreve · Codex revisa</span>
+        {s && <span>{s.roles.maker.model} escreve · {s.roles.checker.model} revisa · {s.roles.planner.model} planeja</span>}
         <span className="grow" />
-        {m && <span>{m.cost.calls} chamadas · US$ {m.cost.usd.toFixed(3)} no Claude</span>}
+        {m && <span>{m.cost.calls} chamadas · {Math.round((m.cost.tokens_in + m.cost.tokens_out) / 1000)}k tokens · US$ {m.cost.usd.toFixed(2)} no Claude</span>}
       </footer>
     </div>
   )
 }
 
+const cur = (m) => m && m.current != null ? m.stories[m.current] : (m?.stories?.find((s) => s.state === 'blocked') || null)
+function testsBadge(m) { const st = cur(m); if (!st?.tests_after) return {}; return { count: `${st.tests_after.total - st.tests_after.failed}/${st.tests_after.total}`, tone: st.tests_after.ok ? 'green' : 'red' } }
+function visualBadge(m) { const st = cur(m); if (!st?.visual?.available) return {}; return { count: st.visual.findings.length, tone: st.visual.findings.length ? 'amber' : 'green' } }
+function reviewBadge(m) { const st = cur(m); if (!st?.review) return {}; return { count: st.review.verdict === 'approve' ? 'ok' : st.review.findings.length, tone: st.review.verdict === 'approve' ? 'green' : 'amber' } }
+
 /* ---------- topo ---------- */
 function MissionChip({ m }) {
   const s = STATE[m.state] || { label: m.state, color: 'gray' }
   const [, tick] = useState(0)
-  useEffect(() => { if (m.state !== 'running') return; const id = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(id) }, [m.state])
-  const secs = Math.max(0, Math.round(((m.finished_at ? new Date(m.finished_at) : new Date()) - new Date(m.started_at)) / 1000))
-  return (
-    <div className="chip">
-      <Badge color={s.color} variant={m.state === 'awaiting_operator' ? 'solid' : 'soft'} size="2">{s.label}</Badge>
-      <Text size="1" color="gray">{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}</Text>
-    </div>
-  )
+  useEffect(() => { if (!['running', 'planning'].includes(m.state)) return; const id = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(id) }, [m.state])
+  const secs = secsBetween(m.started_at, m.finished_at)
+  return <div className="chip"><Badge color={s.color} variant={m.state.startsWith('awaiting') ? 'solid' : 'soft'} size="2">{s.label}</Badge><span className="dim small">{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}</span></div>
 }
-
-function RailButton({ icon, label, active, onClick, badge, disabled }) {
-  return (
-    <Tooltip content={label} side="right">
-      <button className={`rail-btn ${active ? 'active' : ''}`} onClick={onClick} disabled={disabled} aria-label={label} aria-current={active ? 'page' : undefined}>
-        {icon}{badge && <span className="rail-badge" />}
-      </button>
-    </Tooltip>
-  )
+function RailButton({ icon, label, active, onClick, badge }) {
+  return <Tooltip content={label} side="right"><button className={`rail-btn ${active ? 'active' : ''}`} onClick={onClick} aria-label={label} aria-current={active ? 'page' : undefined}>{icon}{badge && <span className="rail-badge" />}</button></Tooltip>
 }
-
 function Tab({ active, onClick, icon, children, count, tone }) {
-  return (
-    <button role="tab" aria-selected={active} className={`tab ${active ? 'active' : ''}`} onClick={onClick}>
-      {icon}<span>{children}</span>{count != null && <span className={`tab-count ${tone || ''}`}>{count}</span>}
-    </button>
-  )
+  return <button role="tab" aria-selected={active} className={`tab ${active ? 'active' : ''}`} onClick={onClick}>{icon}<span>{children}</span>{count != null && <span className={`tab-count ${tone || ''}`}>{count}</span>}</button>
 }
 
-/* ---------- lateral: passos ---------- */
-function Steps({ m }) {
+/* ---------- lateral: progresso (épicos = stories) ---------- */
+function Progress({ m }) {
   const [showAll, setShowAll] = useState(false)
   const [, tick] = useState(0)
-  useEffect(() => { if (!m || m.state !== 'running') return; const id = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(id) }, [m?.state])
-  const steps = PHASES.map((name) => ({ name, ...STEP[name], ...(m?.steps.find((s) => s.name === name) || { status: 'pending' }) }))
-  const done = steps.filter((s) => s.status === 'done').length
-  const explainAll = !m || showAll
+  useEffect(() => { if (!m || !['running', 'planning'].includes(m.state)) return; const id = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(id) }, [m?.state])
+  if (!m) return (
+    <div className="steps">
+      <span className="lbl">Como a ADE trabalha</span>
+      <ol className="timeline">{[...MISSION_STEPS, ...STORY_STEPS].filter((n) => n !== 'research').map((n, i) => <StepRow key={n} i={i} s={{ name: n, status: 'pending', ...STEP[n] }} open />)}</ol>
+    </div>
+  )
+  const done = m.stories.filter((s) => s.state === 'done').length
+  const st = cur(m)
   return (
     <div className="steps">
-      <div className="steps-head">
-        <span className="lbl" style={{ margin: 0 }}>{m ? `Progresso · ${done} de 6` : 'Como a ADE trabalha'}</span>
-        {m && <button className="link" onClick={() => setShowAll((v) => !v)}>{showAll ? 'menos' : 'explicar tudo'}</button>}
-      </div>
-      <div className="progress"><span style={{ '--p': done / 6 }} /></div>
+      <div className="steps-head"><span className="lbl" style={{ margin: 0 }}>{m.plan ? `Partes · ${done} de ${m.stories.length}` : 'Missão'}</span><button className="link" onClick={() => setShowAll((v) => !v)}>{showAll ? 'menos' : 'explicar tudo'}</button></div>
+      <div className="progress"><span style={{ '--p': m.stories.length ? done / m.stories.length : 0 }} /></div>
       <ol className="timeline">
-        {steps.map((s, i) => {
-          const secs = s.started_at ? Math.max(0, Math.round(((s.finished_at ? new Date(s.finished_at) : new Date()) - new Date(s.started_at)) / 1000)) : null
-          const open = explainAll || s.status === 'running' || s.status === 'failed'
-          return (
-            <li key={s.name} className={`step ${s.status}`}>
-              <span className="step-dot">
-                {s.status === 'done' ? <CheckFat weight="fill" /> : s.status === 'failed' ? <X weight="bold" /> : s.status === 'running' ? <Circle weight="fill" /> : <span>{i + 1}</span>}
-              </span>
-              <div className="step-body">
-                <div className="step-title">
-                  <span>{s.title}</span>
-                  <span className="step-meta">{s.status === 'pending' ? '' : s.status === 'skipped' ? 'pulado' : s.status === 'failed' ? 'parou aqui' : `${secs ?? 0} s`}</span>
-                </div>
-                {open && <p className="step-help">{s.help}</p>}
-              </div>
-            </li>
-          )
-        })}
+        {MISSION_STEPS.filter((n) => n !== 'research' || m.steps.find((x) => x.name === 'research')).map((n, i) => <StepRow key={n} i={i} s={{ ...STEP[n], ...(m.steps.find((x) => x.name === n) || { status: 'pending' }), name: n }} open={showAll} />)}
       </ol>
-      {m && (
-        <div className="stats">
-          <Stat k="Chamadas de IA" v={m.cost.calls} />
-          <Stat k="Turnos do Claude" v={m.cost.turns} />
-          <Stat k="Custo no Claude" v={`US$ ${m.cost.usd.toFixed(3)}`} />
-          <Stat k="Tokens" v={`${(m.cost.tokens_in / 1000).toFixed(1)}k novos · ${((m.cost.cache_read || 0) / 1000).toFixed(0)}k cache`} />
-        </div>
-      )}
+      {m.stories.length > 0 && <span className="lbl" style={{ marginTop: 12 }}>Partes do trabalho</span>}
+      <ol className="stories">
+        {m.stories.map((s, i) => (
+          <li key={s.id} className={`story ${s.state} ${st === s ? 'cur' : ''}`}>
+            <span className="story-dot">{s.state === 'done' ? <CheckFat weight="fill" /> : s.state === 'blocked' ? <X weight="bold" /> : s.state === 'skipped' ? <SkipForward /> : s.state === 'running' ? <Circle weight="fill" /> : i + 1}</span>
+            <div className="story-body">
+              <div className="story-title"><span>{s.title}</span><span className="step-meta">{s.state === 'running' ? `rodada ${s.round}` : s.state === 'done' ? 'pronta' : s.state === 'blocked' ? 'parou' : s.state === 'skipped' ? 'pulada' : ''}</span></div>
+              {(st === s) && <ol className="timeline inner">{STORY_STEPS.filter((n) => n !== 'visual' || m.plan?.needs_ui).map((n, j) => <StepRow key={n} i={j} s={{ ...STEP[n], ...(s.steps.find((x) => x.name === n) || { status: 'pending' }), name: n }} open={showAll} />)}</ol>}
+            </div>
+          </li>
+        ))}
+      </ol>
+      <div className="stats">
+        <Stat k="Chamadas de IA" v={m.cost.calls} />
+        <Stat k="Tokens" v={`${(m.cost.tokens_in / 1000).toFixed(0)}k novos · ${((m.cost.cache_read || 0) / 1000).toFixed(0)}k cache`} />
+        <Stat k="Custo no Claude" v={`US$ ${m.cost.usd.toFixed(3)}`} />
+        <Stat k="Cota do plano" v="indisponível nas CLIs" />
+      </div>
     </div>
+  )
+}
+function StepRow({ s, i, open }) {
+  const status = s.status || 'pending'
+  const secs = s.started_at ? secsBetween(s.started_at, s.finished_at) : null
+  const meta = { pending: '', running: `${secs ?? 0} s`, done: `ok · ${secs ?? 0} s`, failed: 'atenção', warn: 'avisos', skipped: 'pulado' }[status]
+  const show = open || status === 'running' || status === 'failed'
+  return (
+    <li className={`step ${status}`}>
+      <span className="step-dot">{status === 'done' ? <CheckFat weight="fill" /> : status === 'failed' ? <X weight="bold" /> : status === 'warn' ? <Warning weight="fill" /> : status === 'running' ? <Circle weight="fill" /> : <span>{i + 1}</span>}</span>
+      <div className="step-body"><div className="step-title"><span>{s.title}</span><span className="step-meta">{meta}</span></div>{show && <p className="step-help">{s.help}</p>}</div>
+    </li>
   )
 }
 const Stat = ({ k, v }) => <div className="stat"><span>{k}</span><b>{v}</b></div>
 
-function History({ history, current }) {
-  if (!history?.length) return <div className="side-empty"><p className="dim">As missões que terminarem aparecem aqui.</p></div>
+/* ---------- lateral: skills ---------- */
+function SkillsPanel({ state, save }) {
+  const { catalog, settings: s, mission: m } = state
+  const [q, setQ] = useState('')
+  const [open, setOpen] = useState(null)
+  const [body, setBody] = useState('')
+  if (!s) return null
+  const active = new Map((m?.skills || []).map((x) => [x.id, x]))
+  const list = catalog.filter((c) => !q || `${c.id} ${c.description}`.toLowerCase().includes(q.toLowerCase()))
+  const toggleForce = (id) => save({ skills: { forced: s.skills.forced.includes(id) ? s.skills.forced.filter((x) => x !== id) : [...s.skills.forced, id], excluded: s.skills.excluded.filter((x) => x !== id) } })
+  const toggleExclude = (id) => save({ skills: { excluded: s.skills.excluded.includes(id) ? s.skills.excluded.filter((x) => x !== id) : [...s.skills.excluded, id], forced: s.skills.forced.filter((x) => x !== id) } })
+  async function show(id) { if (open === id) return setOpen(null); const r = await fetch(`/api/skill?id=${id}`); const j = await r.json(); setBody(j.body || ''); setOpen(id) }
   return (
-    <div className="hist">
-      {history.map((h) => (
-        <div key={h.id} className={`hist-row ${h.id === current?.id ? 'now' : ''}`}>
-          <Badge size="1" color={STATE[h.state]?.color || 'gray'} variant="soft">{STATE[h.state]?.label || h.state}</Badge>
-          <p style={{ marginTop: 4 }}>{h.request}</p>
-          <p className="dim small">{h.finished_at?.slice(11, 16)} · US$ {(h.usd || 0).toFixed(3)}</p>
-        </div>
-      ))}
+    <div className="panel">
+      <div className="steps-head"><span className="lbl" style={{ margin: 0 }}>Skills · {catalog.length} no catálogo</span><label className="sw"><Switch size="1" checked={s.skills.auto} onCheckedChange={(v) => save({ skills: { auto: v } })} /> automático</label></div>
+      <p className="dim small">Skills são manuais de qualidade que a IA recebe junto com o pedido. A ADE escolhe sozinha pelas regras (interface ou design: sempre <b>impeccable</b> + <b>design-taste-frontend</b>; backend: padrões de API) e por afinidade com o pedido. Até {s.skills.max} por missão, cada uma cortada em 7,5k tokens.</p>
+      {m?.skills?.length > 0 && <div className="chips">{m.skills.map((x) => <span key={x.id} className="chip-skill on" title={x.reason}>{x.id}<small>{x.reason}</small></span>)}</div>}
+      <TextField.Root size="1" value={q} onChange={(e) => setQ(e.target.value)} placeholder="filtrar…" style={{ marginTop: 8 }}><TextField.Slot><MagnifyingGlass /></TextField.Slot></TextField.Root>
+      <ul className="skill-list">
+        {list.map((c) => {
+          const forced = s.skills.forced.includes(c.id), excluded = s.skills.excluded.includes(c.id)
+          return (
+            <li key={c.id} className={`skill ${active.has(c.id) ? 'active' : ''} ${excluded ? 'off' : ''}`}>
+              <button className="skill-name" onClick={() => show(c.id)}><span>{c.id}</span><span className="dim small">{c.source} · {(c.bytes / 4 / 1000).toFixed(1)}k tok</span></button>
+              <p className="dim small">{c.description || 'sem descrição'}</p>
+              <div className="skill-actions">
+                {c.tags.map((t) => <span key={t} className="tag">{t}</span>)}
+                <span className="grow" />
+                <button className={`mini ${forced ? 'on' : ''}`} onClick={() => toggleForce(c.id)}>{forced ? 'fixada' : 'fixar'}</button>
+                <button className={`mini ${excluded ? 'on' : ''}`} onClick={() => toggleExclude(c.id)}>{excluded ? 'excluída' : 'excluir'}</button>
+              </div>
+              {open === c.id && <pre className="skill-body">{body.slice(0, 6000)}{body.length > 6000 ? '\n…' : ''}</pre>}
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }
 
-function Projects({ p, recent, running, onChanged }) {
+/* ---------- lateral: modelos ---------- */
+function ModelsPanel({ state, save }) {
+  const { settings: s, registry } = state
+  if (!s) return null
+  const setRole = (role, family, model) => save({ roles: { [role]: { family, model } } })
+  return (
+    <div className="panel">
+      <span className="lbl">Quem faz o quê</span>
+      <p className="dim small">Cada papel tem um modelo. Quem escreve e quem revisa têm de ser de empresas diferentes: é a regra que faz a revisão valer alguma coisa.</p>
+      {Object.entries(ROLE_LABEL).map(([role, label]) => (
+        <div key={role} className="role">
+          <span className="role-label">{label}</span>
+          <select className="sel" value={`${s.roles[role].family}|${s.roles[role].model}`} onChange={(e) => { const [f, mo] = e.target.value.split('|'); setRole(role, f, mo) }}>
+            {Object.entries(registry).map(([fam, fr]) => <optgroup key={fam} label={fr.label}>{fr.models.map((mo) => <option key={mo.id} value={`${fam}|${mo.id}`}>{mo.label}{mo.note ? ` · ${mo.note}` : ''}</option>)}</optgroup>)}
+          </select>
+        </div>
+      ))}
+      <p className="dim small" style={{ marginTop: 10 }}>Fable é o mais forte e o mais caro (~US$ 0,60 só de abertura por chamada). Use para planejar pedidos grandes, não para escrever código linha a linha.</p>
+    </div>
+  )
+}
+
+function Options({ s, save }) {
+  if (!s) return null
+  return (
+    <div className="panel">
+      <span className="lbl">Opções</span>
+      <label className="opt"><Switch checked={s.allow_commands} onCheckedChange={(v) => save({ allow_commands: v })} /><span><b>Deixar a IA rodar comandos</b><small>Instalar dependências, criar projeto. Desligue para ela só ler e editar arquivos.</small></span></label>
+      <label className="opt"><Switch checked={s.visual_gate} onCheckedChange={(v) => save({ visual_gate: v })} /><span><b>Portão visual (Impeccable)</b><small>Varre a interface atrás de cara de template e força uma rodada de retoque.</small></span></label>
+      <label className="opt"><Switch checked={s.research_enabled} onCheckedChange={(v) => save({ research_enabled: v })} /><span><b>Pesquisa com Google (agy)</b><small>Só quando o plano depende de um fato externo.</small></span></label>
+    </div>
+  )
+}
+
+function History({ history, current }) {
+  if (!history?.length) return <div className="side-empty"><p className="dim">As missões que terminarem aparecem aqui.</p></div>
+  return <div className="hist">{history.map((h) => (
+    <div key={h.id} className={`hist-row ${h.id === current?.id ? 'now' : ''}`}>
+      <Badge size="1" color={STATE[h.state]?.color || 'gray'} variant="soft">{STATE[h.state]?.label || h.state}</Badge>
+      <p style={{ marginTop: 4 }}>{h.title || h.request}</p>
+      <p className="dim small">{h.project?.split(/[\\/]/).pop()} · {h.stories || 0} partes · {h.finished_at?.slice(11, 16)} · US$ {(h.usd || 0).toFixed(2)}</p>
+    </div>
+  ))}</div>
+}
+
+function Projects({ p, recent, busy, onChanged }) {
   const [dir, setDir] = useState(p?.dir || '')
   const [msg, setMsg] = useState(null)
-  async function choose(d) {
-    setMsg(null)
-    const r = await post('/api/project', { dir: d })
-    const j = await r.json().catch(() => ({}))
-    if (!r.ok) return setMsg(j.error || 'Não abriu.')
-    setDir(j.dir); onChanged()
-  }
+  async function choose(d) { setMsg(null); const r = await post('/api/project', { dir: d }); const j = await r.json().catch(() => ({})); if (!r.ok) return setMsg(j.error || 'Não abriu.'); setDir(j.dir); onChanged() }
   async function gitInit() { const r = await post('/api/project/git-init', {}); if (r.ok) setMsg('git iniciado com um commit de base.') }
   return (
-    <div className="projects">
+    <div className="panel">
       <span className="lbl">Pasta do projeto</span>
       <form onSubmit={(e) => { e.preventDefault(); choose(dir) }}>
-        <TextField.Root size="2" value={dir} onChange={(e) => setDir(e.target.value)} placeholder="E:\meus-projetos\minha-app" disabled={running} />
-        <Button size="2" type="submit" disabled={running || !dir.trim()} style={{ marginTop: 6, width: '100%' }}>Usar esta pasta</Button>
+        <TextField.Root size="2" value={dir} onChange={(e) => setDir(e.target.value)} placeholder="E:\meus-projetos\minha-app" disabled={busy} />
+        <Button size="2" type="submit" disabled={busy || !dir.trim()} style={{ marginTop: 6, width: '100%' }}>Usar esta pasta</Button>
       </form>
-      <p className="dim small">Cole o caminho de qualquer pasta do seu PC. Pasta vazia também serve: a IA cria o projeto do zero.</p>
+      <p className="dim small">Cole o caminho de qualquer pasta do seu PC. Se não existir, a ADE cria. Pasta vazia: a IA monta o projeto do zero.</p>
       {msg && <p className="small" style={{ color: 'var(--amber-11)' }}>{msg}</p>}
       {p && (
         <div className="proj-info">
           <div><span>git</span><b>{p.git ? (p.dirty ? 'com alterações pendentes' : 'limpo') : 'não é repositório'}</b></div>
           <div><span>provas</span><b>{p.runner === 'none' ? 'nenhum runner (a IA cria)' : p.test_cmd}</b></div>
           <div><span>página</span><b>{p.has_index ? 'index.html na raiz' : 'sem página'}</b></div>
-          {p.nested && <p className="dim small" style={{ margin: '4px 0 0' }}>Esta pasta fica dentro do repositório {p.root}; os commits da ADE vão para lá, só com arquivos desta pasta.</p>}
-          {!p.git && <Button size="1" variant="soft" onClick={gitInit} disabled={running}>Iniciar git nesta pasta</Button>}
+          {p.nested && <p className="dim small" style={{ margin: '4px 0 0' }}>Fica dentro do repositório {p.root}; os commits da ADE vão para lá, só com arquivos desta pasta.</p>}
+          {!p.git && <Button size="1" variant="soft" onClick={gitInit} disabled={busy}>Iniciar git nesta pasta</Button>}
         </div>
       )}
-      {recent?.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <span className="lbl">Recentes</span>
-          {recent.map((d) => <button key={d} className="recent" onClick={() => choose(d)} disabled={running || d === p?.dir} title={d}><FolderSimple size={14} />{d.split(/[\\/]/).pop()}<span className="dim small">{d}</span></button>)}
-        </div>
-      )}
+      {recent?.length > 0 && <div style={{ marginTop: 16 }}><span className="lbl">Recentes</span>{recent.map((d) => <button key={d} className="recent" onClick={() => choose(d)} disabled={busy || d === p?.dir} title={d}><FolderSimple size={14} />{d.split(/[\\/]/).pop()}<span className="dim small">{d}</span></button>)}</div>}
     </div>
   )
 }
 
 /* ---------- centro ---------- */
-function Empty({ onPick, running, p, allowCommands, setAllowCommands }) {
+function Empty({ onPick, busy, p, s }) {
   return (
-    <div className="empty">
-      <div className="empty-inner">
-        <Heading size="6" style={{ letterSpacing: '-0.02em' }}>O que você quer construir{p ? ` em ${p.name}` : ''}?</Heading>
-        <p className="dim">Escreva em português, do seu jeito: uma correção, uma tela nova, um app inteiro. A ADE escreve a prova, implementa, confere e manda uma segunda IA revisar. Você só decide no fim.</p>
-        <label className="toggle"><input type="checkbox" checked={allowCommands} onChange={(e) => setAllowCommands(e.target.checked)} /> Deixar a IA rodar comandos (instalar dependências, criar projeto). Desligue para ela só ler e editar arquivos.</label>
-        {p?.name === 'example' && (
-          <>
-            <span className="lbl" style={{ marginTop: 18 }}>Experimente no projeto de exemplo</span>
-            <div className="sugs">
-              {SUGGESTIONS.map((s) => <button key={s} className="sug" onClick={() => onPick(s)} disabled={running}><Play weight="fill" />{s}</button>)}
-            </div>
-          </>
-        )}
+    <div className="empty"><div className="empty-inner">
+      <Heading size="6" style={{ letterSpacing: '-0.02em' }}>O que você quer construir{p ? ` em ${p.name}` : ''}?</Heading>
+      <p className="dim">Escreva em português, do seu jeito: uma correção, uma tela, um app inteiro. A ADE entende o pedido, escolhe as skills, escreve as provas, implementa, confere o visual e manda outra IA revisar. Você só decide no fim.</p>
+      {s && <p className="dim small">Agora: {s.roles.planner.model} planeja · {s.roles.maker.model} escreve · {s.roles.checker.model} revisa · comandos {s.allow_commands ? 'liberados' : 'bloqueados'}.</p>}
+      <span className="lbl" style={{ marginTop: 18 }}>Experimente</span>
+      <div className="sugs">{SUGGESTIONS.map((t) => <button key={t} className="sug" onClick={() => onPick(t)} disabled={busy || !p}><Play weight="fill" />{t}</button>)}</div>
+    </div></div>
+  )
+}
+
+function Plan({ m, catalog }) {
+  if (!m.plan) return <Hint>{m.state === 'planning' ? 'A IA está lendo o pedido e o projeto para montar o plano. Acompanhe na Atividade.' : 'Sem plano.'}</Hint>
+  const pl = m.plan
+  return (
+    <div className="plan">
+      <div className="plan-head">
+        <Badge variant="soft" color="gray">{({ trivial: 'trivial', bounded: 'pequeno', feature: 'funcionalidade', subsystem: 'grande' })[pl.complexity] || pl.complexity}</Badge>
+        {pl.needs_ui && <Badge variant="soft" color="teal">interface</Badge>}{pl.needs_backend && <Badge variant="soft" color="violet">backend</Badge>}
+        {pl.domains.map((d) => <Badge key={d} variant="outline" color="gray">{d}</Badge>)}
       </div>
+      <p className="plan-summary">{pl.summary}</p>
+      {pl.questions?.length > 0 && <div className="explain bad"><b>A IA precisa saber:</b><ul>{pl.questions.map((q) => <li key={q}>{q}</li>)}</ul></div>}
+      <span className="lbl">Partes do trabalho</span>
+      <ol className="plan-stories">
+        {m.stories.map((s, i) => (
+          <li key={s.id} className={s.state}>
+            <div className="ps-head"><span className="ps-n">{i + 1}</span><b>{s.title}</b><Badge size="1" variant="soft" color={{ done: 'green', running: 'teal', blocked: 'amber', skipped: 'gray', queued: 'gray' }[s.state]}>{{ done: 'pronta', running: 'em andamento', blocked: 'parou', skipped: 'pulada', queued: 'na fila' }[s.state]}</Badge></div>
+            <p className="dim">{s.request}</p>
+            <ul className="acc">{s.acceptance.map((a) => <li key={a}>{a}</li>)}</ul>
+            <p className="dim small">Prova: {s.test_hint}</p>
+          </li>
+        ))}
+      </ol>
+      <span className="lbl">Skills ativas</span>
+      {m.skills.length ? <div className="chips">{m.skills.map((x) => <span key={x.id} className="chip-skill on">{x.id}<small>{x.reason}{x.truncated ? ' · cortada em 7,5k' : ''}</small></span>)}</div> : <p className="dim small">Nenhuma skill se aplica a este pedido.</p>}
+      {m.research?.findings?.length > 0 && <><span className="lbl">Pesquisa</span>{m.research.findings.map((f) => <div key={f.question} className="explain"><b>{f.question}</b><p>{f.answer}</p>{f.sources?.length > 0 && <p className="dim small">{f.sources.join(' · ')}</p>}</div>)}</>}
     </div>
   )
 }
 
-function Console({ log, running, live }) {
+function Console({ log, busy, live }) {
   const end = useRef(null)
   const [thinking, setThinking] = useState(false)
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }) }, [log.length, live?.text?.length])
   const groups = useMemo(() => {
     const out = []
-    for (const l of log) {
-      if (!thinking && l.kind === 'thinking') continue
-      const g = out[out.length - 1]
-      if (g && g.phase === l.phase) g.lines.push(l); else out.push({ phase: l.phase, lines: [l] })
-    }
+    for (const l of log) { if (!thinking && l.kind === 'thinking') continue; const g = out[out.length - 1]; const key = `${l.phase}|${l.story}`; if (g && g.key === key) g.lines.push(l); else out.push({ key, phase: l.phase, story: l.story, lines: [l] }) }
     return out
   }, [log, thinking])
   const thoughtCount = log.filter((l) => l.kind === 'thinking').length
   return (
     <div className="console">
-      <div className="console-bar">
-        <span className="dim small">Tudo que as IAs fazem, na ordem.</span>
-        <button className="link" onClick={() => setThinking((v) => !v)}>{thinking ? 'esconder pensamento' : `mostrar pensamento${thoughtCount ? ` (${thoughtCount})` : ''}`}</button>
-      </div>
+      <div className="console-bar"><span className="dim small">Tudo que as IAs fazem, na ordem.</span><button className="link" onClick={() => setThinking((v) => !v)}>{thinking ? 'esconder pensamento' : `mostrar pensamento${thoughtCount ? ` (${thoughtCount})` : ''}`}</button></div>
       {groups.map((g, gi) => (
         <section key={gi} className="phase">
-          <div className="phase-head"><span className="phase-n">{PHASES.indexOf(g.phase) + 1 || '·'}</span>{STEP[g.phase]?.title || 'Motor'}</div>
+          <div className="phase-head">{g.story != null && <span className="phase-n">P{g.story + 1}</span>}{STEP[g.phase]?.title || 'Motor'}</div>
           {g.lines.map((l, i) => <Line key={i} l={l} />)}
         </section>
       ))}
-      {running && (
-        <div className={`line live ${live?.kind || ''}`}>
-          <span className="who" data-src={live?.source || 'claude'}>{live ? ({ thinking: 'pensando', tool: 'ferramenta', text: 'escrevendo' })[live.kind] : 'trabalhando'}</span>
-          <span className="txt">{live?.text || '…'}<span className="cursor" /></span>
-        </div>
-      )}
+      {busy && <div className={`line live ${live?.kind || ''}`}><span className="who" data-src={live?.source || 'claude'}>{live ? ({ thinking: 'pensando', tool: 'ferramenta', text: 'escrevendo' })[live.kind] : 'trabalhando'}</span><span className="txt">{live?.text || '…'}<span className="cursor" /></span></div>}
       <div ref={end} />
     </div>
   )
 }
-
 function Line({ l }) {
   const who = l.kind === 'thinking' ? 'pensou' : l.kind === 'tool' ? 'fez' : l.kind === 'result' ? 'viu' : l.kind === 'error' ? 'erro' : l.source === 'engine' ? 'motor' : l.source
-  return (
-    <div className={`line ${l.kind}`}>
-      <span className="who" data-src={l.source}>{who}</span>
-      <span className="txt">{l.text}</span>
-      <time>{l.ts.slice(11, 19)}</time>
-    </div>
-  )
+  return <div className={`line ${l.kind}`}><span className="who" data-src={l.source}>{who}</span><span className="txt">{l.text}</span><time>{l.ts.slice(11, 19)}</time></div>
 }
 
-function Diff({ diff }) {
-  if (!diff) return <Hint>Sem alterações ainda. Aparecem aqui assim que a IA mexer em algum arquivo.</Hint>
+function Diff({ m }) {
+  const st = cur(m); const diff = st?.diff
+  if (!diff) return <Hint>Sem alterações na parte atual. Aparecem aqui assim que a IA mexer em algum arquivo.</Hint>
   const files = []
-  for (const l of diff.split('\n')) {
-    if (l.startsWith('diff --git')) files.push({ name: l.split(' b/')[1] || l, lines: [] })
-    else if (files.length) files[files.length - 1].lines.push(l)
-  }
-  return (
-    <div className="diff">
-      {files.map((f) => (
-        <section key={f.name} className="file">
-          <div className="file-head"><GitDiff size={14} />{f.name}<span className="dim">+{f.lines.filter((l) => l.startsWith('+') && !l.startsWith('+++')).length} −{f.lines.filter((l) => l.startsWith('-') && !l.startsWith('---')).length}</span></div>
-          <pre>{f.lines.filter((l) => !/^(index|---|\+\+\+)/.test(l)).map((l, i) => <span key={i} className={l.startsWith('@@') ? 'h' : l.startsWith('+') ? 'a' : l.startsWith('-') ? 'd' : 'c'}>{l || ' '}</span>)}</pre>
-        </section>
-      ))}
-    </div>
-  )
+  for (const l of diff.split('\n')) { if (l.startsWith('diff --git')) files.push({ name: l.split(' b/')[1] || l, lines: [] }); else if (files.length) files[files.length - 1].lines.push(l) }
+  return <div className="diff">{files.map((f) => (
+    <section key={f.name} className="file">
+      <div className="file-head"><GitDiff size={14} />{f.name}<span className="dim">+{f.lines.filter((l) => l.startsWith('+') && !l.startsWith('+++')).length} −{f.lines.filter((l) => l.startsWith('-') && !l.startsWith('---')).length}</span></div>
+      <pre>{f.lines.filter((l) => !/^(index|---|\+\+\+)/.test(l)).slice(0, 400).map((l, i) => <span key={i} className={l.startsWith('@@') ? 'h' : l.startsWith('+') ? 'a' : l.startsWith('-') ? 'd' : 'c'}>{l || ' '}</span>)}</pre>
+    </section>
+  ))}</div>
 }
 
 function Tests({ m }) {
-  const explain = <div className="explain"><b>Como a ADE prova que a mudança funciona:</b> a IA escreve primeiro uma prova (um mini-programa que checa o que você pediu). A prova tem de <b>falhar</b> no código antigo e <b>passar</b> no código novo. Se ela já passasse antes, não estaria checando nada de novo.</div>
-  if (!m?.tests_after) return <div>{explain}<Hint>{m?.tests_before ? `Ponto de partida: ${m.tests_before.total} provas, ${m.tests_before.failed} falhando. Esperando a IA terminar.` : 'As provas rodam antes e depois da alteração.'}</Hint></div>
-  const before = new Map(m.tests_before.tests.map((t) => [t.name, t.status]))
+  const st = cur(m)
+  const explain = <div className="explain"><b>Como a ADE prova que a mudança funciona:</b> a IA escreve primeiro uma prova (um mini-programa que checa o que você pediu). A prova tem de <b>falhar</b> no código antigo e <b>passar</b> no código novo.</div>
+  if (!st?.tests_after) return <div>{explain}<Hint>{m.tests_before ? `Ponto de partida: ${m.tests_before.total} provas, ${m.tests_before.failed} falhando.` : 'As provas rodam antes e depois da mudança.'}</Hint></div>
+  const before = new Map((m.tests_before?.tests || []).map((t) => [t.name, t.status]))
   return (
-    <div>
-      {explain}
-      {m.tests_after.error && <div className="explain bad"><Code>{m.tests_after.error}</Code></div>}
-      <table className="tbl">
-        <thead><tr><th>Prova</th><th>Antes</th><th>Depois</th></tr></thead>
-        <tbody>
-          {m.tests_after.tests.map((t) => {
-            const b = before.get(t.name)
-            return (
-              <tr key={t.name}>
-                <td>{t.name}{!b && <span className="new">nova</span>}{t.message && <div className="dim small">{t.message}</div>}</td>
-                <td><Result s={b} /></td>
-                <td><Result s={t.status} /></td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-      <Hint>{m.red_tests?.length ? `Prova que falhou antes e serve de evidência: ${m.red_tests.map((t) => t.name).join(', ')}.` : 'Nenhuma prova nova falhou antes da correção.'}</Hint>
+    <div>{explain}
+      {st.tests_after.error && <div className="explain bad"><Code>{st.tests_after.error}</Code></div>}
+      <table className="tbl"><thead><tr><th>Prova</th><th>Antes</th><th>Depois</th></tr></thead><tbody>
+        {st.tests_after.tests.map((t) => { const b = before.get(t.name); return <tr key={t.name}><td>{t.name}{!b && <span className="new">nova</span>}{t.message && <div className="dim small">{t.message}</div>}</td><td><Result s={b} /></td><td><Result s={t.status} /></td></tr> })}
+      </tbody></table>
+      <Hint>{st.red_tests?.length ? `Prova que falhou antes e serve de evidência: ${st.red_tests.map((t) => t.name).join(', ')}.` : 'Nenhuma prova nova falhou antes da mudança.'}</Hint>
     </div>
   )
 }
 const Result = ({ s }) => !s ? <span className="dim">não existia</span> : <span className={`res ${s === 'passed' ? 'ok' : 'bad'}`}>{s === 'passed' ? 'passou' : 'falhou'}</span>
 
-function Review({ review }) {
-  if (!review) return <Hint>A revisão pelo Codex roda depois que a prova passa.</Hint>
+function Visual({ m }) {
+  const st = cur(m)
+  if (!m.plan?.needs_ui) return <Hint>Este pedido não tem interface; o portão visual não roda.</Hint>
+  if (!st?.visual) return <Hint>O portão visual roda depois que as provas passam. Ele varre o código atrás de cara de template (fontes batidas, cores gritantes, gradiente roxo, três cards iguais).</Hint>
+  if (!st.visual.available) return <Hint>Impeccable não encontrado nesta máquina.</Hint>
+  return (
+    <div>
+      <p className="small dim">Impeccable detect · {st.visual.findings.length} achado(s){st.visual.error ? ` · ${st.visual.error}` : ''}</p>
+      {st.visual.findings.length === 0 ? <div className="explain"><b>Nenhum sinal de template.</b> O visual passou no detector.</div> : st.visual.findings.map((f, i) => <div key={i} className="finding medium"><div className="finding-head"><span className="sev">{f.rule}</span><Code size="1">{f.file}{f.line ? `:${f.line}` : ''}</Code></div><p>{f.message}</p></div>)}
+      {p2(st)}
+    </div>
+  )
+}
+const p2 = (st) => st.review ? null : null
+
+function Review({ m }) {
+  const st = cur(m); const review = st?.review
+  if (!review) return <Hint>A revisão pelo Codex roda depois que a prova passa e o visual é conferido.</Hint>
   return (
     <div className="review">
       <div className="verdict"><Badge size="2" color={review.verdict === 'approve' ? 'green' : 'amber'} variant="solid">{review.verdict === 'approve' ? 'Aprovado' : 'Pediu mudanças'}</Badge><span className="dim">Codex · leitura apenas</span></div>
       <p>{review.summary}</p>
-      {review.findings.length === 0 ? <Hint>Nenhum problema apontado.</Hint> : review.findings.map((f, i) => (
-        <div key={i} className={`finding ${f.severity}`}>
-          <div className="finding-head"><span className="sev">{({ high: 'grave', medium: 'médio', low: 'leve' })[f.severity]}</span><Code size="1">{f.file}</Code></div>
-          <p>{f.problem}</p>
-          <p className="dim">Sugestão: {f.fix}</p>
-        </div>
-      ))}
+      {review.findings.length === 0 ? <Hint>Nenhum problema apontado.</Hint> : review.findings.map((f, i) => <div key={i} className={`finding ${f.severity}`}><div className="finding-head"><span className="sev">{({ high: 'grave', medium: 'médio', low: 'leve' })[f.severity]}</span><Code size="1">{f.file}</Code></div><p>{f.problem}</p><p className="dim">Sugestão: {f.fix}</p></div>)}
     </div>
   )
 }
@@ -414,25 +480,44 @@ const Hint = ({ children }) => <p className="hint">{children}</p>
 
 /* ---------- direita ---------- */
 function Report({ m, decide }) {
-  if (!m) return <div className="rpt"><span className="lbl">Sua parte</span><p className="dim">Você só entra no fim: aceitar, pedir outra rodada ou descartar. Enquanto isso, nada para fazer.</p></div>
+  const [answer, setAnswer] = useState('')
+  if (!m) return <div className="rpt"><span className="lbl">Sua parte</span><p className="dim">Você só entra quando a ADE precisar: aprovar um plano grande, responder uma dúvida, ou decidir no fim. Enquanto isso, nada para fazer.</p></div>
+  const st = cur(m)
   return (
     <div className="rpt">
       <span className="lbl">Sua parte</span>
-      {m.state === 'running' && <div className="card calm"><Pulse /><div><b>Trabalhando</b><p>Nada para fazer agora. Acompanhe pela atividade ou vá tomar um café.</p></div></div>}
-      {m.state === 'complete' && <div className="card good"><CheckCircle weight="fill" /><div><b>Pronta</b><p>{m.reason === 'accepted_by_operator' ? 'Aceita por você.' : 'A prova falhou antes, passou depois, e o Codex aprovou.'} As alterações estão em <Code>proto/example</Code>. <a href="/api/app/" target="_blank" rel="noreferrer">Abrir o app</a> para ver funcionando.</p></div></div>}
+      {m.state === 'planning' && <div className="card calm"><Pulse /><div><b>Entendendo o pedido</b><p>A IA está lendo o projeto e montando o plano. Leva menos de um minuto.</p></div></div>}
+      {m.state === 'running' && <div className="card calm"><Pulse /><div><b>Trabalhando</b><p>{st ? `Parte ${m.current + 1} de ${m.stories.length}: ${st.title}.` : 'Preparando.'} Nada para fazer agora.</p></div></div>}
+      {m.state === 'complete' && <div className="card good"><CheckCircle weight="fill" /><div><b>Pronta</b><p>{m.stories.length} parte(s) provadas, revisadas e commitadas na sua pasta.{m.plan?.needs_ui ? ' Abra o app pelo botão no topo.' : ''}</p></div></div>}
       {m.state === 'discarded' && <div className="card"><Trash /><div><b>Descartada</b><p>Os arquivos voltaram ao que eram.</p></div></div>}
+      {m.state === 'awaiting_plan' && (
+        <>
+          <div className="card warn"><ListChecks weight="fill" /><div><b>{m.reason === 'questions' ? 'A IA tem uma dúvida' : 'Plano pronto para aprovar'}</b><p>{REASON[m.reason]} Veja a aba Plano.</p></div></div>
+          {m.reason === 'questions' ? (
+            <>
+              <ul className="qs">{m.plan.questions.map((q) => <li key={q}>{q}</li>)}</ul>
+              <textarea className="ta" rows={3} value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Responda aqui, do seu jeito" />
+              <div className="decide"><button className="act primary" disabled={!answer.trim()} onClick={() => decide('answer', answer)}><CheckCircle weight="fill" /><span><b>Responder e replanejar</b></span></button><button className="act" onClick={() => decide('start')}><Play weight="fill" /><span><b>Seguir sem responder</b><small>A IA usa a escolha que já registrou no plano.</small></span></button></div>
+            </>
+          ) : (
+            <div className="decide"><button className="act primary" onClick={() => decide('start')}><Play weight="fill" /><span><b>Começar</b><small>{m.stories.length} partes, uma de cada vez.</small></span></button><button className="act danger" onClick={() => decide('discard')}><Trash /><span><b>Descartar plano</b></span></button></div>
+          )}
+        </>
+      )}
       {m.state === 'awaiting_operator' && (
         <>
           <div className="card warn"><Warning weight="fill" /><div><b>Precisa de você</b><p>{REASON[m.reason] || m.reason}</p></div></div>
           <div className="decide">
-            <button className="act primary" onClick={() => decide('accept')}><CheckCircle weight="fill" /><span><b>Aceitar como está</b><small>Fecha a missão e mantém as alterações.</small></span></button>
-            <button className="act" onClick={() => decide('retry')}><ArrowCounterClockwise /><span><b>Mais uma rodada</b><small>A IA recebe os problemas apontados e tenta de novo.</small></span></button>
+            <button className="act primary" onClick={() => decide('accept')}><CheckCircle weight="fill" /><span><b>Aceitar como está</b><small>Commita esta parte e segue para a próxima.</small></span></button>
+            <button className="act" onClick={() => decide('retry')}><ArrowCounterClockwise /><span><b>Mais uma rodada</b><small>A IA recebe os problemas e tenta de novo.</small></span></button>
+            <button className="act" onClick={() => decide('skip')}><SkipForward /><span><b>Pular esta parte</b><small>Desfaz só ela e segue.</small></span></button>
             <button className="act danger" onClick={() => decide('discard')}><Trash /><span><b>Descartar tudo</b><small>Volta os arquivos ao que eram.</small></span></button>
           </div>
         </>
       )}
-      {m.review && <div className="block"><span className="lbl">O revisor disse</span><p>{m.review.summary}</p></div>}
-      {m.red_tests?.length > 0 && <div className="block"><span className="lbl">Prova usada</span>{m.red_tests.map((t) => <p key={t.name}>{t.name}</p>)}</div>}
+      {st?.review && <div className="block"><span className="lbl">O revisor disse</span><p>{st.review.summary}</p></div>}
+      {m.skills?.length > 0 && <div className="block"><span className="lbl">Skills nesta missão</span><div className="chips">{m.skills.map((x) => <span key={x.id} className="chip-skill on" title={x.reason}>{x.id}</span>)}</div></div>}
+      {m.roles && <div className="block"><span className="lbl">Quem fez</span><p className="small">{m.roles.planner.model} planejou · {m.roles.maker.model} escreveu · {m.roles.checker.model} revisou</p></div>}
     </div>
   )
 }

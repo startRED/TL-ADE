@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "properties": {
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "question": { "type": "string" },
+          "answer": { "type": "string" },
+          "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+          "sources": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["question", "answer", "confidence", "sources"]
+      }
+    }
+  },
+  "required": ["findings"]
+}
