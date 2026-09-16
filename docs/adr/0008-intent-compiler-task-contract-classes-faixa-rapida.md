@@ -15,20 +15,36 @@ CI, missões anteriores) **antes** de qualquer chamada de modelo, classifica a c
 classes (`trivial`, `bounded`, `feature`, `subsystem`, `project`), expande em camadas
 (intenção → resultados observáveis → restrições → EARS → cenários → evals → DesignBrief quando há UI),
 entrevista **≤5 perguntas** e emite um plano de **Task Contracts** validado por ajv. O contrato é
-imutável após aprovação e `passes` é o **único** campo gravável pelo agente, sempre por evidência.
-Aprovação é **única**, no plano. `trivial` tem **faixa rápida** com requisito próprio e eval próprio:
-≤30 s até a primeira edição de arquivo-fonte, 0 perguntas, ≤2 chamadas. `depends_on` é opcional: há DAG
-só quando o plano o declara. O classificador barato tem custo **medido** por chamada e fallback
-determinístico por tamanho de diff estimado.
+**imutável após aprovação** (coberto por `immutable_digest`) e **não tem campo `passes`**: o estado da
+story vive no journal (`unit_state`) e na projeção `status.json`, e o veredito no `unit-result` (E1). A
+única exceção de mutabilidade é `trivial` com `evals: []` na aprovação, em que o Maker preenche `evals`
+uma vez, gravado como step `local_write` com `eval_authored_by` (E2). Aprovação é **única**, no plano, e
+congela o conjunto elegível de skills da missão (união do top-8 por story, E33). `plan.mission_budget`
+(`max_wall_clock_seconds`, `max_parked_units`, `max_usd`) é gravado no `batch_open`, e
+`permitted_effects` lista só efeitos externos (E3). Orçamento default por story e classe **[hipótese]**:
+trivial 3 chamadas/1 rework; bounded 6/2; feature 10/3; subsystem e project 12/3 (E4). `trivial` tem
+**faixa rápida** com requisito próprio e eval próprio: ≤30 s até a primeira edição de arquivo-fonte, 0
+perguntas, ≤2 chamadas — o teste `fast_lane_trivial_starts_within_30s_zero_questions` é critério de
+saída da **v0.3**, e o slice 1 só grava `first_source_edit_ms` como baseline (E40). `depends_on` é
+opcional: há DAG só quando o plano o declara. O classificador é **determinístico primeiro**: candidato a
+`trivial` decidido por regra (1 arquivo tocado no discovery + verbo de correção), com chamada de modelo
+só quando a confiança fica < 0,6 ou a classe é ≥ `feature` (E18); quando roda, ela conta dentro das ≤2
+chamadas da faixa rápida, e seu custo é medido. A pesquisa dispara por **incógnita declarada do tipo
+`external_fact`**, não por classe; o teto é por classe (bounded ≤1 consulta sem time, feature+ até 3,
+time paralelo opt-in) (E19). O teto de pack por story tem duas verificações: estimativa no plano
+(dividida por cenário) e medição no `prepare`, que poda o contexto recuperado, nunca o contrato, e
+reabre a divisão se o contrato sozinho estourar (E20).
 
 ## Evidência
 
 - SWE-EVO (`README.md`, Confirmações): instruction following responde por **>60 %** das falhas de
   horizonte longo — o investimento vai para Intent Compiler e Task Contract.
 - Digest #22: o harness de longa duração da Anthropic **não usa DAG**: lista plana de features com um
-  único campo gravável (`passes`). O DAG é contribuição da ADE e precisa se pagar por classe.
+  único campo gravável (`passes`). O DAG é contribuição da ADE e precisa se pagar por classe; o campo
+  gravável, não — na ADE o estado fica no journal, fora do contrato (E1).
 - Digest #26: `claude -p --model haiku` **faturou como claude-sonnet-5** (US$ 0,37 para ecoar 200
-  bytes). "Classificador barato" é hipótese de custo, não fato.
+  bytes). "Classificador barato" é hipótese de custo, não fato — daí a regra determinística vir
+  primeiro (E18).
 - `README.md` (Confirmações): template oficial de contrato = tarefa + guardrails + critérios de
   aceitação + verificação própria; EARS ("WHEN … THE SYSTEM SHALL …") 1:1 com nome de teste.
 - `judgment-J1-implementability.md` §6: a faixa rápida de `trivial` é **requisito com eval próprio**, não
@@ -41,7 +57,10 @@ A expansão em camadas custa uma chamada forte por plano; classe errada custa pr
 perguntas onde bastaria editar) ou de menos (story grande sem revisão de portão) — a classe fica
 visível no resumo de aprovação e é corrigível ali. EARS genérico passa na validação de forma
 (**[hipótese]** até haver fixtures de recusa semântica). O teto de pack limita o tamanho de story: o
-validador recusa e pede divisão, o que às vezes contraria o desenho natural do trabalho.
+validador recusa e pede divisão, o que às vezes contraria o desenho natural do trabalho — e a segunda
+verificação no `prepare` pode reabrir a divisão depois da aprovação, custo aceito para não podar o
+contrato. Os orçamentos por classe são chutes calibráveis: baixos demais produzem `awaiting_operator` em
+trabalho legítimo.
 
 ## Alternativas rejeitadas
 
@@ -50,8 +69,10 @@ validador recusa e pede divisão, o que às vezes contraria o desenho natural do
 | DAG obrigatório para toda missão | digest #22; complexidade sem demanda por classe |
 | Entrevista aberta / conversacional | conhecimento operacional exigido do usuário; ≤5 perguntas com recomendação primeiro cobre o caso |
 | Aprovação por story | quebra a jornada desatendida; a aprovação única já lista efeitos externos e custo |
-| Classificador barato assumido sem medição | digest #26 |
-| Contrato mutável durante a execução | `passes` seria negociável e a evidência perderia sentido |
+| Classificador barato assumido sem medição | digest #26; regra determinística cobre o candidato a `trivial` a custo zero (E18) |
+| Contrato mutável durante a execução | o veredito seria negociável e a evidência perderia sentido; estado vive no journal (E1) |
+| `passes` gravável no contrato | mistura contrato com estado; `unit-result` + `unit_state` já carregam o veredito (E1) |
+| Pesquisa disparada por classe de complexidade | classe alta sem incógnita externa gasta chamada à toa (E19) |
 
 ## Como reverter
 

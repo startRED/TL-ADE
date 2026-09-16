@@ -14,9 +14,10 @@ precisa preservar o comportamento **byte a byte**, não só a intenção.
 `journal.jsonl` append-only por missão, um evento por linha. `prev` = 16 hex do SHA-256 da linha
 anterior calculado sobre a serialização **canônica** (RFC 8785 / JCS, via `canonicalize`). `fsync` por
 linha. Escritor único serializado por fila assíncrona: dois `step()` concorrentes na mesma unidade são
-proibidos por construção. `format_version: 1` no evento, com `runtime_stamp` (`<versão do
-engine>:<digest da config>`). Um teste de paridade compara a saída do canonicalizador TS com fixture
-byte-idêntica gerada pelo Python de referência.
+proibidos por construção. `format_version: 1` no evento, com `runtime_stamp` em três partes
+(`<core_version>:<config_digest>:<capabilities_digest>`, E7): só `core_version` — constante do núcleo
+durável — bloqueia com `stale_workflow_version`. Um teste de paridade compara a saída do
+canonicalizador TS com fixture byte-idêntica gerada pelo Python de referência.
 
 ## Evidência
 
@@ -41,7 +42,7 @@ serialização global por missão; é o preço da ordem total que a reconciliaç
 
 | Alternativa | Motivo |
 | :--- | :--- |
-| SQLite como store primário | perde diffabilidade, inspeção com `tail`/`rg` e o porte literal dos testes; SQLite entra só como projeção reconstruível (ADR 0013) |
+| SQLite como store primário | perde diffabilidade, inspeção com `tail`/`rg` e o porte literal dos testes; SQLite entra só como projeção reconstruível na v0.4b (ADR 0013) |
 | `JSON.stringify` sem JCS | ordem de chaves não é garantida entre engines/versões; a cadeia quebraria sem aviso |
 | Assinatura criptográfica dos eventos | não há ameaça correspondente; custo de chave sem ganho |
 | Hash completo (64 hex) | 4× de bytes por linha sem ganho prático na única ameaça real |

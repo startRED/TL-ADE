@@ -14,12 +14,14 @@ agente é dependente**.
 | Eixo | Decisão |
 | :--- | :--- |
 | Portões | Malha de CI estilo Orca antes de qualquer aumento de autonomia: `tsc --strict` + Vitest desde o commit 1, `oxlint` + `anti-slop` pinado por SHA, root directory guard, ratchets (`max-lines`, `ts-nocheck`, `any`) que só melhoram, `code-quality:changed`, verificação de que todo import novo existe no registry, razão teste:produção visível no corpo do PR |
-| Ciclo por story | Skills **Superpowers** já instaladas: `brainstorming → writing-plans → using-git-worktrees → subagent-driven-development + TDD → requesting-code-review → finishing-a-development-branch`. Dois pontos de humano por story, e só dois: aprovar o design e aprovar o merge |
+| Ciclo por story | Skills **Superpowers** já instaladas: `brainstorming → writing-plans → using-git-worktrees → subagent-driven-development + TDD → requesting-code-review → finishing-a-development-branch`. Dois pontos de humano por story, e só dois: aprovar o design e aprovar o merge. **Exceção escrita** (§11 E30): as três superfícies de segurança — `contain`/isolamento, servidor local do painel, ingestão do catálogo — têm revisão humana obrigatória do diff, sempre |
+| Repositório | **pacote único na raiz na v1**; npm workspaces só no commit que cria `packages/web`, na v0.4b (§11 E29) |
+| Cobertura | ≥85 % de linhas apenas em `journal, step, lease, git, runner, contain` **[hipótese]**; no resto, razão teste:produção visível no corpo do PR, sem portão (§11 E27) |
 | Backlog | `docs/plan/features.json` — lista **plana** de features com `id`, `description` end-to-end, `steps`, `eval` (comando) e um único campo gravável pelo agente: `passes`. JSON, não Markdown |
 | Escopo | `PROJECT_CHARTER.md` de uma página dizendo o que a ADE **não** é (não é CI, não é issue tracker, não é IDE) |
 | Instruções | `AGENTS.md` ≤ 8 KB como roteador de gatilhos; `CLAUDE.md` = uma linha (`@AGENTS.md`); poda semanal pelo critério "remover esta linha faria o agente errar?" |
-| Fixtures | Toda regra que lê saída de CLI de agente é escrita contra **transcript gravado byte a byte e commitado**, nunca contra tela lembrada |
-| Paridade | `tl-orchestrator` v0.17.0 roda **um** lote: o porte dos 93 testes de `test_tl_runtime.py` para Vitest com os mesmos nomes. Nada mais |
+| Fixtures | Toda regra que lê saída de CLI de agente é escrita contra **transcript gravado byte a byte e commitado**, nunca contra tela lembrada; `scripts/record-transcript.ts` é artefato do **dia 1** (§11 E28) |
+| Paridade | `tl-orchestrator` v0.17.0 roda **um** lote: o porte dos 93 testes de `test_tl_runtime.py` para Vitest com os mesmos nomes, guiado pela `parity-name-map.json` como artefato de **entrada** da v0.2. O slice 1 cobre um subconjunto nomeado de **44 casos**; 93/93 é critério da **v0.2** (§11 E26). Dois alvos normativos: `parity` (zero credencial, CI Windows + Linux) e `probes` (chamadas reais, local, opt-in). Nada mais |
 | Troca | A partir do sub-projeto 3, a própria ADE constrói a ADE. Ponto de troca verificável, não data |
 
 ## Evidência
@@ -49,7 +51,10 @@ Portões custam minutos de CI por PR (Orca paga 54,6–64,9 runner-min) e a malh
 render. Superpowers e Orca trazem cerimônia que a regra de proporcionalidade tem de conter: se o diff
 cabe numa frase, pula brainstorming e plano. Usar o `tl-orchestrator` para um lote só é aceitar
 integrar um runtime Python que será substituído — se custar mais de meio dia de adaptação, cai para
-`claude -p` em loop sobre a lista de testes, que é a mesma ideia sem integração.
+`claude -p` em loop sobre a lista de testes (estágio 0), que é a mesma ideia sem integração e que grava
+cursor durável no formato de linha do `journal-event` (§11 E28). A v1 completa é estimada em
+**~15–16 semanas a 5 dias/semana** (§11 E37); o slice 1 mede linhas portadas por dia na semana 1 e
+replaneja explicitamente.
 
 ## Alternativas rejeitadas
 
@@ -73,5 +78,7 @@ ordem: **nenhum aumento de autonomia sem portão novo**, nunca o inverso.
 `docs/development-method.md` (fonte do detalhe), `AGENTS.md` (≤ 8 KB, roteador de gatilhos),
 `CLAUDE.md` (uma linha), `PROJECT_CHARTER.md`, `init.sh`, `docs/plan/features.json` e
 `docs/plan/progress.md`, `docs/reference/*.md` (nasce vazio, um arquivo por cicatriz),
-`.github/workflows/pr.yml` (malha de portões), `fixtures/` (transcripts gravados, nunca texto escrito à
-mão), `docs/roadmap.md` (ponto de troca no sub-projeto 3), ADR 0003 (paridade 93/93), ADR 0019.
+`package.json` único na raiz até a v0.4b, `.github/workflows/pr.yml` (malha de portões, alvos `parity` e
+`probes`), `scripts/record-transcript.ts` e `fixtures/` (transcripts gravados, nunca texto escrito à
+mão), `docs/roadmap.md` (ponto de troca no sub-projeto 3; v0.4a/v0.4b; ~15–16 semanas),
+ADR 0003 (paridade: 44 casos no slice 1, 93/93 na v0.2), ADR 0019.

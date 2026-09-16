@@ -9,10 +9,13 @@ operacional mora no harness.
 
 **Estado: planejamento concluído (rodada de rearquitetação de 2026-09-16/17). Nenhum código ainda.**
 
+Repositório canônico: [`startRED/TL-ADE`](https://github.com/startRED/TL-ADE) (privado). Autor: Erick.
+Trabalho novo entra por branch + PR contra `main`; convenções em [`docs/development-method.md`](docs/development-method.md).
+
 ## Leia nesta ordem
 
 1. [`docs/vision.md`](docs/vision.md) — north star, 15 princípios reconciliados, métricas, não-objetivos.
-2. [`docs/architecture.md`](docs/architecture.md) — **documento canônico**: tese, componentes, contratos, fluxo de missão, durabilidade, subsistemas, mudanças sobre a spec v2, decisões pendentes de Erick (§9), adendos do ECC (§10) e arbitragem das divergências (§11).
+2. [`docs/architecture.md`](docs/architecture.md) — **documento canônico**: tese, componentes, contratos, fluxo de missão, durabilidade, subsistemas, mudanças sobre a spec v2, decisões pendentes de Erick (§9), adendos do ECC (§10), arbitragem das divergências (§11) e emendas da revisão adversarial (§12, E41–E69).
 3. [`docs/specs/2026-09-17-master-spec.md`](docs/specs/2026-09-17-master-spec.md) — spec mestra (substitui a v2) e specs por subsistema em [`docs/specs/`](docs/specs/): engine e durabilidade, Intent Compiler, Skill Fabric, Frontend Quality Engine, adapters e Capability Registry, contexto/Firewall/telemetria, superfície do operador.
 4. [`docs/roadmap.md`](docs/roadmap.md) — vertical slices (slice 1 → v0.2 → v0.3 → v0.4a/b → v0.5 → v1 → futuro) com aceite, evals, calendário e escada de dogfood.
 5. [`docs/plans/slice-1.md`](docs/plans/slice-1.md) — plano executável do primeiro slice (~3 semanas): stories como Task Contracts, testes nomeados, CLI falsa, método de execução.

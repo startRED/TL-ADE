@@ -36,8 +36,11 @@ Duas invariantes fixas em todos os níveis:
   decide se o **engine**, depois de `gates` e `review`, está autorizado (`permitted_effects`, porte de I55).
 - **Ambiente do worker é filtrado** (I49). PAT de push, `GH_TOKEN`, chave de produção nunca entram no
   `env` do worker em nível nenhum — só o processo do engine que executa `git push`/`gh` as tem.
-  `--disallowedTools` é glob de string best-effort (`git -C <dir> push`, um alias, um script de repo
-  passam; judgment-J3 §5): a cerca real é o `env` filtrado mais o engine ser o único a rodar git/gh.
+  `--disallowedTools` é glob de string best-effort, em **um** argumento com regras separadas por vírgula
+  (`"Bash(git push*),Bash(gh pr*)"`, forma medida; `architecture.md` §11 E24; string normativa única em
+  `specs/adapters-capability-registry.md` §2) — `git -C <dir> push`, um
+  alias, um script de repo passam (judgment-J3 §5): a cerca real é o `env` filtrado mais o engine ser o
+  único a rodar git/gh.
 
 ---
 
@@ -63,7 +66,8 @@ Duas invariantes fixas em todos os níveis:
 | roda desatendido | sim | sim | **nunca** |
 
 `restricted` não é "mais permissivo para coisas perigosas com aprovação": é o nível em que **tudo o que
-sai do worktree vira pergunta**. `ask_operator: ['*']` é obrigatório no contrato e o engine recusa
+sai do worktree vira pergunta**. `ask_operator: ['*']` é obrigatório no contrato, o nível herda os
+`scope_paths` da story (como os demais) e não tem bloco de famílias: `dispatch: never` — o engine recusa
 despachar um worker desatendido numa story `restricted` (`autonomy_requires_operator`, exit 3). Uma
 missão com qualquer story `restricted` não é elegível ao modo noturno (§6).
 
@@ -85,22 +89,40 @@ Bloco `autonomy` validado por `ade-config.schema.json`. Forma (campos, não sint
 | :--- | :--- | :--- |
 | `autonomy.default` | `safe\|controlled\|restricted` | nível quando a story não declara um; default do `ade init`: `safe` |
 | `autonomy.operator_can_raise` | bool | o resumo de aprovação pode elevar o nível de uma story |
-| `autonomy.permitted_effects` | mapa efeito→bool | vocabulário de `effect_class` do journal; o engine recusa um lote cujo passo peça efeito não permitido (porte de I55) |
+| `autonomy.permitted_effects` | `EffectClass[]` | forma única em todo o sistema (master-spec §5, `architecture.md` §4): **array** de `effect_class`, nunca mapa efeito→bool. Só efeitos **externos** entram; classes internas (`model_call`, `eval_run`, `local_write`, `gate`, `prepare`) são implícitas (E3). O valor daqui é o teto do repositório; o subconjunto efetivo é congelado em `plan.authorization.permitted_effects` na aprovação única, e é esse que o engine checa por passo (porte de I55) |
 | `sensitive_paths` | glob[] | precedência 2; `stop_batch` |
-| `secrets.patterns` | regex[] | acrescenta aos embutidos; varredura sobre o diff integral com `maxBuffer` explícito |
-| `secrets.max_diff_bytes` | int | teto da varredura; estourar é `stop_batch`, nunca truncar em silêncio |
-| `gates.always` / `gates.on_flag` | argv[] | portões sobre a árvore do Maker; saída passa pelo Firewall |
+| `secrets.patterns` | regex[] | acrescenta aos embutidos; varredura sobre o diff integral com `maxBuffer` explícito (`1<<31`). **Não existe teto configurável da varredura**: o operador não pode baixar o que é varrido, e truncagem detectada é `unexpected_tree_state`, nunca aviso (engine §8, I24). `review.max_diff_bytes` vale só para o pack do Checker |
+| `gates.always` / `gates.on_flag` | argv[] | portões sobre a árvore do Maker (inclui o lint anti-slop, Oxlint vendorizado, por flag); saída passa pelo Firewall |
+| `review.max_diff_bytes` | int | teto do diff entregue ao Checker; default 60 000 chars, por arquivo em ordem de relevância de escopo, com ponteiro `ade show diff:<story>#<arquivo>` (E13) |
+| `limits.max_pack_bytes` | int | corte do pack em bytes; default 120 000 **[hipótese]**, calibrar por p90 (E13) |
 | `budgets.max_usd` / `max_model_calls` / `max_rework_rounds` | num | reserva por story no scheduler |
 | `max_wall_clock_seconds` | int | orçamento de parede da missão (modo noturno) |
 | `max_parked_units` | int | para o lote quando o acúmulo de unidades paradas deixa de ser útil |
 | `notify` | argv | comando chamado com um JSON a cada mudança de estado relevante; roda com a confiança do operador e o mesmo `env` filtrado; **não** é efeito do lote e `permitted_effects` não o governa (RUNTIME.md, `notify_argv`) |
 
 `deny_paths_always` embutido (não configurável para baixo): `.env*`, `**/secrets/**`, `.git/hooks/**`,
-`**/*.pem`, `**/*credentials*`. Entradas fora do worktree (`~/.ssh/**`, `~/.aws/**`) **não** entram aqui
-— ver Divergências §8.3.
+`**/*.pem`, `**/*credentials*`. Entradas fora do worktree (`~/.ssh/**`, `~/.aws/**`, `**/.env*` fora da
+árvore) **não** entram aqui: vivem no `env` filtrado, no canário de isolamento e no `ade doctor`, nunca no
+`contain` (que só vê o diff) — `architecture.md` §11 E23, que ajusta A4.
 
 `.ade/` nunca entra em commit (`.git/info/exclude`). Mudança de nível — por story ou por lote — é um
 `step` próprio no journal com o `permitted_effects` resultante.
+
+**`.ade/config.json` é superfície de confiança, não dado inerte.** Ele declara argv que o **engine**
+executa (`gates.always`, `gates.on_flag`, `notify`) e os padrões da varredura de segredo
+(`secrets.patterns`). Vive na raiz do repo, **fora** do worktree da story, e o `contain` — por E23 — só
+vê o diff do worktree: uma escrita ali não aparece em diff nenhum, e no Windows a escrita fora do
+worktree não é prevenível para `claude` e `agy` (`security/README.md` §11.3). Duas consequências
+operacionais na v1:
+
+- **Argv congelado.** `gates` e `notify` são resolvidos (binário real pelo BinaryResolver) e congelados
+  no `batch_open`; o lote em curso nunca relê o arquivo. Reedição só vale para o próximo lote.
+- **Hash antes e depois.** `<repo>/.ade/**` (config e schemas) entra no conjunto de alvos que o canário
+  de isolamento e o `ade doctor` verificam por hash antes e depois de cada chamada, junto com os
+  caminhos de E23; divergência dentro do lote é `stop_batch`, como segredo.
+
+O que **não** muda: `config_digest` continua entrando no `runtime_stamp` sem bloquear — só `core_version`
+gera `stale_workflow_version` (E7). Tornar `config_digest` bloqueante seria mudança de arquitetura.
 
 ---
 
@@ -114,24 +136,27 @@ Medidas no binário local, não na documentação (`addendum-autonomia...` §1, 
 
 | Papel | Escreve? | Família default | Comando |
 | :--- | :-: | :--- | :--- |
-| **Maker** | sim, no worktree | `claude` | `claude -p --safe-mode --session-id <uuid> --max-budget-usd <n> --json-schema <inline> --permission-mode bypassPermissions --permission-prompts none --disallowedTools "Bash(git push*),Bash(gh pr*),Bash(gh release*)" --add-dir <worktree>`, `env` filtrado + `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` |
+| **Maker** | sim, no worktree | `claude` | `claude -p --safe-mode --session-id <uuid> --max-budget-usd <n> --json-schema <inline> --permission-mode bypassPermissions --permission-prompts none --disallowedTools "Bash(git push*),Bash(gh pr*)" --add-dir <worktree>` (string normativa única, `specs/adapters-capability-registry.md` §2), `env` filtrado + `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` |
 | **Maker** (alt.) | sim, no worktree | `codex` | `codex exec --json --ignore-user-config --output-schema <arquivo> --sandbox workspace-write --approve-for-me -C <worktree>` |
 | **Checker de rodada** | **não** | `codex` | `codex exec --json --ignore-user-config --output-schema review-result.schema.json --sandbox read-only -C <worktree>`; nunca `--approve-for-me`, nunca `codex review` |
 | **Checker de portão** | **não** | `claude` | `claude -p --json-schema <inline> --permission-mode plan --add-dir <worktree>` |
-| **Juiz visual** | **não lê o repo** | outra família do Maker | screenshots + rubrica no prompt; sem `--add-dir`, sem ferramentas; julga antes de ver diff e achados do detector |
-| **Classificador** | sem ferramentas | `claude` | `claude -p --restricted --json-schema <inline>` (`--restricted` remove Bash/PowerShell/REPL/WebFetch e ignora settings de usuário/projeto) |
-| **Pesquisa** | somente-leitura | `agy` → `claude` | `agy --json-schema ... --approval-mode yolo`, worktree descartável, até o canário de isolamento passar em toda chamada (digest #38) |
+| **Juiz visual** | **não lê o repo fonte** | outra família do Maker | rubrica no prompt + caminho de cada screenshot; na família Claude a imagem só entra por caminho de arquivo no texto do prompt (não existe `--image`, digest de `capabilities-claude-code.md` §6), logo `--safe-mode --tools "Read" --add-dir <artifacts>` — o `--add-dir` é o diretório das capturas, nunca o worktree; no braço Codex, `-i <captura>` por captura (flag nativa). Anti-ancoragem é restrição de **conteúdo do pack** (julga antes de ver diff e achados do detector), não ausência de ferramentas |
+| **Classificador** | sem ferramentas | `claude` | `claude -p --output-format json --json-schema <inline> --model haiku --safe-mode --tools "" --max-turns 1 --max-budget-usd 0.05` (argv dono: `specs/adapters-capability-registry.md` §2; `--safe-mode`, nunca `--restricted`, que é outro modo e não foi medido como piso de bootstrap); só roda quando a regra determinística não fecha `trivial` — confiança < 0,6 ou classe ≥ `feature` (E18) |
+| **Pesquisa** | somente-leitura | `agy` → `claude` | `agy --json-schema ... --dangerously-skip-permissions` (o `--approval-mode yolo` é do Gemini CLI, não do `agy`), worktree descartável, até o canário de isolamento passar em toda chamada (digest #38) |
 
 `--sandbox read-only` no Checker de rodada transforma I28 ("Checker que edita a árvore") de detecção em
 impossibilidade (judgment-J3 §5, recomendação §11). `no_checker_family_available` → `parked`, nunca
-aprovado sem revisão. Maker ≠ Checker por `model_id`, não por binário (digest #3).
+aprovado sem revisão. Maker ≠ Checker por `model_id`, não por binário (digest #3); o Checker de rodada
+também recusa `models[].vendor` igual ao do Maker (E10). Chamada curta no Codex (Checker, classificador)
+usa a receita completa `--ignore-user-config --ignore-rules --ephemeral -c skills.max_context_tokens=0`
+com `AGENTS.md` ≤2 KB escrito pelo engine no worktree (E16).
 
 ### Por nível
 
 | Nível | claude (Maker) | codex (Maker) | agy (pesquisa) |
 | :--- | :--- | :--- | :--- |
-| `safe` | `bypassPermissions` + `--permission-prompts none` + `--disallowedTools` cobrindo git/gh/WebFetch | `--sandbox workspace-write --approve-for-me`, `network_access=false` | `--approval-mode yolo`, worktree descartável |
-| `controlled` | idem; `--disallowedTools` cobre `git push*`, `gh pr create*`, `gh pr merge*` | idem, `network_access=true` (instalar dependência) | idem |
+| `safe` | `bypassPermissions` + `--permission-prompts none` + `--disallowedTools "Bash(git push*),Bash(gh pr*)"` (argumento único, vírgula — string normativa única) | `--sandbox workspace-write --approve-for-me`, `network_access=false` | `--dangerously-skip-permissions`, worktree descartável |
+| `controlled` | idem, **mesma** string normativa (o nível não afrouxa a deny-list do worker: push/PR continuam efeito do engine) | idem, `network_access=true` (instalar dependência) | idem |
 | `restricted` | **não despacha worker desatendido** | idem | idem |
 
 Nunca `--permission-mode auto`: `auto-mode` só liga com esse valor literal do flag, é classificador
@@ -151,7 +176,7 @@ A resposta muda por família, e nenhuma é "a CLI pergunta e o engine responde".
 | :--- | :--- | :--- | :--- |
 | `claude` com `bypassPermissions` | **não há prompt a negar**; só `--disallowedTools` filtra, no nível de disponibilidade da ferramenta | `permission_denials` no stream-json; o texto final do turno **não** é evidência | Ferramenta bloqueada + relato de sucesso: medido. Um `claude -p` reporta sucesso após tentativa negada e retentativa — ou sem tentativa nenhuma (digest #37; `addendum-autonomia...` §2.3, §6.4) |
 | `codex` com `--sandbox workspace-write` | fronteira de SO real no Windows (restricted token); escrita fora do diretório declarado falha com acesso negado | erro de acesso no stream; sem pergunta pendurada | Fail-closed real; mas `codex sandbox` como jaula universal não é zero-config (`[permissions.<nome>]` com chave não documentada; §3.2 do addendum) — não adotado na v1 |
-| `agy` com `yolo` | nada filtra | — | Escreveu em `~/.gemini/antigravity-cli/scratch/` em vez do `--add-dir` pedido, **sem aviso** (digest #38) |
+| `agy` com `--dangerously-skip-permissions` | nada filtra | — | Escreveu em `~/.gemini/antigravity-cli/scratch/` em vez do `--add-dir` pedido, **sem aviso** (digest #38) |
 
 Consequência de projeto: **bloqueio silencioso seguido de relato enganoso é o modo de falha default, não
 o excepcional.** Por isso:
@@ -160,7 +185,10 @@ o excepcional.** Por isso:
   eventos estruturados e o `EvalRecord`.
 - `eval_run{phase: red}` contra `tree_before` é obrigatório (salvo `strictness.mode = additive`): a prova
   vermelha antes da mudança é o que distingue "o Maker trabalhou" de "o Maker escreveu um parágrafo".
-  Eval que nasce verde volta ao Intent Compiler (`architecture.md` §7, Eval-first).
+  Só `red_reason: assertion` conta como vermelho válido; `missing_target`, `compile_error` e
+  `environment` rebaixam para `additive` com aviso (classe ≥ `feature`: `awaiting_operator`), e `additive`
+  exige no mesmo cenário um eval `negative` ou spot-check `mutate` (E12). Eval que nasce verde volta ao
+  Intent Compiler (`architecture.md` §7, Eval-first).
 - **Canário de isolamento por família a cada chamada**: um passo do Maker que escreve fora do worktree
   tem de falhar; se não falhar, a família é rebaixada e a story vai a `awaiting_operator`
   (judgment-J3 §3, §11.2).
@@ -170,22 +198,24 @@ o excepcional.** Por isso:
 ## 6. Escalação
 
 Destino único: fila de `awaiting_operator`, com motivo, evidência (ponteiro de artifact) e opções
-`retry` / `skip` / `takeover` / `discard`. `ade decide <unit> --option retry|skip`: `retry` devolve a
-unidade a `retryable` (o trabalho parado está no checkpoint em `refs/ade/`); `skip` marca `failed`
-(RUNTIME.md, `decide`).
+`retry` / `skip` / `takeover` / `discard`. `ade decide <unit> --option retry|skip|discard|pick --value <id>`
+(E32): `retry` devolve a unidade a `retryable` (o trabalho parado está no checkpoint em `refs/ade/`);
+`skip` marca `failed`; `discard` manda a árvore para `refs/ade/discarded/`; `pick` escolhe entre opções
+apresentadas (por exemplo, a variante visual do FQE) pelo `--value` (RUNTIME.md, `decide`).
 
 | Gatilho | Tipo | Origem |
 | :--- | :--- | :--- |
 | `budget_exhausted` (usd, calls, rework, wall clock) | determinístico | reserva do scheduler |
 | `loop_detected` (mesma assinatura normalizada N vezes) | determinístico | histórico de `attempt`; nunca zera com troca de modelo |
 | `diff_oscillation` (árvore A→B→A) | determinístico | GitPort |
-| `stagnation` (mesmos achados do Checker em rodadas consecutivas) | determinístico | `review-result` |
+| `stagnation` (mesmo `findings_digest` do Checker em rodadas consecutivas, E22; ou assinatura de falha idêntica — hash de stderr/stack normalizado — em duas tentativas seguidas, A6) | determinístico | `review-result`; Gate/Eval runner |
 | `scope_violation` 2ª vez na mesma story | determinístico | `contain` |
 | `secret_detected`, `sensitive_path` | determinístico | `contain` → `stop_batch` (não é fila: para o lote) |
 | `no_checker_family_available` | determinístico | Capability Registry |
 | `network_unavailable` na retomada de `push`/`pull_request` | determinístico | reconciliação; **nunca retry** |
 | `ambiguous` na reconciliação (remoto movido, PR em merge queue, `HEAD` avançado) | determinístico | Reconciler |
-| `skill_first_use` no projeto | determinístico | Skill Fabric |
+| `skill_first_use` no projeto (skill fora do conjunto elegível congelado na aprovação única, E33) | determinístico | Skill Fabric |
+| `worker_heartbeat_lost` (sem heartbeat por N s: o engine mata o grupo de processos e põe o log em quarentena, A3) | determinístico | dead-man switch do Runner |
 | `stale_workflow_version` | determinístico | `runtime_stamp` divergente |
 | empate na pesquisa | determinístico | subsistema de pesquisa |
 | `ask_operator` disparado por efeito | determinístico | `permitted_effects` × contrato |
@@ -210,15 +240,21 @@ orçamento de parede e retomada sem nova entrevista (`architecture.md` §5).
 | # | Pré-requisito |
 | :-- | :--- |
 | 1 | Nenhuma story `restricted` no backlog aprovado |
-| 2 | `ade doctor` verde nas famílias dos papéis usados (probe real, não declaração) |
-| 3 | `max_wall_clock_seconds` e `max_parked_units` definidos; orçamento em USD com `cost_source` no resumo |
+| 2 | `ade doctor` verde nas famílias dos papéis usados (probe real, não declaração; `probe_ok: null` recusa despacho, nunca degrada — E10) |
+| 3 | `plan.mission_budget` gravado no `batch_open` com `max_wall_clock_seconds`, `max_parked_units` e `max_usd`; orçamento em USD com `cost_source` no resumo (E3) |
 | 4 | Backlog já aprovado numa aprovação única prévia; `operator_can_raise` não se aplica desatendido |
 | 5 | `git` limpo na base; nenhum lease vivo; `runtime_stamp` igual ao da missão |
+| 6 | Gates ativos (`gates.always` não vazio) e baseline de eval verde na base (A5) |
+| 7 | Caminho de rollback em `refs/ade/` disponível e isolamento por worktree verificado pelo canário da família (A5) |
+
+`ade run --unattended` **recusa** quando qualquer um destes falta (`autonomy_requires_operator` /
+precondição ausente, exit 3): a jornada 6 não degrada, não roda "sem gates" nem "sem baseline".
 
 **Paradas do lote noturno (todas viram item de fila, nunca decisão do modelo):**
 
-- **Skill nova no projeto** → `awaiting_operator: skill_first_use`. Primeira aparição exige aprovação
-  humana mesmo em lote (`architecture.md` §7, Skill Fabric).
+- **Skill fora do conjunto elegível** → `awaiting_operator: skill_first_use`. A aprovação única congela o
+  conjunto elegível da missão (união do top-8 por story, E33): dentro dele o lote segue; skill fora dele
+  exige aprovação humana mesmo em lote (`architecture.md` §7, Skill Fabric).
 - **Rede indisponível** na retomada de `push`/`pull_request` → `awaiting_operator`, nunca retry (I11/I14
   exigem `ls-remote`/`gh` para reconciliar; sem rede não há como distinguir `released` de `ambiguous`).
 - **Orçamento de parede esgotado** → o lote para no fim da story corrente (nunca no meio de um efeito
@@ -252,10 +288,12 @@ reboot é adotado automaticamente **só** quando o processo dono não existe com
 reciclado não engana. Se o dono existe e é seu, encerre o engine; nunca apague `lease/` à mão com engine
 vivo.
 
-**`stale_workflow_version`.** `runtime_stamp` (`<versão do engine>:<digest da config>`) divergiu de uma
-intenção aberta. A missão fica bloqueada até `ade run --accept-stale-version`. Aceite depois de ler o
-diff de config; em dogfood, a regra existe exatamente para impedir trocar o engine embaixo de uma missão
-em andamento (`architecture.md` §6).
+**`stale_workflow_version`.** `runtime_stamp` (`<core_version>:<config_digest>:<capabilities_digest>`, E7)
+divergiu de uma intenção aberta. Só `core_version` — constante do núcleo durável (C1–C5, C7) — bloqueia;
+`config_digest` e `capabilities_digest` (que cobre upgrade silencioso de CLI, `agy` 1.2.3 → 1.2.4) entram
+no carimbo e no relatório. A missão fica bloqueada até `ade run --accept-stale-version`, gravado como
+evento `decision`. Aceite depois de ler o diff de config; em dogfood, a regra existe exatamente para
+impedir trocar o engine embaixo de uma missão em andamento (`architecture.md` §6).
 
 **Worktree órfão.** `.ade/wt/<story>/` sem story viva. `ade doctor` reporta; a remoção é `git worktree
 remove` pelo engine, e o conteúdo vai antes para `refs/ade/discarded/`. Em repo JS, `node_modules` por
@@ -266,10 +304,26 @@ fronteira universal).
 (RUNTIME.md). A missão não abre. Recuperação: `ade show <ref>` para inspecionar, copiar o journal para
 perícia, e abrir missão nova sobre a mesma base — a árvore está em `refs/ade/`, não no journal.
 
+**Inventário do mundo é obrigatório antes de recomeçar.** Um journal ilegível pode conter intenções
+abertas de efeito externo (`local_commit`, `push`, `pull_request`, `pull_request_merge`) que a
+reconciliação nunca resolverá, porque a reconciliação lê o journal. Abrir missão nova sem inventário
+reintroduz exatamente as duplicações que I35–I38 impedem. Passos, nesta ordem:
+
+1. **Leitura forense somente-leitura**: `ade show <ref>` percorre o journal **até a primeira linha
+   inválida** e lista os `step_intent` sem `step_result` com `effect_class` externo e o `intent_context`
+   de cada um. Nada é reescrito; o arquivo corrompido é preservado para perícia.
+2. **Confronto com o mundo**: `git ls-remote` para branches e commits empurrados, `gh pr list --head
+   ade/<missão>/<story>` para PR aberto ou em merge queue, `git log` na base para merge já integrado.
+3. **Confirmação do operador** do relatório resultante (o que existe no remoto e o que será
+   considerado já entregue). Sem essa confirmação a missão nova não abre.
+4. A missão nova nasce com um evento `note` referenciando o inventário e com `permitted_effects`
+   reduzido a efeitos locais até a confirmação — o engine não empurra nem abre PR sobre uma base cujo
+   estado remoto não foi inventariado.
+
 **Custo estourado.** `budget_exhausted` para a story corrente (nunca no meio de efeito externo) e põe em
 `awaiting_operator`. `ade decide <unit> --option retry` só depois de elevar `budgets.max_usd` no
-`.ade/config.json` — o que muda o `runtime_stamp` e exige `--accept-stale-version` se houver intenção
-aberta. Alternativa mais barata: `--option skip`.
+`.ade/config.json` — o que muda o `config_digest` do `runtime_stamp` (registrado, mas não bloqueante: só
+`core_version` gera `stale_workflow_version`, E7). Alternativa mais barata: `--option skip`.
 
 **Dependência instalada pelo agente (`controlled`).** Permitida dentro do worktree, com `network_access=true`
 no Codex. `contain` exige que o lockfile esteja no diff e dentro de `scope_paths`. Bump **major** de
@@ -290,52 +344,38 @@ de qualquer CLI (`addendum-autonomia...` §6.5). `ade release <story>` grava che
 
 ---
 
-## 9. Divergências propostas
+## 9. Divergências resolvidas
 
-Objeções a `architecture.md`; a revisão adversarial decide. Nenhuma decisão foi alterada neste documento.
+Arbitradas em `architecture.md` §11 (2026-09-17). O texto deste documento já reflete cada decisão.
 
-**9.1 — Forma do argumento `--disallowedTools`.** `architecture.md` §7 escreve
-`--disallowedTools "Bash(git *)" "Bash(gh *)"` (dois argumentos, espaço dentro do glob). A medição do
-addendum §1/§4.1 usa **um** argumento com regras separadas por vírgula
-(`--disallowedTools "Bash(git push*),Bash(gh pr*)"`) e registra que "o espaço antes do `*` importa" no
-prefix-match. Duas formas diferentes não podem estar ambas certas, e a forma errada faz **no-op
-silencioso** — exatamente o modo de falha que este documento diz que a arquitetura deve evitar. Proposta:
-fixar a forma de argumento único separado por vírgula e transformar isso em probe do `ade doctor`
-(lançar um `-p` que tenta `git push --dry-run` e exigir `permission_denials` não vazio). Evidência:
-`addendum-autonomia-permissoes-por-repositorio.md` §1, §4.1; digest #37.
+**9.1 — Forma do argumento `--disallowedTools` → aceita (`architecture.md` §11 E24).** Vale a forma
+medida: **um** argumento com regras separadas por vírgula (`--disallowedTools "Bash(git push*),Bash(gh pr*)"`),
+não dois argumentos com espaço dentro do glob. A forma errada é no-op silencioso. A string normativa é
+única e mora em `specs/adapters-capability-registry.md` §2 — este documento e `security/README.md` a
+referenciam, não a redigitam em variantes. Probe obrigatório do
+`ade doctor`: um `-p` que tenta `git push --dry-run` **com essa string exata** tem de produzir
+`permission_denials` não vazio.
+Refletido em §1 e §4.
 
-**9.2 — `ask_operator` precisa de vocabulário fechado.** `architecture.md` §4 tipa `ask_operator?: string[]`
-e o addendum §5 preenche com frases ("dependência com bump major", "migration com DROP/TRUNCATE",
-"hard_deny (qualquer família)"). Frase em linguagem natural num campo que o engine tem de avaliar **sem
-modelo** reintroduz o gatilho semântico que a §5.11 limita a um só (`target_role: 'human'`). Proposta:
-enum fechado (o de §2 deste documento) no `task-contract.schema.json`, com `note` livre à parte.
-Evidência: judgment-J3 §10.9 ("`ask_operator: '*'` não está em contrato nenhum"); digest #32 (o defeito
-latente do runtime nasceu de schema e código discordando de um campo de escalação).
+**9.2 — `ask_operator` com vocabulário fechado → aceita (E5).** Enum fechado no `task-contract.schema.json`
+(`push`, `pull_request`, `pull_request_merge`, `dependency_add`, `dependency_major_bump`,
+`migration_destructive`, `deploy`, `secrets_read`, `destructive_local`, `skill_first_use`, `*`) mais
+`note` livre à parte. Nada em linguagem natural num campo avaliado sem modelo. Refletido em §2.
 
-**9.3 — `deny_paths_always` com caminhos fora do worktree é regra morta.** O addendum §5 lista `~/.ssh/**`
-e `~/.aws/**` em `deny_paths_always`. `contain` opera sobre `git status`/diff **do worktree**
-(judgment-J3 §3): esses globs nunca casam e dão sensação falsa de cobertura. A proteção real desses
-caminhos é o `env` filtrado (I49) mais o canário de isolamento por família. Proposta: removê-los do
-`contain` e registrá-los como item do canário e do `ade doctor`. Evidência: judgment-J3 §3; digest #38.
+**9.3 — `deny_paths_always` com caminhos fora do worktree → aceita (E23, ajusta A4).** `~/.ssh/**`,
+`~/.aws/**` e `**/.env*` fora da árvore saem do `contain` (que só vê o diff) e vivem no `env` filtrado,
+no canário de isolamento e no `ade doctor`. Refletido em §3.
 
-**9.4 — `restricted` com `scope_paths: ["**"]` é mais largo que `safe`.** O addendum §5 define, para
-`restricted`, `contain.scope_paths: ["**"]` — um nível chamado "restrito" cuja regra de escopo aceita
-qualquer caminho, confiando apenas em `on_scope_violation: stop_batch`. Proposta: `restricted` herda
-`${story.scope_paths}` como os outros e mantém `stop_batch` (mais estrito nos dois eixos, não só num).
-Evidência: `addendum-autonomia...` §5, bloco `restricted`.
+**9.4 — `restricted` com `scope_paths: ["**"]` → aceita (E5).** `restricted` herda
+`${story.scope_paths}` como os demais níveis e mantém `stop_batch`: mais estrito nos dois eixos.
 
-**9.5 — `restricted` com `permission_prompts: "host"` não tem host.** O addendum §5 configura, para
-`restricted`, `claude: { permission_mode: "plan", permission_prompts: "host" }`. Numa sessão headless
-`-p` despachada pelo engine não existe host interativo para responder o prompt: ou pendura, ou degrada
-para o default. Como `restricted` nunca roda desatendido de qualquer forma (§2), a entrada é
-contraditória. Proposta: `restricted` não tem bloco `families`; tem `dispatch: never`. Evidência:
-`addendum-autonomia...` §4.2 (`restricted`: "a resposta correta é não desatender").
+**9.5 — `restricted` com `permission_prompts: "host"` → aceita (E5).** `restricted` não tem bloco de
+famílias: tem `dispatch: never` (`autonomy_requires_operator`). Refletido em §2 e §4.
 
-**9.6 — `max_diff_bytes` herdado sem revisão.** `architecture.md` não fixa o teto de diff entregue ao
-Checker; o valor herdado do runtime é 200 000 chars (~50k tokens), pago por rodada, por Checker, por
-story grande. Judgment-J3 §6 nomeia isso como o desperdício estrutural nº 2, presente nas três propostas
-do painel. Proposta: teto explícito no `.ade/config.json` (`review.max_diff_bytes`), menor, com ponteiro
-de drill-down pelo Firewall (`ade show <ref>`) em vez de truncagem cega. Evidência: judgment-J3 §6, §10.5.
+**9.6 — `max_diff_bytes` herdado sem revisão → aceita (E13).** Teto explícito em `.ade/config.json`:
+`review.max_diff_bytes` default 60 000 chars (não os 200 000 herdados), entregue por arquivo em ordem de
+relevância de escopo, com ponteiro `ade show diff:<story>#<arquivo>` em vez de truncagem cega. O corte do
+pack passa a ser em bytes (`limits.max_pack_bytes`, default 120 000 **[hipótese]**). Refletido em §3.
 
 ---
 
@@ -349,10 +389,14 @@ de drill-down pelo Firewall (`ade show <ref>`) em vez de truncagem cega. Evidên
 3. `agy`/Policy Engine falha aberto ou fechado com `--policy` inválido ou ausente? Sem confirmação
    (`addendum-autonomia...` §6.8). Enquanto isso, `agy` só somente-leitura e com canário por chamada.
 4. Defaults numéricos de `max_wall_clock_seconds` e `max_parked_units` para a jornada 6: **[hipótese]**
-   6 h e 3, a calibrar no dogfood.
+   8 h e 3 (E3), a calibrar no dogfood.
 5. Custo real do classificador barato: `claude -p --model haiku` faturou como `claude-sonnet-5`
    (US$ 0,37 para ecoar 200 bytes, digest #26). Até medir, o classificador tem orçamento próprio e
    fallback determinístico por tamanho de diff estimado.
 6. `notify` roda com a confiança do operador e fora de `permitted_effects` (herdado de `notify_argv`).
    Se o comando de notificação fizer efeito externo, a ADE não o vê. Aceito conscientemente; revisar se
    o painel da v0.4 passar a configurá-lo.
+
+## 11. Emendas de `architecture.md` §12 (2026-09-17)
+
+§12 prevalece sobre este documento. Itens com efeito aqui: E44 (`deploy` e `dependency_install` são valores só de `ask_operator`, não de `effect_class`); E46 (literal canônico `"Bash(git push *),Bash(gh pr *),Bash(gh release *)"`, sede em adapters §2); E47 (exit codes = master-spec §4); E64 (`local_merge` ff-only entra em `safe`); E42 (`takeover_open` recusa despacho); E43/E68 (só `core_version` bloqueia; `config_digest`/`capabilities_digest` só relatam); E62 (sem cancelamento de story `running`); E56 (v1 assume repositório do próprio operador).

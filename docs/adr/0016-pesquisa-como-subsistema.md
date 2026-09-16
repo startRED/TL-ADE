@@ -13,8 +13,9 @@ terceiro entra no pack do Maker: é conteúdo observado, não instrução.
 
 Pesquisa é **um step com classe de efeito própria** (`research`), não um modo de operação.
 
-- **Gatilho duplo:** só roda com incógnita **declarada** no plano **e** classe ≥ `feature`. Classes
-  `trivial` e `bounded` nunca pesquisam.
+- **Gatilho:** a pesquisa dispara por **incógnita declarada do tipo `external_fact`**, não por classe
+  (§11 E19). O teto é que varia por classe: `trivial` nunca pesquisa; `bounded` ≤1 consulta e sem time;
+  `feature` e acima até 3 consultas; time paralelo opt-in.
 - **Forma v1:** uma chamada com schema (`agy --json-schema` quando o canário de isolamento passar; senão
   `claude`), saída validada contra `research-finding` (JSON Schema inline enquanto houver um consumidor
   só).
@@ -24,7 +25,8 @@ Pesquisa é **um step com classe de efeito própria** (`research`), não um modo
   recuperado, sob o mesmo teto (≤6k) e a mesma cerca inbound do Tool Output Firewall (C11); nunca na
   seção de papel ou de invariantes.
 - `research_refs` no Task Contract liga o achado à story que o consumiu; o bruto vira artifact, com
-  `ade show <ref>` para drill-down.
+  `ade show <ref> --open` para drill-down. O `unit-result` da story que consumiu o achado lista o digest
+  da seção em `sources` (§11 E8), sem o que `cited` é sempre falso.
 
 ## Evidência
 
@@ -49,9 +51,9 @@ Pesquisa é **um step com classe de efeito própria** (`research`), não um modo
 
 ## Trade-offs
 
-Uma chamada única erra mais que quatro em paralelo, e classes `trivial`/`bounded` ficam sem pesquisa
-mesmo quando ela ajudaria. Em troca, o custo de pesquisa por missão é limitado pelo número de incógnitas
-declaradas — que o Intent Compiler tem de justificar — em vez de pelo apetite do modelo. O empate como
+Uma chamada única erra mais que quatro em paralelo, e `trivial` fica sem pesquisa (e `bounded` com uma
+consulta só) mesmo quando ela ajudaria. Em troca, o custo de pesquisa por missão é limitado pelo número
+de incógnitas `external_fact` declaradas — que o Intent Compiler tem de justificar — em vez de pelo apetite do modelo. O empate como
 pergunta ao operador custa uma interrupção e evita a pior falha: dois achados contraditórios virando uma
 decisão implícita. **[hipótese]** o ganho de recall do time de 2–4 não foi medido na stack da ADE.
 
@@ -61,6 +63,7 @@ decisão implícita. **[hipótese]** o ganho de recall do time de 2–4 não foi
 | :--- | :--- |
 | Time de 2–4 agentes ligado por padrão na v1 | ~15× tokens sem recall medido nesta stack (#21, J3 §6) |
 | Pesquisa livre, sem incógnita declarada | vira exploração aberta; o custo deixa de ter teto |
+| Disparar pesquisa por classe (`≥ feature`) em vez de por incógnita | classe é proxy de tamanho, não de ignorância: uma story `bounded` pode depender de um fato externo e uma `subsystem` pode não depender de nenhum (§11 E19) |
 | Agente de pesquisa com escrita | escritores paralelos na mesma árvore são o modo de falha nomeado (Cognition) e `agy` já escreveu fora do escopo (#38) |
 | Achado injetado na seção de papel do pack | conteúdo observado com autoridade de instrução; vetor de injeção (J3 §4) |
 | Desempate por votação entre modelos | empate é sinal de que a incógnita foi mal formulada; volta ao operador |
@@ -77,6 +80,7 @@ quando aparecer o segundo consumidor.
 
 `schemas/journal-event.schema.json` (`effect_class: 'research'` com regra de reconciliação),
 `schemas/task-contract.schema.json` (`research_refs`), `research-finding` inline em `docs/specs/`,
-`docs/specs/intent-compiler.md` (incógnita declarada como pré-condição), `~/.ade/config.json` (opt-in do
-time paralelo), `docs/roadmap.md` (pesquisa como subsistema na v0.5, com canário), ADR 0005 (papel do
+`docs/specs/intent-compiler.md` (incógnita `external_fact` como pré-condição e tetos por classe),
+`~/.ade/config.json` (opt-in do time paralelo), `docs/roadmap.md` (chamada única na v1; `agy` e time
+paralelo na v0.x, com canário), ADR 0005 (papel do
 `agy`), ADR 0011 (cerca inbound do Firewall), ADR 0017 (`cost_source` no braço `agy`).

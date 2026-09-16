@@ -18,7 +18,8 @@ worktree) — é o que torna N>1 reversível.
   nunca singleton (C4).
 - `step_intent` e `unit_state` carregam o campo `worktree` desde a v1, mesmo com N=1.
 - O `Scheduler` (C14) tem `next_ready` devolvendo **conjunto**, com `depends_on` opcional; a v1 consome
-  o primeiro elemento. N>1 é opt-in por config nas classes `subsystem` e `project`, pós-v1.
+  o primeiro elemento. **Nenhuma classe de complexidade libera N na v1**: N>1 é opt-in por config e
+  pós-v1, e mesmo lá só nas classes `subsystem` e `project` (`architecture.md` §5).
 - Um único escritor por árvore; paralelismo só em trabalho somente-leitura (pesquisa, ADR 0016).
 - A guarda de árvore suja (I29) passa a ser por worktree, e deixa de ser bloqueio global.
 
@@ -54,7 +55,7 @@ de `node_modules` duplicado — e não tem a classe de bug de dois escritores na
 | `Git` singleton com worktrees depois | é exatamente o estado do runtime de referência: o supervisor pronto que nunca foi ligado (#33); o custo do retrofit de `GIT_INDEX_FILE` e do campo de evento é maior depois |
 | N=2 na v1 (proposta B) | superfície comprada antes de existir v1; `node_modules` por worktree sem custeio (J3 §6 e §9) |
 | Frota de 20–30 agentes (Gas Town) | 22,7 % de CI verde medido no dashboard do próprio org (ADR 0019, `landscape-dev-workflows.md` b5) |
-| DAG completo desde a v1 | o harness de longa duração da Anthropic usa lista plana com um campo gravável (`passes`, digest #22); o DAG é contribuição da ADE e só se paga por classe (`architecture.md` §5) |
+| DAG completo desde a v1 | o harness de longa duração da Anthropic usa lista plana com um campo gravável (`passes`, digest #22 — na ADE esse campo é do backlog de desenvolvimento, não do Task Contract: §11 E1 tirou `passes` do contrato e o veredito vive no `unit_state` e no `unit-result`); o DAG é contribuição da ADE e só se paga por classe (`architecture.md` §5) |
 
 ## Como reverter
 
@@ -70,4 +71,4 @@ Nenhuma migração de journal: `worktree` já está no evento e `next_ready` já
 `schemas/plan.schema.json` e `schemas/task-contract.schema.json` (`depends_on` declarativo desde a v1,
 mesmo com execução serial), `docs/specs/` (Scheduler com `next_ready` devolvendo conjunto, estado
 `blocked`, `git worktree prune` e varredura de órfãs no `ade doctor` mesmo com N=1), `docs/roadmap.md`
-(N opt-in só em `subsystem`/`project`, pós-v1), ADR 0012, ADR 0019, ADR 0022.
+(N>1 inteiramente pós-v1; opt-in só em `subsystem`/`project` quando vier), ADR 0012, ADR 0019, ADR 0022.
