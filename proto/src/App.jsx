@@ -183,7 +183,7 @@ function Steps({ m }) {
         <span className="lbl" style={{ margin: 0 }}>{m ? `Progresso · ${done} de 6` : 'Como a ADE trabalha'}</span>
         {m && <button className="link" onClick={() => setShowAll((v) => !v)}>{showAll ? 'menos' : 'explicar tudo'}</button>}
       </div>
-      <div className="progress"><span style={{ width: `${(done / 6) * 100}%` }} /></div>
+      <div className="progress"><span style={{ '--p': done / 6 }} /></div>
       <ol className="timeline">
         {steps.map((s, i) => {
           const secs = s.started_at ? Math.max(0, Math.round(((s.finished_at ? new Date(s.finished_at) : new Date()) - new Date(s.started_at)) / 1000)) : null
