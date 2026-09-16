@@ -11,4 +11,5 @@ Code, Codex e Gemini/Antigravity → painel com terminais reais dos agentes.
 - Referência do motor a portar: `tl-orchestrator` v0.17.0 (`scripts/tl_runtime.py`, `docs/RUNTIME.md`,
   schemas JSON e 93 testes como suíte de paridade)
 
-Próximo passo: plano de implementação do sub-projeto 1 (núcleo), spec §14.
+Próximo passo: rodada de rearquitetação com Fable 5.1 — cole [`PROMPT.md`](PROMPT.md) num chat novo
+aberto neste diretório. Depois dela: plano de implementação do primeiro vertical slice.
