@@ -263,6 +263,7 @@ function Projects({ p, recent, running, onChanged }) {
           <div><span>git</span><b>{p.git ? (p.dirty ? 'com alterações pendentes' : 'limpo') : 'não é repositório'}</b></div>
           <div><span>provas</span><b>{p.runner === 'none' ? 'nenhum runner (a IA cria)' : p.test_cmd}</b></div>
           <div><span>página</span><b>{p.has_index ? 'index.html na raiz' : 'sem página'}</b></div>
+          {p.nested && <p className="dim small" style={{ margin: '4px 0 0' }}>Esta pasta fica dentro do repositório {p.root}; os commits da ADE vão para lá, só com arquivos desta pasta.</p>}
           {!p.git && <Button size="1" variant="soft" onClick={gitInit} disabled={running}>Iniciar git nesta pasta</Button>}
         </div>
       )}
