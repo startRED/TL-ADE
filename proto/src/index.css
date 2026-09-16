@@ -265,3 +265,6 @@ button { font: inherit; color: inherit; }
 .ta { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--bg-2); color: var(--gray-12); font: inherit; font-size: 13px; resize: vertical; }
 .step.warn .step-dot { background: var(--amber-a3); border-color: var(--amber-9); color: var(--amber-11); }
 .explain ul { margin: 6px 0 0; padding-left: 18px; }
+
+.role-skills { display: grid; grid-template-columns: 90px 1fr; gap: 8px; align-items: start; margin-top: 6px; }
+.role-name { font-size: 12px; color: var(--gray-10); padding-top: 6px; }
