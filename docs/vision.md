@@ -323,7 +323,7 @@ Nenhum destes é "ainda não" por falta de tempo; cada um é uma escolha com mot
 | Ser um orquestrador multi-agente genérico | O valor está no contrato e no portão, não em rodar N agentes. Cognition "don't build multi-agents" ataca escritores paralelos sem contexto compartilhado — e é esse o modo que a ADE recusa |
 | Substituir a CLI do usuário | A ADE **usa** `claude`/`codex`/`agy` headless; quem quiser conversar com o modelo usa `ade takeover` (que imprime o comando e grava `takeover-<story>.cmd`/`.ps1`) e volta com `ade release`; enquanto o takeover está aberto, o `prepare` recusa despachar naquela worktree e a story fica em `awaiting_operator{reason:'takeover_open'}` (architecture.md §12 E42) |
 | Exigir chave de API | Tudo roda sobre assinaturas já autenticadas. Consequência aceita: sem 4º provider na v1 (architecture.md §9.3, pendente de confirmação do Erick) |
-| Ser um produto multiusuário / SaaS | Local, um usuário, um repositório por vez. Sem servidor, sem auth, sem multi-tenancy |
+| Ser um produto multiusuário / SaaS | Local, um usuário. Vários repositórios do mesmo operador, um por vez na v1 e vários em paralelo depois (architecture.md §9.7). Sem auth, sem multi-tenancy |
 | Guardar memória por usuário entre missões | Memória implícita destrói determinismo; o estado é o repositório + o journal. `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` é decisão, não configuração |
 | Regressão visual por pixel-diff | Falso positivo dominante em UI que muda de propósito; a barra é o juiz + portões determinísticos (ADR 0019) |
 | CI própria / loop de CI | A ADE entrega até o merge; o que a CI do repositório faz é do repositório |

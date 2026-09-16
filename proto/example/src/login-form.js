@@ -1,6 +1,4 @@
 // Formulário de login. Projeto de exemplo usado pelo protótipo da TL-ADE.
-// Bug conhecido: o botão "Entrar" continua ativo enquanto o envio está em curso,
-// então um duplo clique dispara dois logins.
 
 export function createLoginForm({ login }) {
   const form = document.createElement('form')
@@ -17,11 +15,14 @@ export function createLoginForm({ login }) {
     event.preventDefault()
     error.hidden = true
     const data = new FormData(form)
+    button.disabled = true
     try {
       await login({ email: data.get('email'), password: data.get('password') })
     } catch (err) {
       error.textContent = err.message
       error.hidden = false
+    } finally {
+      button.disabled = false
     }
   })
 
