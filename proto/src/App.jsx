@@ -37,7 +37,9 @@ const SUGGESTIONS = [
 const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 
 export default function App() {
-  const [state, setState] = useState({ mission: null, log: [], history: [], live: null })
+  const [state, setState] = useState({ project: null, mission: null, log: [], history: [], live: null, recent: [] })
+  const [allowCommands, setAllowCommands] = useState(true)
+  const [error, setError] = useState(null)
   const [request, setRequest] = useState('')
   const [tab, setTab] = useState('activity')
   const [connected, setConnected] = useState(false)
@@ -52,13 +54,15 @@ export default function App() {
   }, [])
 
   const m = state.mission
+  const p = state.project
   const running = m?.state === 'running'
 
   async function run(text) {
     const req = (text ?? request).trim()
     if (!req || running) return
-    setTab('activity'); setView('mission')
-    await post('/api/run', { request: req })
+    setTab('activity'); setView('mission'); setError(null)
+    const r = await post('/api/run', { request: req, model: 'sonnet', allow_commands: allowCommands })
+    if (!r.ok) { const j = await r.json().catch(() => ({})); setError(j.error || 'Não deu para começar.'); if (j.error?.includes('git')) setView('projects') }
   }
 
   return (
@@ -73,7 +77,7 @@ export default function App() {
             </TextField.Slot>
           </TextField.Root>
         </form>
-        <div className="topright">{m && <MissionChip m={m} />}<a className="open-app" href="/api/app/" target="_blank" rel="noreferrer"><ArrowSquareOut /> Abrir o app</a></div>
+        <div className="topright">{m && <MissionChip m={m} />}{p?.has_index && <a className="open-app" href="/api/app/" target="_blank" rel="noreferrer"><ArrowSquareOut /> Abrir o app</a>}</div>
       </header>
 
       <div className="body">
@@ -86,20 +90,22 @@ export default function App() {
         </nav>
 
         <aside className="side">
-          <div className="side-head">
+          <button className="side-head" onClick={() => setView('projects')} title={p?.dir || ''}>
             <FolderSimple size={16} color="var(--gray-10)" />
             <div>
-              <Text size="2" weight="medium" as="p">exemplo-login</Text>
-              <Text size="1" color="gray" as="p">proto/example · main</Text>
+              <Text size="2" weight="medium" as="p">{p?.name || 'Nenhuma pasta'}</Text>
+              <Text size="1" color="gray" as="p">{p ? `${p.branch || 'sem git'} · ${p.runner === 'none' ? 'sem provas' : p.runner}` : 'escolha uma pasta'}</Text>
             </div>
-          </div>
+            <span className="dim small" style={{ marginLeft: 'auto' }}>trocar</span>
+          </button>
           {view === 'mission' && <Steps m={m} />}
           {view === 'history' && <History history={state.history} current={m} />}
-          {view === 'projects' && <Projects />}
+          {view === 'projects' && <Projects p={p} recent={state.recent} running={running} onChanged={() => { setView('mission'); setError(null) }} />}
         </aside>
 
         <main className="main">
-          {!m ? <Empty onPick={(s) => { setRequest(s); run(s) }} running={running} /> : (
+          {error && <div className="errbar"><Warning weight="fill" /> {error}</div>}
+          {!m ? <Empty onPick={(s) => { setRequest(s); run(s) }} running={running} p={p} allowCommands={allowCommands} setAllowCommands={setAllowCommands} /> : (
             <>
               <div className="main-head">
                 <Heading size="4" style={{ letterSpacing: '-0.01em' }}>{m.request}</Heading>
@@ -128,7 +134,7 @@ export default function App() {
 
       <footer className="status">
         <span className={connected ? 'ok' : 'bad'}>{connected ? '● servidor ligado' : '○ sem servidor'}</span>
-        <span>alvo proto/example</span>
+        <span title={p?.dir}>{p ? p.dir : 'sem pasta'}</span>
         <span>Claude Sonnet escreve · Codex revisa</span>
         <span className="grow" />
         {m && <span>{m.cost.calls} chamadas · US$ {m.cost.usd.toFixed(3)} no Claude</span>}
@@ -232,26 +238,60 @@ function History({ history, current }) {
   )
 }
 
-function Projects() {
+function Projects({ p, recent, running, onChanged }) {
+  const [dir, setDir] = useState(p?.dir || '')
+  const [msg, setMsg] = useState(null)
+  async function choose(d) {
+    setMsg(null)
+    const r = await post('/api/project', { dir: d })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) return setMsg(j.error || 'Não abriu.')
+    setDir(j.dir); onChanged()
+  }
+  async function gitInit() { const r = await post('/api/project/git-init', {}); if (r.ok) setMsg('git iniciado com um commit de base.') }
   return (
-    <div className="side-empty">
-      <p>Um projeto por vez neste protótipo: <b>exemplo-login</b>.</p>
-      <p className="dim" style={{ marginTop: 6 }}>Na versão real: lista de repositórios, cada um com suas missões e progresso por épico.</p>
+    <div className="projects">
+      <span className="lbl">Pasta do projeto</span>
+      <form onSubmit={(e) => { e.preventDefault(); choose(dir) }}>
+        <TextField.Root size="2" value={dir} onChange={(e) => setDir(e.target.value)} placeholder="E:\meus-projetos\minha-app" disabled={running} />
+        <Button size="2" type="submit" disabled={running || !dir.trim()} style={{ marginTop: 6, width: '100%' }}>Usar esta pasta</Button>
+      </form>
+      <p className="dim small">Cole o caminho de qualquer pasta do seu PC. Pasta vazia também serve: a IA cria o projeto do zero.</p>
+      {msg && <p className="small" style={{ color: 'var(--amber-11)' }}>{msg}</p>}
+      {p && (
+        <div className="proj-info">
+          <div><span>git</span><b>{p.git ? (p.dirty ? 'com alterações pendentes' : 'limpo') : 'não é repositório'}</b></div>
+          <div><span>provas</span><b>{p.runner === 'none' ? 'nenhum runner (a IA cria)' : p.test_cmd}</b></div>
+          <div><span>página</span><b>{p.has_index ? 'index.html na raiz' : 'sem página'}</b></div>
+          {!p.git && <Button size="1" variant="soft" onClick={gitInit} disabled={running}>Iniciar git nesta pasta</Button>}
+        </div>
+      )}
+      {recent?.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <span className="lbl">Recentes</span>
+          {recent.map((d) => <button key={d} className="recent" onClick={() => choose(d)} disabled={running || d === p?.dir} title={d}><FolderSimple size={14} />{d.split(/[\\/]/).pop()}<span className="dim small">{d}</span></button>)}
+        </div>
+      )}
     </div>
   )
 }
 
 /* ---------- centro ---------- */
-function Empty({ onPick, running }) {
+function Empty({ onPick, running, p, allowCommands, setAllowCommands }) {
   return (
     <div className="empty">
       <div className="empty-inner">
-        <Heading size="6" style={{ letterSpacing: '-0.02em' }}>O que você quer que seja feito?</Heading>
-        <p className="dim">Escreva em português, do seu jeito. A ADE transforma em prova, corrige, confere e manda uma segunda IA revisar. Você só decide no fim.</p>
-        <span className="lbl" style={{ marginTop: 18 }}>Experimente</span>
-        <div className="sugs">
-          {SUGGESTIONS.map((s) => <button key={s} className="sug" onClick={() => onPick(s)} disabled={running}><Play weight="fill" />{s}</button>)}
-        </div>
+        <Heading size="6" style={{ letterSpacing: '-0.02em' }}>O que você quer construir{p ? ` em ${p.name}` : ''}?</Heading>
+        <p className="dim">Escreva em português, do seu jeito: uma correção, uma tela nova, um app inteiro. A ADE escreve a prova, implementa, confere e manda uma segunda IA revisar. Você só decide no fim.</p>
+        <label className="toggle"><input type="checkbox" checked={allowCommands} onChange={(e) => setAllowCommands(e.target.checked)} /> Deixar a IA rodar comandos (instalar dependências, criar projeto). Desligue para ela só ler e editar arquivos.</label>
+        {p?.name === 'example' && (
+          <>
+            <span className="lbl" style={{ marginTop: 18 }}>Experimente no projeto de exemplo</span>
+            <div className="sugs">
+              {SUGGESTIONS.map((s) => <button key={s} className="sug" onClick={() => onPick(s)} disabled={running}><Play weight="fill" />{s}</button>)}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
