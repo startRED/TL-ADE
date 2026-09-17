@@ -9,6 +9,7 @@ que escreve tudo em um journal encadeado por hash, com lease, worktree por story
 e reconciliação por classe de efeito. Cada story roda um ciclo eval-first: a prova nasce vermelha,
 o Maker implementa, a prova fica verde, e o resultado termina em um commit local. A ADE existe para
 que uma story rode sozinha do começo ao commit, de forma auditável e recuperável de qualquer crash.
+Ela é dona do worktree e do processo, dona do journal, quem roda `git`/`gh` e quem prova 'pronto' por eval executado.
 
 ## O que a ADE não é
 
@@ -17,15 +18,35 @@ operador: o portão substitui a revisão linha a linha, não o humano. A ADE nã
 aposta em janela de contexto maior — o gargalo de missões longas é seguir instrução, não tamanho de
 contexto, e o investimento vai para o contrato, não para o modelo. A ADE não reimplementa o que os
 binários instalados já fazem nativamente (`claude`, `codex`); ela só escreve o que é insubstituível:
-o journal, o Task Contract com eval provado, e o Context Pack.
+o journal, o Task Contract com eval provado, e o Context Pack. A ADE não é um CI, não é um issue tracker,
+não é uma IDE, não é um provedor de modelo (nunca chama API HTTP de modelo; só CLI com assinatura), não é um framework de agentes.
 
-## Regra de ampliação de escopo (o que não pode entrar no código nesta fatia)
+## Escopo do Slice 1 (o que entra em `src/` nesta fatia)
 
-Esta fatia entrega apenas a fundação: o pacote TypeScript estrito na raiz, os oito contratos de dados
-publicados (`journal-event`, `ade-config`, `plan`, `task-contract`, `eval`, `unit-result`,
-`review-result`, `capability-set`) com seus validadores ajv, e a canonicalização JCS com o digest de
-16 hex do SHA-256. Nada além disso entra em `src/` nesta fatia: sem painel web, sem Intent Compiler,
-sem entrevista, sem push/PR/merge, sem scheduler, sem adapters de despacho real. `proto/` é a demo e
-continua funcionando como está, intocada. Qualquer pedido de ampliar o escopo desta fatia — adicionar
-um recurso não listado nos critérios de aceite da story atual — é recusado até a story seguinte ser
-aberta explicitamente; a ordem do roadmap é fixa e não é renegociada dentro de uma fatia em andamento.
+`ade run --plan plan.json` executa uma story `trivial` de plano escrito à mão, família `claude`, `local_commit` local, zero rede além da CLI; código em JS ESM com JSDoc, ADR 0023.
+
+- `src/journal`: `canonical.js` (wrapper `canonicalize` + `digest16`), `journal.js` (append/read/fold, `prev`, fd aberto + `fsyncSync`).
+- `src/step`: `step.js` (write-ahead, `input_digest`, `intent_context`, fila serializada), `reconcile.js` (tabela por `effect_class`).
+- `src/lease`: `lease.js` (`mkdir` + heartbeat 2 s + TTL 15 s, fingerprint pid/start-time; exit 5).
+- `src/git`: `gitport.js` (instância por worktree, `worktree_tree` com índice racy, `dirty_paths -z`, checkpoint/restore em `refs/ade/`).
+- `src/runner`: `spawn.js` (env explícito, recibo durável, `taskkill /T /F`), `receipt.js`, `resolve-binary.js`.
+- `src/contain`: `contain.js` (precedência segurança > sensíveis > escopo, `maxBuffer` explícito), `secrets.js`, `canary.js`.
+- `src/gates`: `gates.js` (cache `gate:<id>:<tree>`, restauração de sobras).
+- `src/evals`: `eval-runner.js` (`phase: red|green`, `strictness`, evidência).
+- `src/pack`: `pack.js` (5 seções do slice, teto por seção com ponteiro, redação pós-montagem), `firewall.js`.
+- `src/adapters/claude`: argv, `--session-id`, `--json-schema`, parser tolerante, `parse_usage`.
+- `src/adapters/fake`: CLI falsa para testes determinísticos sem rede.
+- `src/cli`: `node:util parseArgs`; `ade run --plan`, `ade doctor`, `ade show`.
+- `src/engine.js`: ciclo da story, orçamento, `runtime_stamp`.
+- `src/schema`: carregador ajv compartilhado dos 8 schemas publicados.
+- `schemas/`: 8 arquivos `.schema.json` publicados (`journal-event`, `ade-config`, `plan`, `task-contract`, `eval`, `unit-result`, `review-result`, `capability-set`).
+- `fixtures/`: transcripts gravados, cenários da CLI falsa, vetores JCS.
+- `tests/`: Vitest, um arquivo por módulo + `parity/` + `probes/`.
+
+**Fora do slice 1, sem exceção — nenhum destes entra em `src/`:** Intent Compiler, entrevista, classificação, Checker como componente da ADE (adapter `codex`, ingestão de `review-result` pelo engine, rework automático), Skill Fabric, FQE, pesquisa, painel, PTY, push/PR/merge/CI, N>1, `agy`, SQLite, Playwright, Fastify, WebSocket. `proto/` é a demo e fica intocada.
+
+**Checker como passo do método.** O operador roda `codex exec` sobre o diff, fora do engine; o Codex é ferramenta de desenvolvimento, nunca importada pelo engine.
+
+**Regra de ampliação.** Item da lista "fora" que apareça em `src/` é motivo de rejeição, não de discussão; o caminho é uma linha em `docs/roadmap.md`.
+
+**Regra de cerimônia proporcional.** Se o diff cabe numa frase, pula plano e brainstorming.

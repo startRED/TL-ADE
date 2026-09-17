@@ -5,6 +5,7 @@ import { describe, expect, test } from 'vitest'
 const ADR_0023_PATH = fileURLToPath(new URL('../docs/adr/0023-js-esm-com-jsdoc-e-checkjs.md', import.meta.url))
 const ADR_0001_PATH = fileURLToPath(new URL('../docs/adr/0001-typescript-node-monorepo.md', import.meta.url))
 const README_PATH = fileURLToPath(new URL('../docs/adr/README.md', import.meta.url))
+const CHARTER_PATH = fileURLToPath(new URL('../PROJECT_CHARTER.md', import.meta.url))
 
 describe('ADR 0023', () => {
   // AC1: Formato fixo com status proposto e ordem das 7 seções
@@ -77,3 +78,140 @@ describe('ADR 0023', () => {
     expect(content).toContain('**Status:** aceito 2026-09-17')
   })
 })
+
+describe('PROJECT_CHARTER.md slice 1', () => {
+  // AC1: Módulos do Slice 1 e nenhum caminho src/... terminando em .ts
+  test('project_charter_lists_slice_1_modules_and_forbids_ts', () => {
+    expect(existsSync(CHARTER_PATH), 'PROJECT_CHARTER.md deve existir').toBe(true)
+
+    const charter = readFileSync(CHARTER_PATH, 'utf8')
+    const modules = [
+      'src/journal',
+      'src/step',
+      'src/lease',
+      'src/git',
+      'src/runner',
+      'src/contain',
+      'src/gates',
+      'src/evals',
+      'src/pack',
+      'src/adapters/claude',
+      'src/adapters/fake',
+      'src/cli',
+      'src/engine.js',
+      'src/schema',
+    ]
+
+    for (const mod of modules) {
+      expect(charter, `Módulo ausente: ${mod}`).toContain(mod)
+    }
+
+    expect(charter, 'Nenhum caminho src/... pode terminar em .ts').not.toMatch(/src\/[\w/.-]*\.ts\b/)
+  })
+
+  // AC2: Lista de exclusões do Slice 1
+  test('project_charter_lists_slice_1_exclusions', () => {
+    expect(existsSync(CHARTER_PATH), 'PROJECT_CHARTER.md deve existir').toBe(true)
+
+    const charter = readFileSync(CHARTER_PATH, 'utf8')
+    const exclusions = [
+      'Fora do slice 1',
+      'Intent Compiler',
+      'Skill Fabric',
+      'FQE',
+      'painel',
+      'PTY',
+      'push/PR/merge',
+      'agy',
+      'SQLite',
+      'Playwright',
+      'Fastify',
+      'WebSocket',
+    ]
+
+    for (const item of exclusions) {
+      expect(charter, `Exclusão ausente: ${item}`).toContain(item)
+    }
+  })
+
+  // AC3: Regras normativas e limite de 80 linhas
+  test('project_charter_declares_rules_and_stays_under_80_lines', () => {
+    expect(existsSync(CHARTER_PATH), 'PROJECT_CHARTER.md deve existir').toBe(true)
+
+    const charter = readFileSync(CHARTER_PATH, 'utf8')
+    const rules = [
+      'codex exec',
+      'Regra de ampliação',
+      'cerimônia proporcional',
+    ]
+
+    for (const rule of rules) {
+      expect(charter, `Regra ausente: ${rule}`).toContain(rule)
+    }
+
+    const lines = charter.split(/\r?\n/)
+    expect(lines.length, 'PROJECT_CHARTER.md deve ter no máximo 80 linhas').toBeLessThanOrEqual(80)
+  })
+
+  // Cobertura completa dos três primeiros critérios de aceite
+  test('project_charter_describes_full_slice_1_scope', () => {
+    expect(existsSync(CHARTER_PATH), 'PROJECT_CHARTER.md deve existir').toBe(true)
+
+    const charter = readFileSync(CHARTER_PATH, 'utf8')
+
+    // AC1: Módulos do Slice 1 e nenhum caminho src/... terminando em .ts
+    const modules = [
+      'src/journal',
+      'src/step',
+      'src/lease',
+      'src/git',
+      'src/runner',
+      'src/contain',
+      'src/gates',
+      'src/evals',
+      'src/pack',
+      'src/adapters/claude',
+      'src/adapters/fake',
+      'src/cli',
+      'src/engine.js',
+      'src/schema',
+    ]
+    for (const mod of modules) {
+      expect(charter, `Módulo ausente: ${mod}`).toContain(mod)
+    }
+    expect(charter, 'Nenhum caminho src/... pode terminar em .ts').not.toMatch(/src\/[\w/.-]*\.ts\b/)
+
+    // AC2: Lista de exclusões do Slice 1
+    const exclusions = [
+      'Fora do slice 1',
+      'Intent Compiler',
+      'Skill Fabric',
+      'FQE',
+      'painel',
+      'PTY',
+      'push/PR/merge',
+      'agy',
+      'SQLite',
+      'Playwright',
+      'Fastify',
+      'WebSocket',
+    ]
+    for (const item of exclusions) {
+      expect(charter, `Exclusão ausente: ${item}`).toContain(item)
+    }
+
+    // AC3: Regras e limite de 80 linhas
+    const rules = [
+      'codex exec',
+      'Regra de ampliação',
+      'cerimônia proporcional',
+    ]
+    for (const rule of rules) {
+      expect(charter, `Regra ausente: ${rule}`).toContain(rule)
+    }
+
+    const lines = charter.split(/\r?\n/)
+    expect(lines.length, 'PROJECT_CHARTER.md deve ter no máximo 80 linhas').toBeLessThanOrEqual(80)
+  })
+})
+
