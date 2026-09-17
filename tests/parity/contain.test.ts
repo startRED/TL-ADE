@@ -1,6 +1,6 @@
-import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import fs, { mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import {
   MAX_FINDINGS,
   SECRET_PATTERNS,
@@ -951,6 +951,160 @@ describe('contain parity', () => {
     expect(multiResult.ok).toBe(true)
     expect(multiResult.violations).toEqual([])
     expect(multiResult.changedPaths).toEqual(['src/a.js', 'src/b.js'])
+  })
+
+  // AC1: Dado um segredo e uma violação de escopo simultâneos, quando contain roda,
+  // então as duas violações aparecem na lista e o motivo é o segredo.
+  test('secret_with_scope_violation_still_stops', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    const rawPort = createGitPort({ worktreeDir: repo.dir })
+    const port = {
+      ...rawPort,
+      restore: (tree: string, options: { label: string }) => rawPort.restoreTree(tree, options),
+    }
+
+    const srcDir = path.join(repo.dir, 'src')
+    mkdirSync(srcDir, { recursive: true })
+    writeFileSync(path.join(srcDir, 'a.js'), 'export const a = 1;\n')
+    const initialCommit = await port.commit({ message: 'commit inicial' })
+
+    // src/a.js alterado com segredo ('AKIA' + 'ABCDEFGHIJ234567') e fora/b.txt alterado fora do escopo
+    const awsKey = 'AKIA' + 'ABCDEFGHIJ234567'
+    writeFileSync(path.join(srcDir, 'a.js'), `export const a = "${awsKey}";\n`)
+
+    const foraDir = path.join(repo.dir, 'fora')
+    mkdirSync(foraDir, { recursive: true })
+    writeFileSync(path.join(foraDir, 'b.txt'), 'conteudo fora do escopo\n')
+
+    const result = await contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore: initialCommit.tree,
+      scopePaths: ['src/**'],
+    })
+
+    // Exemplo: reason === 'secret', violations[0].kind === 'secret' e lista contém 'scope'
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('secret')
+    expect(result.failureClass).toBe('security')
+    expect(result.action).toBe('stop_batch')
+    expect(result.violations[0].kind).toBe('secret')
+    expect(result.violations.map((v) => v.kind)).toContain('scope')
+
+    const scopeViolation = result.violations.find(
+      (v) => v.kind === 'scope' && v.path === 'fora/b.txt',
+    )
+    expect(scopeViolation).toBeDefined()
+
+    // Exemplo: .env com 'AKIA' + 'ABCDEFGHIJ234567' dentro -> reason === 'secret' (segredo vence sensivel) e violations contem sensitive_path
+    writeFileSync(path.join(repo.dir, '.env'), `AWS_SECRET=${awsKey}\n`)
+    const resEnv = await contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore: initialCommit.tree,
+      scopePaths: ['src/**', '.env'],
+    })
+    expect(resEnv.ok).toBe(false)
+    expect(resEnv.reason).toBe('secret')
+    expect(resEnv.violations[0].kind).toBe('secret')
+    expect(resEnv.violations.map((v) => v.kind)).toContain('sensitive_path')
+
+    // Reverter arquivos para testar caminho que resolve para fora do worktree sem diff pendente
+    unlinkSync(path.join(repo.dir, '.env'))
+    unlinkSync(path.join(foraDir, 'b.txt'))
+    writeFileSync(path.join(srcDir, 'a.js'), 'export const a = 1;\n')
+
+    // Exemplo: caminho alterado que resolve para fora do worktree -> não aparece em violations e nenhum arquivo é lido.
+    // O arquivo real fora do worktree contém um segredo: se fosse lido, apareceria como violação e
+    // fs.readFileSync seria chamado com o caminho dele. Como nenhum dos dois acontece, a leitura foi
+    // realmente pulada, não apenas "não encontrou nada por acaso".
+    const outsidePath = path.join(repo.dir, '..', 'fora-do-repo-real.txt')
+    writeFileSync(outsidePath, 'AKIA' + 'ABCDEFGHIJ234567')
+    const readFileSyncSpy = vi.spyOn(fs, 'readFileSync')
+    try {
+      const mockPort = {
+        ...port,
+        dirtyPaths: async () => ['../fora-do-repo-real.txt'],
+      }
+      const resOutside = await contain({
+        git: mockPort,
+        unitId: 'S10',
+        treeBefore: initialCommit.tree,
+        scopePaths: ['**'],
+      })
+      expect(resOutside.violations).toEqual([])
+      expect(readFileSyncSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining('fora-do-repo-real.txt'),
+      )
+    } finally {
+      readFileSyncSpy.mockRestore()
+      unlinkSync(outsidePath)
+    }
+  })
+
+  // AC2: Dado um arquivo novo com acentos e espaço no nome contendo um segredo, quando contain roda, então o segredo é detectado.
+  // AC3: Dado esse mesmo arquivo, quando contain termina, então o caminho aparece na lista de arquivos alterados na forma legível, sem aspas nem escapes.
+  test('secret_in_a_file_git_would_quote_is_caught', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    const rawPort = createGitPort({ worktreeDir: repo.dir })
+    const port = {
+      ...rawPort,
+      restore: (tree: string, options: { label: string }) => rawPort.restoreTree(tree, options),
+    }
+
+    const srcDir = path.join(repo.dir, 'src')
+    mkdirSync(srcDir, { recursive: true })
+    writeFileSync(path.join(srcDir, 'a.js'), 'export const a = 1;\n')
+    const initialCommit = await port.commit({ message: 'commit inicial' })
+
+    // Criar src/acentuação ç.txt com 'gh' + 'p_' + 'a'.repeat(36)
+    const specialFile = 'src/acentuação ç.txt'
+    const githubToken = 'gh' + 'p_' + 'a'.repeat(36)
+    writeFileSync(path.join(repo.dir, specialFile), githubToken)
+
+    const result = await contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore: initialCommit.tree,
+      scopePaths: ['src/**'],
+    })
+
+    // Exemplo: reason === 'secret' e changedPaths inclui 'src/acentuação ç.txt'
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('secret')
+    expect(result.failureClass).toBe('security')
+    expect(result.action).toBe('stop_batch')
+    expect(result.changedPaths).toContain(specialFile)
+
+    const secretViolation = result.violations.find(
+      (v) => v.kind === 'secret' && v.path === specialFile,
+    )
+    expect(secretViolation).toBeDefined()
+    expect(secretViolation?.pattern).toBe('github_token')
+
+    // Exemplo: arquivos src/b.js e src/a.js alterados -> changedPaths === ['src/a.js', 'src/b.js'] (ordem alfabetica estavel).
+    // git.dirtyPaths() do GitPort real já devolve os caminhos em ordem alfabética, então essa prova sozinha
+    // não distingue um contain que ordena de um que só repassa a ordem do git. Por isso o mock abaixo devolve
+    // dirtyPaths deliberadamente fora de ordem (b antes de a): só o .sort() dentro de contain() pode corrigir
+    // isso para a ordem alfabética esperada.
+    unlinkSync(path.join(repo.dir, specialFile))
+    writeFileSync(path.join(srcDir, 'b.js'), 'export const b = 2;\n')
+    writeFileSync(path.join(srcDir, 'a.js'), 'export const a = 2;\n')
+
+    const unorderedPort = {
+      ...port,
+      dirtyPaths: async () => ['src/b.js', 'src/a.js'],
+    }
+    const resOrdered = await contain({
+      git: unorderedPort,
+      unitId: 'S10',
+      treeBefore: initialCommit.tree,
+      scopePaths: ['src/**'],
+      sensitivePaths: [],
+    })
+    expect(resOrdered.changedPaths).toEqual(['src/a.js', 'src/b.js'])
   })
 })
 
