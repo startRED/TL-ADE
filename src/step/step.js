@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { digest16 } from '../journal/canonical.js'
 import { readJournal } from '../journal/journal.js'
+import { StateIntegrityError } from '../journal/errors.js'
 import { maybeFault } from './fault.js'
 
 /** Classes de efeito fechadas desta fatia do motor. */
@@ -42,7 +43,7 @@ export function priorStepResult(events, stepId) {
  * @param {{
  *   journal: { append: (partial: Record<string, unknown>) => Promise<Record<string, unknown>> },
  *   missionDir: string,
- *   gitPort?: unknown,
+ *   gitPort?: import('../git/gitport.js').GitPort | null,
  *   env?: NodeJS.ProcessEnv,
  * }} options
  * @returns {{ step: (spec: {
@@ -63,8 +64,8 @@ export function priorStepResult(events, stepId) {
  * }> }}
  */
 export function createStepRunner({ journal, missionDir, gitPort = null, env = process.env }) {
-  // gitPort é reservado para a guarda de HEAD da s2; não é lido nesta story.
-  void gitPort
+  /** @type {Map<string, Promise<void>>} */
+  const queues = new Map()
 
   /**
    * @param {{
@@ -78,7 +79,7 @@ export function createStepRunner({ journal, missionDir, gitPort = null, env = pr
    * }} spec
    * @param {() => Promise<unknown>} effectFn
    */
-  async function step(spec, effectFn) {
+  async function runStep(spec, effectFn) {
     const { unit, id, effect_class, input, intent_context = {}, worktree = '', receiptPath = '' } = spec ?? {}
 
     if (typeof unit !== 'string' || !UNIT_OR_ID_REGEX.test(unit)) {
@@ -146,12 +147,19 @@ export function createStepRunner({ journal, missionDir, gitPort = null, env = pr
       return reused
     }
 
+    let before = null
+    let recordedContext = intent_context
+    if (effect_class === 'model_call' && gitPort) {
+      before = await gitPort.headInfo()
+      recordedContext = { ...intent_context, head_before: before.commit, branch_before: before.branch }
+    }
+
     await journal.append({
       kind: 'step_intent',
       step_id: id,
       effect_class,
       input_digest: digest,
-      intent_context,
+      intent_context: recordedContext,
       worktree,
       receipt_path: receiptPath,
       unit,
@@ -174,6 +182,30 @@ export function createStepRunner({ journal, missionDir, gitPort = null, env = pr
     }
 
     maybeFault('after_effect', env)
+
+    if (effect_class === 'model_call' && gitPort && before) {
+      const after = await gitPort.headInfo()
+      if (after.commit !== before.commit || after.branch !== before.branch) {
+        await journal.append({
+          kind: 'step_result',
+          step_id: id,
+          effect_class,
+          input_digest: digest,
+          status: 'state_integrity',
+          reason: 'head_moved',
+          head_before: before.commit,
+          head_after: after.commit,
+          branch_before: before.branch,
+          branch_after: after.branch,
+        })
+        throw new StateIntegrityError('head_moved', {
+          step_id: id,
+          head_before: before.commit,
+          head_after: after.commit,
+        })
+      }
+    }
+
     await journal.append({
       kind: 'step_result',
       step_id: id,
@@ -185,6 +217,38 @@ export function createStepRunner({ journal, missionDir, gitPort = null, env = pr
     maybeFault('after_result', env)
 
     return { step_id: id, status: /** @type {'ok'} */ ('ok'), result: value, reused: false }
+  }
+
+  /**
+   * @param {{
+   *   unit: string,
+   *   id: string,
+   *   effect_class: string,
+   *   input: unknown,
+   *   intent_context?: Record<string, string | null>,
+   *   worktree?: string,
+   *   receiptPath?: string,
+   * }} spec
+   * @param {() => Promise<unknown>} effectFn
+   */
+  async function step(spec, effectFn) {
+    const unit = spec?.unit
+    if (typeof unit !== 'string' || !UNIT_OR_ID_REGEX.test(unit)) {
+      throw new TypeError('unit inválida')
+    }
+    const prev = queues.get(unit) ?? Promise.resolve()
+    const next = prev.then(
+      () => runStep(spec, effectFn),
+      () => runStep(spec, effectFn),
+    )
+    queues.set(
+      unit,
+      next.then(
+        () => undefined,
+        () => undefined,
+      ),
+    )
+    return next
   }
 
   return { step }
