@@ -189,4 +189,40 @@ describe('AGENTS.md e CLAUDE.md', () => {
   })
 })
 
+function findJsFiles(dir: string): string[] {
+  const entries = readdirSync(dir, { withFileTypes: true })
+  const files: string[] = []
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      files.push(...findJsFiles(fullPath))
+    } else if (entry.isFile() && entry.name.endsWith('.js')) {
+      files.push(fullPath)
+    }
+  }
+  return files
+}
+
+describe('execFile explicit maxBuffer guard', () => {
+  test('every_git_execfile_declares_an_explicit_maxbuffer', () => {
+    const srcDir = path.join(ROOT, 'src')
+    const files = findJsFiles(srcDir)
+
+    for (const file of files) {
+      const content = readFileSync(file, 'utf8')
+      // Aplica a arquivos que importam execFile de child_process
+      if (!/import\s*\{[^}]*\bexecFile\b(?!\s+as)/.test(content)) {
+        continue
+      }
+      let idx = 0
+      while ((idx = content.indexOf('execFile(', idx)) !== -1) {
+        const snippet = content.slice(idx, idx + 400)
+        expect(snippet).toContain('maxBuffer')
+        expect(snippet).not.toContain('shell: true')
+        idx += 'execFile('.length
+      }
+    }
+  })
+})
+
 
