@@ -1447,9 +1447,12 @@ async function agyMaker({ role, prompt, model, effort }) {
   m.cost.tokens_in += u.input_tokens || 0; m.cost.tokens_out += u.output_tokens || 0; m.cost.cache_read += u.cache_read_tokens || 0
   m.cost.by_model[id] = m.cost.by_model[id] || 0
   journal({ type: 'model_call', family: 'agy', role, model: id, effort, story: m.current, turns: j?.num_turns || 0, usd: 0, tokens_in: u.input_tokens || 0, cache_read: u.cache_read_tokens || 0, tokens_out: u.output_tokens || 0, prompt_chars: prompt.length, wall_ms: Date.now() - t0 }).catch(() => {})
-  if (!j || j.status !== 'SUCCESS') {
+  // status diferente de SUCCESS com código 0 e resposta completa não é falha (visto em 17/09: a prova tinha sido escrita e o resumo era jogado fora, junto com as suposições declaradas)
+  const soft = j && j.status !== 'SUCCESS' && r.code === 0 && String(j.response || '').trim().length > 40 && !/quota reached|rate limit|RESOURCE_EXHAUSTED/i.test(String(j.response))
+  if (soft) log('engine', `agy terminou com status "${j.status}" em vez de SUCCESS, mas saiu com código 0 e resposta completa; sigo com a resposta`, 'warn')
+  if (!soft && (!j || j.status !== 'SUCCESS')) {
     const msg = (j?.response || r.err || r.out || '').toString()
-    log('engine', `agy falhou (código ${r.code}): ${msg.slice(0, 300)}`, 'error')
+    log('engine', `agy falhou (código ${r.code}, status ${j?.status ?? 'sem JSON'}): ${msg.slice(0, 300)}`, 'error')
     if (/quota reached|rate limit|RESOURCE_EXHAUSTED/i.test(msg)) {
       const t = /Resets in (?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/i.exec(msg) || []
       const wait = ((+t[1] || 0) * 3600 + (+t[2] || 0) * 60 + (+t[3] || 0)) * 1000 || 30 * 60 * 1000
