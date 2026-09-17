@@ -1,4 +1,5 @@
-import { AdeError } from './errors.js'
+import { StaleWorkflowVersionError } from './errors.js'
+import { openIntents } from './fold.js'
 
 export const CORE_VERSION = 1
 
@@ -39,25 +40,102 @@ export function parseRuntimeStamp(stamp) {
 }
 
 /**
- * Localiza intenções abertas emitidas sob core_version incompatível com o atual (s4).
- * @param {...unknown} _args
+ * @typedef {{
+ *   seq: number,
+ *   step_id: string,
+ *   effect_class: string,
+ *   runtime_stamp: string,
+ * }} StaleIntent
  */
-export function findStaleIntents(..._args) {
-  throw new AdeError('not_implemented', 'não implementado: s4', 2)
+
+/**
+ * Localiza intenções abertas emitidas sob core_version incompatível com o atual.
+ * @param {ReadonlyArray<Record<string, unknown>>} [events]
+ * @param {number} [currentCoreVersion=CORE_VERSION]
+ * @returns {Array<StaleIntent>}
+ */
+export function findStaleIntents(events = [], currentCoreVersion = CORE_VERSION) {
+  /** @type {Set<number>} */
+  const acceptedSeqs = new Set()
+
+  if (Array.isArray(events)) {
+    for (const ev of events) {
+      if (
+        ev &&
+        typeof ev === 'object' &&
+        ev.kind === 'decision' &&
+        ev.data &&
+        typeof ev.data === 'object'
+      ) {
+        /** @type {Record<string, unknown>} */
+        const data = /** @type {Record<string, unknown>} */ (ev.data)
+        if (
+          data.decision === 'accept_stale_version' &&
+          data.current_core_version === currentCoreVersion &&
+          Array.isArray(data.stale_seqs)
+        ) {
+          for (const s of data.stale_seqs) {
+            if (typeof s === 'number') {
+              acceptedSeqs.add(s)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return openIntents(events)
+    .filter(
+      (i) =>
+        parseRuntimeStamp(i.runtime_stamp).coreVersion !== currentCoreVersion &&
+        !acceptedSeqs.has(i.seq),
+    )
+    .map(({ seq, step_id, effect_class, runtime_stamp }) => ({
+      seq,
+      step_id,
+      effect_class,
+      runtime_stamp,
+    }))
 }
 
 /**
- * Assegura que o stamp em uso é compatível com a sessão corrente (s4).
- * @param {...unknown} _args
+ * Assegura que o stamp em uso é compatível com a sessão corrente.
+ * @param {ReadonlyArray<Record<string, unknown>>} [events]
+ * @param {number} [currentCoreVersion=CORE_VERSION]
+ * @returns {void}
+ * @throws {StaleWorkflowVersionError}
  */
-export function assertStampCurrent(..._args) {
-  throw new AdeError('not_implemented', 'não implementado: s4', 2)
+export function assertStampCurrent(events = [], currentCoreVersion = CORE_VERSION) {
+  const stale = findStaleIntents(events, currentCoreVersion)
+  if (stale.length > 0) {
+    throw new StaleWorkflowVersionError(stale, currentCoreVersion)
+  }
 }
 
 /**
- * Grava decisão autorizando prosseguimento com versão desatualizada (s4).
- * @param {...unknown} _args
+ * Grava decisão autorizando prosseguimento com versão desatualizada.
+ * @param {{ append(partial: Record<string, unknown>): Promise<Record<string, unknown>> }} journal
+ * @param {ReadonlyArray<Record<string, unknown>>} events
+ * @param {{ source?: string, currentCoreVersion?: number }} [options]
+ * @returns {Promise<Record<string, unknown> | null>}
  */
-export function acceptStaleVersion(..._args) {
-  throw new AdeError('not_implemented', 'não implementado: s4', 2)
+export async function acceptStaleVersion(
+  journal,
+  events,
+  { source = 'operator', currentCoreVersion = CORE_VERSION } = {},
+) {
+  const stale = findStaleIntents(events, currentCoreVersion)
+  if (stale.length === 0) {
+    return null
+  }
+  return journal.append({
+    kind: 'decision',
+    source,
+    data: {
+      decision: 'accept_stale_version',
+      current_core_version: currentCoreVersion,
+      stale_seqs: stale.map((s) => s.seq),
+    },
+  })
 }
+

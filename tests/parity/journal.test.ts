@@ -9,9 +9,14 @@ import {
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { JournalCorruptError } from '../../src/journal/errors.js'
+import { JournalCorruptError, StaleWorkflowVersionError } from '../../src/journal/errors.js'
 import { digest16 } from '../../src/journal/canonical.js'
-import { openJournal, readJournal } from '../../src/journal/journal.js'
+import { fold, openJournal, readJournal } from '../../src/journal/journal.js'
+import {
+  acceptStaleVersion,
+  assertStampCurrent,
+  findStaleIntents,
+} from '../../src/journal/stamp.js'
 
 interface ReadJournalResult {
   events: Array<Record<string, unknown>>
@@ -290,3 +295,165 @@ describe('journal parity', () => {
     expect(corruptErr.details).toEqual({ line: 2, reason: 'not_canonical' })
   })
 })
+
+describe('runtime stamp parity', () => {
+  // AC1 & AC2: Intenção sob versão desatualizada bloqueia até aceite gravado como decision
+  test('stale_runtime_version_stops_until_accepted', async () => {
+    const missionDir = createMissionDir()
+    const journal1 = openJournal({ missionDir, runtimeStamp: '0:aa:bb' })
+    await journal1.append({
+      kind: 'step_intent',
+      step_id: 'T1:r1:maker',
+      effect_class: 'model_call',
+    })
+    await journal1.close()
+
+    const filePath = path.join(missionDir, 'journal.jsonl')
+    const { events } = readJournal(filePath) as unknown as ReadJournalResult
+
+    // Critério 1: assertStampCurrent lança StaleWorkflowVersionError para core atual 1
+    const err = catchError(() => assertStampCurrent(events, 1))
+    expect(err).toBeInstanceOf(StaleWorkflowVersionError)
+    const staleErr = err as StaleWorkflowVersionError
+    expect(staleErr.code).toBe('stale_workflow_version')
+    expect(staleErr.exitCode).toBe(2)
+    expect(staleErr.details).toEqual({
+      stale: [
+        {
+          seq: 1,
+          step_id: 'T1:r1:maker',
+          effect_class: 'model_call',
+          runtime_stamp: '0:aa:bb',
+        },
+      ],
+      current_core_version: 1,
+    })
+
+    const staleBefore = findStaleIntents(events, 1)
+    expect(staleBefore).toEqual([
+      {
+        seq: 1,
+        step_id: 'T1:r1:maker',
+        effect_class: 'model_call',
+        runtime_stamp: '0:aa:bb',
+      },
+    ])
+
+    // Critério 2: reabertura com core 1 e aceite pelo operador
+    const journal2 = openJournal({ missionDir, runtimeStamp: '1:aa:bb' })
+    const accepted = await acceptStaleVersion(journal2, events, {
+      source: 'operator',
+      currentCoreVersion: 1,
+    })
+    expect(accepted).not.toBeNull()
+    expect(accepted?.kind).toBe('decision')
+    expect(accepted?.seq).toBe(2)
+    expect(accepted?.source).toBe('operator')
+    expect(accepted?.data).toEqual({
+      decision: 'accept_stale_version',
+      current_core_version: 1,
+      stale_seqs: [1],
+    })
+    await journal2.close()
+
+    const { events: eventsAfter } = readJournal(filePath) as unknown as ReadJournalResult
+    expect(eventsAfter).toHaveLength(2)
+    expect(() => assertStampCurrent(eventsAfter, 1)).not.toThrow()
+    expect(findStaleIntents(eventsAfter, 1)).toEqual([])
+
+    // Aceite vale somente para o core_version em que foi concedido (exemplo core 2)
+    const staleCore2 = findStaleIntents(eventsAfter, 2)
+    expect(staleCore2).toEqual([
+      {
+        seq: 1,
+        step_id: 'T1:r1:maker',
+        effect_class: 'model_call',
+        runtime_stamp: '0:aa:bb',
+      },
+    ])
+    const errCore2 = catchError(() => assertStampCurrent(eventsAfter, 2))
+    expect(errCore2).toBeInstanceOf(StaleWorkflowVersionError)
+  })
+
+  // AC3: Divergência somente de digests ou intenções já fechadas não bloqueiam
+  test('only_core_version_divergence_blocks', async () => {
+    // Caso 1: divergência apenas de config_digest e capabilities_digest não bloqueia
+    const missionDir1 = createMissionDir()
+    const journal1 = openJournal({ missionDir: missionDir1, runtimeStamp: '1:cc:dd' })
+    await journal1.append({
+      kind: 'step_intent',
+      step_id: 'T1:r1:maker',
+      effect_class: 'model_call',
+    })
+    await journal1.close()
+
+    const filePath1 = path.join(missionDir1, 'journal.jsonl')
+    const linesBefore1 = readFileSync(filePath1, 'utf8').split('\n').filter(Boolean).length
+    const { events: events1 } = readJournal(filePath1) as unknown as ReadJournalResult
+
+    expect(findStaleIntents(events1, 1)).toEqual([])
+    expect(() => assertStampCurrent(events1, 1)).not.toThrow()
+
+    const reopen1 = openJournal({ missionDir: missionDir1, runtimeStamp: '1:cc:dd' })
+    const res1 = await acceptStaleVersion(reopen1, events1, {
+      source: 'operator',
+      currentCoreVersion: 1,
+    })
+    expect(res1).toBeNull()
+    await reopen1.close()
+
+    const linesAfter1 = readFileSync(filePath1, 'utf8').split('\n').filter(Boolean).length
+    expect(linesAfter1).toBe(linesBefore1)
+
+    // Caso 2: intent sob core 0 já fechado por step_result não bloqueia
+    const missionDir2 = createMissionDir()
+    const journal2 = openJournal({ missionDir: missionDir2, runtimeStamp: '0:aa:bb' })
+    await journal2.append({
+      kind: 'step_intent',
+      step_id: 'T1:r1:maker',
+      effect_class: 'model_call',
+    })
+    await journal2.append({
+      kind: 'step_result',
+      step_id: 'T1:r1:maker',
+      status: 'completed',
+    })
+    await journal2.close()
+
+    const filePath2 = path.join(missionDir2, 'journal.jsonl')
+    const linesBefore2 = readFileSync(filePath2, 'utf8').split('\n').filter(Boolean).length
+    const { events: events2 } = readJournal(filePath2) as unknown as ReadJournalResult
+
+    expect(findStaleIntents(events2, 1)).toEqual([])
+    expect(() => assertStampCurrent(events2, 1)).not.toThrow()
+
+    const reopen2 = openJournal({ missionDir: missionDir2, runtimeStamp: '1:aa:bb' })
+    const res2 = await acceptStaleVersion(reopen2, events2, {
+      source: 'operator',
+      currentCoreVersion: 1,
+    })
+    expect(res2).toBeNull()
+    await reopen2.close()
+
+    const linesAfter2 = readFileSync(filePath2, 'utf8').split('\n').filter(Boolean).length
+    expect(linesAfter2).toBe(linesBefore2)
+
+    // Caso vazio: findStaleIntents([]) devolve [] e não lança
+    expect(findStaleIntents([])).toEqual([])
+    expect(() => assertStampCurrent([])).not.toThrow()
+  })
+
+  // AC4: Re-exportação de fold a partir do módulo journal
+  test('journal_module_reexports_fold', () => {
+    const result = fold([])
+    expect(result).toEqual({
+      lastSeq: 0,
+      kinds: {},
+      steps: {},
+      openIntents: [],
+      decisions: [],
+    })
+    expect(typeof fold).toBe('function')
+  })
+})
+
