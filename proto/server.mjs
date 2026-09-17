@@ -1615,7 +1615,7 @@ async function decide(option, payload = {}) {
   if (m.state === 'paused' && option === 'discard') { await gitDiscard(state.project.dir); await refreshProject(); m.state = 'discarded'; log('operador', 'descartou a missão pausada; arquivos restaurados'); return finish() }
   if (m.state !== 'awaiting_operator') return
   const st = story()
-  if (option === 'accept') { if (st) { st.state = 'done'; await gitCommit(state.project.dir, `ade: ${st.title.slice(0, 72)} (aceita pelo operador)`); await refreshProject() } log('operador', 'aceitou como está'); return runStories() }
+  if (option === 'accept') { if (st) { st.state = 'done'; await gitCommit(state.project.dir, `ade: ${st.title.slice(0, 72)} (aceita pelo operador)`); await refreshProject() } log('operador', 'aceitou como está'); m.reason = null; return runStories() }
   if (option === 'retry') {
     if (!st) return
     log('operador', 'pediu mais uma rodada'); m.state = 'running'; st.state = 'running'; broadcast()
