@@ -272,13 +272,18 @@ async function guard(fn) {
   try { return await fn() } catch (err) {
     const m = state.mission; if (!m) return
     if (err === PAUSE || (m.reason === 'budget' && state.settings.unattended)) {
-      m.pause_requested = false; m.state = 'paused'; m.reason = null
+      const byQuota = !m.pause_requested && !!m.quota_until
+      m.pause_requested = false; m.state = 'paused'; m.reason = byQuota ? 'quota' : null
       if (m.current != null && m.stories[m.current] && m.stories[m.current].state !== 'done') { const st = m.stories[m.current]; Object.assign(st, { state: 'queued', round: 0, steps: [], red_tests: [], tests_after: null, diff: '', review: null, visual: null }); if (state.project) await gitDiscard(state.project.dir).catch(() => {}); await refreshProject().catch(() => {}) }
       state.live = null; log('operador', 'pausou; a parte em andamento volta do começo quando continuar')
       await persistMission().catch(() => {}); return finish()
     }
     m.state = 'awaiting_operator'; m.reason = 'engine_error'; log('engine', `erro do engine: ${err.message}`, 'error'); await persistMission().catch(() => {}); return finish()
   }
+}
+function scheduleQuotaResume(e) {
+  const m = e.mission; if (!m?.quota_until) return
+  setTimeout(() => { if (e.mission === m && m.state === 'paused' && m.reason === 'quota' && !busyOf(e)) withEngine(e, () => guard(resumeMission)) }, Math.max(5000, new Date(m.quota_until) - Date.now()))
 }
 async function pauseMission() {
   const e = currentEngine(); const m = e.mission
@@ -291,7 +296,7 @@ async function resumeMission() {
   const m = state.mission
   if (!m || m.state !== 'paused') return 'Esta missão não está pausada.'
   const fresh = await discover(state.project.dir); if (fresh.dirty) { await gitDiscard(fresh.dir); }
-  state.project = await discover(fresh.dir); m.finished_at = null; m.reason = null; log('operador', 'continuou a missão')
+  state.project = await discover(fresh.dir); m.finished_at = null; const auto = m.reason === 'quota'; m.reason = null; m.quota_until = null; log(auto ? 'engine' : 'operador', 'continuou a missão')
   if (m.program) {
     let reopened = 0
     for (const ep of m.program.epics) {
@@ -328,6 +333,7 @@ async function loadSavedMissions() {
     }
     if (m.program && m.epic) m.epic = m.program.epics.find((x) => x.id === m.epic.id) || null
     e.mission = m; e.log = j.log || []; e.live = null
+    if (m.state === 'paused' && m.reason === 'quota') scheduleQuotaResume(e)
   }
   if (saved.active && engines.get(path.resolve(saved.active))?.project) activeDir = path.resolve(saved.active)
 }
@@ -1330,7 +1336,18 @@ async function agyMaker({ role, prompt, model, effort }) {
   m.cost.tokens_in += u.input_tokens || 0; m.cost.tokens_out += u.output_tokens || 0; m.cost.cache_read += u.cache_read_tokens || 0
   m.cost.by_model[id] = m.cost.by_model[id] || 0
   journal({ type: 'model_call', family: 'agy', role, model: id, effort, story: m.current, turns: j?.num_turns || 0, usd: 0, tokens_in: u.input_tokens || 0, cache_read: u.cache_read_tokens || 0, tokens_out: u.output_tokens || 0, prompt_chars: prompt.length, wall_ms: Date.now() - t0 }).catch(() => {})
-  if (!j || j.status !== 'SUCCESS') { log('engine', `agy falhou (código ${r.code}): ${(j?.response || r.err || r.out || '').toString().slice(0, 300)}`, 'error'); return null }
+  if (!j || j.status !== 'SUCCESS') {
+    const msg = (j?.response || r.err || r.out || '').toString()
+    log('engine', `agy falhou (código ${r.code}): ${msg.slice(0, 300)}`, 'error')
+    if (/quota reached|rate limit|RESOURCE_EXHAUSTED/i.test(msg)) {
+      const t = /Resets in (?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/i.exec(msg) || []
+      const wait = ((+t[1] || 0) * 3600 + (+t[2] || 0) * 60 + (+t[3] || 0)) * 1000 || 30 * 60 * 1000
+      m.quota_until = new Date(Date.now() + wait + 60 * 1000).toISOString()
+      log('engine', `cota do Gemini esgotada: a missão pausa sem gastar rodadas e retoma sozinha às ${new Date(m.quota_until).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}. Para não esperar, troque quem escreve em Modelos e continue.`, 'warn')
+      scheduleQuotaResume(currentEngine()); throw PAUSE
+    }
+    return null
+  }
   const text = String(j.response || '').replace(/\(file:\/\/[^)]*\)/g, '').trim()
   log('agy', text.slice(0, 600), 'text')
   log('engine', `agy terminou · ${Math.round((Date.now() - t0) / 1000)} s · ${Math.round((u.input_tokens || 0) / 1000)}k tokens de entrada · ${touched.length} arquivo(s)`)
