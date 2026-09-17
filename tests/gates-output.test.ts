@@ -1,7 +1,7 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import fs, { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 import { buildExtract, EXTRACT_CAPS, MAX_RAW_REF_BYTES, safeId, writeRawArtifact } from '../src/gates/output.js'
 
 describe('gates output and raw artifacts', () => {
@@ -74,6 +74,103 @@ describe('gates output and raw artifacts', () => {
 
       const outsideFile = path.join(tmp, 'escape.log')
       expect(existsSync(outsideFile)).toBe(false)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  // Teste de segurança: fuga física por link simbólico/junção, que a checagem lexical não vê.
+  test('writeRawArtifact refuses to follow symlinks or junctions out of the mission dir', () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ade-gate-link-'))
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir'
+    try {
+      // Caso 1: <missionDir>/artifacts é, ele mesmo, um link para fora da missão.
+      const outsideA = path.join(tmp, 'outside-a')
+      const missionA = path.join(tmp, 'mission-a')
+      mkdirSync(outsideA, { recursive: true })
+      mkdirSync(missionA, { recursive: true })
+      let linked = true
+      try {
+        symlinkSync(outsideA, path.join(missionA, 'artifacts'), linkType)
+      } catch {
+        // Sem privilégio para criar link neste ambiente: nada a provar aqui.
+        linked = false
+      }
+      if (linked) {
+        expect(() => {
+          writeRawArtifact({ missionDir: missionA, ref: 'gates/lint/abc123', text: 'forbidden' })
+        }, 'deve recusar artifacts que é link para fora').toThrow(TypeError)
+        expect(existsSync(path.join(outsideA, 'gates'))).toBe(false)
+      }
+
+      // Caso 2: um diretório intermediário dentro de artifacts é um link para fora.
+      const outsideB = path.join(tmp, 'outside-b')
+      const missionB = path.join(tmp, 'mission-b')
+      mkdirSync(outsideB, { recursive: true })
+      mkdirSync(path.join(missionB, 'artifacts'), { recursive: true })
+      let linkedB = true
+      try {
+        symlinkSync(outsideB, path.join(missionB, 'artifacts', 'gates'), linkType)
+      } catch {
+        linkedB = false
+      }
+      if (linkedB) {
+        expect(() => {
+          writeRawArtifact({ missionDir: missionB, ref: 'gates/lint/abc123', text: 'forbidden' })
+        }, 'deve recusar diretório intermediário que é link para fora').toThrow(TypeError)
+        expect(existsSync(path.join(outsideB, 'lint'))).toBe(false)
+      }
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  // Teste de corrida: o diretório é trocado por um link para fora DEPOIS da validação,
+  // no instante da abertura do arquivo. Nenhum arquivo pode sobrar fora da missão.
+  test('writeRawArtifact discards the file when a directory is swapped after validation', () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'ade-gate-race-'))
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir'
+    try {
+      const outside = path.join(tmp, 'outside')
+      const mission = path.join(tmp, 'mission')
+      mkdirSync(outside, { recursive: true })
+      mkdirSync(mission, { recursive: true })
+
+      const leaf = path.join(mission, 'artifacts', 'gates', 'lint')
+      const realOpen = fs.openSync
+      let swapped = false
+      let linked = false
+      const spy = vi.spyOn(fs, 'openSync').mockImplementation((...args: Parameters<typeof fs.openSync>) => {
+        if (!swapped) {
+          swapped = true
+          // Toda a cadeia já foi criada e conferida como diretório real; aqui ela é
+          // trocada por uma junção para fora, exatamente na janela entre conferir e abrir.
+          rmSync(leaf, { recursive: true, force: true })
+          try {
+            symlinkSync(outside, leaf, linkType)
+            linked = true
+          } catch {
+            // Sem privilégio para criar link neste ambiente: restaura o diretório real.
+            mkdirSync(leaf, { recursive: true })
+          }
+        }
+        return realOpen(...args)
+      })
+
+      let caught: unknown = null
+      try {
+        writeRawArtifact({ missionDir: mission, ref: 'gates/lint/abc123', text: 'forbidden' })
+      } catch (err) {
+        caught = err
+      } finally {
+        spy.mockRestore()
+      }
+
+      if (linked) {
+        expect(caught, 'troca após a validação deve ser recusada').toBeInstanceOf(TypeError)
+        expect(existsSync(path.join(outside, 'abc123.log'))).toBe(false)
+        expect(readdirSync(outside)).toEqual([])
+      }
     } finally {
       rmSync(tmp, { recursive: true, force: true })
     }

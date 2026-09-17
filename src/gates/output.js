@@ -33,6 +33,92 @@ export function safeId(id) {
 }
 
 /**
+ * Confere que `dir` existe como diretório real (não link simbólico nem junção do Windows).
+ * Devolve false quando o caminho ainda não existe.
+ *
+ * @param {string} dir
+ * @returns {boolean}
+ */
+function assertRealDir(dir) {
+  let st
+  try {
+    st = fs.lstatSync(dir)
+  } catch (err) {
+    if (err && /** @type {NodeJS.ErrnoException} */ (err).code === 'ENOENT') {
+      return false
+    }
+    throw err
+  }
+  if (st.isSymbolicLink()) {
+    throw new TypeError(`ref inválido: '${dir}' é link simbólico ou junção e não pode ser seguido`)
+  }
+  if (!st.isDirectory()) {
+    throw new TypeError(`ref inválido: '${dir}' existe e não é diretório`)
+  }
+  return true
+}
+
+/**
+ * Cria (ou reaproveita) um único nível de diretório recusando link simbólico/junção.
+ * A reconferência depois do mkdir fecha a corrida em que outro processo troca o nome
+ * por um link entre a checagem e a criação.
+ *
+ * @param {string} dir
+ * @returns {void}
+ */
+function mkdirContained(dir) {
+  if (assertRealDir(dir)) {
+    return
+  }
+  try {
+    fs.mkdirSync(dir)
+  } catch (err) {
+    if (!err || /** @type {NodeJS.ErrnoException} */ (err).code !== 'EEXIST') {
+      throw err
+    }
+  }
+  assertRealDir(dir)
+}
+
+/**
+ * Confere que `dir` é, fisicamente, `<real(missionDir)>/artifacts/<segmentos sem o último>`.
+ * `realpath` resolve link simbólico/junção em qualquer nível da cadeia, inclusive no próprio
+ * `artifacts`, então a comparação é feita contra o caminho esperado montado a partir do
+ * `realpath` do diretório da missão — nunca a partir do `realpath` de `artifacts`, que já
+ * viria de fora se tivesse sido trocado.
+ *
+ * @param {string} missionDir
+ * @param {string[]} segments
+ * @param {string} dir
+ * @returns {void}
+ */
+function assertPhysicallyContained(missionDir, segments, dir) {
+  const realMission = fs.realpathSync(path.resolve(missionDir))
+  const expected = path.resolve(realMission, 'artifacts', ...segments.slice(0, -1))
+  const actual = fs.realpathSync(dir)
+  if (actual !== expected) {
+    throw new TypeError(`ref inválido: '${dir}' resolve para '${actual}', fora de <missionDir>/artifacts`)
+  }
+}
+
+/**
+ * Apaga um arquivo recém-criado fora da missão. Ausente já é o resultado desejado;
+ * qualquer outra falha sobe, porque deixar sobra fora da missão é o que se quer evitar.
+ *
+ * @param {string} rawPath
+ * @returns {void}
+ */
+function discardEscapedFile(rawPath) {
+  try {
+    fs.unlinkSync(rawPath)
+  } catch (err) {
+    if (!err || /** @type {NodeJS.ErrnoException} */ (err).code !== 'ENOENT') {
+      throw err
+    }
+  }
+}
+
+/**
  * @typedef {Object} WriteRawArtifactOptions
  * @property {string} missionDir
  * @property {string} ref
@@ -94,8 +180,54 @@ export function writeRawArtifact({ missionDir, ref, text }) {
     throw new TypeError('ref inválido: caminho tenta escapar de artifacts')
   }
 
-  fs.mkdirSync(path.dirname(rawPath), { recursive: true })
-  fs.writeFileSync(rawPath, text, 'utf8')
+  // Contenção física em duas fases, porque a checagem lexical acima não vê link
+  // simbólico/junção. Fase 1: cria e confere cada nível, recusando link já existente.
+  // Fase 2 (depois da abertura): resolve a cadeia inteira com realpath e confere a
+  // identidade do descritor; se um diretório já validado foi trocado por link entre a
+  // conferência e a abertura, o arquivo recém-criado é apagado e a escrita é recusada
+  // antes de qualquer byte sair. A escrita final vai pelo descritor conferido, não pelo
+  // caminho, então trocar o diretório depois disso não desvia mais nada.
+  fs.mkdirSync(path.resolve(missionDir), { recursive: true })
+  mkdirContained(artifactsDir)
+  let current = artifactsDir
+  for (const seg of segments.slice(0, -1)) {
+    current = path.join(current, seg)
+    mkdirContained(current)
+  }
+  assertPhysicallyContained(missionDir, segments, path.dirname(rawPath))
+
+  const noFollow = fs.constants.O_NOFOLLOW ?? 0
+  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | noFollow
+  let fd
+  try {
+    fd = fs.openSync(rawPath, flags)
+  } catch (err) {
+    if (err && /** @type {NodeJS.ErrnoException} */ (err).code === 'ELOOP') {
+      throw new TypeError(`ref inválido: '${rawPath}' é link simbólico e não pode ser seguido`)
+    }
+    throw err
+  }
+  let escaped = false
+  try {
+    const opened = fs.fstatSync(fd)
+    const onDisk = fs.lstatSync(rawPath)
+    if (onDisk.isSymbolicLink() || onDisk.ino !== opened.ino || onDisk.dev !== opened.dev) {
+      escaped = true
+      throw new TypeError(`ref inválido: '${rawPath}' foi trocado por link simbólico durante a escrita`)
+    }
+    try {
+      assertPhysicallyContained(missionDir, segments, path.dirname(rawPath))
+    } catch (err) {
+      escaped = true
+      throw err
+    }
+    fs.writeFileSync(fd, text, 'utf8')
+  } finally {
+    fs.closeSync(fd)
+    if (escaped) {
+      discardEscapedFile(rawPath)
+    }
+  }
 
   return {
     rawPath,
