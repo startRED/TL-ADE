@@ -802,4 +802,155 @@ describe('contain parity', () => {
     const scopeIdx = result.violations.findIndex((v) => v.kind === 'scope')
     expect(sensitiveIdx).toBeLessThan(scopeIdx)
   })
+
+  // AC1: Dado um worktree em que só um arquivo dentro do escopo mudou, sem segredo e sem caminho sensível,
+  // quando contain roda, então o resultado é aprovado com lista de violações vazia e sem referência de quarentena nem árvore restaurada.
+  test('clean_change_passes_without_violations', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    const rawPort = createGitPort({ worktreeDir: repo.dir })
+    const port = {
+      ...rawPort,
+      restore: (tree: string, options: { label: string }) => rawPort.restoreTree(tree, options),
+    }
+
+    const srcDir = path.join(repo.dir, 'src')
+    mkdirSync(srcDir, { recursive: true })
+    writeFileSync(path.join(srcDir, 'a.js'), 'export const n = 1;\n')
+    const initialCommit = await port.commit({ message: 'commit inicial' })
+    const headBefore = (await port.run(['rev-parse', 'HEAD'], { maxBuffer: 1 << 20 })).text
+
+    // Reescrever src/a.js com export const n = 2;
+    writeFileSync(path.join(srcDir, 'a.js'), 'export const n = 2;\n')
+
+    const result = await contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore: initialCommit.tree,
+      scopePaths: ['src/**'],
+      sensitivePaths: [],
+    })
+
+    // Exemplo 1: aprovação limpa com changedPaths: ['src/a.js']
+    expect(result).toEqual({
+      ok: true,
+      reason: null,
+      failureClass: null,
+      action: 'continue',
+      violations: [],
+      changedPaths: ['src/a.js'],
+      quarantineRef: null,
+      restoredTree: null,
+    })
+
+    // Exemplo 2: saída de for-each-ref sob refs/ade/quarantine vazia e HEAD inalterado
+    const forEachRefRes = await port.run(
+      ['for-each-ref', '--format=%(refname)', 'refs/ade/quarantine'],
+      { maxBuffer: 1 << 20 },
+    )
+    expect(forEachRefRes.text.trim()).toBe('')
+
+    const headAfter = (await port.run(['rev-parse', 'HEAD'], { maxBuffer: 1 << 20 })).text
+    expect(headAfter).toBe(headBefore)
+
+    // Exemplo 4: contain com src/a.js alterado e doNotTouch: ['src/a.js'] -> ok === false e reason === 'scope'
+    const doNotTouchRes = await contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore: initialCommit.tree,
+      scopePaths: ['src/**'],
+      doNotTouch: ['src/a.js'],
+      sensitivePaths: [],
+    })
+    expect(doNotTouchRes.ok).toBe(false)
+    expect(doNotTouchRes.reason).toBe('scope')
+  })
+
+  // AC2: Dado esse mesmo caso, quando contain termina, então nenhuma referência sob
+  // refs/ade/quarantine/ foi criada e o HEAD continua o mesmo.
+  test('clean_change_creates_no_quarantine_ref_and_preserves_head', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    const rawPort = createGitPort({ worktreeDir: repo.dir })
+    const port = {
+      ...rawPort,
+      restore: (tree: string, options: { label: string }) => rawPort.restoreTree(tree, options),
+    }
+
+    const srcDir = path.join(repo.dir, 'src')
+    mkdirSync(srcDir, { recursive: true })
+    writeFileSync(path.join(srcDir, 'a.js'), 'export const n = 1;\n')
+    const initialCommit = await port.commit({ message: 'commit inicial' })
+    const headBefore = (await port.run(['rev-parse', 'HEAD'], { maxBuffer: 1 << 20 })).text
+
+    writeFileSync(path.join(srcDir, 'a.js'), 'export const n = 2;\n')
+
+    const result = await contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore: initialCommit.tree,
+      scopePaths: ['src/**'],
+      sensitivePaths: [],
+    })
+
+    expect(result.quarantineRef).toBeNull()
+
+    const forEachRefRes = await port.run(
+      ['for-each-ref', '--format=%(refname)', 'refs/ade/quarantine'],
+      { maxBuffer: 1 << 20 },
+    )
+    expect(forEachRefRes.text.trim()).toBe('')
+
+    const headAfter = (await port.run(['rev-parse', 'HEAD'], { maxBuffer: 1 << 20 })).text
+    expect(headAfter).toBe(headBefore)
+  })
+
+  // AC3: Dado esse mesmo caso, quando o resultado é inspecionado, então a lista de
+  // arquivos alterados contém exatamente o arquivo que mudou.
+  test('clean_change_inspects_changed_paths_matching_diff', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    const rawPort = createGitPort({ worktreeDir: repo.dir })
+    const port = {
+      ...rawPort,
+      restore: (tree: string, options: { label: string }) => rawPort.restoreTree(tree, options),
+    }
+
+    const srcDir = path.join(repo.dir, 'src')
+    mkdirSync(srcDir, { recursive: true })
+    writeFileSync(path.join(srcDir, 'a.js'), 'export const a = 1;\n')
+    writeFileSync(path.join(srcDir, 'b.js'), 'export const b = 1;\n')
+    const initialCommit = await port.commit({ message: 'commit inicial' })
+
+    // Apenas src/a.js modificado
+    writeFileSync(path.join(srcDir, 'a.js'), 'export const a = 2;\n')
+
+    const singleResult = await contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore: initialCommit.tree,
+      scopePaths: ['src/**'],
+      sensitivePaths: [],
+    })
+
+    expect(singleResult.ok).toBe(true)
+    expect(singleResult.changedPaths).toEqual(['src/a.js'])
+
+    // Exemplo 3: contain com src/a.js e src/b.js alterados dentro do escopo
+    // -> changedPaths === ['src/a.js', 'src/b.js'] e ok === true
+    writeFileSync(path.join(srcDir, 'b.js'), 'export const b = 2;\n')
+
+    const multiResult = await contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore: initialCommit.tree,
+      scopePaths: ['src/**'],
+      sensitivePaths: [],
+    })
+
+    expect(multiResult.ok).toBe(true)
+    expect(multiResult.violations).toEqual([])
+    expect(multiResult.changedPaths).toEqual(['src/a.js', 'src/b.js'])
+  })
 })
+
