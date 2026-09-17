@@ -26,7 +26,20 @@
     "kind": { "type": "string", "minLength": 1 },
     "effect_class": { "type": "string", "minLength": 1 },
     "input_digest": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
-    "intent_context": { "type": "object", "additionalProperties": false },
+    "intent_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "head_before": { "type": ["string", "null"] },
+        "branch_before": { "type": ["string", "null"] },
+        "head_after": { "type": ["string", "null"] },
+        "branch_after": { "type": ["string", "null"] },
+        "tree_before": { "type": ["string", "null"] },
+        "parent_commit": { "type": ["string", "null"] },
+        "remote_before": { "type": ["string", "null"] },
+        "base_before": { "type": ["string", "null"] }
+      }
+    },
     "worktree": { "type": "string" },
     "receipt_path": { "type": "string" },
     "session_ref": { "type": ["string", "null"] },
