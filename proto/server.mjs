@@ -36,24 +36,34 @@ const REGISTRY = {
     { id: 'gpt-5.5', label: 'GPT-5.5', note: '' },
   ] },
   agy: { label: 'Antigravity (Google)', models: [
-    { id: 'gemini-3.1-pro-high', label: 'Gemini 3.1 Pro (High)', note: 'padrão para pesquisa' },
-    { id: 'gemini-3.1-pro-low', label: 'Gemini 3.1 Pro (Low)', note: '' },
-    { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)', note: 'rápido' },
-    { id: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)', note: 'o mais barato' },
+    { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro', note: 'padrão para pesquisa; esforço alto ou baixo' },
+    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', note: 'rápido e barato; padrão do batedor' },
+    { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash', note: '' },
+    { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 via Google', note: 'conta como família Claude' },
     { id: 'claude-opus-4-6-thinking', label: 'Claude Opus 4.6 via Google', note: 'conta como família Claude' },
     { id: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B', note: 'quarta opinião' },
   ] },
 }
+// Esforço por papel (Erick, 17/09): Claude → --effort; Codex → model_reasoning_effort; Antigravity → sufixo do modelo (pro só tem high/low).
+const EFFORTS = ['low', 'medium', 'high']
+function effortOf(role) { return state.settings.roles[role]?.effort || DEFAULT_SETTINGS.roles[role]?.effort || 'medium' }
+function agyModel(id, effort) { const mm = /^(gemini-[\d.]+-(flash|pro))(?:-(high|medium|low))?$/.exec(id || ''); if (!mm) return id; const e = mm[2] === 'pro' && effort === 'medium' ? 'high' : (effort || 'medium'); return `${mm[1]}-${e}` }
+// Recomendação de quem planeja, pela dificuldade que o entendedor mediu (Erick, 17/09): leve → Sonnet; normal → Opus médio; pesado → Fable alto.
+const PLANNER_BY_DIFFICULTY = { easy: { family: 'claude', model: 'sonnet', effort: 'medium' }, normal: { family: 'claude', model: 'opus', effort: 'medium' }, hard: { family: 'claude', model: 'fable', effort: 'high' } }
+function plannerChoice() { return state.mission?.planner || state.settings.roles.planner }
 const vendorOf = (family, model) => family === 'agy' && /^claude/.test(model) ? 'anthropic' : family === 'agy' && /^gpt/.test(model) ? 'openai' : family === 'claude' ? 'anthropic' : family === 'codex' ? 'openai' : 'google'
 
 const DEFAULT_SETTINGS = {
   roles: {
-    intent: { family: 'claude', model: 'sonnet' },
-    planner: { family: 'claude', model: 'opus' },
-    maker: { family: 'claude', model: 'sonnet' },
-    checker: { family: 'codex', model: 'gpt-5.6-terra' },
-    research: { family: 'agy', model: 'gemini-3.1-pro-high' },
+    intent: { family: 'claude', model: 'sonnet', effort: 'medium' },
+    planner: { family: 'claude', model: 'opus', effort: 'high' },
+    maker: { family: 'claude', model: 'sonnet', effort: 'high' },
+    checker: { family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' },
+    research: { family: 'agy', model: 'gemini-3.1-pro', effort: 'high' },
+    scout: { family: 'agy', model: 'gemini-3.8-flash', effort: 'medium' }, // batedor: lê muito (projeto, web, GitHub) e devolve um recibo curto
   },
+  planner_recommend: true, // o entendedor mede a dificuldade e recomenda quem planeja; você escolhe (modo noturno segue a recomendação)
+  scout_enabled: true, // batedor antes de planejar (pedido de funcionalidade para cima, em projeto que já tem código) e sob demanda pelo maker
   allow_commands: true,
   research_enabled: true,
   visual_gate: true,
@@ -76,8 +86,13 @@ const engines = new Map() // dir → engine
 let activeDir = null
 const als = new AsyncLocalStorage()
 const PAUSE = Symbol('pause')
-function newEngine(project) { return { project, mission: null, log: [], live: null, attachments: [], phase: null, children: new Set() } }
-function engineFor(dir) { const key = path.resolve(dir); if (!engines.has(key)) engines.set(key, newEngine(null)); return engines.get(key) }
+function newEngine(project) { return { project, mission: null, log: [], live: null, attachments: [], phase: null, children: new Set(), chat: [], chat_busy: false } }
+function engineFor(dir) { const key = path.resolve(dir); if (!engines.has(key)) { const e = newEngine(null); engines.set(key, e); loadChat(key).then((c) => { e.chat = c; broadcastSoon() }).catch(() => {}) } return engines.get(key) }
+// conversa por pasta (Erick, 17/09): perguntas e pedidos variados, com o modelo que você escolher, sem virar missão. Só leitura.
+const CHATS_DIR = path.join(ADE_DIR, 'chats')
+const chatKey = (dir) => path.resolve(dir).replace(/[^\w.-]+/g, '_').slice(-90)
+async function loadChat(dir) { try { return JSON.parse(await readFile(path.join(CHATS_DIR, chatKey(dir) + '.json'), 'utf8')) } catch { return [] } }
+async function saveChat(dir, turns) { await mkdir(CHATS_DIR, { recursive: true }); await writeFile(path.join(CHATS_DIR, chatKey(dir) + '.json'), JSON.stringify(turns.slice(-80))) }
 function activeEngine() { if (!activeDir) return null; return engines.get(activeDir) || null }
 function currentEngine() { return als.getStore() || activeEngine() || (activeDir = 'sem-projeto', engines.set('sem-projeto', newEngine(null)), engines.get('sem-projeto')) }
 const withEngine = (e, fn) => als.run(e, fn)
@@ -147,7 +162,7 @@ let pending = null
 const clients = new Set()
 
 function now() { return new Date().toISOString() }
-function engineView(e, dir, full) { return { dir, project: e.project, mission: e.mission, live: e.live, attachments: e.attachments, log: full ? e.log : undefined, busy: !!(e.mission && ['running', 'planning'].includes(e.mission.state)) } }
+function engineView(e, dir, full) { return { dir, project: e.project, mission: e.mission, live: e.live, attachments: e.attachments, log: full ? e.log : undefined, chat: full ? e.chat : undefined, chat_busy: !!e.chat_busy, busy: !!(e.mission && ['running', 'planning'].includes(e.mission.state)) } }
 function pub() {
   const a = activeEngine() || newEngine(null)
   return {
@@ -480,14 +495,15 @@ function describeTool(c, dir) {
 }
 
 // ---------- chamada Claude (maker / planner) ----------
-async function claudeCall({ role, prompt, model, tools, skipPermissions, schema, maxTurns = 40 }) {
+async function claudeCall({ role, prompt, model, effort, tools, skipPermissions, schema, maxTurns = 40 }) {
   const m = state.mission, dir = state.project.dir
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--safe-mode', '--max-turns', String(maxTurns), '--model', model]
+  if (EFFORTS.includes(effort)) args.push('--effort', effort)
   // shell:true no Windows concatena argumentos: aspas internas precisam de escape estilo MSVC.
   if (schema) args.push('--json-schema', JSON.stringify(schema))
   if (skipPermissions) args.push('--dangerously-skip-permissions')
   else { args.push('--permission-mode', 'acceptEdits'); if (tools) args.push('--tools', ...tools) }
-  log('engine', `claude (${role}, ${model})${schema ? ' com saída estruturada' : ''}`)
+  log('engine', `claude (${role}, ${model}${EFFORTS.includes(effort) ? `, esforço ${effort}` : ''})${schema ? ' com saída estruturada' : ''}`)
   let result = null, liveBuf = null
   const touched = new Set()
   const t0 = Date.now()
@@ -524,7 +540,7 @@ async function claudeCall({ role, prompt, model, tools, skipPermissions, schema,
     c.cache_read += result.usage?.cache_read_input_tokens || 0; c.tokens_out += result.usage?.output_tokens || 0
     c.by_model[model] = (c.by_model[model] || 0) + (result.total_cost_usd || 0)
     log('engine', `claude terminou · ${result.num_turns} turnos · US$ ${(result.total_cost_usd || 0).toFixed(2)} · ${Math.round((result.duration_ms || 0) / 1000)} s`)
-    journal({ type: 'model_call', family: 'claude', role, model, story: m.current, turns: result.num_turns || 0, usd: result.total_cost_usd || 0, tokens_in: result.usage?.input_tokens || 0, cache_write: result.usage?.cache_creation_input_tokens || 0, cache_read: result.usage?.cache_read_input_tokens || 0, tokens_out: result.usage?.output_tokens || 0, prompt_chars: prompt.length, wall_ms: Date.now() - t0, max_turns: maxTurns }).catch(() => {})
+    journal({ type: 'model_call', family: 'claude', role, model, effort: effort || null, story: m.current, turns: result.num_turns || 0, usd: result.total_cost_usd || 0, tokens_in: result.usage?.input_tokens || 0, cache_write: result.usage?.cache_creation_input_tokens || 0, cache_read: result.usage?.cache_read_input_tokens || 0, tokens_out: result.usage?.output_tokens || 0, prompt_chars: prompt.length, wall_ms: Date.now() - t0, max_turns: maxTurns }).catch(() => {})
     readQuota().then(broadcastSoon)
     if (result.is_error) log('engine', `claude reportou erro: ${result.result || result.subtype}`, 'error')
   } else log('engine', `claude saiu com código ${r.code}: ${(r.err || r.out).slice(0, 300)}`, 'error')
@@ -534,7 +550,7 @@ async function claudeCall({ role, prompt, model, tools, skipPermissions, schema,
 // ---------- pesquisa: agy ----------
 async function research(questions) {
   const m = state.mission, dir = state.project.dir
-  const { model } = state.settings.roles.research
+  const model = agyModel(state.settings.roles.research.model, effortOf('research'))
   const prompt = `Responda em português, com fontes verificáveis (URL), às perguntas abaixo, no formato JSON exigido. Seja curto e factual; se não souber, diga desconhecido.\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n')}`
   log('engine', `agy (pesquisa, ${model})`)
   setLive({ source: 'agy', kind: 'thinking', text: 'pesquisando…' })
@@ -548,6 +564,106 @@ async function research(questions) {
     for (const f of parsed.findings || []) log('agy', `${f.question}: ${f.answer} ${f.sources?.length ? `(${f.sources.join(', ')})` : ''}`, 'text')
     return parsed
   } catch { log('engine', `agy não devolveu JSON: ${(r.out || r.err).slice(0, 300)}`, 'error'); return null }
+}
+
+// ---------- conversa (chat) ----------
+async function chatTurn(e, text, { family, model, effort }) {
+  const dir = e.project.dir, m = e.mission
+  const turns = e.chat || (e.chat = [])
+  const history = turns.slice(-8).map((t) => `${t.role === 'user' ? 'Usuário' : 'Assistente'}: ${t.text.slice(0, 1500)}`).join('\n')
+  const tree = await projectTree(dir)
+  const prompt = [
+    `Você é o assistente de conversa da TL-ADE no projeto ${e.project.name} (${dir}). Responda em português, direto e curto (até ~250 palavras, salvo pedido de detalhe); listas curtas e blocos de código quando ajudarem. Só leitura: não edite arquivos nem rode nada que altere o projeto. Se a pergunta for sobre o projeto, leia só o necessário.`,
+    m ? `Missão atual desta pasta: "${m.request.slice(0, 200)}" · estado ${m.state}${m.reason ? ` (${m.reason})` : ''} · custo US$ ${m.cost.usd.toFixed(2)} · partes: ${m.stories.map((s) => `${s.id} ${s.state}`).join(', ') || 'nenhuma'}${m.program ? ` · épicos: ${m.program.epics.map((x) => `${x.id} ${x.state}`).join(', ')}` : ''}. Detalhes das partes ficam em .ade/missions/${m.id}.json na pasta do TL-ADE (${ADE_DIR}).` : 'Sem missão nesta pasta agora.',
+    `Arquivos do projeto (${tree.length}): ${tree.slice(0, 150).join(', ')}`,
+    history ? `Conversa até aqui:\n${history}` : '', `Usuário: ${text}`,
+  ].filter(Boolean).join('\n')
+  const user = { role: 'user', text, ts: now() }, ai = { role: 'ai', text: '', pending: true, family, model, effort, ts: now(), usd: 0 }
+  turns.push(user, ai); e.chat_busy = true; broadcast()
+  const stream = (t) => { ai.text = t; broadcastSoon() }
+  let answer = '', usd = 0
+  try {
+    if (family === 'claude') {
+      const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--safe-mode', '--max-turns', '12', '--model', model, '--permission-mode', 'plan', '--tools', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch']
+      if (EFFORTS.includes(effort)) args.push('--effort', effort)
+      let buf = ''
+      const r = await run('claude', args, { cwd: dir, stdin: prompt, env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' }, timeoutMs: 8 * 60 * 1000, onLine: (line) => {
+        let ev; try { ev = JSON.parse(line) } catch { return }
+        if (ev.type === 'stream_event') { const ev2 = ev.event; if (ev2?.type === 'content_block_start' && ev2.content_block?.type === 'text') buf = ''; if (ev2?.type === 'content_block_delta' && ev2.delta?.text) { buf += ev2.delta.text; stream(buf) } }
+        if (ev.type === 'assistant') for (const c of ev.message?.content || []) if (c.type === 'tool_use') stream((buf ? buf + '\n\n' : '') + `_${describeTool(c, dir)}_`)
+        if (ev.type === 'result') { answer = ev.result || buf; usd = ev.total_cost_usd || 0 }
+      } })
+      if (!answer) answer = `(sem resposta; código ${r.code}) ${(r.err || '').slice(0, 300)}`
+    } else if (family === 'codex') {
+      const args = ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${EFFORTS.includes(effort) ? effort : 'medium'}`, '-C', dir, '-m', model, '-']
+      const r = await run('codex', args, { cwd: dir, stdin: prompt, timeoutMs: 8 * 60 * 1000, onLine: (line) => {
+        let ev; try { ev = JSON.parse(line) } catch { return }
+        if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') { answer = ev.item.text; stream(answer) }
+        if (ev.type === 'item.completed' && ev.item?.type === 'command_execution') stream((answer ? answer + '\n\n' : '') + `_$ ${(ev.item.command || '').slice(0, 120)}_`)
+      } })
+      if (!answer) answer = `(sem resposta; código ${r.code}) ${(r.err || r.out).slice(0, 300)}`
+    } else {
+      const id = agyModel(model, effort)
+      const r = await run('agy', [`--print=${prompt.replace(/"/g, "'").replace(/\r?\n/g, ' ')}`, '--output-format', 'json', '--model', id, '--mode', 'plan', '--dangerously-skip-permissions'], { cwd: dir, timeoutMs: 8 * 60 * 1000 })
+      try { const j = JSON.parse(r.out); answer = typeof j.response === 'string' ? j.response : JSON.stringify(j.response) } catch { answer = `(sem resposta; código ${r.code}) ${(r.err || r.out).slice(0, 300)}` }
+    }
+  } catch (err) { answer = err === PAUSE ? '(interrompido)' : `(erro: ${err.message})` }
+  ai.text = answer; ai.pending = false; ai.usd = usd; ai.done_ts = now(); e.chat_busy = false
+  readQuota().then(broadcastSoon); broadcast()
+  await saveChat(dir, turns).catch(() => {})
+}
+
+// ---------- batedor: Gemini (agy) lê muito e devolve pouco ----------
+// Chamado pelo motor antes de planejar (pergunta focada no pedido/épico) e pelo maker sob demanda (scout.mjs, quando precisa de
+// documentação, arquivo grande ou fato de fora). O recibo entra nos prompts; os outros modelos leem só o trecho apontado.
+const SCOUT_SCRIPT = path.join(ROOT, 'scout.mjs')
+async function scout(question, { web = false, files = [] } = {}) {
+  const m = state.mission
+  const model = agyModel(state.settings.roles.scout.model, effortOf('scout'))
+  log('engine', `batedor (agy ${model}): ${question.slice(0, 140)}`)
+  setLive({ source: 'agy', kind: 'thinking', text: 'batedor lendo o projeto…' })
+  const t0 = Date.now()
+  const r = await run('node', [SCOUT_SCRIPT, '--json', '--model', model, ...(web ? ['--web'] : []), question.replace(/[\r\n"]+/g, ' '), ...files], { cwd: state.project.dir, timeoutMs: 7 * 60 * 1000 })
+  setLive(null); if (m) m.cost.calls += 1
+  let rec = null; try { rec = JSON.parse(r.out.trim().split('\n').pop()) } catch {}
+  if (!rec?.summary) { log('engine', `batedor sem recibo (código ${r.code}): ${(r.err || r.out).trim().slice(0, 300)}`, 'error'); return null }
+  if (m) { m.cost.tokens_in += rec.usage?.input_tokens || 0; m.cost.tokens_out += rec.usage?.output_tokens || 0 }
+  journal({ type: 'model_call', family: 'agy', role: 'scout', model, story: m?.current ?? null, tokens_in: rec.usage?.input_tokens || 0, tokens_out: rec.usage?.output_tokens || 0, prompt_chars: question.length, wall_ms: Date.now() - t0, files: (rec.files || []).length }).catch(() => {})
+  log('agy', `recibo do batedor: ${rec.summary}`, 'text')
+  return { summary: rec.summary, facts: rec.facts || [], files: rec.files || [], sources: rec.sources || [], model, question, at: now() }
+}
+function scoutBlock(rec) {
+  if (!rec) return ''
+  return [`RECIBO DO BATEDOR (Gemini já leu o projeto para isto; confie e leia só o trecho apontado):`, rec.summary,
+    rec.facts.length ? `Fatos: ${rec.facts.join(' | ')}` : '', rec.files.length ? `Arquivos: ${rec.files.map((f) => `${f.path} linhas ${f.lines} (${f.why})`).join('; ')}` : '',
+    rec.sources.length ? `Fontes: ${rec.sources.join(' ')}` : ''].filter(Boolean).join('\n')
+}
+const scoutWorth = () => state.settings.scout_enabled !== false && (state.project?.files || 0) > 3
+
+// ---------- mapa do código (sem IA): símbolo@linha por arquivo, para ler só o trecho ----------
+const MAP_RULES = [
+  [/\.(m?js|jsx|tsx?)$/i, /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\*?\s+([A-Za-z_$][\w$]*)|class\s+([A-Za-z_$][\w$]*)|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>))/],
+  [/\.py$/i, /^\s*(?:async\s+)?(?:def|class)\s+([A-Za-z_]\w*)/],
+  [/\.go$/i, /^(?:func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)|type\s+([A-Za-z_]\w*))/],
+  [/\.rs$/i, /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:fn|struct|enum|trait|impl(?:<[^>]*>)?)\s+([A-Za-z_]\w*)/],
+  [/\.css$/i, /^\/\*\s*[-=]*\s*([^*]{3,60}?)\s*[-=]*\s*\*\/|^(@media[^{]{0,40})/],
+  [/\.html?$/i, /<(?:section|header|main|nav|footer|template|dialog|form|aside)\b[^>]*\bid="([\w-]+)"|<(section|header|main|nav|footer|template|dialog|aside)\b/],
+  [/\.md$/i, /^#{1,3}\s+(.{3,60})/],
+]
+async function codeMap(dir, files, { maxFiles = 60, maxChars = 7000 } = {}) {
+  const out = []
+  for (const f of files.slice(0, maxFiles)) {
+    const rule = MAP_RULES.find(([ext]) => ext.test(f)); if (!rule) continue
+    let body; try { body = await readFile(path.join(dir, f), 'utf8') } catch { continue }
+    if (body.length > 400000) continue
+    const lines = body.split('\n'); if (lines.length < 40) continue // pequeno: lê inteiro
+    const syms = []
+    lines.forEach((l, i) => { const mm = rule[1].exec(l); if (mm) { const name = mm.slice(1).find(Boolean); if (name) syms.push(`${name.trim()}@${i + 1}`) } })
+    if (!syms.length) continue
+    out.push(`${f} (${lines.length} linhas): ${syms.length > 40 ? syms.slice(0, 40).join(', ') + ' …' : syms.join(', ')}`)
+  }
+  let text = out.join('\n'); if (text.length > maxChars) text = text.slice(0, maxChars) + '\n…'
+  return text ? `MAPA DO CÓDIGO (símbolo@linha; leia só o trecho que precisa, com Read offset/limit): \n${text}` : ''
 }
 
 // ---------- revisão: Codex ----------
@@ -568,8 +684,8 @@ async function checker(diff, tests, st) {
   ].join('\n') + skillsBlock(m.skills.checker || [])
   // Receita de chamada curta (architecture.md E16): sem config, regras e skills do usuário; sessão efêmera.
   // skills.max_context_tokens=0 é rejeitado ("expected a nonzero usize"); 1 remove todas as skills do usuário. Sem --ephemeral: a sessão gravada em ~/.codex/sessions é de onde a cota é lida.
-  const args = ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-C', dir, '-m', model, '--output-schema', REVIEW_SCHEMA, '-']
-  log('engine', `codex (revisão, ${model})`)
+  const args = ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${effortOf('checker')}`, '-C', dir, '-m', model, '--output-schema', REVIEW_SCHEMA, '-']
+  log('engine', `codex (revisão, ${model}, esforço ${effortOf('checker')})`)
   let lastMessage = null, usage = null
   const r = await run('codex', args, {
     cwd: dir, stdin: prompt,
@@ -656,13 +772,14 @@ const INTENT_JSON_SCHEMA = {
   type: 'object', additionalProperties: false,
   properties: {
     summary: { type: 'string' }, complexity: { type: 'string', enum: ['trivial', 'bounded', 'feature', 'subsystem', 'project'] },
+    difficulty: { type: 'string', enum: ['easy', 'normal', 'hard'] }, difficulty_why: { type: 'string' },
     domains: { type: 'array', items: { type: 'string' } }, keywords: { type: 'array', items: { type: 'string' } },
     needs_ui: { type: 'boolean' }, needs_backend: { type: 'boolean' },
     research_questions: { type: 'array', items: { type: 'string' } },
     questions: { type: 'array', maxItems: 5, items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, question: { type: 'string' }, why: { type: 'string' }, options: { type: 'array', minItems: 2, maxItems: 4, items: { type: 'object', additionalProperties: false, properties: { label: { type: 'string' }, hint: { type: 'string' } }, required: ['label', 'hint'] } }, allow_other: { type: 'boolean' } }, required: ['id', 'question', 'why', 'options', 'allow_other'] } },
     skills: { type: 'object', additionalProperties: false, properties: Object.fromEntries(['planner', 'maker', 'checker', 'research'].map((r) => [r, { type: 'array', items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, reason: { type: 'string' } }, required: ['id', 'reason'] } }])), required: ['planner', 'maker', 'checker', 'research'] },
   },
-  required: ['summary', 'complexity', 'domains', 'keywords', 'needs_ui', 'needs_backend', 'research_questions', 'questions', 'skills'],
+  required: ['summary', 'complexity', 'difficulty', 'difficulty_why', 'domains', 'keywords', 'needs_ui', 'needs_backend', 'research_questions', 'questions', 'skills'],
 }
 function intentPrompt() {
   const p = state.project, s = state.settings
@@ -670,6 +787,7 @@ function intentPrompt() {
     'Você é a primeira IA da TL-ADE: entende o pedido do usuário e decide o que cada papel precisa. Responda em português no formato JSON exigido. Não explore o projeto além de 2 leituras; o planejador explora depois.',
     `Pedido: ${state.mission.request}`,
     attachBlock(state.mission.attachments),
+    '- difficulty: easy (mudança localizada, padrão conhecido, pouca decisão), normal (funcionalidade com algumas decisões de desenho), hard (arquitetura, concorrência, algoritmo delicado, muitas partes interligadas, regras de negócio densas). difficulty_why: uma frase. Isso define quem planeja: leve → modelo rápido; pesado → o mais forte.',
     `Projeto: ${p.name}; ${p.files} itens na raiz; linguagem: ${p.language || 'nenhuma'}; runner de provas: ${p.runner === 'none' ? 'nenhum' : p.test_cmd}; index.html: ${p.has_index ? 'sim' : 'não'}.`,
     `Papéis e modelos: planejador ${s.roles.planner.model} (monta stories); maker ${s.roles.maker.model} (escreve provas e código); revisor ${s.roles.checker.model} (Codex, lê o diff, não escreve); pesquisador ${s.roles.research.model} (Google, só fatos externos).`,
     'Se há anexos, abra-os antes de decidir (uma imagem de referência muda domínios, skills e perguntas).',
@@ -704,6 +822,7 @@ function planPrompt() {
     m.epic && m.program?.epics?.some((e) => e.state === 'done') ? `Épicos já concluídos e commitados (não refaça; construa em cima): ${m.program.epics.filter((e) => e.state === 'done').map((e) => `${e.title}: ${(e.summary || '').slice(0, 200)}`).join(' | ')}` : '',
     attachBlock(m.attachments),
     `Entendimento prévio (outra IA): ${state.mission.intent?.summary || ''} Domínios: ${(state.mission.intent?.domains || []).join(', ')}.`,
+    scoutBlock(m.scout), m.map || '',
     m.answers?.length ? `ESCOLHAS DO USUÁRIO NA ENTREVISTA (obrigatórias): ${m.answers.map((a) => `${a.question} → ${a.answer}`).join(' | ')}` : '',
     `Projeto: ${p.name} em ${p.dir}; ${p.files} itens na raiz; linguagem detectada: ${p.language || 'nenhuma'}; runner de provas: ${p.runner === 'none' ? 'nenhum' : p.test_cmd}; index.html na raiz: ${p.has_index ? 'sim' : 'não'}.`,
     'Explore o projeto só o necessário (Glob/Read/Grep). Depois produza:',
@@ -768,6 +887,7 @@ async function contextPack(st, extra = []) {
     parts.push(`=== ${f} (estado atual) ===\n${body}`)
   }
   if (want.length) parts.push('Os arquivos acima já estão no estado atual: NÃO os releia; edite direto com Edit. Leia só o que não está aqui.')
+  const map = await codeMap(dir, tree.filter((f) => TEXT_EXT.test(f) && !want.includes(f)), { maxFiles: 40, maxChars: 5000 }); if (map) parts.push(map)
   if (st.last_summary) parts.push(`Resumo da sessão anterior desta parte: ${st.last_summary.slice(0, 1200)}`)
   return parts.join('\n')
 }
@@ -788,6 +908,7 @@ function epicsPrompt() {
     `Pedido: ${m.request}`,
     attachBlock(m.attachments),
     `Entendimento prévio: ${m.intent?.summary || ''} Domínios: ${(m.intent?.domains || []).join(', ')}.`,
+    scoutBlock(m.scout), m.map || '',
     m.answers?.length ? `Escolhas do usuário: ${m.answers.map((a) => `${a.question} → ${a.answer}`).join(' | ')}` : '',
     `Projeto: ${p.name} em ${p.dir}; ${p.files} itens na raiz; linguagem: ${p.language || 'nenhuma'}; runner de provas: ${p.runner === 'none' ? 'nenhum' : p.test_cmd}. Explore só o necessário (Glob/Read/Grep). Se o projeto tem docs/ ou ADRs, cite os arquivos relevantes no goal de cada épico.`,
     'Responda em português no JSON exigido: title (≤8 palavras); explanation (4 a 8 linhas leigas: o que existirá no fim e o que cada épico entrega); epics (2 a 10): id (e1, e2…), title (≤8 palavras), goal (instrução completa para planejar esse épico sozinho depois: o que construir, onde, quais arquivos/ADRs ler, o que NÃO fazer), acceptance (2 a 4 critérios observáveis do épico), depends_on (ids anteriores).',
@@ -807,6 +928,9 @@ function common(st) {
     attachBlock(m.attachments),
     `Critérios de aceite: ${(st.acceptance || []).map((a, i) => `(${i + 1}) ${a}`).join(' ')}`,
     'Trabalhe só dentro do diretório atual; não suba para diretórios acima. Leia antes de escrever.',
+    scoutBlock(m.scout),
+    'Arquivos grandes: use o MAPA DO CÓDIGO e leia só o trecho (Read com offset e limit); não leia inteiro um arquivo com mais de 300 linhas sem precisar. Código novo vai em módulo novo e pequeno quando o arquivo de destino já passa de 400 linhas; nunca reescreva um arquivo inteiro para mudar um trecho.',
+    m.allow_commands && state.settings.scout_enabled !== false ? `Batedor sob demanda (Gemini, barato e rápido): quando precisar de documentação, de um arquivo com mais de 500 linhas, de um fato de biblioteca/API ou de algo na internet/GitHub, NÃO leia você: rode  node "${SCOUT_SCRIPT}" "pergunta objetiva" [arquivos]  (acrescente --web para pesquisar fora) e use o recibo impresso. Uma chamada por dúvida, pergunta curta e específica.` : '',
     m.allow_commands ? 'Você pode rodar comandos (instalar dependências, inicializar projeto). Não rode servidores que fiquem abertos; não use git.' : 'Você só tem ferramentas de leitura e edição; o harness roda as provas.',
     p.runner === 'none' ? 'Não há runner de provas: crie o mínimo (JS: package.json com vitest e "test": "vitest run"; Python: requirements.txt com pytest e as dependências) antes da prova.' : '',
     p.language === 'python' || /python|fastapi|django|flask|pytest/i.test(m.request) ? 'Python: o harness cria .venv com uv e instala requirements.txt + pytest antes de cada rodada de provas. Liste toda dependência em requirements.txt; para rodar algo você mesmo use .venv\\Scripts\\python.exe (o "python" do PATH é o stub da Microsoft Store, sem pacotes). Não instale nada globalmente.' : '',
@@ -844,7 +968,7 @@ function fastLane(request) {
   const ui = /\b(bot[ãa]o|cor|cores|css|tela|p[áa]gina|layout|fonte|imagem|menu|link|t[íi]tulo|texto|estilo)\b/i.test(request) || (p.has_index && !/\b(api|rota|endpoint|servidor|banco)\b/i.test(request))
   const be = /\b(api|rota|endpoint|banco|sql|servidor|valida[çc][ãa]o)\b/i.test(request)
   const domains = new Set(['testing']); if (ui) { domains.add('frontend'); domains.add('design') } if (be) { domains.add('backend'); domains.add('api') } if (p.language === 'python') domains.add('python')
-  return { complexity: 'trivial', summary: request, domains: [...domains], keywords: [], needs_ui: ui, needs_backend: be, research_questions: [], questions: [], skills: { planner: [], maker: [], checker: [], research: [] } }
+  return { complexity: 'trivial', difficulty: 'easy', difficulty_why: 'correção curta', summary: request, domains: [...domains], keywords: [], needs_ui: ui, needs_backend: be, research_questions: [], questions: [], skills: { planner: [], maker: [], checker: [], research: [] } }
 }
 async function planMission() {
   const m = state.mission
@@ -859,15 +983,23 @@ async function planMission() {
     return runStories()
   }
   setStep('intent', 'running')
-  const ri = await claudeCall({ role: 'entender', prompt: intentPrompt(), model: state.settings.roles.intent.model, tools: ['Read', 'Glob'], schema: INTENT_JSON_SCHEMA, maxTurns: 4 })
+  const ri = await claudeCall({ role: 'entender', prompt: intentPrompt(), model: state.settings.roles.intent.model, effort: effortOf('intent'), tools: ['Read', 'Glob'], schema: INTENT_JSON_SCHEMA, maxTurns: 4 })
   const intent = ri?.structured_output
   if (!intent) { setStep('intent', 'failed'); m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'o entendimento não veio no formato esperado', 'error'); return finish() }
   m.intent = intent
   m.skills = selectSkills(intent)
   setStep('intent', 'done')
+  // recomendação de quem planeja: só vira decisão sua quando difere do configurado; modo noturno segue a recomendação
+  const rec = PLANNER_BY_DIFFICULTY[intent.difficulty], cfg = state.settings.roles.planner
+  if (rec && state.settings.planner_recommend !== false && (rec.model !== cfg.model || rec.effort !== (cfg.effort || 'high'))) {
+    m.planner_options = { recommended: rec, configured: { family: cfg.family, model: cfg.model, effort: cfg.effort || 'high' }, difficulty: intent.difficulty, why: intent.difficulty_why || '' }
+    if (state.settings.unattended) { m.planner = { ...rec, source: 'recomendado' }; log('engine', `modo noturno: planejador ${rec.model} (${rec.effort}) recomendado para dificuldade ${intent.difficulty}; seguindo a recomendação`, 'warn') }
+    else log('engine', `dificuldade ${intent.difficulty}: recomendo planejar com ${rec.model} (${rec.effort}); configurado é ${cfg.model} (${cfg.effort || 'high'}). Você escolhe no painel.`)
+  }
   log('engine', `entendido: ${intent.complexity} · ${intent.domains.join(', ')} · skills — planejador: ${m.skills.planner.map((s) => s.id).join(', ') || 'nenhuma'}; maker: ${m.skills.maker.map((s) => s.id).join(', ') || 'nenhuma'}; revisor: ${m.skills.checker.map((s) => s.id).join(', ') || 'nenhuma'}; pesquisa: ${m.skills.research.map((s) => s.id).join(', ') || 'nenhuma'}`)
   if (intent.questions?.length && state.settings.unattended) { m.answers = intent.questions.map((q) => ({ id: q.id, question: q.question, answer: q.options?.[0]?.label || 'não sei' })); log('engine', `modo noturno: entrevista respondida com as recomendações (${m.answers.length} pergunta(s))`, 'warn') }
   else if (intent.questions?.length) { m.plan = { title: m.request.slice(0, 60), summary: intent.summary, complexity: intent.complexity, domains: intent.domains, needs_ui: intent.needs_ui, needs_backend: intent.needs_backend, questions: intent.questions, research_questions: [], stories: [] }; m.state = 'awaiting_plan'; m.reason = 'questions'; broadcast(); await persistMission().catch(() => {}); return }
+  else if (m.planner_options && !m.planner) { m.state = 'awaiting_plan'; m.reason = 'planner_choice'; broadcast(); await persistMission().catch(() => {}); return }
   return continuePlanning()
 }
 async function continuePlanning() {
@@ -877,12 +1009,14 @@ async function continuePlanning() {
     setStep('research', 'running'); m.research = await research(intent.research_questions.slice(0, 3)); setStep('research', m.research ? 'done' : 'failed')
   }
   if (['subsystem', 'project'].includes(intent.complexity) && !m.program) return makeProgram()
+  if (!m.scout && scoutWorth() && ['feature', 'subsystem', 'project'].includes(intent.complexity)) { setStep('scout', 'running'); m.scout = await scout(`O que quem vai planejar "${m.request.slice(0, 300)}" precisa saber deste projeto: onde ficam as partes envolvidas, padrões e provas existentes, o que já existe do pedido e o que pode atrapalhar.`); setStep('scout', m.scout ? 'done' : 'failed') }
+  if (!m.map) m.map = await codeMap(state.project.dir, (await projectTree(state.project.dir)).filter((f) => TEXT_EXT.test(f)))
   return makePlan()
 }
 async function makeProgram() {
   const m = state.mission, intent = m.intent
   m.state = 'planning'; setStep('plan', 'running')
-  const r = await claudeCall({ role: 'épicos', prompt: epicsPrompt(), model: state.settings.roles.planner.model, tools: ['Read', 'Glob', 'Grep'], schema: EPICS_JSON_SCHEMA, maxTurns: 10 })
+  const r = await claudeCall({ role: 'épicos', prompt: epicsPrompt(), model: plannerChoice().model, effort: plannerChoice().effort, tools: ['Read', 'Glob', 'Grep'], schema: EPICS_JSON_SCHEMA, maxTurns: 10 })
   const pr = r?.structured_output
   if (!pr?.epics?.length) { setStep('plan', 'failed'); m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'a divisão em épicos não veio no formato esperado', 'error'); return finish() }
   m.program = { title: pr.title, explanation: pr.explanation, epics: pr.epics.map((e) => ({ ...e, state: 'queued', usd: 0, stories: [], summary: '' })), current: null }
@@ -906,6 +1040,8 @@ async function runProgram() {
     const usd0 = m.cost.usd
     log('engine', `épico ${i + 1} de ${pg.epics.length}: ${ep.title}`)
     m.state = 'planning'; broadcast()
+    if (scoutWorth() && i > 0) { setStep('scout', 'running'); m.scout = await scout(`Épico "${ep.title}": ${ep.goal.slice(0, 400)}. O que quem vai planejar este épico precisa saber do estado atual do projeto (o que os épicos anteriores deixaram, onde ficam as partes envolvidas, provas existentes)?`); setStep('scout', m.scout ? 'done' : 'failed') }
+    m.map = await codeMap(state.project.dir, (await projectTree(state.project.dir)).filter((f) => TEXT_EXT.test(f)))
     const planned = await makePlan({ inProgram: true })
     if (!planned) { ep.state = 'failed'; ep.reason = 'plano não veio'; ep.usd = m.cost.usd - usd0; continue }
     if (m.state === 'awaiting_plan') return // dúvida do planejador: espera você; decide('start'/'answer') volta para cá
@@ -923,7 +1059,7 @@ async function runProgram() {
 async function makePlan({ inProgram = false } = {}) {
   const m = state.mission, intent = m.intent
   m.state = 'planning'; setStep('plan', 'running')
-  const r = await claudeCall({ role: 'plano', prompt: planPrompt(), model: state.settings.roles.planner.model, tools: ['Read', 'Glob', 'Grep'], schema: PLAN_JSON_SCHEMA, maxTurns: 10 })
+  const r = await claudeCall({ role: 'plano', prompt: planPrompt(), model: plannerChoice().model, effort: plannerChoice().effort, tools: ['Read', 'Glob', 'Grep'], schema: PLAN_JSON_SCHEMA, maxTurns: 10 })
   const plan = r?.structured_output
   if (!plan?.stories?.length) { setStep('plan', 'failed'); if (inProgram) return false; m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'o plano não veio no formato esperado', 'error'); return finish() }
   // parte grande demais volta ao planejador uma vez, sem gastar com maker
@@ -1013,7 +1149,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   if (round === 1) {
     if (m.plan.needs_ui && state.settings.visual_gate) st.visual_before = await visualGate()
     st.usd_start = m.cost.usd
-    setStep('test', 'running'); const rt = await claudeCall({ role: 'prova', prompt: testPrompt(st, await contextPack(st)), model: state.settings.roles.maker.model, tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: 20 }); remember(st, rt); await refreshProject(); setStep('test', 'done')
+    setStep('test', 'running'); const rt = await claudeCall({ role: 'prova', prompt: testPrompt(st, await contextPack(st)), model: state.settings.roles.maker.model, effort: effortOf('maker'), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: 20 }); remember(st, rt); await refreshProject(); setStep('test', 'done')
     setStep('red', 'running')
     const after = await runTests(state.project)
     const before = new Set(m.tests_before.tests.map((t) => t.name))
@@ -1029,7 +1165,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   const escalate = round >= 3 && grave && state.settings.roles.planner.model !== state.settings.roles.maker.model
   const makerModel = escalate ? state.settings.roles.planner.model : state.settings.roles.maker.model
   if (escalate) log('engine', `rodada ${round}: problema grave persiste; maker sobe para ${makerModel} (teto 20 ações)`)
-  setStep('fix', 'running', { round }); const rf = await claudeCall({ role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), model: makerModel, tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 }); remember(st, rf); await refreshProject(); setStep('fix', 'done', { round })
+  setStep('fix', 'running', { round }); const rf = await claudeCall({ role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), model: makerModel, effort: effortOf('maker'), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 }); remember(st, rf); await refreshProject(); setStep('fix', 'done', { round })
   setStep('tests', 'running'); st.tests_after = await runTests(state.project); st.diff = await gitDiff(state.project.dir)
   log('engine', `provas depois: ${st.tests_after.total} no total, ${st.tests_after.failed} vermelha(s)`); setStep('tests', st.tests_after.ok ? 'done' : 'failed')
   if (!st.diff.trim()) { setStep('checker', 'skipped'); return stop('no_changes') }
@@ -1111,8 +1247,14 @@ async function decide(option, payload = {}) {
   if (!m) return
   journal({ type: 'decision', option }).catch(() => {})
   if (m.state === 'awaiting_plan') {
+    if (option === 'planner' || (m.reason === 'planner_choice' && option === 'start')) {
+      const pick = payload.choice === 'recommended' || (option === 'planner' && payload.choice !== 'configured') ? 'recommended' : 'configured'
+      m.planner = pick === 'recommended' ? { ...m.planner_options.recommended, source: 'recomendado' } : { ...m.planner_options.configured, source: 'configurado' }
+      log('operador', `planejar com ${m.planner.model} (${m.planner.effort}, ${m.planner.source})`); return continuePlanning()
+    }
     if (option === 'start' && m.reason === 'questions') { m.answers = (m.plan.questions || []).map((q) => ({ id: q.id, question: q.question, answer: q.options?.[0]?.label || 'não sei' })); log('operador', 'seguiu com as recomendações'); return continuePlanning() }
     if (option === 'start') { log('operador', 'aprovou o plano'); return m.program ? runProgram() : runStories() }
+    if (option === 'answer' && m.planner_options && !m.planner && payload.planner) { const pick = payload.planner === 'recommended' ? 'recommended' : 'configured'; m.planner = { ...m.planner_options[pick], source: pick === 'recommended' ? 'recomendado' : 'configurado' }; log('operador', `planejar com ${m.planner.model} (${m.planner.effort}, ${m.planner.source})`) }
     if (option === 'answer') {
       m.answers = payload.answers?.length ? payload.answers : [{ id: 'livre', question: 'resposta livre', answer: payload.text || '' }]
       log('operador', `respondeu: ${m.answers.map((a) => `${a.question} → ${a.answer}`).join(' | ')}`)
@@ -1214,6 +1356,16 @@ http.createServer(async (req, res) => {
       activeDir = path.resolve(e.project.dir)
       const err = await withEngine(e, () => startMission(request.trim(), { commitFirst: !!b.commit_first })); return err ? json(res, 400, typeof err === 'string' ? { error: err } : err) : json(res, 202, { ok: true })
     }
+    if (url.pathname === '/api/chat' && req.method === 'POST') {
+      const b = await body(req); const e = await targetEngine(req, url, b); if (!e?.project) return json(res, 400, { error: 'Escolha uma pasta primeiro.' })
+      if (!b.text?.trim()) return json(res, 400, { error: 'Pergunta vazia.' })
+      if (e.chat_busy) return json(res, 409, { error: 'Ainda estou respondendo a anterior.' })
+      const family = ['claude', 'codex', 'agy'].includes(b.family) ? b.family : 'claude'
+      const model = b.model || (family === 'claude' ? 'sonnet' : family === 'codex' ? 'gpt-5.6-sol' : 'gemini-3.8-flash')
+      withEngine(e, () => chatTurn(e, b.text.trim(), { family, model, effort: EFFORTS.includes(b.effort) ? b.effort : 'medium' })).catch((err) => { e.chat_busy = false; log('engine', `conversa falhou: ${err.message}`, 'error') })
+      return json(res, 202, { ok: true })
+    }
+    if (url.pathname === '/api/chat/clear' && req.method === 'POST') { const b = await body(req); const e = await targetEngine(req, url, b); if (!e?.project) return json(res, 400, {}); e.chat = []; await saveChat(e.project.dir, []).catch(() => {}); broadcast(); return json(res, 200, { ok: true }) }
     if (url.pathname === '/api/decide' && req.method === 'POST') { const b = await body(req); const e = await targetEngine(req, url, b); if (!e) return json(res, 400, {}); withEngine(e, () => guard(() => decide(b.option, { text: b.text, answers: b.answers }))); return json(res, 202, { ok: true }) }
     if (url.pathname === '/api/skill' && url.searchParams.get('id')) { const c = state.catalog.find((x) => x.id === url.searchParams.get('id')); return c ? json(res, 200, { id: c.id, body: c.body }) : json(res, 404, {}) }
     if (url.pathname === '/api/app' || url.pathname.startsWith('/api/app/')) {
@@ -1235,6 +1387,11 @@ http.createServer(async (req, res) => {
   const saved = await loadJson('settings.json', null)
   if (saved) state.settings = { ...DEFAULT_SETTINGS, ...saved, roles: { ...DEFAULT_SETTINGS.roles, ...(saved.roles || {}) }, skills: { ...DEFAULT_SETTINGS.skills, ...(saved.skills || {}) } }
   if (!state.settings.roles.intent) state.settings.roles.intent = DEFAULT_SETTINGS.roles.intent
+  for (const [k, d] of Object.entries(DEFAULT_SETTINGS.roles)) {
+    const r = state.settings.roles[k]; if (!r) { state.settings.roles[k] = d; continue }
+    const mm = /^(gemini-[\d.]+-(?:flash|pro))-(high|medium|low)$/.exec(r.model || ''); if (mm) { r.model = mm[1]; r.effort = mm[2] }
+    if (!EFFORTS.includes(r.effort)) r.effort = d.effort
+  }
   await loadCatalog()
   await readQuota()
   await loadSavedMissions()
