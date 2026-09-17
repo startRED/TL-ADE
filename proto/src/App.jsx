@@ -56,12 +56,13 @@ const REASON = {
   plan_failed: 'Não deu para transformar o pedido em plano. Reescreva o pedido com mais contexto.',
   approve_plan: 'O plano tem várias partes. Confira e aprove.',
   questions: 'A IA precisa de uma resposta sua antes de começar.',
+  epic_incomplete: 'Um épico ficou incompleto mesmo depois de replanejado, e os seguintes dependem dele. Continuar tenta de novo só o que falta; ou mande um pedido menor.',
   planner_choice: 'O entendedor mediu a dificuldade e recomenda outro modelo para planejar. Escolha.',
 }
 const DIFF_PT = { easy: 'leve', normal: 'normal', hard: 'pesada' }
 const EFFORT_PT = { low: 'baixo', medium: 'médio', high: 'alto' }
 const modelName = (r) => `${r?.model || ''}${r?.effort ? ` · esforço ${EFFORT_PT[r.effort] || r.effort}` : ''}`
-const EPIC_PT = { queued: 'na fila', running: 'em andamento', done: 'pronto', failed: 'falhou', blocked: 'bloqueado' }
+const EPIC_PT = { incomplete: 'incompleto', queued: 'na fila', running: 'em andamento', done: 'pronto', failed: 'falhou', blocked: 'bloqueado' }
 // pergunta ou pedido pequeno vai para a conversa (só leitura), não vira missão
 const looksQuestion = (t) => { const x = (t || '').trim(); return /\?\s*$/.test(x) || /^(o que|oque|que |qual|quais|como|por que|porque|pq|quando|onde|quanto|quem|será|sera|existe|tem |há |ha |vc |você|voce|me (explique|diga|mostre|fale|conte)|explique|explica|resuma|resume)\b/i.test(x) }
 const COMPLEXITY_PT = { trivial: 'pedido pequeno', bounded: 'pedido curto', feature: 'funcionalidade', subsystem: 'trabalho grande' }
@@ -487,7 +488,7 @@ const BoardRow = ({ s }) => (
 function BoardView({ m }) {
   if (!m) return <div className="talk empty"><div className="empty-inner"><h1 className="empty-h">Sem pedido nesta pasta</h1><p className="empty-p">O quadro mostra os épicos e as partes do pedido atual: o que está pronto, o que falta, o que foi pulado e quanto custou.</p></div></div>
   const epics = m.program?.epics || [], cur = m.epic?.id
-  const storiesOf = (e) => e.id === cur ? m.stories : (e.stories || [])
+  const storiesOf = (e) => e.id === cur ? [...(e.stories_prev || []), ...m.stories] : (e.stories || [])
   const all = epics.length ? epics.flatMap(storiesOf) : m.stories
   const done = all.filter((s) => s.state === 'done').length, skipped = all.filter((s) => s.state === 'skipped').length
   const epicsDone = epics.filter((e) => e.state === 'done').length
@@ -510,7 +511,7 @@ function BoardView({ m }) {
           <section className={`epic ${e.state}`} key={e.id}>
             <div className="epic-head"><span className={`dot-${tone}${e.state === 'running' ? ' dot-live' : ''}`} aria-hidden="true">●</span><b>{i + 1}. {e.title}</b><span className="mono">{EPIC_PT[e.state] || e.state}{e.usd ? ` · ${fmtUsd(e.usd)}` : ''}</span></div>
             {e.reason && <p className="epic-note warn">{e.reason}</p>}
-            {stories.length ? <div className="epic-body">{stories.map((s) => <BoardRow key={s.id} s={s} />)}</div>
+            {stories.length ? <div className="epic-body">{stories.map((s, k) => <BoardRow key={k} s={s} />)}</div>
               : e.state === 'queued' ? <p className="epic-note">{e.depends_on?.length ? `depende de ${e.depends_on.join(', ')} · ` : ''}planejado quando chegar a vez · {e.goal?.slice(0, 160)}</p> : null}
           </section>
         )
