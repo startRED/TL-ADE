@@ -1,6 +1,16 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { cpSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+// Importações da failure-policy a implementar na fase 2
+import {
+  FAILURE_CLASSES,
+  RETRY_LIMITS,
+  chargeOfClass,
+  classifyFailure,
+  movementOf,
+  runWithPolicy,
+} from '../../src/runner/failure-policy.js'
 import { readReceipt } from '../../src/runner/receipt.js'
 // Importações do runner a implementar na fase 2
 import {
@@ -10,6 +20,9 @@ import {
   runWorker,
 } from '../../src/runner/spawn.js'
 import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.js'
+
+const ROOT = fileURLToPath(new URL('../../', import.meta.url))
+const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.js')
 
 describe('runner parity', () => {
   let tmpDir: string
@@ -421,4 +434,403 @@ describe('runner parity', () => {
     expect(receiptDeadMan!.state).toBe('timeout')
     expect(receiptDeadMan!.reason).toBe('dead_man')
   }, 20000)
+
+  // AC1: Dado um harness que cai em toda invocação, quando a política roda,
+  // então há exatamente uma repetição, uma única espera de cem milissegundos e o desfecho é estacionado por classe de harness.
+  test('harness_crash_retries_once_then_parks', async () => {
+    expect(movementOf('harness')).toBe('retry')
+    expect(chargeOfClass('harness')).toBe('charged')
+    expect(RETRY_LIMITS.harness).toBe(1)
+
+    const scenarioSrc = path.join(ROOT, 'fixtures/scenarios/harness-crash')
+    const scenarioDest = path.join(tmpDir, 'scenario-harness-crash')
+    cpSync(scenarioSrc, scenarioDest, { recursive: true })
+
+    const resultFile = path.join(tmpDir, 'out.json')
+    const packPath = path.join(tmpDir, 'pack.md')
+    writeFileSync(packPath, '# pack\n')
+
+    const delays: number[] = []
+    const sleep = async (ms: number) => {
+      delays.push(ms)
+    }
+
+    const runner = async (_attempt: number) => {
+      return runWorker({
+        resolved: { exe: process.execPath, prefixArgs: [] },
+        args: [CLI_PATH, packPath],
+        cwd: tmpDir,
+        missionDir: tmpDir,
+        missionId: 'm1',
+        stepId: 's1-harness-crash',
+        request: {
+          unit: 's1',
+          authorization: 'd0',
+          cwd: tmpDir,
+          argv: [process.execPath, CLI_PATH, packPath],
+          timeout: 120,
+          result_file: resultFile,
+        },
+        env: {
+          ADE_FAKE_SCENARIO: scenarioDest,
+          ADE_FAKE_ROLE: 'maker',
+          ADE_FAKE_RESULT_FILE: resultFile,
+        },
+        now: () => '2026-09-17T00:00:00.000Z',
+        getStartTime: async () => null,
+      })
+    }
+
+    const res = await runWithPolicy({
+      runner,
+      resultFile,
+      sleep,
+    })
+
+    expect(res).toEqual({
+      outcome: 'parked',
+      attempts: 2,
+      delaysMs: [100],
+      failureClass: 'harness',
+      reason: 'harness_retries_exhausted',
+      charge: 'charged',
+      batchStopped: false,
+    })
+    expect(delays).toEqual([100])
+  }, 20000)
+
+  // AC2: Dada uma primeira invocação que falha com mensagem de limite de taxa e uma segunda que conclui bem,
+  // quando a política roda, então houve uma espera antes da repetição e o desfecho é sucesso na segunda tentativa.
+  test('transient_failure_retries_with_backoff_then_succeeds', async () => {
+    expect(
+      classifyFailure({
+        state: 'crashed',
+        exitCode: 1,
+        stderr: '429 rate limit exceeded',
+      }),
+    ).toBe('transient')
+    expect(movementOf('transient')).toBe('retry')
+    expect(chargeOfClass('transient')).toBe('charged')
+    expect(RETRY_LIMITS.transient).toBe(3)
+
+    const scenarioSrc = path.join(ROOT, 'fixtures/scenarios/transient-then-ok')
+    const scenarioDest = path.join(tmpDir, 'scenario-transient-then-ok')
+    cpSync(scenarioSrc, scenarioDest, { recursive: true })
+
+    const resultFile = path.join(tmpDir, 'out.json')
+    const packPath = path.join(tmpDir, 'pack.md')
+    writeFileSync(packPath, '# pack\n')
+
+    const delays: number[] = []
+    const sleep = async (ms: number) => {
+      delays.push(ms)
+    }
+
+    const runner = async (_attempt: number) => {
+      return runWorker({
+        resolved: { exe: process.execPath, prefixArgs: [] },
+        args: [CLI_PATH, packPath],
+        cwd: tmpDir,
+        missionDir: tmpDir,
+        missionId: 'm1',
+        stepId: 's1-transient-ok',
+        request: {
+          unit: 's1',
+          authorization: 'd0',
+          cwd: tmpDir,
+          argv: [process.execPath, CLI_PATH, packPath],
+          timeout: 120,
+          result_file: resultFile,
+        },
+        env: {
+          ADE_FAKE_SCENARIO: scenarioDest,
+          ADE_FAKE_ROLE: 'maker',
+          ADE_FAKE_RESULT_FILE: resultFile,
+        },
+        now: () => '2026-09-17T00:00:00.000Z',
+        getStartTime: async () => null,
+      })
+    }
+
+    const res = await runWithPolicy({
+      runner,
+      resultFile,
+      sleep,
+    })
+
+    expect(res).toEqual({
+      outcome: 'ok',
+      attempts: 2,
+      delaysMs: [100],
+      failureClass: null,
+      charge: 'charged',
+      batchStopped: false,
+      reason: null,
+    })
+    expect(delays).toEqual([100])
+  }, 20000)
+
+  // AC3: Dado um resultado de unidade que declara bloqueio por autorização,
+  // quando a política roda, então não há nenhuma repetição, o lote é marcado como parado e o desfecho registra a classe de autorização.
+  test('maker_blocked_on_authorization_stops_batch', async () => {
+    expect(
+      classifyFailure({
+        state: 'exited',
+        exitCode: 0,
+        resultPresent: true,
+        unitResult: { outcome: 'blocked', blocker: 'authorization' },
+      }),
+    ).toBe('authorization')
+    expect(movementOf('authorization')).toBe('stop')
+    expect(chargeOfClass('authorization')).toBe('charged')
+
+    const scenarioSrc = path.join(ROOT, 'fixtures/scenarios/authorization-block')
+    const scenarioDest = path.join(tmpDir, 'scenario-authorization-block')
+    cpSync(scenarioSrc, scenarioDest, { recursive: true })
+
+    const resultFile = path.join(tmpDir, 'out.json')
+    const packPath = path.join(tmpDir, 'pack.md')
+    writeFileSync(packPath, '# pack\n')
+
+    const delays: number[] = []
+    const sleep = async (ms: number) => {
+      delays.push(ms)
+    }
+
+    const runner = async (_attempt: number) => {
+      return runWorker({
+        resolved: { exe: process.execPath, prefixArgs: [] },
+        args: [CLI_PATH, packPath],
+        cwd: tmpDir,
+        missionDir: tmpDir,
+        missionId: 'm1',
+        stepId: 's1-auth-block',
+        request: {
+          unit: 's1',
+          authorization: 'd0',
+          cwd: tmpDir,
+          argv: [process.execPath, CLI_PATH, packPath],
+          timeout: 120,
+          result_file: resultFile,
+        },
+        env: {
+          ADE_FAKE_SCENARIO: scenarioDest,
+          ADE_FAKE_ROLE: 'maker',
+          ADE_FAKE_RESULT_FILE: resultFile,
+        },
+        now: () => '2026-09-17T00:00:00.000Z',
+        getStartTime: async () => null,
+      })
+    }
+
+    const res = await runWithPolicy({
+      runner,
+      resultFile,
+      sleep,
+    })
+
+    expect(res).toEqual({
+      outcome: 'stopped',
+      attempts: 1,
+      delaysMs: [],
+      failureClass: 'authorization',
+      charge: 'charged',
+      batchStopped: true,
+      reason: 'authorization',
+    })
+    expect(delays).toEqual([])
+  }, 20000)
+
+  // AC4: Dado um executável ausente, quando a política roda,
+  // então o desfecho é estacionado por classe de ambiente, sem nenhuma repetição e com a chamada não cobrada.
+  test('missing_executable_parks_as_environment_without_retry', async () => {
+    expect(classifyFailure({ state: 'start_failed', exitCode: null })).toBe('environment')
+    expect(movementOf('environment')).toBe('park')
+    expect(chargeOfClass('environment')).toBe('released')
+    expect(FAILURE_CLASSES).toContain('environment')
+
+    const nonExistentExe = path.join(tmpDir, 'nao-existe.exe')
+    const resultFile = path.join(tmpDir, 'out.json')
+    const delays: number[] = []
+    const sleep = async (ms: number) => {
+      delays.push(ms)
+    }
+
+    const runner = async (_attempt: number) => {
+      return runWorker({
+        resolved: { exe: nonExistentExe, prefixArgs: [] },
+        args: [],
+        cwd: tmpDir,
+        missionDir: tmpDir,
+        missionId: 'm1',
+        stepId: 's1-missing-exe',
+        request: {
+          unit: 's1',
+          authorization: 'd0',
+          cwd: tmpDir,
+          argv: [nonExistentExe],
+          timeout: 120,
+          result_file: resultFile,
+        },
+        now: () => '2026-09-17T00:00:00.000Z',
+        getStartTime: async () => null,
+      })
+    }
+
+    const res = await runWithPolicy({
+      runner,
+      resultFile,
+      sleep,
+    })
+
+    expect(res).toEqual({
+      outcome: 'parked',
+      attempts: 1,
+      delaysMs: [],
+      failureClass: 'environment',
+      charge: 'released',
+      batchStopped: false,
+      reason: 'environment',
+    })
+    expect(delays).toEqual([])
+  }, 20000)
+
+  test('runner_with_budget_failure_class_stops_batch_without_delays', async () => {
+    const resultFile = path.join(tmpDir, 'out.json')
+    const delays: number[] = []
+    const sleep = async (ms: number) => {
+      delays.push(ms)
+    }
+
+    const runner = async () => ({
+      state: 'crashed',
+      exitCode: 1,
+      failureClass: 'budget',
+    })
+
+    const res = await runWithPolicy({
+      runner,
+      resultFile,
+      sleep,
+    })
+
+    expect(res).toEqual({
+      outcome: 'stopped',
+      attempts: 1,
+      delaysMs: [],
+      failureClass: 'budget',
+      charge: 'charged',
+      batchStopped: true,
+      reason: 'budget',
+    })
+    expect(delays).toEqual([])
+  }, 20000)
+
+  test('runner_with_security_failure_class_stops_batch_without_delays', async () => {
+    const resultFile = path.join(tmpDir, 'out.json')
+    const delays: number[] = []
+    const sleep = async (ms: number) => {
+      delays.push(ms)
+    }
+
+    const runner = async () => ({
+      state: 'crashed',
+      exitCode: 1,
+      failureClass: 'security',
+    })
+
+    const res = await runWithPolicy({
+      runner,
+      resultFile,
+      sleep,
+    })
+
+    expect(res).toEqual({
+      outcome: 'stopped',
+      attempts: 1,
+      delaysMs: [],
+      failureClass: 'security',
+      charge: 'charged',
+      batchStopped: true,
+      reason: 'security',
+    })
+    expect(delays).toEqual([])
+  }, 20000)
+
+  test('runner_with_state_integrity_failure_class_stops_batch_without_delays', async () => {
+    const resultFile = path.join(tmpDir, 'out.json')
+    const delays: number[] = []
+    const sleep = async (ms: number) => {
+      delays.push(ms)
+    }
+
+    const runner = async () => ({
+      state: 'crashed',
+      exitCode: 1,
+      failureClass: 'state_integrity',
+    })
+
+    const res = await runWithPolicy({
+      runner,
+      resultFile,
+      sleep,
+    })
+
+    expect(res).toEqual({
+      outcome: 'stopped',
+      attempts: 1,
+      delaysMs: [],
+      failureClass: 'state_integrity',
+      charge: 'charged',
+      batchStopped: true,
+      reason: 'state_integrity',
+    })
+    expect(delays).toEqual([])
+  }, 20000)
+
+  test('runner_with_invalid_failure_class_throws_type_error', async () => {
+    const resultFile = path.join(tmpDir, 'out.json')
+    const runner = async () => ({
+      state: 'crashed',
+      exitCode: 1,
+      failureClass: 'invalid_class',
+    })
+
+    await expect(
+      runWithPolicy({
+        runner,
+        resultFile,
+      }),
+    ).rejects.toThrow(new TypeError('classe de falha inválida'))
+  }, 20000)
+
+  // Leitura do result file é efeito de sistema injetável: sem dublê, nenhum arquivo real é tocado.
+  test('run_with_policy_reads_result_via_injected_double', async () => {
+    const resultFile = path.join(tmpDir, 'result-nao-existe.json')
+    const reads: string[] = []
+    const readResult = (file: string) => {
+      reads.push(file)
+      return { resultPresent: true, unitResult: { outcome: 'ok' } }
+    }
+
+    const runner = async () => ({ state: 'exited', exitCode: 0 })
+
+    const res = await runWithPolicy({
+      runner,
+      resultFile,
+      readResult,
+    })
+
+    expect(reads).toEqual([resultFile])
+    expect(res).toEqual({
+      outcome: 'ok',
+      attempts: 1,
+      delaysMs: [],
+      failureClass: null,
+      charge: 'charged',
+      batchStopped: false,
+      reason: null,
+    })
+  }, 20000)
 })
+
