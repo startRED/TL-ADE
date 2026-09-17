@@ -30,6 +30,10 @@
     "worktree": { "type": "string" },
     "receipt_path": { "type": "string" },
     "session_ref": { "type": ["string", "null"] },
-    "runtime_stamp": { "type": "string", "pattern": "^[0-9]+:[0-9a-f]+:[0-9a-f]+$" }
+    "runtime_stamp": { "type": "string", "pattern": "^[0-9]+:[0-9a-f]+:[0-9a-f]+$" },
+    "step_id": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "minLength": 1 },
+    "source": { "type": "string", "minLength": 1 },
+    "data": { "type": "object" }
   }
 }
