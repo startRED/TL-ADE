@@ -322,6 +322,78 @@ describe('step write-ahead durability', () => {
   })
 })
 
+describe('step queue by unit', () => {
+  // AC1: dois step() disparados sem await na mesma unidade não se sobrepõem no tempo
+  // e a ordem de entrada é preservada.
+  test('two_concurrent_steps_on_the_same_unit_are_serialized', async () => {
+    const missionDir = makeMissionDir()
+    const { step } = makeRunner(missionDir)
+    const order: string[] = []
+
+    const effectA = async () => {
+      order.push('a:start')
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      order.push('a:end')
+      return { who: 'a' }
+    }
+    const effectB = async () => {
+      order.push('b:start')
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      order.push('b:end')
+      return { who: 'b' }
+    }
+
+    const pA = step({ unit: 'T042', id: 'T042:queue-a', effect_class: 'local_write', input: { a: 1 } }, effectA)
+    const pB = step({ unit: 'T042', id: 'T042:queue-b', effect_class: 'local_write', input: { a: 2 } }, effectB)
+
+    await Promise.all([pA, pB])
+
+    expect(order).toEqual(['a:start', 'a:end', 'b:start', 'b:end'])
+  })
+
+  // AC2: dois step() disparados sem await em unidades diferentes podem se sobrepor
+  // (o segundo começa antes de o primeiro terminar).
+  test('steps_on_different_units_are_not_serialized', async () => {
+    const missionDir = makeMissionDir()
+    const { step } = makeRunner(missionDir)
+    const order: string[] = []
+
+    const effectA = async () => {
+      order.push('a:start')
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      order.push('a:end')
+      return { who: 'a' }
+    }
+    const effectB = async () => {
+      order.push('b:start')
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      order.push('b:end')
+      return { who: 'b' }
+    }
+
+    const pA = step({ unit: 'T042', id: 'T042:queue-a2', effect_class: 'local_write', input: { a: 1 } }, effectA)
+    const pB = step({ unit: 'T043', id: 'T043:queue-b2', effect_class: 'local_write', input: { a: 2 } }, effectB)
+
+    await Promise.all([pA, pB])
+
+    expect(order).toEqual(['a:start', 'b:start', 'a:end', 'b:end'])
+  })
+
+  // step() é async: unit inválida rejeita a Promise em vez de lançar de forma síncrona.
+  test('step_rejects_asynchronously_for_invalid_unit', async () => {
+    const missionDir = makeMissionDir()
+    const { step } = makeRunner(missionDir)
+
+    let result: Promise<unknown> | undefined
+    expect(() => {
+      result = step({ unit: 123 as any, id: 'T042:x', effect_class: 'none', input: {} }, async () => ({}))
+    }).not.toThrow()
+
+    expect(result).toBeInstanceOf(Promise)
+    await expect(result).rejects.toThrow(TypeError)
+  })
+})
+
 describe('fault points', () => {
   test('maybeFault_rejects_unknown_fault_points', () => {
     expect(() => maybeFault('depois', {})).toThrow(TypeError)

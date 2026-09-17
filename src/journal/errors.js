@@ -121,3 +121,16 @@ export class UnexpectedTreeStateError extends AdeError {
   }
 }
 
+/**
+ * Sinaliza que o HEAD ou a branch do worktree mudaram durante um `model_call`.
+ */
+export class StateIntegrityError extends AdeError {
+  /**
+   * @param {string} reason
+   * @param {Record<string, unknown>} [details]
+   */
+  constructor(reason, details = {}) {
+    super('state_integrity', 'integridade de estado violada: ' + reason, 4, { ...details, reason })
+  }
+}
+
