@@ -824,7 +824,8 @@ async function checker(diff, tests, st) {
     st.round > 1 && st.review?.findings?.length ? [
       `ESTA É A RODADA ${st.round} DE REVISÃO. Seus achados da rodada anterior: ${st.review.findings.map((f) => `[${f.severity}] ${f.file}: ${String(f.problem).slice(0, 220)}`).join(' | ')}`,
       `Resposta de quem escreveu: ${String(st.last_summary || '(sem resposta)').slice(0, 1800)}`,
-      'Regras desta rodada: (1) confira se cada achado anterior foi corrigido; (2) se quem escreveu RECUSOU um achado citando uma decisão do plano, o contrato da story ou um critério de aceite, e a citação procede, RETIRE o achado (não repita); (3) achado NOVO só vale se for high E tiver sido introduzido pelo diff desta rodada ou violar um critério de aceite; melhorias que você não pediu na primeira rodada viram no máximo low. O objetivo é convergir, não reabrir a story.',
+      'Regras desta rodada: (1) confira se cada achado anterior foi corrigido; (2) se quem escreveu RECUSOU um achado citando uma decisão do plano, o contrato da story ou um critério de aceite, e a citação procede, RETIRE o achado (não repita); (3) achado NOVO só vale como high se tiver sido introduzido pelo diff desta rodada ou violar LITERALMENTE um critério de aceite (cite o número); melhorias que você não pediu na primeira rodada viram no máximo low. O objetivo é convergir, não reabrir a story.',
+      st.round >= 4 ? `RODADA ${st.round}: todos os vetores que você queria cobertos deviam ter sido listados na primeira rodada. Se os achados anteriores foram corrigidos, APROVE. Achado novo que não é regressão introduzida por este diff entra em findings com severity "low" e problem começando por "PENDÊNCIA:" (o motor registra e o planejador abre uma parte própria no épico seguinte); ele NÃO impede o approve, por mais grave que pareça.` : '',
     ].join('\n') : '',
     `Pedido do usuário: ${m.request}`, `Story em revisão: ${st.title}. Critérios de aceite: ${(st.acceptance || []).map((a, i) => `(${i + 1}) ${a}`).join(' ')}`,
     st.assumptions?.length ? `SUPOSIÇÕES que quem escreveu declarou (faltava decisão no plano). Julgue cada uma: cabe no contrato e nos critérios = aceite e não comente; fixa comportamento que um critério ou decisão cobre de outro jeito = achado citando o critério:\n${st.assumptions.map((a) => `- ${a}`).join('\n')}` : '',
@@ -1022,6 +1023,7 @@ function planPrompt(revising = false) {
     '- CRITÉRIOS de aceite: cada um é um resultado observável de fora, com valores concretos (teste: alguém que nunca viu o código consegue dizer se passou?); critério com "e também" são dois critérios; critério que só repete o pedido com outras palavras não prova nada. Toda story com 2 ou mais critérios tem pelo menos um de caminho feliz e um de borda ou de falha.',
     '- RASTREIO (o motor confere): os critérios de cada story são numerados pela ordem, CA1, CA2... Termine cada passo da recipe com os critérios que ele atende entre colchetes: "[CA1]", "[CA1,CA3]"; passo de preparo que não atende critério nenhum termina com "[prep]". Comece cada example com o critério que ele comprova: "[CA2] total([]) → 0". Todo critério aparece em pelo menos um passo e em pelo menos um example.',
     '- decisions: escreva cada uma como "X, porque Y" e, quando havia alternativa real, acrescente "; descartado: Z". Decisão sem motivo não orienta ninguém quando aparece um caso que ela não previu.',
+    m.program?.follow_up?.length ? `- PENDÊNCIAS deixadas por revisões de partes anteriores (o revisor aprovou a parte, mas apontou isto como faltando): ${m.program.follow_up.map((f) => `[${f.epic}/${f.story}] ${f.text}`).join(' | ').slice(0, 4000)}. Para cada pendência que ainda valer e couber no ÉPICO ATUAL, crie uma story própria (pequena) ou inclua o ponto na story que mexe no mesmo arquivo; pendência fora do escopo deste épico fica como está.` : '',
     m.program?.decisions_log?.length ? `- DECISÕES DOS ÉPICOS ANTERIORES (já valem no código commitado; siga-as e NÃO as repita nas decisions; se este épico precisa contrariar uma, diga qual e por quê numa decision nova):\n${m.program.decisions_log.map((e) => `  [${e.epic}] ${e.decisions.join(' | ')}`).join('\n').slice(0, 6000)}` : '',
     '- decisions: 3 a 12 decisões que valem para TODAS as stories, uma frase cada, concretas: bibliotecas e versões (ou "nenhuma dependência"), estrutura de pastas, convenção de nomes, formato dos dados (com um exemplo literal), tratamento de erro, idioma dos textos, estilo visual quando houver interface. Siga o que o projeto já usa (veja o recibo do batedor e o mapa).',
     '- recipe de cada story: 3 a 8 passos numeráveis, em ordem, cada um com arquivo e ação concreta: "criar src/x.js exportando f(a, b) → tipo", "em src/y.js, dentro de render@120, chamar f antes de montar a lista", "registrar a rota em src/app.js". Cite símbolo@linha do mapa quando o arquivo existe. Nada de "implementar a lógica" ou "ajustar conforme necessário".',
@@ -1567,6 +1569,14 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     }
   }
   setStep('checker', 'running'); st.review = await checker(st.diff, st.tests_after, st); setStep('checker', st.review ? (st.review.verdict === 'approve' ? 'done' : 'failed') : 'failed')
+  if (st.review) {
+    const pend = (st.review.findings || []).filter((f) => /^\s*PEND[ÊE]NCIA:/i.test(String(f.problem || '')))
+    if (pend.length) {
+      st.deferred = pend.map((f) => `${f.file ? f.file + ': ' : ''}${String(f.problem).replace(/^\s*PEND[ÊE]NCIA:\s*/i, '').slice(0, 300)}`)
+      const pg = m.program; if (pg) pg.follow_up = [...(pg.follow_up || []), ...st.deferred.map((d) => ({ epic: m.epic?.id || null, story: st.id, title: st.title, text: d }))].slice(-40)
+      for (const d of st.deferred) log('engine', `pendência registrada pelo revisor em "${st.title}": ${d}`, 'warn')
+    }
+  }
   if (st.review?.verdict === 'approve') return true
   const spent = m.cost.usd - (st.usd_start || 0), budget = state.settings.max_usd_per_story || 4
   if (st.review && round < MAX_ROUNDS && spent > budget) log('engine', `orçamento da parte estourado (US$ ${spent.toFixed(2)} > ${budget}); sem novas rodadas`, 'warn')
