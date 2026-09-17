@@ -15,6 +15,7 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url))
 const ADE_DIR = path.join(ROOT, '.ade')
 const REVIEW_SCHEMA = path.join(ROOT, 'review.schema.json')
 const RESEARCH_SCHEMA = path.join(ROOT, 'research.schema.json')
+const PLANCRITIC_SCHEMA = path.join(ROOT, 'plancritic.schema.json')
 const PORT = Number(process.env.ADE_PORT) || 4317 // abrir.bat 2 → 4318/5174: duas ADEs em projetos diferentes ao mesmo tempo
 const IS_WIN = process.platform === 'win32'
 const HOME = os.homedir()
@@ -63,6 +64,7 @@ const DEFAULT_SETTINGS = {
     scout: { family: 'agy', model: 'gemini-3.8-flash', effort: 'medium' }, // batedor: lê muito (projeto, web, GitHub) e devolve um recibo curto
   },
   planner_recommend: true, // o entendedor mede a dificuldade e recomenda quem planeja; você escolhe (modo noturno segue a recomendação)
+  plan_critic: true, // outra IA (o revisor) lê o plano antes de qualquer código e aponta o que obrigaria quem escreve a decidir; o planejador corrige uma vez
   scout_enabled: true, // batedor antes de planejar (pedido de funcionalidade para cima, em projeto que já tem código) e sob demanda pelo maker
   allow_commands: true,
   research_enabled: true,
@@ -667,6 +669,30 @@ async function codeMap(dir, files, { maxFiles = 60, maxChars = 7000 } = {}) {
   return text ? `MAPA DO CÓDIGO (símbolo@linha; leia só o trecho que precisa, com Read offset/limit): \n${text}` : ''
 }
 
+// ---------- crítica do plano: o revisor (outra empresa) lê o plano como quem vai implementar ----------
+async function planCritic(plan) {
+  const m = state.mission, dir = state.project.dir, model = state.settings.roles.checker.model
+  if (state.settings.roles.checker.family !== 'codex') return null
+  const prompt = [
+    'Você vai criticar um PLANO, não código. Quem vai implementar cada story é um modelo rápido e barato, que segue instruções muito bem e decide mal, numa sessão nova que só vê a story, as decisions e os arquivos citados.',
+    'Leia cada story como se fosse implementá-la agora. Aponte SÓ o que obrigaria esse modelo a decidir ou adivinhar: passo de recipe vago, arquivo ou símbolo citado que não existe no projeto (confira), interface sem assinatura, formato de dado sem exemplo, caso de borda sem resposta, examples que não cobrem um critério de aceite, dependência entre stories não declarada, duas stories mexendo no mesmo trecho, story grande demais para ~300 linhas de diff.',
+    'Não opine sobre arquitetura nem estilo, não peça escopo novo. Se o plano está executável, verdict = "ready" e issues = []. Senão verdict = "revise" e até 10 issues: story (id), problem (uma frase), fix (o texto concreto que falta). Responda em português no JSON exigido.',
+    `Pedido do usuário: ${m.request}`, m.epic ? `Épico: ${m.epic.title}. ${m.epic.goal}` : '',
+    '--- PLANO ---', JSON.stringify({ decisions: plan.decisions, stories: plan.stories }, null, 1).slice(0, 40000),
+  ].filter(Boolean).join('\n')
+  log('engine', `codex (crítica do plano, ${model})`); setLive({ source: 'codex', kind: 'thinking', text: 'lendo o plano como quem vai implementar…' })
+  let last = null, usage = null
+  const r = await run('codex', ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${effortOf('checker')}`, '-C', dir, '-m', model, '--output-schema', PLANCRITIC_SCHEMA, '-'], { cwd: dir, stdin: prompt, onLine: (line) => { let ev; try { ev = JSON.parse(line) } catch { return } if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') last = ev.item.text; if (ev.type === 'turn.completed') usage = ev.usage } })
+  setLive(null); m.cost.calls += 1
+  if (usage) { m.cost.tokens_in += usage.input_tokens || 0; m.cost.tokens_out += usage.output_tokens || 0 }
+  let crit = null; try { crit = JSON.parse(last) } catch {}
+  journal({ type: 'model_call', family: 'codex', role: 'plan_critic', model, tokens_in: usage?.input_tokens || 0, tokens_out: usage?.output_tokens || 0, prompt_chars: prompt.length, verdict: crit?.verdict || null, issues: crit?.issues?.length || 0 }).catch(() => {})
+  if (!crit) { log('engine', `crítica do plano falhou (código ${r.code}); sigo com o plano como está`, 'warn'); return null }
+  log('codex', `plano ${crit.verdict === 'ready' ? 'executável' : 'precisa de detalhe'}: ${crit.summary}`, 'text')
+  m.plan_critic = { verdict: crit.verdict, summary: crit.summary, issues: crit.issues || [] }
+  return crit
+}
+
 // ---------- revisão: Codex ----------
 async function checker(diff, tests, st) {
   const m = state.mission, dir = state.project.dir
@@ -842,6 +868,12 @@ function planPrompt() {
     '- needs_ui, needs_backend: booleanos.',
     '- research_questions: só fatos externos que mudariam a implementação (versão de API, regra de negócio pública); normalmente vazio.',
     '- questions: só se o pedido for ambíguo a ponto de gerar trabalho errado; no máximo 2; normalmente vazio (prefira uma escolha razoável e registre em summary).',
+    'REGRA DE OURO: quem implementa é um modelo rápido e barato que segue instruções muito bem e decide mal. TODA decisão é sua, agora. Se ao ler uma story alguém precisaria escolher biblioteca, nome, formato de dado, local do arquivo, mensagem de erro ou comportamento de borda, o plano está incompleto.',
+    '- decisions: 3 a 12 decisões que valem para TODAS as stories, uma frase cada, concretas: bibliotecas e versões (ou "nenhuma dependência"), estrutura de pastas, convenção de nomes, formato dos dados (com um exemplo literal), tratamento de erro, idioma dos textos, estilo visual quando houver interface. Siga o que o projeto já usa (veja o recibo do batedor e o mapa).',
+    '- recipe de cada story: 3 a 8 passos numeráveis, em ordem, cada um com arquivo e ação concreta: "criar src/x.js exportando f(a, b) → tipo", "em src/y.js, dentro de render@120, chamar f antes de montar a lista", "registrar a rota em src/app.js". Cite símbolo@linha do mapa quando o arquivo existe. Nada de "implementar a lógica" ou "ajustar conforme necessário".',
+    '- examples de cada story: 2 a 5 casos literais de entrada → saída que viram provas, incluindo pelo menos um caso de borda (vazio, inválido, limite). Ex.: "total([{preco: 2, qtd: 3}]) → 6", "total([]) → 0", "POST /itens sem nome → 400 {erro: \'nome obrigatório\'}".',
+    '- test_file de cada story: caminho exato do arquivo de prova a criar ou estender, no padrão que o projeto já usa.',
+    '- A primeira story de um projeto ou épico novo cria o esqueleto: pastas, arquivos com as interfaces exportadas (corpo mínimo), runner de provas. As seguintes só preenchem; assim cada uma cita arquivos que já existem.',
     '- CONTRATO de cada story (quem implementa é um modelo mais barato; o contrato é o que evita erro): scope_paths (arquivos que ela pode criar ou alterar; caminhos reais do projeto ou nomes novos), do_not_touch (arquivos que NÃO pode alterar), out_of_scope (o que fica de fora, em 1 linha cada), interfaces (assinaturas que ela expõe ou consome, ex.: "appendEvent(event) → Promise<seq>", "GET /api/items → [{id,name}]"). acceptance no formato "Dado …, quando …, então …", cada um provável por UMA prova automatizada sem chamada real de rede, CLI ou serviço (dublês). test_hint diz o arquivo de prova e como simular dependências.',
     '- stories: 1 a 6 stories PEQUENAS, em ordem de execução. TAMANHO É REGRA: cada story = um comportamento observável, request com no máximo 120 palavras, acceptance com 2 a 4 critérios, diff esperado de até ~300 linhas, provável de passar numa revisão rigorosa em 1 ou 2 rodadas. Nunca junte dois comportamentos com "e também". Se o trabalho não cabe em 6 stories desse tamanho, faça só a primeira fatia coerente e diga em summary o que ficou para o próximo épico. Cada uma: id (s1, s2…), title, request (instrução completa e autossuficiente para a IA que vai implementar, incluindo o estilo visual quando houver interface), acceptance, test_hint (como provar), depends_on (ids das stories anteriores de que esta depende; [] se independente).',
     p.runner === 'none' ? '- Não há runner de provas: a primeira story deve incluir criar o mínimo para rodar provas (JS: package.json + vitest; Python: pytest).' : '',
@@ -858,11 +890,12 @@ const PLAN_JSON_SCHEMA = {
     domains: { type: 'array', items: { type: 'string' } }, keywords: { type: 'array', items: { type: 'string' } },
     needs_ui: { type: 'boolean' }, needs_backend: { type: 'boolean' },
     research_questions: { type: 'array', items: { type: 'string' } }, questions: { type: 'array', items: { type: 'string' } },
+    decisions: { type: 'array', items: { type: 'string' } },
     assets_style: { type: 'string' },
     assets: { type: 'array', maxItems: 6, items: { type: 'object', additionalProperties: false, properties: { file: { type: 'string' }, prompt: { type: 'string' }, purpose: { type: 'string' } }, required: ['file', 'prompt', 'purpose'] } },
-    stories: { type: 'array', minItems: 1, maxItems: 6, items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, title: { type: 'string' }, request: { type: 'string' }, acceptance: { type: 'array', items: { type: 'string' } }, test_hint: { type: 'string' }, depends_on: { type: 'array', items: { type: 'string' } }, scope_paths: { type: 'array', items: { type: 'string' } }, do_not_touch: { type: 'array', items: { type: 'string' } }, out_of_scope: { type: 'array', items: { type: 'string' } }, interfaces: { type: 'array', items: { type: 'string' } } }, required: ['id', 'title', 'request', 'acceptance', 'test_hint', 'depends_on', 'scope_paths', 'do_not_touch', 'out_of_scope', 'interfaces'] } },
+    stories: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, title: { type: 'string' }, request: { type: 'string' }, acceptance: { type: 'array', items: { type: 'string' } }, test_hint: { type: 'string' }, depends_on: { type: 'array', items: { type: 'string' } }, scope_paths: { type: 'array', items: { type: 'string' } }, do_not_touch: { type: 'array', items: { type: 'string' } }, out_of_scope: { type: 'array', items: { type: 'string' } }, interfaces: { type: 'array', items: { type: 'string' } }, recipe: { type: 'array', items: { type: 'string' } }, examples: { type: 'array', items: { type: 'string' } }, test_file: { type: 'string' } }, required: ['id', 'title', 'request', 'acceptance', 'test_hint', 'depends_on', 'scope_paths', 'do_not_touch', 'out_of_scope', 'interfaces', 'recipe', 'examples', 'test_file'] } },
   },
-  required: ['title', 'summary', 'explanation', 'complexity', 'domains', 'keywords', 'needs_ui', 'needs_backend', 'research_questions', 'questions', 'assets_style', 'assets', 'stories'],
+  required: ['title', 'summary', 'explanation', 'complexity', 'domains', 'keywords', 'needs_ui', 'needs_backend', 'research_questions', 'questions', 'decisions', 'assets_style', 'assets', 'stories'],
 }
 
 // ---------- pacote de contexto (sessão nova do Claude sem releitura) ----------
@@ -919,6 +952,8 @@ function epicsPrompt() {
 }
 // tamanho de story: regra sem IA. Story grande demais volta ao planejador para dividir (uma vez).
 const WORDS = (t) => String(t || '').trim().split(/\s+/).length
+const VAGUE = /\b(conforme necess[áa]rio|se necess[áa]rio|implementar a l[óo]gica|ajustar o que for|etc\.?|e assim por diante|adequadamente|apropriad[oa])\b/i
+function underSpecified(st) { return (st.recipe || []).length < 2 || (st.examples || []).length < 2 || !String(st.test_file || '').trim() || (st.recipe || []).some((x) => VAGUE.test(x)) }
 function tooBig(st) { return (st.acceptance || []).length > 4 || WORDS(st.request) > 140 || /\b(e tamb[ée]m|al[ée]m disso)\b/i.test(st.request || '') || !(st.scope_paths || []).length }
 
 // ---------- prompts do maker ----------
@@ -927,7 +962,11 @@ function common(st) {
   return [
     `Projeto: ${p.name} (${p.language || 'linguagem a definir'}); runner de provas: ${p.runner === 'none' ? 'nenhum' : p.test_cmd}.`,
     `Objetivo da missão: ${m.plan.title}. ${m.plan.summary}`,
+    m.plan.decisions?.length ? `DECISÕES DO PLANO (já tomadas; não rediscuta nem troque):\n${m.plan.decisions.map((d) => `- ${d}`).join('\n')}` : '',
     `Story atual: ${st.title}. Instrução: ${st.request}`,
+    st.recipe?.length ? `RECEITA (siga na ordem; um passo de cada vez):\n${st.recipe.map((x, i) => `${i + 1}. ${x}`).join('\n')}` : '',
+    st.examples?.length ? `EXEMPLOS que têm de valer (entrada → saída):\n${st.examples.map((x) => `- ${x}`).join('\n')}` : '',
+    st.recipe?.length ? 'Não tome decisões de desenho: se faltar um detalhe, escolha o mais simples que satisfaz os exemplos e diga qual foi na frase final.' : '',
     attachBlock(m.attachments),
     `Critérios de aceite: ${(st.acceptance || []).map((a, i) => `(${i + 1}) ${a}`).join(' ')}`,
     st.scope_paths?.length ? `CONTRATO. Pode criar ou alterar SÓ: ${st.scope_paths.join(', ')}${st.do_not_touch?.length ? `. NÃO altere: ${st.do_not_touch.join(', ')}` : ''}${st.out_of_scope?.length ? `. Fora do escopo (não faça): ${st.out_of_scope.join('; ')}` : ''}${st.interfaces?.length ? `. Interfaces a respeitar: ${st.interfaces.join(' | ')}` : ''}. Precisa tocar em outro arquivo? Faça o mínimo e diga na frase final.` : '',
@@ -946,7 +985,7 @@ function common(st) {
 }
 function testPrompt(st, pack) {
   return [`Pedido original do usuário: ${state.mission.request}`, ...common(st),
-    `FASE 1 de 2: escreva APENAS as provas novas (testes automatizados) desta story: uma função de teste por critério de aceite, todas no mesmo arquivo, com nomes que digam o critério. Todas devem FALHAR (ou nem carregar) no código atual, porque o comportamento ainda não existe. Dica de prova: ${st.test_hint}. Não implemente o comportamento ainda. Provas NUNCA fazem chamada real de rede, CLI externa ou serviço: simule com dublês (stub/mock) e teste o comportamento observável; prova que depende do ambiente vira falha falsa e trava a parte.`,
+    `FASE 1 de 2: escreva APENAS as provas novas (testes automatizados) desta story: uma função de teste por critério de aceite, todas no mesmo arquivo, com nomes que digam o critério. Todas devem FALHAR (ou nem carregar) no código atual, porque o comportamento ainda não existe. ${st.test_file ? `Arquivo de prova: ${st.test_file}. ` : ''}${st.examples?.length ? 'Cada EXEMPLO acima vira uma asserção. ' : ''}Dica de prova: ${st.test_hint}. Não implemente o comportamento ainda. Provas NUNCA fazem chamada real de rede, CLI externa ou serviço: simule com dublês (stub/mock) e teste o comportamento observável; prova que depende do ambiente vira falha falsa e trava a parte.`,
     pack, 'Ao terminar, escreva uma frase com o nome do arquivo de prova e os nomes das provas novas.'].filter(Boolean).join('\n')
 }
 function fixPrompt(st, round, review, visual, pack) {
@@ -1040,7 +1079,7 @@ async function runProgram() {
     if (['done', 'failed', 'blocked'].includes(ep.state)) continue
     const bad = (ep.depends_on || []).filter((id) => pg.epics.find((x) => x.id === id)?.state !== 'done')
     if (bad.length) { ep.state = 'blocked'; ep.reason = `depende de ${bad.join(', ')}`; log('engine', `épico "${ep.title}" bloqueado: depende de ${bad.join(', ')}, que não concluiu. Nada gasto.`, 'warn'); continue }
-    pg.current = i; ep.state = 'running'; m.epic = ep; m.stories = []; m.tests_before = null; m.split_tried = false; m.current = null
+    pg.current = i; ep.state = 'running'; m.epic = ep; m.stories = []; m.tests_before = null; m.split_tried = false; m.spec_tried = false; m.critic_tried = false; m.current = null
     const usd0 = m.cost.usd
     log('engine', `épico ${i + 1} de ${pg.epics.length}: ${ep.title}`)
     m.state = 'planning'; broadcast()
@@ -1063,10 +1102,18 @@ async function runProgram() {
 async function makePlan({ inProgram = false } = {}) {
   const m = state.mission, intent = m.intent
   m.state = 'planning'; setStep('plan', 'running')
-  const r = await claudeCall({ role: 'plano', prompt: planPrompt(), model: plannerChoice().model, effort: plannerChoice().effort, tools: ['Read', 'Glob', 'Grep'], schema: PLAN_JSON_SCHEMA, maxTurns: 10 })
+  const r = await claudeCall({ role: 'plano', prompt: planPrompt(), model: plannerChoice().model, effort: plannerChoice().effort, tools: ['Read', 'Glob', 'Grep'], schema: PLAN_JSON_SCHEMA, maxTurns: 16 })
   const plan = r?.structured_output
   if (!plan?.stories?.length) { setStep('plan', 'failed'); if (inProgram) return false; m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'o plano não veio no formato esperado', 'error'); return finish() }
   // parte grande demais volta ao planejador uma vez, sem gastar com maker
+  const vague = plan.stories.filter((x) => !tooBig(x) && underSpecified(x))
+  if (vague.length && !m.spec_tried) {
+    m.spec_tried = true
+    m.plan_feedback = [...(m.plan_feedback || []), `A(s) parte(s) ${vague.map((x) => x.id).join(', ')} está(ão) subespecificada(s): faltam passos concretos na recipe (arquivo + ação, sem "conforme necessário"), pelo menos 2 examples literais de entrada → saída ou o test_file. Complete; mantenha as outras.`]
+    m.stories = plan.stories.map((s) => ({ ...s, state: 'queued', steps: [], round: 0 })); m.plan = { ...(m.plan || {}), ...plan }
+    log('engine', `plano com parte(s) subespecificada(s) (${vague.map((x) => x.id).join(', ')}); pedindo detalhe ao planejador`, 'warn')
+    return makePlan({ inProgram })
+  }
   const big = plan.stories.filter(tooBig)
   if (big.length && !m.split_tried) {
     m.split_tried = true
@@ -1074,6 +1121,16 @@ async function makePlan({ inProgram = false } = {}) {
     m.stories = plan.stories.map((s) => ({ ...s, state: 'queued', steps: [], round: 0 })); m.plan = { ...(m.plan || {}), ...plan }
     log('engine', `plano com parte(s) grande(s) demais (${big.map((x) => x.id).join(', ')}); pedindo divisão ao planejador`, 'warn')
     return makePlan({ inProgram })
+  }
+  if (state.settings.plan_critic !== false && !m.critic_tried && ['feature', 'subsystem', 'project'].includes(m.intent?.complexity)) {
+    m.critic_tried = true
+    const crit = await planCritic(plan)
+    if (crit?.verdict === 'revise' && crit.issues?.length) {
+      m.plan_feedback = [...(m.plan_feedback || []), `Outra IA leu o plano como se fosse implementar e apontou onde teria de decidir sozinha. Corrija cada ponto na story indicada (recipe, examples, interfaces, decisions) e mantenha o resto: ${crit.issues.slice(0, 10).map((x) => `[${x.story}] ${x.problem} → ${x.fix}`).join(' | ')}`]
+      m.stories = plan.stories.map((s) => ({ ...s, state: 'queued', steps: [], round: 0 })); m.plan = { ...(m.plan || {}), ...plan }
+      log('engine', `crítica do plano: ${crit.issues.length} ponto(s) em aberto; planejador corrige uma vez`, 'warn')
+      return makePlan({ inProgram })
+    }
   }
   const keep = m.program ? { epics: m.program.epics, explanation: m.program.explanation } : {}
   m.plan = { ...plan, ...keep, title: m.program ? m.program.title : plan.title, epic_title: m.epic?.title || null, epic_explanation: m.program ? plan.explanation : null, needs_ui: plan.needs_ui || intent.needs_ui, needs_backend: plan.needs_backend || intent.needs_backend, domains: [...new Set([...(intent.domains || []), ...(plan.domains || [])])] }

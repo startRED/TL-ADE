@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "properties": {
+    "verdict": { "type": "string", "enum": ["ready", "revise"] },
+    "summary": { "type": "string" },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "story": { "type": "string" },
+          "problem": { "type": "string" },
+          "fix": { "type": "string" }
+        },
+        "required": ["story", "problem", "fix"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["verdict", "summary", "issues"],
+  "additionalProperties": false
+}

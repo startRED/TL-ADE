@@ -771,6 +771,26 @@ function Conversation({ state, m }) {
                 ))}
               </ol>
             )}
+            {m.plan.decisions?.length > 0 && (
+              <Fold title="Decisões já tomadas pelo plano" icon={<ListChecks />} meta={`${m.plan.decisions.length}`}>
+                <ul className="plan-lines">{m.plan.decisions.map((d, i) => <li key={i}>{d}</li>)}</ul>
+              </Fold>
+            )}
+            {m.stories.some((s) => s.recipe?.length) && (
+              <Fold title="Receita de cada parte" icon={<ListBullets />} meta="passos, exemplos e arquivo de prova">
+                {m.stories.filter((s) => s.recipe?.length).map((s) => (
+                  <div key={s.id} className="role-line">
+                    <span className="role-name">{s.id} · {s.title}</span>
+                    <ol className="recipe">{s.recipe.map((x, i) => <li key={i}>{x}</li>)}</ol>
+                    {s.examples?.length > 0 && <p className="dim small">Exemplos: {s.examples.join(' · ')}</p>}
+                    {s.test_file && <p className="dim small">Prova em <span className="mono">{s.test_file}</span> · pode tocar: <span className="mono">{(s.scope_paths || []).join(', ')}</span></p>}
+                  </div>
+                ))}
+              </Fold>
+            )}
+            {m.plan_critic && (
+              <p className="dim small">Crítica do plano ({m.plan_critic.verdict === 'ready' ? 'executável' : `${m.plan_critic.issues.length} ponto(s) corrigidos pelo planejador`}): {m.plan_critic.summary}</p>
+            )}
             {m.plan.assets?.length > 0 && !started && <Assets m={m} dir={state.dir} />}
           </Ade>
         )}
@@ -1158,6 +1178,7 @@ function OptionsPage({ s, save }) {
           <Row title="Modo noturno (sem perguntar)" note="Responde a entrevista com as recomendações, aprova o plano sozinha e, se uma parte travar sem saída, pula a parte e segue. Para só se estourar o teto da missão ou der erro do motor." control={<Switch checked={!!s.unattended} onCheckedChange={(v) => save({ unattended: v })} />} />
           <Row title="Teto por missão (US$ no Claude)" note="Estourou: a missão pausa e espera você." control={<input className="ta" style={{ width: 80 }} type="number" min={5} step={5} value={s.max_usd_per_mission ?? 60} onChange={(e) => save({ max_usd_per_mission: Number(e.target.value) || 60 })} />} />
           <Row title="Recomendar quem planeja" note="O entendedor mede a dificuldade (leve, normal, pesada) e sugere o modelo do planejador: leve → Sonnet, normal → Opus médio, pesada → Fable alto. Você escolhe; no modo noturno ela segue a recomendação." control={<Switch checked={s.planner_recommend !== false} onCheckedChange={(v) => save({ planner_recommend: v })} />} />
+          <Row title="Crítica do plano" note="Antes de qualquer código, o revisor lê o plano como quem vai implementar e aponta onde teria de adivinhar; o planejador corrige uma vez. Só em pedidos de funcionalidade para cima." control={<Switch checked={s.plan_critic !== false} onCheckedChange={(v) => save({ plan_critic: v })} />} />
           <Row title="Batedor (Gemini lê antes)" note="Antes de planejar um pedido de funcionalidade para cima, o Gemini lê o projeto e devolve um recibo curto; quem escreve pode chamá-lo sob demanda para documentação, arquivos grandes e pesquisa na web." control={<Switch checked={s.scout_enabled !== false} onCheckedChange={(v) => save({ scout_enabled: v })} />} />
           <Row title="Faixa rápida para correções pequenas" note="Pedido curto do tipo corrija, ajuste, troque, em projeto existente: pula a entrevista e o plano e vai direto para prova, correção e revisão." control={<Switch checked={s.fast_lane !== false} onCheckedChange={(v) => save({ fast_lane: v })} />} />
         </Card>
