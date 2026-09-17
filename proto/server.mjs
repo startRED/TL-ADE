@@ -818,7 +818,8 @@ async function checker(diff, tests, st) {
   const prompt = [
     'Você é o revisor. Outra IA, de outro fornecedor, fez a alteração abaixo no projeto. Não escreva código; só avalie.',
     'Regras: toda mudança de comportamento vem com uma prova (teste) que falha antes e passa depois; sem mudanças fora do escopo; sem quebrar acessibilidade; sem segredos em código; interface sem cara de template (cores saturadas, gradiente roxo, três cards iguais).',
-    st.early_impl || st.no_red ? 'ATENÇÃO: nesta story o harness NÃO viu as provas novas falharem antes da implementação. Confira você se as provas realmente exercitam o comportamento novo (falhariam sem o código); prova que passa sem o código = achado high.' : '',
+    st.early_impl && st.red_verified ? 'Nesta story quem escreveu implementou junto com a prova; o harness conferiu o vermelho de outro jeito: guardou de lado o código novo, rodou a suíte, viu as provas novas falharem e devolveu o código. Trate as provas como provas que falham sem o código.' : '',
+    (st.early_impl && !st.red_verified) || st.no_red ? 'ATENÇÃO: nesta story o harness NÃO viu as provas novas falharem antes da implementação. Confira você se as provas realmente exercitam o comportamento novo (falhariam sem o código); prova que passa sem o código = achado high.' : '',
     m.plan?.decisions?.length ? `DECISÕES DO PLANO (são contrato, já aprovadas; um achado que contradiz uma decisão NÃO é achado, por melhor que seja a ideia):\n${m.plan.decisions.map((d) => `- ${d}`).join('\n')}` : '',
     st.round > 1 && st.review?.findings?.length ? [
       `ESTA É A RODADA ${st.round} DE REVISÃO. Seus achados da rodada anterior: ${st.review.findings.map((f) => `[${f.severity}] ${f.file}: ${String(f.problem).slice(0, 220)}`).join(' | ')}`,
@@ -1460,6 +1461,25 @@ async function agyMaker({ role, prompt, model, effort }) {
   return { result: text, touched, num_turns: j.num_turns || 0, total_cost_usd: 0 }
 }
 
+const IS_TEST_FILE = (f, st) => f === st.test_file || /(^|\/)(tests?|__tests__|specs?|fixtures|__fixtures__|__mocks__)\//i.test(f) || /\.(test|spec)\.[cm]?[jt]sx?$/i.test(f) || /(^|\/)(test_[^/]+|[^/]+_test)\.py$/i.test(f)
+// devolve 'red' (provas novas falham sem o código novo), 'green' (passam sem ele: não provam nada) ou 'skip' (não deu para conferir)
+async function redWithoutCode(st, diff, fresh) {
+  const dir = state.project.dir
+  if (st.base && (await gitHead(dir)) !== st.base) return 'skip' // quem escreve commitou: não há o que guardar de lado
+  const code = [...new Set([...diff.matchAll(/^diff --git a\/(\S+)/gm)].map((x) => x[1]))].filter((f) => !IS_TEST_FILE(f, st))
+  if (!code.length) return 'skip'
+  await run('git', ['reset', '-q'], { cwd: dir }) // tira a "intenção de adicionar" do índice (vem do gitDiff); com ela o stash recusa ("not uptodate")
+  const put = await run('git', ['stash', 'push', '-u', '-q', '-m', 'ade-prova-vermelha', '--', ...code], { cwd: dir })
+  if (put.code !== 0) { log('engine', `não consegui guardar o código de lado para conferir a prova vermelha (${(put.err || put.out).trim().split('\n')[0]}); sigo sem essa conferência`, 'warn'); return 'skip' }
+  let res = null
+  try { res = await runTests(state.project) } finally {
+    // numa pausa pedida no meio, run() recusa rodar o pop; a parte recomeça do zero de qualquer jeito e a entrada fica em `git stash list`
+    const back = await run('git', ['stash', 'pop', '-q'], { cwd: dir }).catch(() => ({ code: -1, err: 'pausa' }))
+    if (back.code !== 0 && back.err !== 'pausa') { log('engine', 'NÃO consegui devolver o código guardado de lado; ele está em `git stash list` com o nome ade-prova-vermelha. Rode `git stash pop` na pasta do projeto', 'error'); throw new Error('git stash pop falhou depois da conferência de prova vermelha') }
+  }
+  if (!res || res.timeout) return 'skip'
+  return res.ok ? 'green' : 'red' // arquivo de prova que nem carrega sem o código conta como vermelho
+}
 function remember(st, r) {
   if (!r) return
   st.files = [...new Set([...(st.files || []), ...(r.touched || [])])]
@@ -1497,7 +1517,12 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
       // (b) não escreveu prova que falha: repete a fase de prova uma vez com o motivo; (c) parte sem comportamento testável (config, docs): implementa sem prova vermelha e o revisor julga.
       const fresh = generic ? [] : after.tests.filter((t) => !before.has(t.name))
       const changed = (await gitDiff(state.project.dir, st.base)).trim()
-      if (fresh.length && after.ok && changed) { st.early_impl = true; setStep('red', 'skipped'); log('engine', `quem escreve adiantou a implementação junto com a prova (${fresh.length} prova(s) nova(s) já verdes); sigo para verificação e revisão`, 'warn') }
+      if (fresh.length && after.ok && changed) {
+        const red = await redWithoutCode(st, changed, fresh)
+        if (red === 'green' && !st.red_retry) { st.red_retry = true; setStep('red', 'failed'); log('engine', 'quem escreve implementou junto com a prova, e as provas novas passam MESMO sem o código novo (guardei o código de lado e rodei a suíte): não provam o comportamento. Repetindo a fase de prova uma vez', 'warn'); return runStory(st, 1, null, null) }
+        st.early_impl = true; st.red_verified = red === 'red'; setStep('red', red === 'red' ? 'done' : 'skipped')
+        log('engine', red === 'red' ? `quem escreve adiantou a implementação junto com a prova (${fresh.length} prova(s) nova(s)); conferi que elas ficam vermelhas sem o código novo (código guardado de lado, suíte rodada, código devolvido). Sigo para verificação e revisão` : `quem escreve adiantou a implementação junto com a prova (${fresh.length} prova(s) nova(s) já verdes) e não deu para conferir o vermelho sem o código; sigo para verificação e revisão, e o revisor julga`, 'warn')
+      }
       else if (!st.red_retry) { st.red_retry = true; setStep('red', 'failed'); log('engine', 'nenhuma prova nova ficou vermelha; repetindo a fase de prova uma vez com o motivo', 'warn'); return runStory(st, 1, null, null) }
       else { st.no_red = true; setStep('red', 'skipped'); log('engine', 'sem prova vermelha na segunda tentativa (parte de configuração ou documentação?); implemento assim mesmo e o revisor julga', 'warn') }
     } else setStep('red', 'done')
