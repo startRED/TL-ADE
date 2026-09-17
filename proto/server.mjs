@@ -782,6 +782,8 @@ async function planCritic(plan) {
   const prompt = [
     'Você vai criticar um PLANO, não código. Quem vai implementar cada story é um modelo rápido e barato, que segue instruções muito bem e decide mal, numa sessão nova que só vê a story, as decisions e os arquivos citados.',
     'Leia cada story como se fosse implementá-la agora. Aponte SÓ o que obrigaria esse modelo a decidir ou adivinhar: passo de recipe vago, arquivo ou símbolo citado que não existe no projeto (confira), interface sem assinatura, formato de dado sem exemplo, caso de borda sem resposta, examples que não cobrem um critério de aceite, dependência entre stories não declarada, duas stories mexendo no mesmo trecho, story que muda um formato ou contrato já coberto por provas de outra story enquanto proíbe tocar nessas provas (contrato impossível), story grande demais para ~300 linhas de diff.',
+    'O achado MAIS importante: para cada critério de aceite, todo valor que a story precisa produzir, calcular, gravar ou exibir cuja ORIGEM o plano não nomeia (parâmetro, campo de qual arquivo, decisão anterior), e toda decisão que quem implementa teria de inventar. Confira também: critério que não é observável de fora ou que só repete o pedido; critério sem exemplo concreto; story que depende de um comportamento de outra parte do sistema que nenhuma decision, ADR ou arquivo do projeto registra (suposição escondida: mande declarar); e, se o projeto tem AGENTS.md ou CLAUDE.md, qualquer passo do plano que viole uma proibição ou convenção escrita ali (leia o arquivo).',
+    'Só liste o que BLOQUEIA a implementação sem adivinhar; sugestão de clareza ou de estilo não entra. Todo achado traz em fix o texto concreto que falta, pronto para colar na story.',
     'Não opine sobre arquitetura nem estilo, não peça escopo novo. Se o plano está executável, verdict = "ready" e issues = []. Senão verdict = "revise" e até 10 issues: story (id), problem (uma frase), fix (o texto concreto que falta). Responda em português no JSON exigido.',
     `Pedido do usuário: ${m.request}`, m.epic ? `Épico: ${m.epic.title}. ${m.epic.goal}` : '',
     '--- PLANO ---', JSON.stringify({ decisions: plan.decisions, stories: plan.stories }, null, 1).slice(0, 40000),
@@ -826,6 +828,7 @@ async function checker(diff, tests, st) {
     'Responda em português no formato JSON exigido. verdict = "approve" só se não houver achado high.',
     diff.length > 60000 ? `ATENÇÃO: o diff tem ${diff.length} caracteres e abaixo vão só os primeiros 60000. Arquivos alterados: ${[...diff.matchAll(/^diff --git a\/(\S+)/gm)].map((x) => x[1]).join(', ')}. Abra com as suas ferramentas os que não aparecerem inteiros antes de aprovar.` : '',
     (() => { const names = new Set((st.tests_after?.tests || []).map((t) => t.name)); const gone = (st.red_tests || []).map((t) => t.name).filter((n) => n && !/[\\/]|\.test\./.test(n) && !names.has(n)); return gone.length ? `PROVAS QUE NASCERAM VERMELHAS E NÃO EXISTEM MAIS: ${gone.slice(0, 8).join(' | ')}. Confira se foram só renomeadas; prova apagada ou asserção enfraquecida para passar é achado high.` : '' })(),
+    (() => { const debt = [...diff.matchAll(/^\+(?!\+\+).*\b(TODO|FIXME|XXX|HACK)\b.*$/gm)].map((x) => x[0].slice(1, 160).trim()).filter((l) => !/#\d+|issue/i.test(l)); return debt.length ? `MARCADORES DE DÍVIDA ACRESCENTADOS POR ESTE DIFF (sem referência a item de trabalho): ${debt.slice(0, 8).join(' | ')}. Trabalho declarado como pendente dentro do escopo da story é achado high; fora do escopo, low.` : '' })(),
     '--- DIFF ---', diff.slice(0, 60000),
   ].join('\n') + skillsBlock(m.skills.checker || [])
   // Receita de chamada curta (architecture.md E16): sem config, regras e skills do usuário; sessão efêmera.
@@ -996,6 +999,11 @@ function planPrompt(revising = false) {
     '- research_questions: só fatos externos que mudariam a implementação (versão de API, regra de negócio pública); normalmente vazio.',
     '- questions: só se o pedido for ambíguo a ponto de gerar trabalho errado; no máximo 2; normalmente vazio (prefira uma escolha razoável e registre em summary).',
     'REGRA DE OURO: quem implementa é um modelo rápido e barato que segue instruções muito bem e decide mal. TODA decisão é sua, agora. Se ao ler uma story alguém precisaria escolher biblioteca, nome, formato de dado, local do arquivo, mensagem de erro ou comportamento de borda, o plano está incompleto.',
+    '- ORIGEM DOS VALORES: todo valor que uma story produz, calcula, grava ou exibe tem origem nomeada na recipe, nos examples ou nas decisions (parâmetro tal, campo tal de tal arquivo, decisão tal). Valor sem origem nomeada é decisão que sobrou para quem implementa: plano incompleto.',
+    '- CRITÉRIOS de aceite: cada um é um resultado observável de fora, com valores concretos (teste: alguém que nunca viu o código consegue dizer se passou?); critério com "e também" são dois critérios; critério que só repete o pedido com outras palavras não prova nada. Toda story com 2 ou mais critérios tem pelo menos um de caminho feliz e um de borda ou de falha.',
+    '- RASTREIO (o motor confere): os critérios de cada story são numerados pela ordem, CA1, CA2... Termine cada passo da recipe com os critérios que ele atende entre colchetes: "[CA1]", "[CA1,CA3]"; passo de preparo que não atende critério nenhum termina com "[prep]". Comece cada example com o critério que ele comprova: "[CA2] total([]) → 0". Todo critério aparece em pelo menos um passo e em pelo menos um example.',
+    '- decisions: escreva cada uma como "X, porque Y" e, quando havia alternativa real, acrescente "; descartado: Z". Decisão sem motivo não orienta ninguém quando aparece um caso que ela não previu.',
+    m.program?.decisions_log?.length ? `- DECISÕES DOS ÉPICOS ANTERIORES (já valem no código commitado; siga-as e NÃO as repita nas decisions; se este épico precisa contrariar uma, diga qual e por quê numa decision nova):\n${m.program.decisions_log.map((e) => `  [${e.epic}] ${e.decisions.join(' | ')}`).join('\n').slice(0, 6000)}` : '',
     '- decisions: 3 a 12 decisões que valem para TODAS as stories, uma frase cada, concretas: bibliotecas e versões (ou "nenhuma dependência"), estrutura de pastas, convenção de nomes, formato dos dados (com um exemplo literal), tratamento de erro, idioma dos textos, estilo visual quando houver interface. Siga o que o projeto já usa (veja o recibo do batedor e o mapa).',
     '- recipe de cada story: 3 a 8 passos numeráveis, em ordem, cada um com arquivo e ação concreta: "criar src/x.js exportando f(a, b) → tipo", "em src/y.js, dentro de render@120, chamar f antes de montar a lista", "registrar a rota em src/app.js". Cite símbolo@linha do mapa quando o arquivo existe. Nada de "implementar a lógica" ou "ajustar conforme necessário".',
     '- examples de cada story: 2 a 5 casos literais de entrada → saída que viram provas, incluindo pelo menos um caso de borda (vazio, inválido, limite). Ex.: "total([{preco: 2, qtd: 3}]) → 6", "total([]) → 0", "POST /itens sem nome → 400 {erro: \'nome obrigatório\'}".',
@@ -1007,7 +1015,7 @@ function planPrompt(revising = false) {
     p.runner === 'none' ? '- Não há runner de provas: a primeira story deve incluir criar o mínimo para rodar provas (JS: package.json + vitest; Python: pytest).' : '',
     '- Se o pedido é visual e não há index.html, uma story deve entregar index.html na raiz funcionando como arquivos estáticos (ES modules, sem build), para abrir no navegador.',
     'Pedidos simples viram 1 ou 2 stories. Não invente escopo além do pedido. questions: normalmente vazio (a entrevista já aconteceu).',
-    revising ? `MODO EDIÇÃO: o plano abaixo já está quase pronto. NÃO explore o projeto de novo (no máximo 2 leituras para conferir um caminho ou símbolo). Devolva o MESMO JSON, alterando só o que o último pedido de mudança exige; copie o resto sem reescrever.\nPLANO ATUAL:\n${JSON.stringify({ ...m.plan, epics: undefined, explanation: m.plan.epic_explanation || m.plan.explanation })}` : '',
+    revising ? `MODO EDIÇÃO: o plano abaixo já está quase pronto. NÃO explore o projeto de novo (no máximo 2 leituras para conferir um caminho ou símbolo). Devolva o MESMO JSON, alterando só o que o último pedido de mudança exige; copie o resto sem reescrever. A correção sugerida em cada pedido é uma ilustração, não uma ordem: se aplicá-la contradiz o pedido do usuário, uma escolha da entrevista ou uma decision, NÃO aplique; resolva o problema apontado de outro jeito e diga no summary qual pedido recusou e por quê. Nunca resolva um pedido entregando menos do que o épico pede.\nPLANO ATUAL:\n${JSON.stringify({ ...m.plan, epics: undefined, explanation: m.plan.epic_explanation || m.plan.explanation })}` : '',
     m.plan_feedback?.length && !revising ? `PLANO ANTERIOR (para revisar, não para repetir):\n${JSON.stringify({ title: m.plan.title, summary: m.plan.summary, stories: m.stories.map((s) => ({ id: s.id, title: s.title, request: s.request })) })}` : '',
     m.plan_feedback?.length ? `O usuário pediu estas mudanças no plano, em ordem: ${m.plan_feedback.map((f, i) => `(${i + 1}) ${f}`).join(' ')} Aplique-as e mantenha o resto.` : '',
   ].filter(Boolean).join('\n') + skillsBlock(state.mission.skills.planner || [])
@@ -1081,8 +1089,16 @@ function epicsPrompt() {
 }
 // tamanho de story: regra sem IA. Story grande demais volta ao planejador para dividir (uma vez).
 const WORDS = (t) => String(t || '').trim().split(/\s+/).length
-const VAGUE = /\b(conforme necess[áa]rio|se necess[áa]rio|implementar a l[óo]gica|ajustar o que for|etc\.?|e assim por diante|adequadamente|apropriad[oa])\b/i
+const VAGUE = /\b(conforme necess[áa]rio|se necess[áa]rio|implementar a l[óo]gica|ajustar o que for|etc\.?|e assim por diante|adequadamente|apropriad[oa]|tbd|a definir|a decidir|por enquanto|provis[óo]ri[oa]|vers[ãa]o simplificada)\b|\.\.\.\s*$/i
 function underSpecified(st) { return (st.recipe || []).length < 2 || (st.examples || []).length < 2 || !String(st.test_file || '').trim() || (st.recipe || []).some((x) => VAGUE.test(x)) }
+// rastreio critério <-> passo <-> exemplo: devolve os critérios (CA1..CAn) que nenhum passo da recipe ou nenhum example cita
+function untraced(st) {
+  const n = (st.acceptance || []).length; if (!n) return []
+  const cited = (list) => new Set((list || []).flatMap((x) => [...String(x).matchAll(/CA(\d+)/g)].map((y) => +y[1])))
+  const inRecipe = cited(st.recipe), inExamples = cited(st.examples), miss = []
+  for (let i = 1; i <= n; i++) { if (!inRecipe.has(i)) miss.push(`CA${i} sem passo na recipe`); if (!inExamples.has(i)) miss.push(`CA${i} sem example`) }
+  return miss
+}
 function tooBig(st) { return (st.acceptance || []).length > 4 || WORDS(st.request) > 140 || /\b(e tamb[ée]m|al[ée]m disso)\b/i.test(st.request || '') || !(st.scope_paths || []).length }
 
 // ---------- prompts do maker ----------
@@ -1097,6 +1113,8 @@ function common(st) {
     st.examples?.length ? `EXEMPLOS que têm de valer (entrada → saída):\n${st.examples.map((x) => `- ${x}`).join('\n')}` : '',
     'DECISÃO FALTANDO: confira se a story, as DECISÕES e os EXEMPLOS dizem de onde vem cada valor que você precisa produzir. Escolha entre opções que o contrato já permite (nome de variável, ordem de um laço) é detalhe seu. Se a escolha fixa a origem de um dado ou um comportamento cobrado num critério, NÃO adivinhe calado: adote a opção mais simples que satisfaz os exemplos e escreva no fim uma linha `SUPOSIÇÃO: <o que faltava> -> <o que você adotou>` para cada uma (o revisor vai julgar). Na dúvida, é suposição.',
     'Siga o padrão que o código já usa (erros, nomes, estrutura de módulo); introduzir padrão novo é decisão, não detalhe.',
+    'DEPENDÊNCIAS: nunca instale nem importe pacote que as DECISÕES ou a receita não nomeiam (nome de pacote inventado é risco de segurança). Se a parte parece exigir um, isso é CONTRATO ERRADO ou SUPOSIÇÃO, não correção automática. Mudança de arquitetura (novo módulo central, troca de formato de dado, nova camada) também não é sua: declare e pare.',
+    'Cinco leituras ou buscas seguidas sem nenhuma edição é sinal de que você está sondando em vez de trabalhar: aja com o que já sabe ou declare o bloqueio na frase final.',
     attachBlock(m.attachments),
     `Critérios de aceite: ${(st.acceptance || []).map((a, i) => `(${i + 1}) ${a}`).join(' ')}`,
     st.scope_paths?.length ? `CONTRATO. Pode criar ou alterar SÓ: ${st.scope_paths.join(', ')}${st.do_not_touch?.length ? `. NÃO altere: ${st.do_not_touch.join(', ')}` : ''}${st.out_of_scope?.length ? `. Fora do escopo (não faça): ${st.out_of_scope.join('; ')}` : ''}${st.interfaces?.length ? `. Interfaces a respeitar: ${st.interfaces.join(' | ')}` : ''}. Precisa tocar em outro arquivo? Faça o mínimo e diga na frase final.` : '',
@@ -1208,6 +1226,8 @@ function closeEpic(ep, stories) {
   ep.stories = [...(ep.stories_prev || []), ...stories.map((x) => ({ id: x.id, title: x.title, state: x.state, skipped_reason: x.skipped_reason || null }))]
   ep.already = [...(ep.already || []), ...done.map((x) => x.title)]
   ep.summary = `${ep.already.length} parte(s) pronta(s): ${ep.already.join('; ')}`
+  const pg = state.mission.program, dec = (state.mission.plan?.decisions || []).map((d) => String(d).slice(0, 400))
+  if (pg && dec.length) pg.decisions_log = [...(pg.decisions_log || []).filter((e) => e.epic !== ep.id), { epic: ep.id, title: ep.title, decisions: dec }]
   if (!missing.length) { ep.state = 'done'; ep.missing = []; return }
   ep.missing = missing.map((x) => `${x.title} (${x.skipped_reason || x.state})`)
   if ((ep.attempts || 0) < 1) { ep.attempts = (ep.attempts || 0) + 1; ep.state = 'queued'; ep.stories_prev = ep.stories.filter((x) => x.state === 'done'); log('engine', `épico "${ep.title}" incompleto (${missing.length} parte(s) sem concluir); volta para a fila e o planejador replaneja só o que falta`, 'warn') }
@@ -1270,11 +1290,13 @@ async function makePlan({ inProgram = false } = {}) {
   if (!plan?.stories?.length) { setStep('plan', 'failed'); if (inProgram) return false; m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'o plano não veio no formato esperado', 'error'); return finish() }
   // parte grande demais volta ao planejador uma vez, sem gastar com maker
   const vague = plan.stories.filter((x) => !tooBig(x) && underSpecified(x))
-  if (vague.length && !m.spec_tried) {
+  const loose = plan.stories.filter((x) => !tooBig(x)).map((x) => ({ id: x.id, miss: untraced(x) })).filter((x) => x.miss.length)
+  if ((vague.length || loose.length) && !m.spec_tried) {
     m.spec_tried = true
-    m.plan_feedback = [...(m.plan_feedback || []), `A(s) parte(s) ${vague.map((x) => x.id).join(', ')} está(ão) subespecificada(s): faltam passos concretos na recipe (arquivo + ação, sem "conforme necessário"), pelo menos 2 examples literais de entrada → saída ou o test_file. Complete; mantenha as outras.`]
+    if (vague.length) m.plan_feedback = [...(m.plan_feedback || []), `A(s) parte(s) ${vague.map((x) => x.id).join(', ')} está(ão) subespecificada(s): faltam passos concretos na recipe (arquivo + ação, sem "conforme necessário"), pelo menos 2 examples literais de entrada → saída ou o test_file. Complete; mantenha as outras.`]
+    if (loose.length) { m.plan_feedback = [...(m.plan_feedback || []), `Rastreio incompleto (cada critério CAn precisa aparecer entre colchetes em pelo menos um passo da recipe e no começo de pelo menos um example): ${loose.map((x) => `${x.id}: ${x.miss.join(', ')}`).join('; ')}. Acrescente as marcas; se um critério não tem passo ou exemplo de verdade, crie o passo ou o exemplo que falta. Mantenha o resto.`]; log('engine', `plano sem rastreio completo de critérios (${loose.map((x) => x.id).join(', ')}); pedindo as marcas ao planejador`, 'warn') }
     m.stories = plan.stories.map((s) => ({ ...s, state: 'queued', steps: [], round: 0 })); m.plan = { ...(m.plan || {}), ...plan }
-    log('engine', `plano com parte(s) subespecificada(s) (${vague.map((x) => x.id).join(', ')}); pedindo detalhe ao planejador`, 'warn')
+    if (vague.length) log('engine', `plano com parte(s) subespecificada(s) (${vague.map((x) => x.id).join(', ')}); pedindo detalhe ao planejador`, 'warn')
     m.auto_revision = true
     return makePlan({ inProgram })
   }
