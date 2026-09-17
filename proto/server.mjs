@@ -851,7 +851,7 @@ function interviewRule() {
 }
 
 // ---------- plano (Intent Compiler) ----------
-function planPrompt() {
+function planPrompt(revising = false) {
   const p = state.project, m = state.mission
   return [
     'Você é o Intent Compiler da TL-ADE. Transforme o pedido do usuário em um plano executável por outra IA, em português, no formato JSON exigido.',
@@ -890,7 +890,8 @@ function planPrompt() {
     p.runner === 'none' ? '- Não há runner de provas: a primeira story deve incluir criar o mínimo para rodar provas (JS: package.json + vitest; Python: pytest).' : '',
     '- Se o pedido é visual e não há index.html, uma story deve entregar index.html na raiz funcionando como arquivos estáticos (ES modules, sem build), para abrir no navegador.',
     'Pedidos simples viram 1 ou 2 stories. Não invente escopo além do pedido. questions: normalmente vazio (a entrevista já aconteceu).',
-    m.plan_feedback?.length ? `PLANO ANTERIOR (para revisar, não para repetir):\n${JSON.stringify({ title: m.plan.title, summary: m.plan.summary, stories: m.stories.map((s) => ({ id: s.id, title: s.title, request: s.request })) })}` : '',
+    revising ? `MODO EDIÇÃO: o plano abaixo já está quase pronto. NÃO explore o projeto de novo (no máximo 2 leituras para conferir um caminho ou símbolo). Devolva o MESMO JSON, alterando só o que o último pedido de mudança exige; copie o resto sem reescrever.\nPLANO ATUAL:\n${JSON.stringify({ ...m.plan, epics: undefined, explanation: m.plan.epic_explanation || m.plan.explanation })}` : '',
+    m.plan_feedback?.length && !revising ? `PLANO ANTERIOR (para revisar, não para repetir):\n${JSON.stringify({ title: m.plan.title, summary: m.plan.summary, stories: m.stories.map((s) => ({ id: s.id, title: s.title, request: s.request })) })}` : '',
     m.plan_feedback?.length ? `O usuário pediu estas mudanças no plano, em ordem: ${m.plan_feedback.map((f, i) => `(${i + 1}) ${f}`).join(' ')} Aplique-as e mantenha o resto.` : '',
   ].filter(Boolean).join('\n') + skillsBlock(state.mission.skills.planner || [])
 }
@@ -1128,7 +1129,12 @@ async function runProgram() {
 async function makePlan({ inProgram = false } = {}) {
   const m = state.mission, intent = m.intent
   m.state = 'planning'; setStep('plan', 'running')
-  const r = await claudeCall({ role: 'plano', prompt: planPrompt(), model: plannerChoice().model, effort: plannerChoice().effort, tools: ['Read', 'Glob', 'Grep'], schema: PLAN_JSON_SCHEMA, maxTurns: 16 })
+  // revisão automática (dividir, detalhar, crítica) é edição de um plano que já existe: modelo mais barato, poucos turnos, sem reexplorar.
+  // Medido em 17/09: uma revisão no Fable custou US$ 4,83 (42 turnos, 63k tokens de saída) porque reescrevia tudo.
+  const revising = !!(m.plan?.stories?.length && m.plan_feedback?.length && (m.split_tried || m.spec_tried || m.critic_tried) && m.auto_revision)
+  const who = revising && plannerChoice().model === 'fable' ? { model: 'opus', effort: 'medium' } : revising ? { model: plannerChoice().model, effort: 'medium' } : plannerChoice()
+  m.auto_revision = false
+  const r = await claudeCall({ role: revising ? 'revisão do plano' : 'plano', prompt: planPrompt(revising), model: who.model, effort: who.effort, tools: ['Read', 'Glob', 'Grep'], schema: PLAN_JSON_SCHEMA, maxTurns: revising ? 6 : 16 })
   const plan = r?.structured_output
   if (!plan?.stories?.length) { setStep('plan', 'failed'); if (inProgram) return false; m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'o plano não veio no formato esperado', 'error'); return finish() }
   // parte grande demais volta ao planejador uma vez, sem gastar com maker
@@ -1138,6 +1144,7 @@ async function makePlan({ inProgram = false } = {}) {
     m.plan_feedback = [...(m.plan_feedback || []), `A(s) parte(s) ${vague.map((x) => x.id).join(', ')} está(ão) subespecificada(s): faltam passos concretos na recipe (arquivo + ação, sem "conforme necessário"), pelo menos 2 examples literais de entrada → saída ou o test_file. Complete; mantenha as outras.`]
     m.stories = plan.stories.map((s) => ({ ...s, state: 'queued', steps: [], round: 0 })); m.plan = { ...(m.plan || {}), ...plan }
     log('engine', `plano com parte(s) subespecificada(s) (${vague.map((x) => x.id).join(', ')}); pedindo detalhe ao planejador`, 'warn')
+    m.auto_revision = true
     return makePlan({ inProgram })
   }
   const big = plan.stories.filter(tooBig)
@@ -1146,6 +1153,7 @@ async function makePlan({ inProgram = false } = {}) {
     m.plan_feedback = [...(m.plan_feedback || []), `Divida a(s) parte(s) ${big.map((x) => x.id).join(', ')} em 2 ou 3 partes menores: cada uma com UM comportamento, até 4 critérios, até 120 palavras e scope_paths preenchido; mantenha as outras.`]
     m.stories = plan.stories.map((s) => ({ ...s, state: 'queued', steps: [], round: 0 })); m.plan = { ...(m.plan || {}), ...plan }
     log('engine', `plano com parte(s) grande(s) demais (${big.map((x) => x.id).join(', ')}); pedindo divisão ao planejador`, 'warn')
+    m.auto_revision = true
     return makePlan({ inProgram })
   }
   if (state.settings.plan_critic !== false && !m.critic_tried && ['feature', 'subsystem', 'project'].includes(m.intent?.complexity)) {
@@ -1155,7 +1163,8 @@ async function makePlan({ inProgram = false } = {}) {
       m.plan_feedback = [...(m.plan_feedback || []), `Outra IA leu o plano como se fosse implementar e apontou onde teria de decidir sozinha. Corrija cada ponto na story indicada (recipe, examples, interfaces, decisions) e mantenha o resto: ${crit.issues.slice(0, 10).map((x) => `[${x.story}] ${x.problem} → ${x.fix}`).join(' | ')}`]
       m.stories = plan.stories.map((s) => ({ ...s, state: 'queued', steps: [], round: 0 })); m.plan = { ...(m.plan || {}), ...plan }
       log('engine', `crítica do plano: ${crit.issues.length} ponto(s) em aberto; planejador corrige uma vez`, 'warn')
-      return makePlan({ inProgram })
+      m.auto_revision = true
+    return makePlan({ inProgram })
     }
   }
   const keep = m.program ? { epics: m.program.epics, explanation: m.program.explanation } : {}
