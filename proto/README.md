@@ -11,7 +11,7 @@ Duplo clique em `abrir.bat`. Na primeira vez instala as dependências (1 a 2 min
 3. Acompanhe: plano, atividade ao vivo, alterações, provas, portão visual, revisão.
 4. Em pedidos médios e grandes a ADE faz uma entrevista curta (2 a 5 perguntas de múltipla escolha, a primeira opção é a recomendada) para você escolher o jeito do programa; "Seguir com as recomendações" pula tudo. Depois vem o plano, com explicação em palavras simples; você aprova, pede mudanças (em texto livre) ou descarta.
 5. Se o plano pede fotos ou ilustrações, o Codex gera as imagens (`$imagegen`) em `assets/img` antes das partes começarem, e elas aparecem na aba Plano.
-6. Decida só quando a ADE pedir. Por padrão ela segue sozinha: após 4 rodadas de revisão com provas verdes e nada grave, aceita e vai para a próxima parte (opção "Depois de 4 rodadas"). Cada parte tem orçamento (US$ 4 no Claude por padrão, em Opções): estourou, não há novas rodadas. Cada rodada tem teto de ações (prova 20, implementação 30); a 3ª rodada sobe o maker para o modelo do planejador.
+6. Decida só quando a ADE pedir. Por padrão ela segue sozinha: após 6 rodadas de revisão com provas verdes e nada grave, aceita e vai para a próxima parte (opção "Depois de 6 rodadas"). Cada parte tem orçamento (US$ 4 no Claude por padrão, em Opções): estourou, não há novas rodadas. Cada rodada tem teto de ações (prova 20, implementação 30); a 3ª rodada sobe o maker para o modelo do planejador.
 7. Duas ADEs ao mesmo tempo (dois projetos): `abrir.bat 2` abre uma segunda instância em `localhost:5174` (servidor 4318).
 8. Anexos: cole imagens com Ctrl+V, arraste arquivos, ou use o "+" (abre o Explorer). Vão para `.ade-attachments/` no projeto (ignorado pelo git) e as IAs abrem com Read. O "+" e a página Projetos também abrem o Explorer para escolher ou criar a pasta do projeto.
 9. Faixa rápida: pedido curto de correção ("corrija o botão…") num projeto existente pula entrevista e plano; vai direto para prova, correção e revisão (~US$ 0,9 medido). Desligável em Opções.
@@ -35,7 +35,7 @@ Duplo clique em `abrir.bat`. Na primeira vez instala as dependências (1 a 2 min
 | Implementar | Claude Sonnet + skills | Implementa até a prova passar e os critérios valerem. |
 | Prova passa depois | motor | Todas as provas verdes. |
 | Portão visual | Impeccable detect | Em pedidos com interface: varre o código atrás de cara de template; se achar, força uma rodada de retoque. |
-| Revisão | Codex GPT-5.6 Terra (revisor) | Lê o diff (sem `node_modules`) em modo somente leitura, isolado da sua configuração pessoal, e recebe o resultado das provas já rodadas pelo motor (não roda nada). Aprova ou pede mudanças: até 4 rodadas automáticas; da 3ª em diante o maker sobe para o modelo do planejador. |
+| Revisão | Codex GPT-5.6 Terra (revisor) | Lê o diff (sem `node_modules`) em modo somente leitura, isolado da sua configuração pessoal, e recebe o resultado das provas já rodadas pelo motor (não roda nada). Aprova ou pede mudanças: até 6 rodadas automáticas; da 3ª em diante o maker sobe para o modelo do planejador. |
 | Entrega | motor | Cada parte aprovada vira um commit `ade: <parte>` na sua pasta. |
 
 Quem escreve e quem revisa têm de ser de empresas diferentes. Modelos por papel em "Modelos": Claude (Sonnet, Opus, Fable, Haiku), Codex (GPT-5.6 Terra/Sol/Luna, GPT-6 Astra, GPT-5.5), Antigravity (Gemini 3.1 Pro, 3.8 Flash, e Claude/GPT-OSS via Google).
