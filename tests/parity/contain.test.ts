@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import {
@@ -15,15 +15,16 @@ import {
   contain,
   matchesGlob,
 } from '../../src/contain/contain.js'
-import { AdeError } from '../../src/journal/errors.js'
-import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.js'
+import { createGitPort } from '../../src/git/gitport.js'
+import { makeRepo, removeRepo } from '../helpers/git-repo.js'
+import { makeTmpDir } from '../helpers/tmp-dir.js'
 
 let tmpDirs: string[] = []
 
 afterEach(() => {
   for (const dir of tmpDirs) {
     try {
-      removeTmpDir(dir)
+      removeRepo(dir)
     } catch {
       // ignora falhas de limpeza no teardown
     }
@@ -157,8 +158,8 @@ describe('contain parity', () => {
       '**/secrets/**',
     ])
 
-    // contain() lança AdeError('not_implemented') nesta story inicial
-    await expect(contain({})).rejects.toThrow(AdeError)
+    // contain() valida entrada obrigatória e lança TypeError
+    await expect(contain({})).rejects.toThrow(TypeError)
   })
 
   // AC2: Dado um buffer com bytes binários e um token sintético ghp_ no meio, quando scanBytes roda,
@@ -207,4 +208,176 @@ describe('contain parity', () => {
       preview: 'ghp_…',
     })
   })
+
+  // AC1: Dado um diff maior que 1 MiB com o segredo no último trecho e, ao mesmo tempo, um arquivo fora do escopo,
+  // quando contain roda, então o resultado reprova por segurança, registra também a violação de escopo e não cria nenhum commit de entrega.
+  // AC3: Dado um segredo detectado, quando contain termina, então a referência de quarentena aponta para a árvore do worktree de antes da parada e o HEAD do repositório continua o mesmo.
+  // AC4: Dado um worktree sem nenhuma alteração, quando contain roda, então o resultado é reprovado como falha semântica, não como sucesso.
+  test('secret_in_diff_stops_batch', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    const port = createGitPort({ worktreeDir: repo.dir })
+
+    // Validação de entrada: unitId inválido lança TypeError('unitId inválido')
+    await expect(
+      contain({
+        git: port,
+        unitId: '../evil',
+        scopePaths: ['src/**'],
+      }),
+    ).rejects.toThrow(new TypeError('unitId inválido'))
+
+    // Cria commit inicial no repositório com um arquivo em src/
+    const srcDir = path.join(repo.dir, 'src')
+    mkdirSync(srcDir, { recursive: true })
+    const bigFilePath = path.join(srcDir, 'big.txt')
+
+    // Gerar arquivo base com ~30.000 linhas (~1.2 MiB)
+    const initialLines = Array.from(
+      { length: 30000 },
+      (_, i) => `linha original de conteudo do arquivo ${i}\n`,
+    ).join('')
+    writeFileSync(bigFilePath, initialLines)
+
+    const initialCommit = await port.commit({ message: 'commit inicial' })
+    const headInitial = (await port.run(['rev-parse', 'HEAD'], { maxBuffer: 1 << 20 })).text
+
+    // AC4 e Exemplo: worktree limpo -> falha semântica com action rework
+    const cleanRes = await contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore: initialCommit.tree,
+      scopePaths: ['src/**'],
+    })
+    expect(cleanRes).toEqual({
+      ok: false,
+      reason: 'no_changes',
+      failureClass: 'semantic',
+      action: 'rework',
+      violations: [{ kind: 'no_changes', path: null, pattern: null, source: null }],
+      changedPaths: [],
+      quarantineRef: null,
+      restoredTree: null,
+    })
+
+    // Reescreve todas as ~30.000 linhas gerando um diff de ~2 MiB,
+    // e adiciona o segredo na última linha
+    const secretKey = 'sk-' + 'a'.repeat(24)
+    const modifiedLines =
+      Array.from(
+        { length: 30000 },
+        (_, i) => `linha modificada de conteudo do arquivo ${i}\n`,
+      ).join('') +
+      secretKey +
+      '\n'
+    writeFileSync(bigFilePath, modifiedLines)
+
+    // Adiciona arquivo fora do escopo ('fora/b.txt')
+    const foraDir = path.join(repo.dir, 'fora')
+    mkdirSync(foraDir, { recursive: true })
+    writeFileSync(path.join(foraDir, 'b.txt'), 'conteudo fora do escopo\n')
+
+    // Guarda HEAD e árvore do worktree antes da chamada
+    const treeBeforeContain = await port.worktreeTree()
+    const headBefore = (await port.run(['rev-parse', 'HEAD'], { maxBuffer: 1 << 20 })).text
+
+    const result = await contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore: initialCommit.tree,
+      scopePaths: ['src/**'],
+    })
+
+    // AC1 e Exemplo: diff ~2 MiB com segredo no final e arquivo fora do escopo
+    // Reprova por segurança, action stop_batch, violação de escopo registrada
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('secret')
+    expect(result.failureClass).toBe('security')
+    expect(result.action).toBe('stop_batch')
+
+    const scopeViolation = result.violations.find(
+      (v) => v.kind === 'scope' && v.path === 'fora/b.txt',
+    )
+    expect(scopeViolation).toBeDefined()
+
+    const secretViolation = result.violations.find((v) => v.kind === 'secret')
+    expect(secretViolation).toBeDefined()
+    expect(secretViolation?.path).toBe('src/big.txt')
+
+    // AC3 e Exemplo: quarantineRef === 'refs/ade/quarantine/S10/1',
+    // aponta para a árvore de antes da parada e HEAD continua o inicial (sem commit de entrega)
+    expect(result.quarantineRef).toBe('refs/ade/quarantine/S10/1')
+
+    const quarantineTree = (
+      await port.run(['rev-parse', `${result.quarantineRef}^{tree}`], { maxBuffer: 1 << 20 })
+    ).text
+    expect(quarantineTree).toBe(treeBeforeContain)
+
+    const headAfter = (await port.run(['rev-parse', 'HEAD'], { maxBuffer: 1 << 20 })).text
+    expect(headAfter).toBe(headBefore)
+    expect(headAfter).toBe(headInitial)
+  }, 30_000)
+
+  // AC2: Dado um segredo posicionado além de 60 000 bytes do diff, quando contain roda,
+  // então o segredo continua sendo encontrado.
+  test('secret_beyond_the_pack_diff_cap_is_still_caught', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    const port = createGitPort({ worktreeDir: repo.dir })
+
+    const srcDir = path.join(repo.dir, 'src')
+    mkdirSync(srcDir, { recursive: true })
+    const targetFile = path.join(srcDir, 'big_diff.txt')
+
+    // Cria arquivo inicial com 2.000 linhas (~90 KB)
+    const initialContent = Array.from(
+      { length: 2000 },
+      (_, i) => `linha original de preenchimento para teste ${String(i).padStart(4, '0')}\n`,
+    ).join('')
+    writeFileSync(targetFile, initialContent)
+
+    const initialCommit = await port.commit({ message: 'commit base filler' })
+
+    // Modifica as primeiras 1.500 linhas (> 60.000 bytes no diff) e insere o segredo AWS
+    const awsKey = 'AKIA' + 'ABCDEFGHIJ234567'
+    const modifiedContent =
+      Array.from(
+        { length: 1500 },
+        (_, i) => `linha modificada de preenchimento para teste ${String(i).padStart(4, '0')}\n`,
+      ).join('') +
+      awsKey +
+      '\n' +
+      Array.from(
+        { length: 500 },
+        (_, i) => `linha original de preenchimento para teste ${String(i + 1500).padStart(4, '0')}\n`,
+      ).join('')
+    writeFileSync(targetFile, modifiedContent)
+
+    const resultPromise = contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore: initialCommit.tree,
+      scopePaths: ['src/**'],
+    })
+    await expect(resultPromise).resolves.toMatchObject({
+      ok: false,
+      reason: 'secret',
+      failureClass: 'security',
+      action: 'stop_batch',
+    })
+    const result = await resultPromise
+
+    // AC2 e Exemplo: segredo escrito após o byte 60.000 do diff é capturado com source: 'diff'
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('secret')
+    expect(result.failureClass).toBe('security')
+    expect(result.action).toBe('stop_batch')
+
+    const diffSecretViolation = result.violations.find(
+      (v) => v.kind === 'secret' && v.source === 'diff',
+    )
+    expect(diffSecretViolation).toBeDefined()
+    expect(diffSecretViolation?.pattern).toBe('aws_access_key_id')
+    expect(diffSecretViolation?.path).toBe('src/big_diff.txt')
+  }, 30_000)
 })

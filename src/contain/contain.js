@@ -1,4 +1,6 @@
-import { AdeError } from '../journal/errors.js'
+import path from 'node:path'
+import { UnexpectedTreeStateError } from '../journal/errors.js'
+import { pathWithin, scanFile, scanText } from './secrets.js'
 
 /**
  * Precedência fixa das violações do contain.
@@ -52,9 +54,9 @@ export function matchesGlob(pattern, relPath) {
 /**
  * @typedef {Object} ContainViolation
  * @property {'secret' | 'sensitive_path' | 'scope' | 'no_changes'} kind
- * @property {string} path
+ * @property {string | null} path
  * @property {string | null} pattern
- * @property {'diff' | 'bytes' | null} source
+ * @property {'diff' | 'file' | null} source
  */
 
 /**
@@ -70,11 +72,309 @@ export function matchesGlob(pattern, relPath) {
  */
 
 /**
+ * Divide o texto do diff integral em seções por arquivo, cada uma com o caminho relativo
+ * extraído do cabeçalho `+++ b/<path>` (ou `--- a/<path>` quando o arquivo foi apagado).
+ *
+ * @param {string} diffText
+ * @returns {Array<{ path: string | null, text: string }>}
+ */
+function splitDiffByFile(diffText) {
+  /** @type {Array<{ path: string | null, lines: string[] }>} */
+  const sections = []
+  /** @type {{ path: string | null, lines: string[] } | null} */
+  let current = null
+  for (const line of diffText.split('\n')) {
+    if (line.startsWith('diff --git ')) {
+      current = { path: null, lines: [] }
+      sections.push(current)
+    }
+    if (!current) {
+      continue
+    }
+    current.lines.push(line)
+    if (current.path === null && line.startsWith('+++ ')) {
+      const p = line.slice(4).trim()
+      if (p !== '/dev/null') {
+        current.path = p.startsWith('b/') ? p.slice(2) : p
+      }
+    }
+    if (current.path === null && line.startsWith('--- ')) {
+      const p = line.slice(4).trim()
+      if (p !== '/dev/null') {
+        current.path = p.startsWith('a/') ? p.slice(2) : p
+      }
+    }
+  }
+  return sections.map((s) => ({ path: s.path, text: s.lines.join('\n') }))
+}
+
+/**
+ * Coloca a árvore atual em quarentena sob refs/ade/quarantine/<unitId>/<n>.
+ *
+ * @param {any} git
+ * @param {string} unitId
+ * @returns {Promise<string>}
+ */
+async function quarantine(git, unitId) {
+  const tree = await git.worktreeTree()
+  const commit = (
+    await git.run(['commit-tree', tree, '-m', 'ade quarantine ' + unitId], {
+      maxBuffer: 1 << 20,
+    })
+  ).text
+  const forEachRefRes = await git.run(
+    ['for-each-ref', '--format=%(refname)', 'refs/ade/quarantine/' + unitId],
+    { maxBuffer: 1 << 20 },
+  )
+  const rawText = typeof forEachRefRes.text === 'string' ? forEachRefRes.text : ''
+  const lines = rawText
+    ? rawText
+        .split('\n')
+        .map((/** @type {string} */ l) => l.trim())
+        .filter(Boolean)
+    : []
+  const prefix = 'refs/ade/quarantine/' + unitId + '/'
+  let maxN = 0
+  for (const line of lines) {
+    if (line.startsWith(prefix)) {
+      const suffix = line.slice(prefix.length)
+      const num = Number.parseInt(suffix, 10)
+      if (!Number.isNaN(num) && String(num) === suffix && num > maxN) {
+        maxN = num
+      }
+    }
+  }
+  const n = maxN + 1
+  const ref = 'refs/ade/quarantine/' + unitId + '/' + n
+  await git.run(['update-ref', ref, commit], { maxBuffer: 1 << 20 })
+  return ref
+}
+
+/**
+ * @typedef {Object} ContainInput
+ * @property {any} [git]
+ * @property {string} [unitId]
+ * @property {string} [treeBefore]
+ * @property {string[]} [scopePaths]
+ * @property {string[]} [doNotTouch]
+ * @property {string[]} [sensitivePaths]
+ * @property {number} [scopeViolationCount]
+ * @property {number} [diffMaxBuffer]
+ */
+
+/**
  * Executa a contenção pós-fato sobre a árvore e o diff.
  *
- * @param {Record<string, unknown>} _input
+ * @param {ContainInput} input
  * @returns {Promise<ContainResult>}
  */
-export async function contain(_input) {
-  throw new AdeError('not_implemented', 'contain chega na story s2', 2)
+export async function contain(input) {
+  if (!input || typeof input !== 'object') {
+    throw new TypeError('input inválido')
+  }
+  const { git } = input
+  if (!git || typeof git !== 'object') {
+    throw new TypeError('git inválido')
+  }
+  if (!Array.isArray(input.scopePaths)) {
+    throw new TypeError('scopePaths inválido')
+  }
+  const { unitId } = input
+  if (typeof unitId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(unitId)) {
+    throw new TypeError('unitId inválido')
+  }
+  const diffMaxBuffer = 2 ** 31
+
+  const head = await git.headInfo()
+  if (!head || !head.commit) {
+    throw new UnexpectedTreeStateError('worktree sem HEAD', { unitId })
+  }
+
+  const changedPaths = await git.dirtyPaths()
+  if (changedPaths.length === 0) {
+    return {
+      ok: false,
+      reason: 'no_changes',
+      failureClass: 'semantic',
+      action: 'rework',
+      violations: [
+        {
+          kind: 'no_changes',
+          path: null,
+          pattern: null,
+          source: null,
+        },
+      ],
+      changedPaths: [],
+      quarantineRef: null,
+      restoredTree: null,
+    }
+  }
+
+  const res = await git.run(
+    ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '--text', 'HEAD', '--'],
+    { maxBuffer: diffMaxBuffer },
+  )
+  if (res.stdout.length >= diffMaxBuffer) {
+    throw new UnexpectedTreeStateError('diff truncado por maxBuffer', {
+      unitId,
+      bytes: res.stdout.length,
+    })
+  }
+
+  /** @type {ContainViolation[]} */
+  const violations = []
+
+  const diffSections = splitDiffByFile(res.stdout.toString('latin1'))
+  for (const section of diffSections) {
+    const diffFindings = scanText(section.text)
+    for (const f of diffFindings) {
+      violations.push({
+        kind: 'secret',
+        path: section.path,
+        pattern: f.pattern,
+        source: 'diff',
+      })
+    }
+  }
+
+  for (const rel of changedPaths) {
+    const absPath = path.resolve(git.worktreeDir, rel)
+    if (!pathWithin(git.worktreeDir, absPath)) {
+      continue
+    }
+
+    const fileFindings = scanFile(absPath)
+    for (const f of fileFindings) {
+      violations.push({
+        kind: 'secret',
+        path: rel,
+        pattern: f.pattern,
+        source: 'file',
+      })
+    }
+
+    const inScope = input.scopePaths.some((pattern) => matchesGlob(pattern, rel))
+    const isDoNotTouch = (input.doNotTouch ?? []).some((pattern) => matchesGlob(pattern, rel))
+    if (!inScope || isDoNotTouch) {
+      violations.push({
+        kind: 'scope',
+        path: rel,
+        pattern: null,
+        source: null,
+      })
+    }
+  }
+
+  violations.sort((a, b) => {
+    const precA = PRECEDENCE.indexOf(a.kind)
+    const precB = PRECEDENCE.indexOf(b.kind)
+    if (precA !== precB) {
+      return precA - precB
+    }
+    if (a.path === null && b.path !== null) {
+      return -1
+    }
+    if (a.path !== null && b.path === null) {
+      return 1
+    }
+    if (a.path !== null && b.path !== null) {
+      const cmp = a.path.localeCompare(b.path)
+      if (cmp !== 0) {
+        return cmp
+      }
+    }
+    const patA = a.pattern ?? ''
+    const patB = b.pattern ?? ''
+    const patCmp = patA.localeCompare(patB)
+    if (patCmp !== 0) {
+      return patCmp
+    }
+    const srcA = a.source ?? ''
+    const srcB = b.source ?? ''
+    return srcA.localeCompare(srcB)
+  })
+
+  if (violations.length === 0) {
+    return {
+      ok: true,
+      reason: null,
+      failureClass: null,
+      action: 'continue',
+      violations: [],
+      changedPaths,
+      quarantineRef: null,
+      restoredTree: null,
+    }
+  }
+
+  const reason = violations[0].kind
+
+  if (reason === 'secret') {
+    const quarantineRef = await quarantine(git, unitId)
+    return {
+      ok: false,
+      reason: 'secret',
+      failureClass: 'security',
+      action: 'stop_batch',
+      violations,
+      changedPaths,
+      quarantineRef,
+      restoredTree: null,
+    }
+  }
+
+  if (reason === 'sensitive_path') {
+    return {
+      ok: false,
+      reason: 'sensitive_path',
+      failureClass: 'security',
+      action: 'stop_batch',
+      violations,
+      changedPaths,
+      quarantineRef: null,
+      restoredTree: null,
+    }
+  }
+
+  if (reason === 'scope') {
+    const scopeViolationCount = input.scopeViolationCount ?? 0
+    if (scopeViolationCount === 0) {
+      if (typeof input.treeBefore !== 'string' || input.treeBefore.length === 0) {
+        throw new TypeError('treeBefore inválido')
+      }
+      const restoreRes = await git.restore(input.treeBefore, { label: unitId })
+      return {
+        ok: false,
+        reason: 'scope',
+        failureClass: 'scope',
+        action: 'restore',
+        violations,
+        changedPaths,
+        quarantineRef: null,
+        restoredTree: restoreRes.tree,
+      }
+    }
+    return {
+      ok: false,
+      reason: 'scope',
+      failureClass: 'scope',
+      action: 'park',
+      violations,
+      changedPaths,
+      quarantineRef: null,
+      restoredTree: null,
+    }
+  }
+
+  return {
+    ok: false,
+    reason: 'no_changes',
+    failureClass: 'semantic',
+    action: 'rework',
+    violations,
+    changedPaths,
+    quarantineRef: null,
+    restoredTree: null,
+  }
 }
