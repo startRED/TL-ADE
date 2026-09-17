@@ -84,6 +84,8 @@ function buildEnv(hooksDir, extra = {}) {
  * @property {() => Promise<HeadInfoResult>} headInfo
  * @property {(name: string) => Promise<string>} gitPath
  * @property {(options: { message: string }) => Promise<CommitResult>} commit
+ * @property {() => Promise<string>} worktreeTree
+ * @property {() => Promise<string[]>} dirtyPaths
  */
 
 /**
@@ -196,11 +198,64 @@ export function createGitPort(options) {
     return { commit, tree }
   }
 
+  /**
+   * Obtém a árvore do worktree com suporte a timestamp racy via índice isolado.
+   *
+   * @returns {Promise<string>}
+   */
+  async function worktreeTree() {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ade-idx-'))
+    const idx = path.join(tmp, 'index')
+    const realIndex = await gitPath('index')
+    try {
+      if (fs.existsSync(realIndex)) {
+        fs.copyFileSync(realIndex, idx)
+        fs.utimesSync(idx, 1, 1)
+      }
+      await run(['add', '-A'], { maxBuffer: 1 << 26, env: { GIT_INDEX_FILE: idx } })
+      const tree = (await run(['write-tree'], { maxBuffer: 1 << 20, env: { GIT_INDEX_FILE: idx } })).text
+      return tree
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
+  }
+
+  /**
+   * Lista os caminhos com alterações no worktree, incluindo untracked e ambos os lados de rename/cópia.
+   *
+   * @returns {Promise<string[]>}
+   */
+  async function dirtyPaths() {
+    const { stdout } = await run(['status', '--porcelain', '-z', '--untracked-files=all'], {
+      maxBuffer: 1 << 30,
+    })
+    const fields = stdout.toString('utf8').split('\0')
+    const set = new Set()
+    for (let i = 0; i < fields.length; i++) {
+      const field = fields[i]
+      if (!field) {
+        continue
+      }
+      const status = field.slice(0, 2)
+      const target = field.slice(3)
+      set.add(target)
+      if (status[0] === 'R' || status[0] === 'C' || status[1] === 'R' || status[1] === 'C') {
+        i += 1
+        if (i < fields.length && fields[i]) {
+          set.add(fields[i])
+        }
+      }
+    }
+    return Array.from(set).sort()
+  }
+
   return {
     worktreeDir,
     run,
     headInfo,
     gitPath,
     commit,
+    worktreeTree,
+    dirtyPaths,
   }
 }

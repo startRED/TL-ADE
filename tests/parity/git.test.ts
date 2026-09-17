@@ -7,6 +7,16 @@ import { makeRepo, removeRepo } from '../helpers/git-repo.js'
 import { createGitPort } from '../../src/git/gitport.js'
 import { AdeError, GitError } from '../../src/journal/errors.js'
 
+interface GitPortWithTreeAndDirty {
+  worktreeDir: string
+  run(args: string[], options?: { maxBuffer?: number; okCodes?: number[]; env?: Record<string, string | undefined> }): Promise<{ code: number; stdout: Buffer; stderr: string; text: string }>
+  headInfo(): Promise<{ commit: string | null; branch: string | null; detached: boolean }>
+  gitPath(name: string): Promise<string>
+  commit(options: { message: string }): Promise<{ commit: string; tree: string }>
+  worktreeTree(): Promise<string>
+  dirtyPaths(): Promise<string[]>
+}
+
 let tmpDirs: string[] = []
 
 afterEach(() => {
@@ -162,4 +172,76 @@ describe('git port parity', () => {
     expect(path.isAbsolute(indexPath)).toBe(true)
     expect(existsSync(indexPath)).toBe(true)
   })
+
+  // AC1: Dado um arquivo reescrito com o mesmo tamanho dentro do mesmo segundo,
+  // quando worktreeTree() é chamado antes e depois, então os dois ids de árvore são diferentes.
+  // Exemplos: árvore vazia e worktree limpo devolvem a árvore correta.
+  test('worktree_tree_sees_a_same_size_rewrite_within_one_second', async () => {
+    // Exemplo: repositório sem nenhum commit e sem arquivo -> await port.worktreeTree() -> '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+    const emptyRepo = makeRepo()
+    tmpDirs.push(emptyRepo.dir)
+    const emptyPort = createGitPort({ worktreeDir: emptyRepo.dir }) as unknown as GitPortWithTreeAndDirty
+    const emptyTree = await emptyPort.worktreeTree()
+    expect(emptyTree).toBe('4b825dc642cb6eb9a060e54bf8d69288fbee4904')
+
+    // Repositório com arquivo inicial commitado
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    const port = createGitPort({ worktreeDir: repo.dir }) as unknown as GitPortWithTreeAndDirty
+
+    const filePath = path.join(repo.dir, 'test.txt')
+    writeFileSync(filePath, 'aaaa')
+    await port.commit({ message: 'initial commit' })
+
+    // AC3 (parte): Dado um worktree sem alteração alguma, quando worktreeTree() é chamado,
+    // então devolve a mesma árvore de HEAD
+    const headTree = (await port.run(['rev-parse', 'HEAD^{tree}'], { maxBuffer: 1 << 20 })).text
+    const cleanTree = await port.worktreeTree()
+    expect(cleanTree).toBe(headTree)
+
+    // AC1 e Exemplo: writeFileSync(f,'aaaa') -> tree T1; writeFileSync(f,'bbbb') no mesmo segundo -> tree T2, com T1 !== T2
+    const t1 = await port.worktreeTree()
+    writeFileSync(filePath, 'bbbb')
+    const t2 = await port.worktreeTree()
+    expect(t1).toMatch(/^[0-9a-f]{40}$/)
+    expect(t2).toMatch(/^[0-9a-f]{40}$/)
+    expect(t1).not.toBe(t2)
+  })
+
+  // AC2: Dado um arquivo renomeado de secrets/x para pkg/x e já registrado no índice,
+  // quando dirtyPaths() é chamado, então a lista contém os dois caminhos.
+  // Exemplos: repositório limpo -> [] e arquivo novo não rastreado -> ['pkg/a.txt'].
+  test('rename_out_of_scope_into_scope_is_contained', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    const port = createGitPort({ worktreeDir: repo.dir }) as unknown as GitPortWithTreeAndDirty
+
+    // Cria commit inicial com secrets/x
+    const secretsDir = path.join(repo.dir, 'secrets')
+    mkdirSync(secretsDir, { recursive: true })
+    writeFileSync(path.join(secretsDir, 'x'), 'secret content')
+    await port.commit({ message: 'add secret' })
+
+    // AC3 (parte) e Exemplo: repositório limpo com um commit -> await port.dirtyPaths() -> []
+    const cleanDirty = await port.dirtyPaths()
+    expect(cleanDirty).toEqual([])
+
+    // Exemplo: arquivo novo pkg/a.txt não rastreado -> await port.dirtyPaths() -> ['pkg/a.txt']
+    const pkgDir = path.join(repo.dir, 'pkg')
+    mkdirSync(pkgDir, { recursive: true })
+    writeFileSync(path.join(pkgDir, 'a.txt'), 'untracked content')
+    const untrackedDirty = await port.dirtyPaths()
+    expect(untrackedDirty).toEqual(['pkg/a.txt'])
+
+    // Remove arquivo não rastreado para isolar o rename
+    rmSync(path.join(pkgDir, 'a.txt'))
+
+    // AC2 e Exemplo: git mv secrets/x pkg/x -> await port.dirtyPaths() -> ['pkg/x', 'secrets/x']
+    repo.git(['mv', 'secrets/x', 'pkg/x'])
+    const renameDirty = await port.dirtyPaths()
+    expect(renameDirty).toContain('secrets/x')
+    expect(renameDirty).toContain('pkg/x')
+    expect(renameDirty).toEqual(['pkg/x', 'secrets/x'])
+  })
 })
+
