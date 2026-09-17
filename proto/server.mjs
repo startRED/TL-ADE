@@ -52,13 +52,40 @@ function effortOf(role) { return state.settings.roles[role]?.effort || DEFAULT_S
 function agyModel(id, effort) { const mm = /^(gemini-[\d.]+-(flash|pro))(?:-(high|medium|low))?$/.exec(id || ''); if (!mm) return id; const e = mm[2] === 'pro' && effort === 'medium' ? 'high' : (effort || 'medium'); return `${mm[1]}-${e}` }
 // Recomendação de quem planeja, pela dificuldade que o entendedor mediu (Erick, 17/09): leve → Sonnet; normal → Opus médio; pesado → Fable alto.
 const PLANNER_BY_DIFFICULTY = { easy: { family: 'claude', model: 'sonnet', effort: 'medium' }, normal: { family: 'claude', model: 'opus', effort: 'medium' }, hard: { family: 'claude', model: 'fable', effort: 'high' } }
-function plannerChoice() { return state.mission?.planner || state.settings.roles.planner }
+function plannerChoice(kind = 'complex') { const r = state.settings.roles; const x = kind === 'light' ? (r.planner_light || r.planner) : r.planner; return { family: x.family || 'claude', model: x.model, effort: x.effort || 'high' } }
+// Planejador por família: Claude (saída estruturada do Claude Code) ou Codex (--output-schema, só leitura). Devolve { structured_output }.
+async function plannerCall(who, { role, prompt, schema, maxTurns }) {
+  if (who.family === 'codex') {
+    const m = state.mission, dir = state.project.dir
+    const file = path.join(ADE_DIR, 'schemas', createHash('sha1').update(JSON.stringify(schema)).digest('hex').slice(0, 12) + '.json')
+    await mkdir(path.dirname(file), { recursive: true }); if (!(await exists(file))) await writeFile(file, JSON.stringify(schema))
+    log('engine', `codex (${role}, ${who.model}, esforço ${who.effort}) com saída estruturada`); setLive({ source: 'codex', kind: 'thinking', text: `${role}: lendo o projeto…` })
+    let last = null, usage = null; const t0 = Date.now()
+    const r = await run('codex', ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${who.effort}`, '-C', dir, '-m', who.model, '--output-schema', file, '-'], { cwd: dir, stdin: prompt, timeoutMs: 30 * 60 * 1000, onLine: (line) => {
+      let ev; try { ev = JSON.parse(line) } catch { return }
+      if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') last = ev.item.text
+      if (ev.type === 'item.started' && ev.item?.type === 'command_execution') setLive({ source: 'codex', kind: 'tool', text: ev.item.command || '' })
+      if (ev.type === 'item.completed' && ev.item?.type === 'command_execution') log('codex', `$ ${ev.item.command}`.slice(0, 200), 'tool')
+      if (ev.type === 'turn.completed') usage = ev.usage
+    } })
+    setLive(null); m.cost.calls += 1
+    if (usage) { m.cost.tokens_in += usage.input_tokens || 0; m.cost.tokens_out += usage.output_tokens || 0 }
+    let out = null; try { out = JSON.parse(last) } catch {}
+    journal({ type: 'model_call', family: 'codex', role, model: who.model, effort: who.effort, usd: 0, tokens_in: usage?.input_tokens || 0, cache_read: usage?.cached_input_tokens || 0, tokens_out: usage?.output_tokens || 0, prompt_chars: prompt.length, wall_ms: Date.now() - t0 }).catch(() => {})
+    readQuota().then(broadcastSoon)
+    if (!out) log('engine', `codex (${role}) não devolveu JSON (código ${r.code}): ${(last || r.err || r.out).trim().slice(0, 300)}`, 'error')
+    return out ? { structured_output: out } : null
+  }
+  if (who.family !== 'claude') { log('engine', `planejador ${who.model} não é Claude nem Codex; usando opus alto`, 'warn'); who = { family: 'claude', model: 'opus', effort: 'high' } }
+  return claudeCall({ role, prompt, model: who.model, effort: who.effort, tools: ['Read', 'Glob', 'Grep'], schema, maxTurns })
+}
 const vendorOf = (family, model) => family === 'agy' && /^claude/.test(model) ? 'anthropic' : family === 'agy' && /^gpt/.test(model) ? 'openai' : family === 'claude' ? 'anthropic' : family === 'codex' ? 'openai' : 'google'
 
 const DEFAULT_SETTINGS = {
   roles: {
     intent: { family: 'claude', model: 'sonnet', effort: 'medium' },
-    planner: { family: 'claude', model: 'opus', effort: 'high' },
+    planner: { family: 'claude', model: 'fable', effort: 'high' }, // plano complexo: divide pedido grande em épicos; plano único de dificuldade pesada
+    planner_light: { family: 'claude', model: 'opus', effort: 'high' }, // plano intermediário/simples: stories de cada épico, planos leves e normais, revisões automáticas
     maker: { family: 'claude', model: 'sonnet', effort: 'high' },
     checker: { family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' },
     research: { family: 'agy', model: 'gemini-3.1-pro', effort: 'high' },
@@ -1070,17 +1097,11 @@ async function planMission() {
   m.intent = intent
   m.skills = selectSkills(intent)
   setStep('intent', 'done')
-  // recomendação de quem planeja: só vira decisão sua quando difere do configurado; modo noturno segue a recomendação
-  const rec = PLANNER_BY_DIFFICULTY[intent.difficulty], cfg = state.settings.roles.planner
-  if (rec && state.settings.planner_recommend !== false && (rec.model !== cfg.model || rec.effort !== (cfg.effort || 'high'))) {
-    m.planner_options = { recommended: rec, configured: { family: cfg.family, model: cfg.model, effort: cfg.effort || 'high' }, difficulty: intent.difficulty, why: intent.difficulty_why || '' }
-    if (state.settings.unattended) { m.planner = { ...rec, source: 'recomendado' }; log('engine', `modo noturno: planejador ${rec.model} (${rec.effort}) recomendado para dificuldade ${intent.difficulty}; seguindo a recomendação`, 'warn') }
-    else log('engine', `dificuldade ${intent.difficulty}: recomendo planejar com ${rec.model} (${rec.effort}); configurado é ${cfg.model} (${cfg.effort || 'high'}). Você escolhe no painel.`)
-  }
+  { const big = ['subsystem', 'project'].includes(intent.complexity), kind = big || intent.difficulty === 'hard' ? 'complex' : 'light', w = plannerChoice(kind)
+    log('engine', `dificuldade ${intent.difficulty || '?'}${intent.difficulty_why ? ` (${intent.difficulty_why})` : ''}: ${big ? 'divisão em épicos' : 'plano'} com o planejador ${kind === 'complex' ? 'complexo' : 'intermediário'} (${w.model}, ${w.effort})${big ? `; o plano de cada épico sai no intermediário (${plannerChoice('light').model})` : ''}`) }
   log('engine', `entendido: ${intent.complexity} · ${intent.domains.join(', ')} · skills — planejador: ${m.skills.planner.map((s) => s.id).join(', ') || 'nenhuma'}; maker: ${m.skills.maker.map((s) => s.id).join(', ') || 'nenhuma'}; revisor: ${m.skills.checker.map((s) => s.id).join(', ') || 'nenhuma'}; pesquisa: ${m.skills.research.map((s) => s.id).join(', ') || 'nenhuma'}`)
   if (intent.questions?.length && state.settings.unattended) { m.answers = intent.questions.map((q) => ({ id: q.id, question: q.question, answer: q.options?.[0]?.label || 'não sei' })); log('engine', `modo noturno: entrevista respondida com as recomendações (${m.answers.length} pergunta(s))`, 'warn') }
   else if (intent.questions?.length) { m.plan = { title: m.request.slice(0, 60), summary: intent.summary, complexity: intent.complexity, domains: intent.domains, needs_ui: intent.needs_ui, needs_backend: intent.needs_backend, questions: intent.questions, research_questions: [], stories: [] }; m.state = 'awaiting_plan'; m.reason = 'questions'; broadcast(); await persistMission().catch(() => {}); return }
-  else if (m.planner_options && !m.planner) { m.state = 'awaiting_plan'; m.reason = 'planner_choice'; broadcast(); await persistMission().catch(() => {}); return }
   return continuePlanning()
 }
 async function continuePlanning() {
@@ -1097,7 +1118,7 @@ async function continuePlanning() {
 async function makeProgram() {
   const m = state.mission, intent = m.intent
   m.state = 'planning'; setStep('plan', 'running')
-  const r = await claudeCall({ role: 'épicos', prompt: epicsPrompt(), model: plannerChoice().model, effort: plannerChoice().effort, tools: ['Read', 'Glob', 'Grep'], schema: EPICS_JSON_SCHEMA, maxTurns: 10 })
+  const r = await plannerCall(plannerChoice('complex'), { role: 'épicos', prompt: epicsPrompt(), schema: EPICS_JSON_SCHEMA, maxTurns: 10 })
   const pr = r?.structured_output
   if (!pr?.epics?.length) { setStep('plan', 'failed'); m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'a divisão em épicos não veio no formato esperado', 'error'); return finish() }
   m.program = { title: pr.title, explanation: pr.explanation, epics: pr.epics.map((e) => ({ ...e, state: 'queued', usd: 0, stories: [], summary: '' })), current: null }
@@ -1162,10 +1183,10 @@ async function makePlan({ inProgram = false } = {}) {
   // revisão automática (dividir, detalhar, crítica) é edição de um plano que já existe: modelo mais barato, poucos turnos, sem reexplorar.
   // Medido em 17/09: uma revisão no Fable custou US$ 4,83 (42 turnos, 63k tokens de saída) porque reescrevia tudo.
   const revising = !!(m.plan?.stories?.length && m.plan_feedback?.length && (m.split_tried || m.spec_tried || m.critic_tried) && m.auto_revision)
-  const perEpic = inProgram && plannerChoice().model === 'fable' && state.settings.epic_plans_cheaper !== false ? { model: 'opus', effort: 'high' } : plannerChoice()
-  const who = revising && plannerChoice().model === 'fable' ? { model: 'opus', effort: 'medium' } : revising ? { model: plannerChoice().model, effort: 'medium' } : perEpic
+  const base = plannerChoice(!inProgram && m.intent?.difficulty === 'hard' ? 'complex' : 'light')
+  const who = revising ? { ...plannerChoice('light'), effort: 'medium' } : base
   m.auto_revision = false
-  const r = await claudeCall({ role: revising ? 'revisão do plano' : 'plano', prompt: planPrompt(revising), model: who.model, effort: who.effort, tools: ['Read', 'Glob', 'Grep'], schema: PLAN_JSON_SCHEMA, maxTurns: revising ? 6 : 16 })
+  const r = await plannerCall(who, { role: revising ? 'revisão do plano' : 'plano', prompt: planPrompt(revising), schema: PLAN_JSON_SCHEMA, maxTurns: revising ? 6 : 16 })
   const plan = r?.structured_output
   if (!plan?.stories?.length) { setStep('plan', 'failed'); if (inProgram) return false; m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'o plano não veio no formato esperado', 'error'); return finish() }
   // parte grande demais volta ao planejador uma vez, sem gastar com maker
@@ -1280,7 +1301,7 @@ function makerLadder() {
   const mk = { family: state.settings.roles.maker.family || 'claude', model: state.settings.roles.maker.model, effort: effortOf('maker') }, steps = [mk]
   if (mk.family === 'agy' && /^gemini/.test(mk.model) && mk.effort !== 'high') steps.push({ ...mk, effort: 'high' })
   if (mk.family !== 'claude') steps.push({ family: 'claude', model: 'sonnet', effort: 'high' })
-  const pl = plannerChoice(); steps.push(pl.model === 'fable' ? { family: 'claude', model: 'opus', effort: 'high' } : { family: 'claude', model: pl.model, effort: pl.effort || 'high' }) // Fable planeja; escrever código no Fable é caro demais
+  const pl = plannerChoice('light'); steps.push(pl.family !== 'claude' || pl.model === 'fable' ? { family: 'claude', model: 'opus', effort: 'high' } : { family: 'claude', model: pl.model, effort: pl.effort || 'high' }) // Fable planeja; escrever código no Fable é caro demais
   return steps.filter((x, i, a) => a.findIndex((y) => y.family === x.family && y.model === x.model && y.effort === x.effort) === i)
 }
 function makerStep(st, round, grave) { const l = makerLadder(); const i = st.fix_of ? l.length - 1 : grave ? Math.min(l.length - 1, Math.max(0, round - 2)) : 0; return { ...l[i], step: i } }

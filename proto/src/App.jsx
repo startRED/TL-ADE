@@ -68,7 +68,8 @@ const looksQuestion = (t) => { const x = (t || '').trim(); return /\?\s*$/.test(
 const COMPLEXITY_PT = { trivial: 'pedido pequeno', bounded: 'pedido curto', feature: 'funcionalidade', subsystem: 'trabalho grande' }
 const ROLE_CARD = {
   intent: { label: 'Entender o pedido', icon: Compass, note: 'Lê o que você escreveu, mede o tamanho e escolhe as skills de cada papel.' },
-  planner: { label: 'Planejar', icon: ListChecks, note: 'Divide o trabalho em partes, com critérios de aceite e como provar cada uma.' },
+  planner: { label: 'Plano complexo', icon: ListChecks, note: 'Divide um pedido grande em épicos e faz o plano único quando a dificuldade é pesada. Roda pouco; vale o modelo mais forte (Fable, Astra).' },
+  planner_light: { label: 'Plano intermediário e simples', icon: ListBullets, note: 'Planeja as partes de cada épico, os planos leves e normais e as revisões automáticas de plano. Roda muito; é onde o custo se decide (Opus, GPT-5.6 Sol).' },
   maker: { label: 'Escrever código e provas', icon: Wrench, note: 'Escreve a prova primeiro e depois o código que faz a prova passar.' },
   checker: { label: 'Revisar', icon: ShieldCheck, note: 'De outra empresa. Lê a mudança e aprova ou aponta problemas. Quem escreve nunca aprova.' },
   research: { label: 'Pesquisar fatos', icon: MagnifyingGlass, note: 'Busca na internet quando o plano depende de uma informação de fora.' },
@@ -408,7 +409,7 @@ export default function App() {
                     <button className="run" type="submit" disabled={mode === 'ask' ? (!p || state.chat_busy || !request.trim()) : (busy || !request.trim())}>{mode === 'ask' ? (state.chat_busy ? 'Respondendo' : 'Perguntar') : busy ? 'Rodando' : 'Rodar'}</button>
                   </div>
                 </div>
-                {s && <p className="composer-hint"><span className="mono">{s.roles.planner.model}</span> planeja · <span className="mono">{s.roles.maker.model}</span> escreve · <span className="mono">{s.roles.checker.model}</span> revisa · comandos {s.allow_commands ? 'liberados' : 'bloqueados'}</p>}
+                {s && <p className="composer-hint"><span className="mono">{s.roles.planner.model}</span> e <span className="mono">{(s.roles.planner_light || s.roles.planner).model}</span> planejam · <span className="mono">{s.roles.maker.model}</span> escreve · <span className="mono">{s.roles.checker.model}</span> revisa · comandos {s.allow_commands ? 'liberados' : 'bloqueados'}</p>}
               </div>
             </form>
           </>
@@ -1180,8 +1181,6 @@ function OptionsPage({ s, save }) {
           <Row title="Depois de 6 rodadas de revisão" note="Segue sozinha: com as provas verdes e nada grave, aceita e vai para a próxima parte. Para e pergunta: você decide." control={<select className="sel" value={s.autonomy || 'auto'} onChange={(e) => save({ autonomy: e.target.value })}><option value="auto">segue sozinha</option><option value="ask">para e pergunta</option></select>} />
           <Row title="Modo noturno (sem perguntar)" note="Responde a entrevista com as recomendações, aprova o plano sozinha e, se uma parte travar sem saída, pula a parte e segue. Para só se estourar o teto da missão ou der erro do motor." control={<Switch checked={!!s.unattended} onCheckedChange={(v) => save({ unattended: v })} />} />
           <Row title="Teto por missão (US$ no Claude)" note="Estourou: a missão pausa e espera você." control={<input className="ta" style={{ width: 80 }} type="number" min={5} step={5} value={s.max_usd_per_mission ?? 60} onChange={(e) => save({ max_usd_per_mission: Number(e.target.value) || 60 })} />} />
-          <Row title="Recomendar quem planeja" note="O entendedor mede a dificuldade (leve, normal, pesada) e sugere o modelo do planejador: leve → Sonnet, normal → Opus médio, pesada → Fable alto. Você escolhe; no modo noturno ela segue a recomendação." control={<Switch checked={s.planner_recommend !== false} onCheckedChange={(v) => save({ planner_recommend: v })} />} />
-          <Row title="Fable só divide em épicos" note="Com Fable como planejador, ele faz a divisão do pedido grande em épicos; o plano de cada épico sai no Opus alto. Medido: US$ 5,60 e 13 minutos por épico no Fable. Desligue para o Fable planejar tudo." control={<Switch checked={s.epic_plans_cheaper !== false} onCheckedChange={(v) => save({ epic_plans_cheaper: v })} />} />
           <Row title="Crítica do plano" note="Antes de qualquer código, o revisor lê o plano como quem vai implementar e aponta onde teria de adivinhar; o planejador corrige uma vez. Só em pedidos de funcionalidade para cima." control={<Switch checked={s.plan_critic !== false} onCheckedChange={(v) => save({ plan_critic: v })} />} />
           <Row title="Batedor (Gemini lê antes)" note="Antes de planejar um pedido de funcionalidade para cima, o Gemini lê o projeto e devolve um recibo curto; quem escreve pode chamá-lo sob demanda para documentação, arquivos grandes e pesquisa na web." control={<Switch checked={s.scout_enabled !== false} onCheckedChange={(v) => save({ scout_enabled: v })} />} />
           <Row title="Faixa rápida para correções pequenas" note="Pedido curto do tipo corrija, ajuste, troque, em projeto existente: pula a entrevista e o plano e vai direto para prova, correção e revisão." control={<Switch checked={s.fast_lane !== false} onCheckedChange={(v) => save({ fast_lane: v })} />} />
