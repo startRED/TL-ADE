@@ -30,7 +30,16 @@ const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
  */
 
 /**
- * @typedef {PrepareReadyResult | PrepareRefusedResult} PrepareStoryResult
+ * @typedef {Object} PrepareAwaitingOperatorResult
+ * @property {'awaiting_operator'} status
+ * @property {'takeover_open' | 'stale_branch' | 'branch_in_use'} reason
+ * @property {number} exitCode
+ * @property {string} worktreeDir
+ * @property {string} branch
+ */
+
+/**
+ * @typedef {PrepareReadyResult | PrepareRefusedResult | PrepareAwaitingOperatorResult} PrepareStoryResult
  */
 
 /**
@@ -60,6 +69,7 @@ export async function prepareStory(options) {
   const worktreeDir = path.join(repoDir, '.ade', 'wt', storyId)
   const basePort = createGitPort({ worktreeDir: repoDir })
 
+  // Ordem de precedência das guardas: dirty_worktree -> takeover_open -> dirty_unit_branch -> stale_branch -> branch_in_use
   const dirty = (await basePort.dirtyPaths()).filter(
     (p) => !p.startsWith('.ade/') && !p.startsWith('.ade\\') && p !== '.ade',
   )
@@ -69,6 +79,16 @@ export async function prepareStory(options) {
       reason: 'dirty_worktree',
       exitCode: 2,
       paths: dirty,
+    }
+  }
+
+  if (fs.existsSync(path.join(worktreeDir, '.ade', 'takeover.json'))) {
+    return {
+      status: 'awaiting_operator',
+      reason: 'takeover_open',
+      exitCode: 3,
+      worktreeDir,
+      branch,
     }
   }
 
@@ -102,10 +122,64 @@ export async function prepareStory(options) {
       }
     }
   } else {
+    const probe = await basePort.run(
+      ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`],
+      { maxBuffer: 1 << 20, okCodes: [0, 1, 128] },
+    )
+    const branchExists = probe.code === 0
+
+    if (branchExists) {
+      const anc = await basePort.run(
+        ['merge-base', '--is-ancestor', `refs/heads/${branch}`, 'HEAD'],
+        { maxBuffer: 1 << 20, okCodes: [0, 1] },
+      )
+      if (anc.code !== 0) {
+        return {
+          status: 'awaiting_operator',
+          reason: 'stale_branch',
+          exitCode: 3,
+          worktreeDir,
+          branch,
+        }
+      }
+
+      const list = (
+        await basePort.run(['worktree', 'list', '--porcelain'], { maxBuffer: 1 << 24 })
+      ).stdout.toString('utf8')
+
+      /** @param {string} p */
+      const norm = (p) =>
+        process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p)
+
+      const blocks = list.split(/(?:\r?\n){2,}/)
+      for (const block of blocks) {
+        const lines = block.trim().split(/\r?\n/)
+        let wtPath = ''
+        let wtBranch = ''
+        for (const line of lines) {
+          if (line.startsWith('worktree ')) {
+            wtPath = line.slice(9).trim()
+          } else if (line.startsWith('branch ')) {
+            wtBranch = line.slice(7).trim()
+          }
+        }
+        if (wtBranch === `refs/heads/${branch}` && norm(wtPath) !== norm(worktreeDir)) {
+          return {
+            status: 'awaiting_operator',
+            reason: 'branch_in_use',
+            exitCode: 3,
+            worktreeDir,
+            branch,
+          }
+        }
+      }
+    }
+
     fs.mkdirSync(path.join(repoDir, '.ade', 'wt'), { recursive: true })
-    await basePort.run(['worktree', 'add', '-b', branch, worktreeDir, 'HEAD'], {
-      maxBuffer: 1 << 24,
-    })
+    const addArgs = branchExists
+      ? ['worktree', 'add', worktreeDir, branch]
+      : ['worktree', 'add', '-b', branch, worktreeDir, 'HEAD']
+    await basePort.run(addArgs, { maxBuffer: 1 << 24 })
     wtPort = createGitPort({ worktreeDir })
   }
 

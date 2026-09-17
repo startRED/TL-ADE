@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { makeRepo, removeRepo } from '../helpers/git-repo.js'
@@ -252,5 +253,152 @@ describe('prepare parity', () => {
         storyId: 's1',
       })
     ).rejects.toThrow(UnexpectedTreeStateError)
+  })
+
+  // AC2: Dado uma branch ade/<missão>/<story> com um commit que não está no HEAD base,
+  // quando prepareStory roda, então devolve espera pelo operador com motivo de branch obsoleta
+  // e código de saída 3, sem criar o worktree.
+  test('stale_unit_branch_with_foreign_commits_waits_for_operator', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+
+    writeFileSync(path.join(repo.dir, 'main.txt'), 'conteúdo base\n')
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'commit base'])
+
+    repo.git(['branch', 'ade/m1/s1'])
+    repo.git(['checkout', 'ade/m1/s1'])
+    writeFileSync(path.join(repo.dir, 'foreign.txt'), 'conteúdo estrangeiro\n')
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'commit na story'])
+    repo.git(['checkout', 'main'])
+
+    const wtDir = path.join(repo.dir, '.ade', 'wt', 's1')
+    const res = await prepareStory({
+      repoDir: repo.dir,
+      missionId: 'm1',
+      storyId: 's1',
+    })
+
+    expect(res).toEqual({
+      status: 'awaiting_operator',
+      reason: 'stale_branch',
+      exitCode: 3,
+      worktreeDir: wtDir,
+      branch: 'ade/m1/s1',
+    })
+    expect(existsSync(wtDir)).toBe(false)
+  })
+
+  // AC4: Dado uma branch ade/<missão>/<story> preexistente, já contida no HEAD base e livre,
+  // quando prepareStory roda, então devolve estado pronto reaproveitando essa branch, sem tentar recriá-la.
+  test('ancestor_unit_branch_is_reused', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+
+    writeFileSync(path.join(repo.dir, 'main.txt'), 'conteúdo base\n')
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'commit base'])
+    const headCommit = repo.git(['rev-parse', 'HEAD']).trim()
+
+    repo.git(['branch', 'ade/m1/s1'])
+
+    const wtDir = path.join(repo.dir, '.ade', 'wt', 's1')
+    const res = await prepareStory({
+      repoDir: repo.dir,
+      missionId: 'm1',
+      storyId: 's1',
+    })
+
+    expect(res).toEqual({
+      status: 'ready',
+      worktreeDir: wtDir,
+      branch: 'ade/m1/s1',
+      baseCommit: headCommit,
+      treeBefore: expect.stringMatching(/^[0-9a-f]{40}$/),
+    })
+    expect(existsSync(wtDir)).toBe(true)
+
+    const wtBranch = repo.git(['-C', wtDir, 'symbolic-ref', '--short', 'HEAD']).trim()
+    expect(wtBranch).toBe('ade/m1/s1')
+  })
+
+  // AC3: Dado que essa branch já está checkoutada em outro worktree, quando prepareStory roda,
+  // então devolve espera pelo operador com motivo de branch em uso e código de saída 3.
+  test('unit_branch_checked_out_elsewhere_waits_for_operator', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+
+    writeFileSync(path.join(repo.dir, 'main.txt'), 'conteúdo base\n')
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'commit base'])
+
+    const other = mkdtempSync(path.join(os.tmpdir(), 'ade-other-'))
+    tmpDirs.push(other)
+    rmSync(other, { recursive: true, force: true })
+    repo.git(['worktree', 'add', '-b', 'ade/m1/s1', other])
+
+    const wtDir = path.join(repo.dir, '.ade', 'wt', 's1')
+    const res = await prepareStory({
+      repoDir: repo.dir,
+      missionId: 'm1',
+      storyId: 's1',
+    })
+
+    expect(res).toEqual({
+      status: 'awaiting_operator',
+      reason: 'branch_in_use',
+      exitCode: 3,
+      worktreeDir: wtDir,
+      branch: 'ade/m1/s1',
+    })
+    expect(existsSync(wtDir)).toBe(false)
+  })
+
+  // Regressão (rodada 3): uma tag homônima da branch não pode desviar a checagem de
+  // ancestralidade nem a escolha da branch usada no `worktree add`.
+  test('ancestor_unit_branch_is_reused_despite_homonymous_tag', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+
+    writeFileSync(path.join(repo.dir, 'main.txt'), 'conteúdo base\n')
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'commit base'])
+    const headCommit = repo.git(['rev-parse', 'HEAD']).trim()
+
+    // Cria um commit estrangeiro (não ancestral do HEAD base) e marca uma tag com o
+    // mesmo nome que a branch da unidade vai ter.
+    repo.git(['checkout', '-b', 'tmp/foreign'])
+    writeFileSync(path.join(repo.dir, 'foreign.txt'), 'conteúdo estrangeiro\n')
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'commit estrangeiro'])
+    const foreignCommit = repo.git(['rev-parse', 'HEAD']).trim()
+    repo.git(['checkout', 'main'])
+    repo.git(['tag', 'ade/m1/s1', foreignCommit])
+    repo.git(['branch', '-D', 'tmp/foreign'])
+
+    // Cria a branch local homônima, ancestral do HEAD base (deve ser a única considerada).
+    repo.git(['branch', 'ade/m1/s1', headCommit])
+
+    const wtDir = path.join(repo.dir, '.ade', 'wt', 's1')
+    const res = await prepareStory({
+      repoDir: repo.dir,
+      missionId: 'm1',
+      storyId: 's1',
+    })
+
+    expect(res).toEqual({
+      status: 'ready',
+      worktreeDir: wtDir,
+      branch: 'ade/m1/s1',
+      baseCommit: headCommit,
+      treeBefore: expect.stringMatching(/^[0-9a-f]{40}$/),
+    })
+    expect(existsSync(wtDir)).toBe(true)
+
+    // Usa a forma completa: com a tag homônima, `--short` fica ambíguo ('heads/ade/m1/s1').
+    const wtBranch = repo.git(['-C', wtDir, 'symbolic-ref', 'HEAD']).trim()
+    expect(wtBranch).toBe('refs/heads/ade/m1/s1')
+    expect(existsSync(path.join(wtDir, 'foreign.txt'))).toBe(false)
   })
 })
