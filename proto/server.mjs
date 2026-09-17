@@ -71,7 +71,7 @@ const DEFAULT_SETTINGS = {
   max_usd_per_story: 5, // orçamento por parte (spec E4): estourou com provas verdes → aceita; sem provas verdes → para
   unattended: false, // modo noturno (ADR 0015): responde a entrevista com as recomendações, aprova o plano, e em parada sem saída pula a parte e segue
   max_usd_per_mission: 60, // teto por missão (US$ no Claude): estourou → pausa em vez de continuar gastando
-  autonomy: 'auto', // auto: após 4 rodadas com provas verdes e sem achado grave do revisor, aceita e segue; ask: para e pergunta
+  autonomy: 'auto', // auto: após 6 rodadas com provas verdes e sem achado grave do revisor, aceita e segue; ask: para e pergunta
   interview: 'auto', // auto | always | never — entrevista de múltipla escolha antes do plano (spec: ≤5 perguntas, recomendação primeiro)
   assets_enabled: true, // imagens geradas pelo Codex ($imagegen) quando o plano pede
   skills: { auto: true, forced: [], excluded: [], max: 4 },
@@ -1147,6 +1147,45 @@ async function runStories() {
   finish(); return 'ok'
 }
 
+const MAX_ROUNDS = 6 // rodadas de correção por parte antes de parar e pedir decisão (Erick, 17/09: 4 era pouco)
+
+// ---------- quem escreve: Claude ou Gemini (Antigravity), com escada de subida por falha grave ----------
+// Degraus: maker configurado → (Gemini) mesmo modelo em esforço alto → Sonnet alto → modelo do planejador. Sobe um degrau por rodada
+// com problema grave a partir da 3ª; parte de correção já nasce no último degrau.
+// ponytail: a escada pode cair na mesma empresa do revisor se o revisor for Claude; hoje o revisor é Codex. Validar se isso mudar.
+function makerLadder() {
+  const mk = { family: state.settings.roles.maker.family || 'claude', model: state.settings.roles.maker.model, effort: effortOf('maker') }, steps = [mk]
+  if (mk.family === 'agy' && /^gemini/.test(mk.model) && mk.effort !== 'high') steps.push({ ...mk, effort: 'high' })
+  if (mk.family !== 'claude') steps.push({ family: 'claude', model: 'sonnet', effort: 'high' })
+  const pl = plannerChoice(); steps.push({ family: 'claude', model: pl.model, effort: pl.effort || 'high' })
+  return steps.filter((x, i, a) => a.findIndex((y) => y.family === x.family && y.model === x.model && y.effort === x.effort) === i)
+}
+function makerStep(st, round, grave) { const l = makerLadder(); const i = st.fix_of ? l.length - 1 : grave ? Math.min(l.length - 1, Math.max(0, round - 2)) : 0; return { ...l[i], step: i } }
+async function makerCall(who, opts) { return who.family === 'agy' ? agyMaker({ ...opts, model: who.model, effort: who.effort }) : claudeCall({ ...opts, model: who.model, effort: who.effort }) }
+// Antigravity como maker: o prompt é grande demais para a linha de comando do Windows, então vai num arquivo ignorado pelo git.
+async function agyMaker({ role, prompt, model, effort }) {
+  const m = state.mission, dir = state.project.dir, id = agyModel(model, effort)
+  const rel = `${ATTACH_DIR}/prompt-${Date.now().toString(36)}.md`
+  await mkdir(path.join(dir, ATTACH_DIR), { recursive: true }); await ensureIgnore(dir); await writeFile(path.join(dir, rel), prompt)
+  const status = async () => new Set((await run('git', ['status', '--porcelain'], { cwd: dir })).out.split('\n').map((l) => l.slice(3).trim()).filter(Boolean))
+  const before = await status(), t0 = Date.now()
+  log('engine', `agy (${role}, ${id})`); setLive({ source: 'agy', kind: 'thinking', text: `${role}: Gemini trabalhando (sem transmissão ao vivo)…` })
+  let r; try { r = await run('agy', [`--print=Leia o arquivo ${rel} e execute exatamente as instruções dele neste projeto. Não altere nem apague esse arquivo. Não use git. Termine com uma frase dizendo o que mudou.`, '--output-format', 'json', '--model', id, '--mode', 'accept-edits', '--dangerously-skip-permissions', '--print-timeout', '20m'], { cwd: dir, timeoutMs: 22 * 60 * 1000 }) }
+  finally { setLive(null); await rm(path.join(dir, rel), { force: true }).catch(() => {}) }
+  m.cost.calls += 1
+  let j = null; try { j = JSON.parse(r.out) } catch {}
+  const touched = [...(await status())].filter((f) => !before.has(f) && !f.startsWith(ATTACH_DIR))
+  const u = j?.usage || {}
+  m.cost.tokens_in += u.input_tokens || 0; m.cost.tokens_out += u.output_tokens || 0; m.cost.cache_read += u.cache_read_tokens || 0
+  m.cost.by_model[id] = m.cost.by_model[id] || 0
+  journal({ type: 'model_call', family: 'agy', role, model: id, effort, story: m.current, turns: j?.num_turns || 0, usd: 0, tokens_in: u.input_tokens || 0, cache_read: u.cache_read_tokens || 0, tokens_out: u.output_tokens || 0, prompt_chars: prompt.length, wall_ms: Date.now() - t0 }).catch(() => {})
+  if (!j || j.status !== 'SUCCESS') { log('engine', `agy falhou (código ${r.code}): ${(j?.response || r.err || r.out || '').toString().slice(0, 300)}`, 'error'); return null }
+  const text = String(j.response || '').replace(/\(file:\/\/[^)]*\)/g, '').trim()
+  log('agy', text.slice(0, 600), 'text')
+  log('engine', `agy terminou · ${Math.round((Date.now() - t0) / 1000)} s · ${Math.round((u.input_tokens || 0) / 1000)}k tokens de entrada · ${touched.length} arquivo(s)`)
+  return { result: text, touched, num_turns: j.num_turns || 0, total_cost_usd: 0 }
+}
+
 function remember(st, r) { if (!r) return; st.files = [...new Set([...(st.files || []), ...(r.touched || [])])]; if (typeof r.result === 'string' && r.result.trim()) st.last_summary = r.result.trim() }
 async function runStory(st, round = 1, previousReview = null, previousVisual = null) {
   const m = state.mission
@@ -1156,7 +1195,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   if (round === 1) {
     if (m.plan.needs_ui && state.settings.visual_gate) st.visual_before = await visualGate()
     st.usd_start = m.cost.usd
-    setStep('test', 'running'); const rt = await claudeCall({ role: 'prova', prompt: testPrompt(st, await contextPack(st)), model: state.settings.roles.maker.model, effort: effortOf('maker'), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: 20 }); remember(st, rt); await refreshProject(); setStep('test', 'done')
+    setStep('test', 'running'); const rt = await makerCall(makerStep(st, 1, false), { role: 'prova', prompt: testPrompt(st, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: 20 }); remember(st, rt); await refreshProject(); setStep('test', 'done')
     setStep('red', 'running')
     const after = await runTests(state.project)
     const before = new Set(m.tests_before.tests.map((t) => t.name))
@@ -1169,16 +1208,15 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   }
   // Escalada: só na 3ª rodada em diante E quando sobrou problema grave (achado high do revisor ou prova vermelha). Pedido de cobertura/estilo continua no maker barato.
   const grave = (previousReview?.findings || []).some((f) => f.severity === 'high') || (st.tests_after && !st.tests_after.ok)
-  const escalate = (st.fix_of || (round >= 3 && grave)) && plannerChoice().model !== state.settings.roles.maker.model // parte de correção já nasce com o modelo forte
-  const makerModel = escalate ? state.settings.roles.planner.model : state.settings.roles.maker.model
-  if (escalate) log('engine', `rodada ${round}: problema grave persiste; maker sobe para ${makerModel} (teto 20 ações)`)
-  setStep('fix', 'running', { round }); const rf = await claudeCall({ role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), model: makerModel, effort: effortOf('maker'), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 }); remember(st, rf); await refreshProject(); setStep('fix', 'done', { round })
+  const who = makerStep(st, round, grave), escalate = who.step > 0
+  if (escalate) log('engine', `rodada ${round}: ${st.fix_of ? 'parte de correção' : 'problema grave persiste'}; maker sobe para ${who.model} (esforço ${who.effort}, degrau ${who.step + 1} de ${makerLadder().length})`)
+  setStep('fix', 'running', { round }); const rf = await makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 }); remember(st, rf); await refreshProject(); setStep('fix', 'done', { round })
   setStep('tests', 'running'); st.tests_after = await runTests(state.project); st.diff = await gitDiff(state.project.dir)
   log('engine', `provas depois: ${st.tests_after.total} no total, ${st.tests_after.failed} vermelha(s)`); setStep('tests', st.tests_after.ok ? 'done' : 'failed')
   if (!st.diff.trim()) { setStep('checker', 'skipped'); return stop('no_changes') }
   if (!st.tests_after.ok) {
     const spentNow = m.cost.usd - (st.usd_start || 0)
-    if (round < 4 && spentNow <= (state.settings.max_usd_per_story || 4)) {
+    if (round < MAX_ROUNDS && spentNow <= (state.settings.max_usd_per_story || 4)) {
       st.red_tests = st.tests_after.tests.filter((t) => t.status !== 'passed').map((t) => ({ name: t.name, status: 'failed', message: t.message || (st.tests_after.output || '').slice(-300) }))
       log('engine', `provas vermelhas depois da implementação; rodada ${round + 1} com o erro`, 'warn'); return runStory(st, round + 1, previousReview, null)
     }
@@ -1198,10 +1236,10 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   setStep('checker', 'running'); st.review = await checker(st.diff, st.tests_after, st); setStep('checker', st.review ? (st.review.verdict === 'approve' ? 'done' : 'failed') : 'failed')
   if (st.review?.verdict === 'approve') return true
   const spent = m.cost.usd - (st.usd_start || 0), budget = state.settings.max_usd_per_story || 4
-  if (st.review && round < 4 && spent > budget) log('engine', `orçamento da parte estourado (US$ ${spent.toFixed(2)} > ${budget}); sem novas rodadas`, 'warn')
-  if (st.review && round < 4 && spent <= budget) { log('engine', `revisor pediu mudanças; rodada ${round + 1} automática`); return runStory(st, round + 1, st.review, null) }
+  if (st.review && round < MAX_ROUNDS && spent > budget) log('engine', `orçamento da parte estourado (US$ ${spent.toFixed(2)} > ${budget}); sem novas rodadas`, 'warn')
+  if (st.review && round < MAX_ROUNDS && spent <= budget) { log('engine', `revisor pediu mudanças; rodada ${round + 1} automática`); return runStory(st, round + 1, st.review, null) }
   if (st.review && state.settings.autonomy !== 'ask' && st.tests_after.ok && !(st.review.findings || []).some((f) => f.severity === 'high')) {
-    st.auto_accepted = true; log('engine', 'autonomia: 4 rodadas, provas verdes e nenhum achado grave; aceita e segue (o pedido do revisor fica registrado na aba Revisão)', 'warn'); return true
+    st.auto_accepted = true; log('engine', 'autonomia: 6 rodadas, provas verdes e nenhum achado grave; aceita e segue (o pedido do revisor fica registrado na aba Revisão)', 'warn'); return true
   }
   return stop(st.review ? 'review_changes' : 'review_failed')
 }

@@ -47,7 +47,7 @@ const STATE = {
 const REASON = {
   tests_red: 'Alguma prova ficou vermelha depois da implementação.',
   no_red_test: 'A prova que a IA escreveu já passava no código antigo, ou ela não escreveu prova. Assim a prova não serve para garantir a mudança.',
-  review_changes: 'A segunda IA pediu mudanças e quem escreve não conseguiu fechar em 4 rodadas.',
+  review_changes: 'A segunda IA pediu mudanças e quem escreve não conseguiu fechar em 6 rodadas.',
   review_failed: 'O revisor não respondeu. Veja o erro na atividade completa; "Mais uma rodada" tenta de novo.',
   budget: 'A missão passou do teto de gasto definido em Opções. Continue se quiser gastar mais, ou descarte.',
   skips: 'Duas partes seguidas foram puladas; as próximas dependem delas. Peça mudanças no plano ou mande um pedido menor.',
@@ -1154,7 +1154,7 @@ function OptionsPage({ s, save }) {
       <div className="opt-cards">
         <Card title="Autonomia" note="Quanto ela faz sozinha antes de te chamar.">
           <Row title="Deixar a IA rodar comandos" note="Instalar dependências, criar projeto. Desligue para ela só ler e editar arquivos." control={<Switch checked={s.allow_commands} onCheckedChange={(v) => save({ allow_commands: v })} />} />
-          <Row title="Depois de 4 rodadas de revisão" note="Segue sozinha: com as provas verdes e nada grave, aceita e vai para a próxima parte. Para e pergunta: você decide." control={<select className="sel" value={s.autonomy || 'auto'} onChange={(e) => save({ autonomy: e.target.value })}><option value="auto">segue sozinha</option><option value="ask">para e pergunta</option></select>} />
+          <Row title="Depois de 6 rodadas de revisão" note="Segue sozinha: com as provas verdes e nada grave, aceita e vai para a próxima parte. Para e pergunta: você decide." control={<select className="sel" value={s.autonomy || 'auto'} onChange={(e) => save({ autonomy: e.target.value })}><option value="auto">segue sozinha</option><option value="ask">para e pergunta</option></select>} />
           <Row title="Modo noturno (sem perguntar)" note="Responde a entrevista com as recomendações, aprova o plano sozinha e, se uma parte travar sem saída, pula a parte e segue. Para só se estourar o teto da missão ou der erro do motor." control={<Switch checked={!!s.unattended} onCheckedChange={(v) => save({ unattended: v })} />} />
           <Row title="Teto por missão (US$ no Claude)" note="Estourou: a missão pausa e espera você." control={<input className="ta" style={{ width: 80 }} type="number" min={5} step={5} value={s.max_usd_per_mission ?? 60} onChange={(e) => save({ max_usd_per_mission: Number(e.target.value) || 60 })} />} />
           <Row title="Recomendar quem planeja" note="O entendedor mede a dificuldade (leve, normal, pesada) e sugere o modelo do planejador: leve → Sonnet, normal → Opus médio, pesada → Fable alto. Você escolhe; no modo noturno ela segue a recomendação." control={<Switch checked={s.planner_recommend !== false} onCheckedChange={(v) => save({ planner_recommend: v })} />} />
