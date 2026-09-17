@@ -263,6 +263,15 @@ async function resumeMission() {
   if (!m || m.state !== 'paused') return 'Esta missão não está pausada.'
   const fresh = await discover(state.project.dir); if (fresh.dirty) { await gitDiscard(fresh.dir); }
   state.project = await discover(fresh.dir); m.finished_at = null; log('operador', 'continuou a missão')
+  if (m.program) {
+    let reopened = 0
+    for (const ep of m.program.epics) {
+      const miss = (ep.stories || []).filter((x) => x.state !== 'done' && !(ep.stories || []).some((f) => f.id === `${x.id}f` && f.state === 'done'))
+      if (ep.state === 'done' && miss.length) { ep.state = 'queued'; ep.attempts = 0; ep.already = (ep.stories || []).filter((x) => x.state === 'done').map((x) => x.title); ep.missing = miss.map((x) => `${x.title} (${x.skipped_reason || x.state})`); ep.stories_prev = (ep.stories || []).filter((x) => x.state === 'done'); reopened++ }
+      if (ep.state === 'incomplete') { ep.state = 'queued'; ep.attempts = 0; reopened++ }
+    }
+    if (reopened) { for (const ep of m.program.epics) if (['running', 'blocked'].includes(ep.state)) ep.state = 'queued'; m.epic = null; m.stories = []; m.current = null; m.reason = null; log('engine', `${reopened} épico(s) com partes puladas voltaram para a fila; o planejador replaneja só o que falta antes de seguir`, 'warn') }
+  }
   if (m.program) { m.state = 'running'; return guard(async () => { if (m.epic && m.stories.length) { const r = await runStories(); return r } return runProgram() }) }
   if (!m.plan || !m.stories.length) { m.state = 'planning'; m.steps = []; return guard(planMission) }
   return guard(runStories)
@@ -700,6 +709,7 @@ async function checker(diff, tests, st) {
   const prompt = [
     'Você é o revisor. Outra IA (Claude) fez a alteração abaixo no projeto. Não escreva código; só avalie.',
     'Regras: toda mudança de comportamento vem com uma prova (teste) que falha antes e passa depois; sem mudanças fora do escopo; sem quebrar acessibilidade; sem segredos em código; interface sem cara de template (cores saturadas, gradiente roxo, três cards iguais).',
+    st.early_impl || st.no_red ? 'ATENÇÃO: nesta story o harness NÃO viu as provas novas falharem antes da implementação. Confira você se as provas realmente exercitam o comportamento novo (falhariam sem o código); prova que passa sem o código = achado high.' : '',
     `Pedido do usuário: ${m.request}`, `Story em revisão: ${st.title}. Critérios de aceite: ${(st.acceptance || []).join('; ')}`,
     st.scope_paths?.length ? `Contrato da story: só podia alterar ${st.scope_paths.join(', ')}${st.do_not_touch?.length ? `; proibido alterar ${st.do_not_touch.join(', ')}` : ''}${st.interfaces?.length ? `; interfaces: ${st.interfaces.join(' | ')}` : ''}. Alteração fora do contrato ou interface quebrada = achado high.` : '',
     `Skills que o autor tinha de seguir: ${(m.skills.maker || []).map((s) => s.id).join(', ') || 'nenhuma'}.`,
@@ -847,6 +857,7 @@ function planPrompt() {
     'Você é o Intent Compiler da TL-ADE. Transforme o pedido do usuário em um plano executável por outra IA, em português, no formato JSON exigido.',
     `Pedido: ${state.mission.request}`,
     m.epic ? `ÉPICO ATUAL (planeje SÓ isto; o pedido acima é contexto): ${m.epic.title}. Objetivo: ${m.epic.goal}. Critérios do épico: ${(m.epic.acceptance || []).join('; ')}.` : '',
+    m.epic?.already?.length ? `ESTE ÉPICO JÁ FOI TENTADO. Já está pronto e commitado (NÃO refaça): ${m.epic.already.join('; ')}. Ficou faltando (planeje SÓ isto, em partes menores e independentes entre si quando possível; se uma parte é de configuração ou documentação, a prova confere o efeito observável: arquivo, script, código de saída): ${(m.epic.missing || []).join('; ')}.` : '',
     m.epic && m.program?.epics?.some((e) => e.state === 'done') ? `Épicos já concluídos e commitados (não refaça; construa em cima): ${m.program.epics.filter((e) => e.state === 'done').map((e) => `${e.title}: ${(e.summary || '').slice(0, 200)}`).join(' | ')}` : '',
     attachBlock(m.attachments),
     `Entendimento prévio (outra IA): ${state.mission.intent?.summary || ''} Domínios: ${(state.mission.intent?.domains || []).join(', ')}.`,
@@ -986,6 +997,8 @@ function common(st) {
 function testPrompt(st, pack) {
   return [`Pedido original do usuário: ${state.mission.request}`, ...common(st),
     `FASE 1 de 2: escreva APENAS as provas novas (testes automatizados) desta story: uma função de teste por critério de aceite, todas no mesmo arquivo, com nomes que digam o critério. Todas devem FALHAR (ou nem carregar) no código atual, porque o comportamento ainda não existe. ${st.test_file ? `Arquivo de prova: ${st.test_file}. ` : ''}${st.examples?.length ? 'Cada EXEMPLO acima vira uma asserção. ' : ''}Dica de prova: ${st.test_hint}. Não implemente o comportamento ainda. Provas NUNCA fazem chamada real de rede, CLI externa ou serviço: simule com dublês (stub/mock) e teste o comportamento observável; prova que depende do ambiente vira falha falsa e trava a parte.`,
+    'PROIBIDO nesta fase: criar ou alterar qualquer arquivo que não seja arquivo de prova. Se você implementar agora, as provas nascem verdes e não provam nada.',
+    st.red_retry ? 'SEGUNDA TENTATIVA: na primeira, nenhuma prova nova falhou no código atual. Escreva provas que exercitem o comportamento que AINDA NÃO EXISTE (importe o que será criado, chame, confira o resultado dos EXEMPLOS). Se a parte é só configuração ou documentação, prove o efeito observável: arquivo existe com tal conteúdo, comando sai com código 0, script do package.json existe.' : '',
     pack, 'Ao terminar, escreva uma frase com o nome do arquivo de prova e os nomes das provas novas.'].filter(Boolean).join('\n')
 }
 function fixPrompt(st, round, review, visual, pack) {
@@ -1071,12 +1084,24 @@ async function makeProgram() {
   m.state = 'awaiting_plan'; m.reason = 'approve_plan'; broadcast(); await persistMission().catch(() => {})
 }
 // roda os épicos em ordem: cada um é planejado na hora (vendo o código dos anteriores) e executado com o fluxo normal de stories
+function closeEpic(ep, stories) {
+  const done = stories.filter((x) => x.state === 'done'), missing = stories.filter((x) => x.state !== 'done' && !stories.some((f) => f.fix_of === x.id && f.state === 'done'))
+  ep.stories = [...(ep.stories_prev || []), ...stories.map((x) => ({ id: x.id, title: x.title, state: x.state, skipped_reason: x.skipped_reason || null }))]
+  ep.already = [...(ep.already || []), ...done.map((x) => x.title)]
+  ep.summary = `${ep.already.length} parte(s) pronta(s): ${ep.already.join('; ')}`
+  if (!missing.length) { ep.state = 'done'; ep.missing = []; return }
+  ep.missing = missing.map((x) => `${x.title} (${x.skipped_reason || x.state})`)
+  if ((ep.attempts || 0) < 1) { ep.attempts = (ep.attempts || 0) + 1; ep.state = 'queued'; ep.stories_prev = ep.stories.filter((x) => x.state === 'done'); log('engine', `épico "${ep.title}" incompleto (${missing.length} parte(s) sem concluir); volta para a fila e o planejador replaneja só o que falta`, 'warn') }
+  else { ep.state = 'incomplete'; ep.reason = `faltou: ${ep.missing.join('; ')}`; log('engine', `épico "${ep.title}" continua incompleto depois do replanejamento; a missão pausa para você decidir (os épicos seguintes dependem dele)`, 'error') }
+}
 async function runProgram() {
   const m = state.mission, pg = m.program
   if (!pg) return runStories()
+  for (const e of pg.epics) if (e.state === 'blocked') { e.state = 'queued'; e.reason = null } // reavalia bloqueios a cada passada
+  if (pg.epics.some((e) => e.state === 'incomplete')) { m.epic = null; m.current = null; m.state = 'paused'; m.reason = 'epic_incomplete'; await persistMission().catch(() => {}); finish(); return 'stopped' }
   for (let i = 0; i < pg.epics.length; i++) {
     const ep = pg.epics[i]
-    if (['done', 'failed', 'blocked'].includes(ep.state)) continue
+    if (['done', 'failed', 'blocked', 'incomplete'].includes(ep.state)) continue
     const bad = (ep.depends_on || []).filter((id) => pg.epics.find((x) => x.id === id)?.state !== 'done')
     if (bad.length) { ep.state = 'blocked'; ep.reason = `depende de ${bad.join(', ')}`; log('engine', `épico "${ep.title}" bloqueado: depende de ${bad.join(', ')}, que não concluiu. Nada gasto.`, 'warn'); continue }
     pg.current = i; ep.state = 'running'; m.epic = ep; m.stories = []; m.tests_before = null; m.split_tried = false; m.spec_tried = false; m.critic_tried = false; m.current = null
@@ -1091,8 +1116,9 @@ async function runProgram() {
     const res = await runStories()
     ep.usd = m.cost.usd - usd0
     if (res !== 'ok') return // pausou ou parou esperando você; ao continuar, runStories termina o épico e chama runProgram de novo
-    ep.state = 'done'; ep.summary = `${m.stories.filter((x) => x.state === 'done').length} de ${m.stories.length} partes; ${m.stories.map((x) => x.title).join('; ')}`; ep.stories = m.stories.map((x) => ({ id: x.id, title: x.title, state: x.state, skipped_reason: x.skipped_reason || null }))
+    if (ep.state === 'running') closeEpic(ep, m.stories)
     m.epic = null; broadcast(); await persistMission().catch(() => {})
+    if (ep.state !== 'done') return runProgram()
   }
   m.epic = null; m.current = null; m.state = 'complete'; m.reason = null
   const failed = pg.epics.filter((e) => e.state !== 'done').length
@@ -1192,9 +1218,9 @@ async function runStories() {
       st.state = 'done'; broadcast(); await persistMission().catch(() => {})
     }
     if (m.program && m.epic) { // fim de um épico: quem fecha é a fila
-      const ep = m.epic; if (ep.state === 'running') { ep.state = 'done'; ep.summary = m.stories.map((x) => x.title).join('; '); ep.stories = m.stories.map((x) => ({ id: x.id, title: x.title, state: x.state, skipped_reason: x.skipped_reason || null })) }
+      const ep = m.epic; if (ep.state === 'running') closeEpic(ep, m.stories)
       m.current = null; m.epic = null; broadcast(); await persistMission().catch(() => {})
-      if (m.program.current != null && m.program.epics.some((e) => e.state === 'queued')) return runProgram()
+      if (m.program.current != null && m.program.epics.some((e) => ['queued', 'incomplete'].includes(e.state))) return runProgram()
       return 'ok'
     }
     m.state = 'complete'; m.reason = null; m.current = null
@@ -1260,14 +1286,23 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     st.red_tests = generic ? after.tests.filter((t) => t.status !== 'passed') : after.tests.filter((t) => !before.has(t.name) && t.status !== 'passed')
     const regress = generic ? [] : after.tests.filter((t) => before.has(t.name) && t.status !== 'passed')
     log('engine', `prova vermelha: ${st.red_tests.length} vermelha(s)${generic ? ' (runner genérico)' : `, ${regress.length} antiga(s) quebrada(s)`}`)
-    if (st.red_tests.length === 0 || regress.length > 0) { setStep('red', 'failed'); st.tests_after = after; st.diff = await gitDiff(state.project.dir); return stop(regress.length ? 'tests_red' : 'no_red_test') }
-    setStep('red', 'done')
+    if (regress.length > 0) { setStep('red', 'failed'); st.tests_after = after; st.diff = await gitDiff(state.project.dir); return stop('tests_red') }
+    if (st.red_tests.length === 0) {
+      // Sem prova vermelha. (a) quem escreve já implementou junto com a prova (comum no Gemini): provas novas verdes + código alterado → segue para verificação e revisão;
+      // (b) não escreveu prova que falha: repete a fase de prova uma vez com o motivo; (c) parte sem comportamento testável (config, docs): implementa sem prova vermelha e o revisor julga.
+      const fresh = generic ? [] : after.tests.filter((t) => !before.has(t.name))
+      const changed = (await gitDiff(state.project.dir)).trim()
+      if (fresh.length && after.ok && changed) { st.early_impl = true; setStep('red', 'skipped'); log('engine', `quem escreve adiantou a implementação junto com a prova (${fresh.length} prova(s) nova(s) já verdes); sigo para verificação e revisão`, 'warn') }
+      else if (!st.red_retry) { st.red_retry = true; setStep('red', 'failed'); log('engine', 'nenhuma prova nova ficou vermelha; repetindo a fase de prova uma vez com o motivo', 'warn'); return runStory(st, 1, null, null) }
+      else { st.no_red = true; setStep('red', 'skipped'); log('engine', 'sem prova vermelha na segunda tentativa (parte de configuração ou documentação?); implemento assim mesmo e o revisor julga', 'warn') }
+    } else setStep('red', 'done')
   }
   // Escalada: só na 3ª rodada em diante E quando sobrou problema grave (achado high do revisor ou prova vermelha). Pedido de cobertura/estilo continua no maker barato.
   const grave = (previousReview?.findings || []).some((f) => f.severity === 'high') || (st.tests_after && !st.tests_after.ok)
   const who = makerStep(st, round, grave), escalate = who.step > 0
   if (escalate) log('engine', `rodada ${round}: ${st.fix_of ? 'parte de correção' : 'problema grave persiste'}; maker sobe para ${who.model} (esforço ${who.effort}, degrau ${who.step + 1} de ${makerLadder().length})`)
-  setStep('fix', 'running', { round }); const rf = await makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 }); remember(st, rf); await refreshProject(); setStep('fix', 'done', { round })
+  if (st.early_impl && round === 1) setStep('fix', 'skipped', { round })
+  else { setStep('fix', 'running', { round }); const rf = await makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 }); remember(st, rf); await refreshProject(); setStep('fix', 'done', { round }) }
   setStep('tests', 'running'); st.tests_after = await runTests(state.project); st.diff = await gitDiff(state.project.dir)
   log('engine', `provas depois: ${st.tests_after.total} no total, ${st.tests_after.failed} vermelha(s)`); setStep('tests', st.tests_after.ok ? 'done' : 'failed')
   if (!st.diff.trim()) { setStep('checker', 'skipped'); return stop('no_changes') }
