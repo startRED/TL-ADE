@@ -346,10 +346,6 @@ export function readJournal(filePath) {
   return { events, tornTail }
 }
 
-/**
- * Reduz a sequência de eventos de um journal no estado consolidado da missão (s4).
- * @param {Array<unknown>} _events
- */
-export function fold(_events) {
-  throw new AdeError('not_implemented', 'não implementado: s4', 2)
-}
+// Reexporta a função fold para consolidação pura do estado da missão.
+export { fold } from './fold.js'
+
