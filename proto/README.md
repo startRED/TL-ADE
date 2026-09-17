@@ -15,7 +15,8 @@ Duplo clique em `abrir.bat`. Na primeira vez instala as dependências (1 a 2 min
 7. Duas ADEs ao mesmo tempo (dois projetos): `abrir.bat 2` abre uma segunda instância em `localhost:5174` (servidor 4318).
 8. Anexos: cole imagens com Ctrl+V, arraste arquivos, ou use o "+" (abre o Explorer). Vão para `.ade-attachments/` no projeto (ignorado pelo git) e as IAs abrem com Read. O "+" e a página Projetos também abrem o Explorer para escolher ou criar a pasta do projeto.
 9. Faixa rápida: pedido curto de correção ("corrija o botão…") num projeto existente pula entrevista e plano; vai direto para prova, correção e revisão (~US$ 0,9 medido). Desligável em Opções.
-10. Economia medida: cada fase é uma sessão nova do Claude, mas o prompt já leva a árvore do projeto, o conteúdo dos arquivos tocados e o resumo da fase anterior (pacote de contexto); turnos por chamada caíram pela metade. Telemetria por chamada em `.ade/journal.jsonl` (`model_call`).
+10. Pedido grande (vários subsistemas): a ADE divide sozinha em **épicos** com dependências, um por vez; cada épico é planejado na hora (vendo o código dos anteriores) e roda como missão pequena. Parte grande demais (mais de 4 critérios, mais de 120 palavras, "e também") volta ao planejador para dividir antes de gastar. Parte que depende de outra não concluída é pulada sem gastar. Parte rejeitada pelo revisor com achado grave vira uma parte de correção só com os achados, mantendo o trabalho feito.
+11. Economia medida: cada fase é uma sessão nova do Claude, mas o prompt já leva a árvore do projeto, o conteúdo dos arquivos tocados e o resumo da fase anterior (pacote de contexto); turnos por chamada caíram pela metade. Telemetria por chamada em `.ade/journal.jsonl` (`model_call`).
 
 ## O que acontece por baixo
 
