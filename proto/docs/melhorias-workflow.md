@@ -108,3 +108,66 @@ pergunta (o par de fornecedores já é fixo); monorepo; modelos de PR, changelog
 3. P3: arquivo de decisões e sincronização.
 4. P4: etapa nova, a maior.
 5. P8, P9, P11, P10.
+
+---
+
+# Segunda rodada (17/09/2026): OpenSpec, claude-code-best-practice, GSD, BMAD, Headroom, RAGFlow
+
+Lidos por nove leitores Sonnet, somente leitura. Como antes, é relato com citação de arquivo, sem conferência linha a
+linha. Licenças: MIT (OpenSpec `bae58cf`, claude-code-best-practice `4b0c0c4`, gsd-core `fb3e228`, BMAD `0a00053`) e
+Apache-2.0 (Headroom `b8b222f`, RAGFlow `15b6668`).
+
+## Veredito por repositório
+
+- **OpenSpec:** copiar o formato, não depender da CLI. A atomicidade dele é snapshot em memória mais arquivo de trava,
+  mais fraca que o journal do TL-ADE; ele não executa nada (só planeja e mescla markdown). Vale copiar: `MODIFIED` como
+  substituição total com recusa se um cenário existente some; ordem fixa RENAMED, REMOVED, MODIFIED, ADDED; marca (hash)
+  do estado-base e recusa de escrita se mudou; envelope único de diagnóstico (severidade, código, mensagem, alvo,
+  comando de correção); schemas com `additionalProperties: false` (campo desconhecido ignorado em silêncio é fonte
+  clássica de defeito); saída `--json` com dependências explícitas mesmo no que já está feito.
+- **claude-code-best-practice:** fonte de fatos sobre a CLI. Conferido na máquina: `--fallback-model`,
+  `--no-session-persistence`, `--settings`, `--setting-sources`, `--permission-mode`, `-w/--worktree` existem. O motor
+  já usa `--safe-mode`, que desliga CLAUDE.md, skills, plugins e hooks: os hooks pessoais do usuário não vazam para as
+  sessões do motor, e hooks como portão dentro da sessão não combinam com esse modo; os portões ficam no motor. O
+  relatório de limites confirma a janela de 5 horas, mas não traz o texto do erro de limite em modo headless.
+- **GSD:** o mais próximo do nosso motor. Vale copiar: classificador de prova vermelha com motivos nomeados (verde
+  inesperado, zero provas descobertas, saída diferente de zero sem falha de prova, falha de carga, falha de outra
+  prova); prova não vazia (nome de prova diferente do nome do arquivo); escrita durável (write, fsync, close, rename
+  com nova tentativa no Windows, fsync do diretório); trava por processo vivo (`process.kill(pid, 0)`), não por idade;
+  commit por lista de arquivos; regras de desvio numeradas; verificação orientada a objetivo (existe, é substantivo,
+  está ligado); ondas com detecção de arquivos em comum; teto de contexto por plano. Não copiar: 33 agentes, mercado de
+  capacidades, instalador para 16 CLIs, modos interativos.
+- **BMAD:** já rejeitado como método (ADR 0019). Peças que valem: toda alegação com fonte verificável, senão é
+  suposição ou pergunta em aberto; achado que aponta para spec ruim volta ao plano em vez de remendar código; registro
+  de triagem de achados que só recebe acréscimos; status lido de arquivo, nunca inferido de texto; retrospectiva de
+  épico com visões que nenhuma parte sozinha enxerga; patch do que foi tentado guardado como evidência quando a parte
+  é revertida. Não copiar: personas, party mode, PRD longo, customização em camadas.
+- **Headroom:** só copiar técnicas. Arrasta Python, núcleo Rust com ONNX e atrito documentado no Windows; o maior ganho
+  dele (não reescrever prefixo já em cache) o motor já tem. Técnicas para o firewall de contexto: manter começo, fim e
+  linhas de erro com 3 linhas de contexto; deduplicar linhas repetidas; cortar diff por arquivo e por trecho, não no
+  meio; guardar o original em arquivo e entregar ponteiro; leitura repetida do mesmo arquivo substitui a anterior.
+- **RAGFlow:** não usar no motor (Docker, cerca de 5 contêineres, 16 GB de RAM; trata código como texto puro, sem
+  AST). Como componente de produto só quando o projeto precisa de OCR, layout e tabelas em volume. Para a base de
+  decisões e lições do próprio projeto, `rg` com índice pequeno basta até a casa de mil documentos.
+
+## Aplicado na demo em 17/09/2026
+
+| Commit | O que entrou |
+| :--- | :--- |
+| `ea5d4c4` | API só aceita o painel local; tempo esgotado mata a árvore de processos; crítica do plano só conta se respondeu; referência de provas atualizada a cada parte; pausa por cota do Claude; aviso de diff cortado e de prova vermelha que sumiu |
+| `4c8c0f2` | Prompts: qualidade da prova; suposição declarada (`SUPOSIÇÃO:`), guardada pelo motor e julgada pelo revisor; depuração nas rodadas com prova vermelha; saída `CONTRATO ERRADO:` sem gastar rodadas; revisor com critérios numerados e regra contra inflação; quem escreve roda só o arquivo de prova da parte |
+| `b885829` | `--no-session-persistence`; processos filhos sem atualização automática nem telemetria |
+| `8429be3` | Plano: origem nomeada de cada valor; critérios observáveis com caminho feliz e borda; rastreio `[CA1]` conferido pelo motor; decisão com motivo; decisões dos épicos anteriores entregues aos seguintes; crítico caça valor sem origem e violação do AGENTS.md; planejador pode recusar pedido do crítico; pacote não nomeado não se instala; marcadores de dívida vão ao revisor |
+| `186e6e1` | Arquivos alterados conferidos contra o contrato; suíte que estoura o tempo não vira prova vermelha; missão gravada por temporário mais rename; arquivo de segredo fora do commit |
+
+## Falta (em ordem)
+
+1. Verificação real por critério (P4): rodar o comando de verdade, quatro vereditos, sem evidência não passa.
+2. Classificador de prova vermelha com motivos nomeados e prova não vazia (GSD).
+3. Retomada que guarda trabalho não commitado (`stash`) em vez de descartar; commit por lista de arquivos.
+4. Revisão automática pendente como estado durável (pausar no meio da revisão do plano retoma sem revisar).
+5. Retrospectiva ao fechar épico e passo de sincronização com padrão "não fazer nada".
+6. Firewall de contexto: só arquivos editados voltam ao prompt a partir da rodada 2; saída de provas e diff cortados pelas regras do Headroom.
+7. Profundidade por missão (Protótipo, Alfa, Beta, GA) e revisor em escada (Luna antes de Terra).
+8. Journal com id de épico e de parte; custo em unidades ponderadas.
+9. Ondas de partes independentes em worktrees, com portão depois de juntar.
