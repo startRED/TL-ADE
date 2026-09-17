@@ -536,7 +536,7 @@ function TurnPanel({ m, state, decide, need, onNew, onResume, err, onClose }) {
           <span className="grow" />
           <button className="icon-btn only-mid" onClick={onClose} aria-label="Fechar"><X /></button>
         </div>
-        <p>{need ? why : paused ? (m.reason === 'budget' ? 'A missão chegou ao teto de gasto definido em Opções e pausou antes de gastar mais. O que já foi feito está gravado. Aumente o teto em Opções e continue, ou pare por aqui.' : m.reason === 'epic_incomplete' ? REASON.epic_incomplete : 'A IA foi interrompida. A parte em andamento voltou para a fila e o que ela tinha mexido foi desfeito.') : 'Nada para decidir agora.'}</p>
+        <p>{need ? why : paused ? (m.reason === 'budget' ? 'A missão chegou ao teto de gasto definido em Opções e pausou antes de gastar mais. O que já foi feito está gravado. Aumente o teto em Opções e continue, ou pare por aqui.' : m.reason === 'epic_incomplete' ? REASON.epic_incomplete : m.reason === 'plan_failed' ? 'O planejador não entregou o plano de um épico em duas tentativas. Nada foi pulado: ao continuar, ele tenta de novo. Se repetir, troque o modelo do plano intermediário em Modelos.' : 'A IA foi interrompida. A parte em andamento voltou para a fila e o que ela tinha mexido foi desfeito.') : 'Nada para decidir agora.'}</p>
       </div>
 
       <div className="turn-body">

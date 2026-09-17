@@ -298,8 +298,9 @@ async function resumeMission() {
       const miss = (ep.stories || []).filter((x) => x.state !== 'done' && !(ep.stories || []).some((f) => f.id === `${x.id}f` && f.state === 'done'))
       if (ep.state === 'done' && miss.length) { ep.state = 'queued'; ep.attempts = 0; ep.already = (ep.stories || []).filter((x) => x.state === 'done').map((x) => x.title); ep.missing = miss.map((x) => `${x.title} (${x.skipped_reason || x.state})`); ep.stories_prev = (ep.stories || []).filter((x) => x.state === 'done'); reopened++ }
       if (ep.state === 'incomplete') { ep.state = 'queued'; ep.attempts = 0; reopened++ }
+      if (ep.state === 'failed') { ep.state = 'queued'; ep.reason = null; ep.plan_tries = 0; reopened++ }
     }
-    if (reopened) { for (const ep of m.program.epics) if (['running', 'blocked'].includes(ep.state)) ep.state = 'queued'; m.epic = null; m.stories = []; m.current = null; m.reason = null; log('engine', `${reopened} épico(s) com partes puladas voltaram para a fila; o planejador replaneja só o que falta antes de seguir`, 'warn') }
+    if (reopened) { for (const ep of m.program.epics) if (['running', 'blocked'].includes(ep.state)) ep.state = 'queued'; m.epic = null; m.stories = []; m.current = null; m.reason = null; log('engine', `${reopened} épico(s) incompleto(s) ou sem plano voltaram para a fila antes de seguir`, 'warn') }
   }
   if (m.program) { m.state = 'running'; return guard(async () => { if (m.epic && m.stories.length) { const r = await runStories(); return r } return runProgram() }) }
   if (!m.plan || !m.stories.length) { m.state = 'planning'; m.steps = []; return guard(planMission) }
@@ -1163,7 +1164,12 @@ async function runProgram() {
     m.map = await codeMap(state.project.dir, (await projectTree(state.project.dir)).filter((f) => TEXT_EXT.test(f)))
     const planned = await makePlan({ inProgram: true })
     ep.plan_usd = m.cost.usd - usd0
-    if (!planned) { ep.state = 'failed'; ep.reason = 'plano não veio'; ep.usd = m.cost.usd - usd0; continue }
+    if (!planned) {
+      ep.usd = m.cost.usd - usd0; ep.plan_tries = (ep.plan_tries || 0) + 1; ep.state = 'queued'; m.epic = null
+      if (ep.plan_tries < 2) { log('engine', `o plano do épico "${ep.title}" não veio; tento mais uma vez com mais turnos`, 'warn'); return runProgram() }
+      log('engine', `o plano do épico "${ep.title}" não veio em duas tentativas; a missão pausa (seguir para o próximo épico deixaria um buraco)`, 'error')
+      ep.plan_tries = 0; m.current = null; m.state = 'paused'; m.reason = 'plan_failed'; await persistMission().catch(() => {}); finish(); return 'stopped'
+    }
     if (m.state === 'awaiting_plan') return // dúvida do planejador: espera você; decide('start'/'answer') volta para cá
     const res = await runStories()
     ep.usd = m.cost.usd - usd0
@@ -1186,7 +1192,8 @@ async function makePlan({ inProgram = false } = {}) {
   const base = plannerChoice(!inProgram && m.intent?.difficulty === 'hard' ? 'complex' : 'light')
   const who = revising ? { ...plannerChoice('light'), effort: 'medium' } : base
   m.auto_revision = false
-  const r = await plannerCall(who, { role: revising ? 'revisão do plano' : 'plano', prompt: planPrompt(revising), schema: PLAN_JSON_SCHEMA, maxTurns: revising ? 6 : 16 })
+  const turns = revising ? 6 : 20 + (m.epic?.plan_tries || 0) * 16
+  const r = await plannerCall(who, { role: revising ? 'revisão do plano' : 'plano', prompt: planPrompt(revising) + `\n\nLIMITE: você tem ${turns} turnos de ferramenta. Use o mapa e o recibo do batedor em vez de reler arquivos; leia só trechos. Entregue o plano antes do limite: plano não entregue é dinheiro perdido.`, schema: PLAN_JSON_SCHEMA, maxTurns: turns })
   const plan = r?.structured_output
   if (!plan?.stories?.length) { setStep('plan', 'failed'); if (inProgram) return false; m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'o plano não veio no formato esperado', 'error'); return finish() }
   // parte grande demais volta ao planejador uma vez, sem gastar com maker
