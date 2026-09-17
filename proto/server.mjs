@@ -6,7 +6,7 @@
 import { SCOUT_SCHEMA, scoutPrompt } from './scout.mjs'
 import http from 'node:http'
 import { spawn } from 'node:child_process'
-import { readFile, writeFile, mkdir, appendFile, rm, stat, access, readdir, realpath } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, appendFile, rm, stat, access, readdir, realpath , rename } from 'node:fs/promises'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import os from 'node:os'
@@ -248,7 +248,8 @@ function run(cmd, args, { cwd, stdin, onLine, timeoutMs = 20 * 60 * 1000, env = 
     const child = spawn(cmd, quoted, { cwd, shell: IS_WIN, env: { ...process.env, DISABLE_AUTOUPDATER: '1', DISABLE_TELEMETRY: '1', ...env }, windowsHide: true })
     if (eng) eng.children.add(child)
     let out = '', err = '', buf = ''
-    const timer = setTimeout(() => killTree(child), timeoutMs)
+    let timedOut = false
+    const timer = setTimeout(() => { timedOut = true; killTree(child) }, timeoutMs)
     child.stdout.on('data', (d) => {
       out += d
       if (!onLine) return
@@ -257,7 +258,7 @@ function run(cmd, args, { cwd, stdin, onLine, timeoutMs = 20 * 60 * 1000, env = 
       for (const l of lines) if (l.trim()) onLine(l)
     })
     child.stderr.on('data', (d) => { err += d })
-    child.on('close', (code) => { clearTimeout(timer); if (eng) eng.children.delete(child); if (onLine && buf.trim()) onLine(buf); if (eng?.mission?.pause_requested) return reject(PAUSE); resolve({ code, out, err }) })
+    child.on('close', (code) => { clearTimeout(timer); if (eng) eng.children.delete(child); if (onLine && buf.trim()) onLine(buf); if (eng?.mission?.pause_requested) return reject(PAUSE); resolve({ code, out, err, timedOut }) })
     child.on('error', (e) => { clearTimeout(timer); if (eng) eng.children.delete(child); resolve({ code: -1, out, err: String(e) }) })
     if (stdin != null) { child.stdin.write(stdin); child.stdin.end() } else child.stdin.end()
   })
@@ -271,7 +272,9 @@ const MISSIONS_DIR = path.join(ADE_DIR, 'missions')
 async function persistMission(e = currentEngine()) {
   const m = e?.mission; if (!m || !e.project) return
   await mkdir(MISSIONS_DIR, { recursive: true })
-  await writeFile(path.join(MISSIONS_DIR, `${m.id}.json`), JSON.stringify({ dir: e.project.dir, mission: m, log: e.log.slice(-400), saved_at: now() }))
+  const file = path.join(MISSIONS_DIR, `${m.id}.json`), tmp = `${file}.${process.pid}.tmp`
+  await writeFile(tmp, JSON.stringify({ dir: e.project.dir, mission: m, log: e.log.slice(-400), saved_at: now() }))
+  for (let i = 0; ; i++) { try { await rename(tmp, file); break } catch (err) { if (i >= 4 || !['EPERM', 'EBUSY', 'EACCES'].includes(err.code)) { await rm(tmp, { force: true }).catch(() => {}); throw err } await new Promise((r) => setTimeout(r, 60 * (i + 1))) } } // Windows: antivírus/indexador seguram o arquivo por instantes
 }
 async function persistEngines() { await saveJson('engines.json', { dirs: [...engines.entries()].filter(([, e]) => e.project).map(([k]) => k), active: activeDir }) }
 let persistTimer = null
@@ -489,7 +492,7 @@ async function runTests(project) {
       })
       const failed = tests.filter((t) => t.status !== 'passed').length
       return { ok: failed === 0 && tests.length > 0, total: tests.length, failed, tests, runner: 'vitest' }
-    } catch { return { ok: false, total: 0, failed: 0, tests: [], runner: 'vitest', error: (r.err || r.out).slice(-600) } }
+    } catch { return { ok: false, total: 0, failed: 0, tests: [], runner: 'vitest', timeout: !!r.timedOut, error: (r.err || r.out).slice(-600) } }
   }
   if (project.runner === 'pytest') {
     const py = await ensurePython(dir)
@@ -545,8 +548,12 @@ async function gitDiff(dir) {
   return d.out
 }
 async function gitDiscard(dir) { await run('git', ['reset', '-q', '--', '.'], { cwd: dir }); await run('git', ['checkout', '--', '.'], { cwd: dir }); await run('git', ['clean', '-fd', '.'], { cwd: dir }) }
+const SECRET_FILE = /(^|\/)(\.env(\.(?!example$|sample$|template$|dist$)[^/]*)?|\.secrets?|id_(rsa|ed25519|ecdsa)|[^/]*\.(pem|p12|pfx|key))$/i
 async function gitCommit(dir, msg) {
   await run('git', ['add', '-A', '--', '.'], { cwd: dir })
+  const staged = (await run('git', ['diff', '--cached', '--name-only'], { cwd: dir })).out.split('\n').map((f) => f.trim()).filter(Boolean)
+  const secrets = staged.filter((f) => SECRET_FILE.test(f))
+  if (secrets.length) { await run('git', ['reset', '-q', '--', ...secrets], { cwd: dir }); log('engine', `arquivo(s) com cara de segredo ficaram FORA do commit: ${secrets.join(', ')}. Se for de propósito, commite você mesmo`, 'warn') }
   const c = await run('git', ['-c', 'user.name=TL-ADE', '-c', 'user.email=ade@local', 'commit', '-q', '-m', msg, '--', '.'], { cwd: dir })
   return c.code === 0
 }
@@ -826,6 +833,14 @@ async function checker(diff, tests, st) {
     'Severidade: high = comportamento errado, critério de aceite não atendido, segurança, acessibilidade quebrada, mudança fora do escopo. Cobertura de prova além do necessário, estilo de código, nomes e refatorações são low e NÃO impedem approve: registre como achado low e aprove.',
     'Inspecione nesta ordem: corretude (caminhos que não são o feliz: nulo, borda, erro, assíncrono, estado), segurança, tratamento de erro (catch vazio, erro engolido, recurso que vaza), contrato e interfaces, aderência às decisões, adequação das provas (prova que só confere o dublê e não o comportamento = achado). Separe "está errado" de "eu faria diferente": preferência é low. Não promova detalhe a high nem esconda defeito real como low; se não tem certeza da gravidade, diga o risco em vez de chutar. Todo achado high cita o critério de aceite pelo número, a decisão do plano ou o item do contrato que ele viola; sem citação possível, não é high. Um achado por problema: não repita o mesmo problema arquivo por arquivo. A correção sugerida vai em palavras, nunca em código.',
     'Responda em português no formato JSON exigido. verdict = "approve" só se não houver achado high.',
+    (() => {
+      if (!st.scope_paths?.length) return ''
+      const rx = (g) => new RegExp('^' + String(g).replace(/\\/g, '/').replace(/^\.\//, '').replace(/[.+^${}()|[\]]/g, '\\$&').replace(/\*\*\/?/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*') + '(/.*)?$')
+      const files = [...new Set([...diff.matchAll(/^diff --git a\/(\S+)/gm)].map((x) => x[1]))]
+      const allow = st.scope_paths.map(rx), deny = (st.do_not_touch || []).map(rx)
+      const forbidden = files.filter((f) => deny.some((r) => r.test(f))), outside = files.filter((f) => !allow.some((r) => r.test(f)) && !forbidden.includes(f))
+      return forbidden.length || outside.length ? `CONFERÊNCIA MECÂNICA DO CONTRATO (feita pelo motor):${forbidden.length ? ` alterou arquivo PROIBIDO: ${forbidden.join(', ')}.` : ''}${outside.length ? ` alterou arquivo FORA de scope_paths: ${outside.join(', ')}.` : ''} Abra cada um: só é legítimo se cair na EXCEÇÃO acima (asserções de prova antiga que a story invalida) ou for o mínimo indispensável dito por quem escreveu; caso contrário é achado high.` : ''
+    })(),
     diff.length > 60000 ? `ATENÇÃO: o diff tem ${diff.length} caracteres e abaixo vão só os primeiros 60000. Arquivos alterados: ${[...diff.matchAll(/^diff --git a\/(\S+)/gm)].map((x) => x[1]).join(', ')}. Abra com as suas ferramentas os que não aparecerem inteiros antes de aprovar.` : '',
     (() => { const names = new Set((st.tests_after?.tests || []).map((t) => t.name)); const gone = (st.red_tests || []).map((t) => t.name).filter((n) => n && !/[\\/]|\.test\./.test(n) && !names.has(n)); return gone.length ? `PROVAS QUE NASCERAM VERMELHAS E NÃO EXISTEM MAIS: ${gone.slice(0, 8).join(' | ')}. Confira se foram só renomeadas; prova apagada ou asserção enfraquecida para passar é achado high.` : '' })(),
     (() => { const debt = [...diff.matchAll(/^\+(?!\+\+).*\b(TODO|FIXME|XXX|HACK)\b.*$/gm)].map((x) => x[0].slice(1, 160).trim()).filter((l) => !/#\d+|issue/i.test(l)); return debt.length ? `MARCADORES DE DÍVIDA ACRESCENTADOS POR ESTE DIFF (sem referência a item de trabalho): ${debt.slice(0, 8).join(' | ')}. Trabalho declarado como pendente dentro do escopo da story é achado high; fora do escopo, low.` : '' })(),
@@ -1490,6 +1505,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   else { setStep('fix', 'running', { round }); const rf = await makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 }); remember(st, rf); await refreshProject(); setStep('fix', 'done', { round }) }
   setStep('tests', 'running'); st.tests_after = await runTests(state.project); st.diff = await gitDiff(state.project.dir)
   log('engine', `provas depois: ${st.tests_after.total} no total, ${st.tests_after.failed} vermelha(s)`); setStep('tests', st.tests_after.ok ? 'done' : 'failed')
+  if (st.tests_after.timeout) { log('engine', 'a suíte de provas estourou o tempo limite (5 min) e foi interrompida: isso não é prova vermelha. Paro a parte sem gastar rodadas; veja se alguma prova ficou pendurada (processo, servidor, espera sem fim)', 'error'); return stop('tests_timeout') }
   if (!st.diff.trim()) { setStep('checker', 'skipped'); return stop('no_changes') }
   if (!st.tests_after.ok) {
     const spentNow = m.cost.usd - (st.usd_start || 0)
