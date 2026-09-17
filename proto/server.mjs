@@ -7,6 +7,7 @@ import http from 'node:http'
 import { spawn } from 'node:child_process'
 import { readFile, writeFile, mkdir, appendFile, rm, stat, access, readdir, realpath } from 'node:fs/promises'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { AsyncLocalStorage } from 'node:async_hooks'
@@ -374,6 +375,7 @@ function selectSkills(intent) {
   }
   return out
 }
+const SKILLS_MARK = '\n\n=== SKILLS ATIVAS'
 function skillsBlock(selected) {
   if (!selected.length) return ''
   return '\n\n=== SKILLS ATIVAS (siga-as; são o padrão de qualidade deste projeto) ===\n' + selected.map((s) => {
@@ -512,6 +514,17 @@ async function claudeCall({ role, prompt, model, effort, tools, skipPermissions,
   const m = state.mission, dir = state.project.dir
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--safe-mode', '--max-turns', String(maxTurns), '--model', model]
   if (EFFORTS.includes(effort)) args.push('--effort', effort)
+  // Cache de prompt (medido em 17/09): o cache é por prefixo exato e dura 5 min, renovado a cada leitura. Cada chamada nossa é uma sessão nova;
+  // com as skills dentro do prompt do usuário, ~37k tokens eram REESCRITOS no cache a cada chamada (US$ 0,15). Com a parte estável (skills) no
+  // system prompt por arquivo e as seções dinâmicas (cwd, git status) fora do system, a chamada seguinte LÊ 40k do cache (US$ 0,013).
+  args.push('--exclude-dynamic-system-prompt-sections')
+  const cut = prompt.indexOf(SKILLS_MARK)
+  if (cut >= 0) {
+    const stable = prompt.slice(cut).trim(); prompt = prompt.slice(0, cut) + '\nAs skills ativas deste papel estão no system prompt; siga-as.'
+    const file = path.join(ADE_DIR, 'sysprompts', createHash('sha1').update(stable).digest('hex').slice(0, 16) + '.md')
+    await mkdir(path.dirname(file), { recursive: true }); if (!(await exists(file))) await writeFile(file, stable)
+    args.push('--append-system-prompt-file', file)
+  }
   // shell:true no Windows concatena argumentos: aspas internas precisam de escape estilo MSVC.
   if (schema) args.push('--json-schema', JSON.stringify(schema))
   if (skipPermissions) args.push('--dangerously-skip-permissions')
@@ -598,7 +611,7 @@ async function chatTurn(e, text, { family, model, effort }) {
   let answer = '', usd = 0
   try {
     if (family === 'claude') {
-      const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--safe-mode', '--max-turns', '12', '--model', model, '--permission-mode', 'plan', '--tools', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch']
+      const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--safe-mode', '--max-turns', '12', '--model', model, '--permission-mode', 'plan', '--exclude-dynamic-system-prompt-sections', '--tools', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch']
       if (EFFORTS.includes(effort)) args.push('--effort', effort)
       let buf = ''
       const r = await run('claude', args, { cwd: dir, stdin: prompt, env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' }, timeoutMs: 8 * 60 * 1000, onLine: (line) => {
