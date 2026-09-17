@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import canonicalizeJcs from 'canonicalize'
 
 function hasLoneSurrogate(str) {
@@ -42,3 +43,13 @@ export function canonicalize(value) {
   }
   return result
 }
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+// Devolve os 16 primeiros caracteres hex do SHA-256 do texto canônico em UTF-8.
+export function digest16(value) {
+  return createHash('sha256').update(canonicalize(value), 'utf8').digest('hex').slice(0, 16)
+}
+
