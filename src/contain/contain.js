@@ -198,7 +198,7 @@ export async function contain(input) {
     throw new UnexpectedTreeStateError('worktree sem HEAD', { unitId })
   }
 
-  const changedPaths = await git.dirtyPaths()
+  const changedPaths = [...await git.dirtyPaths()].sort((a, b) => a.localeCompare(b))
   if (changedPaths.length === 0) {
     return {
       ok: false,
