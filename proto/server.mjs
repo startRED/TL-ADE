@@ -264,7 +264,7 @@ async function resumeMission() {
   const m = state.mission
   if (!m || m.state !== 'paused') return 'Esta missão não está pausada.'
   const fresh = await discover(state.project.dir); if (fresh.dirty) { await gitDiscard(fresh.dir); }
-  state.project = await discover(fresh.dir); m.finished_at = null; log('operador', 'continuou a missão')
+  state.project = await discover(fresh.dir); m.finished_at = null; m.reason = null; log('operador', 'continuou a missão')
   if (m.program) {
     let reopened = 0
     for (const ep of m.program.epics) {
@@ -1129,6 +1129,11 @@ async function runProgram() {
     if (['done', 'failed', 'blocked', 'incomplete'].includes(ep.state)) continue
     const bad = (ep.depends_on || []).filter((id) => pg.epics.find((x) => x.id === id)?.state !== 'done')
     if (bad.length) { ep.state = 'blocked'; ep.reason = `depende de ${bad.join(', ')}`; log('engine', `épico "${ep.title}" bloqueado: depende de ${bad.join(', ')}, que não concluiu. Nada gasto.`, 'warn'); continue }
+    const cap = state.settings.max_usd_per_mission || 60, planCost = Math.max(3, ...pg.epics.filter((x) => x.plan_usd).map((x) => x.plan_usd))
+    if (m.cost.usd + planCost > cap) {
+      log('engine', `teto da missão: gasto US$ ${m.cost.usd.toFixed(2)} + plano do próximo épico (~US$ ${planCost.toFixed(2)}) passa de US$ ${cap}. Pauso antes de planejar "${ep.title}"; aumente o teto em Opções e continue.`, 'warn')
+      m.epic = null; m.current = null; m.state = 'paused'; m.reason = 'budget'; await persistMission().catch(() => {}); finish(); return 'stopped'
+    }
     pg.current = i; ep.state = 'running'; m.epic = ep; m.stories = []; m.tests_before = null; m.split_tried = false; m.spec_tried = false; m.critic_tried = false; m.current = null
     const usd0 = m.cost.usd
     log('engine', `épico ${i + 1} de ${pg.epics.length}: ${ep.title}`)
@@ -1136,6 +1141,7 @@ async function runProgram() {
     if (scoutWorth() && i > 0) { setStep('scout', 'running'); m.scout = await scout(`Épico "${ep.title}": ${ep.goal.slice(0, 400)}. O que quem vai planejar este épico precisa saber do estado atual do projeto (o que os épicos anteriores deixaram, onde ficam as partes envolvidas, provas existentes)?`); setStep('scout', m.scout ? 'done' : 'failed') }
     m.map = await codeMap(state.project.dir, (await projectTree(state.project.dir)).filter((f) => TEXT_EXT.test(f)))
     const planned = await makePlan({ inProgram: true })
+    ep.plan_usd = m.cost.usd - usd0
     if (!planned) { ep.state = 'failed'; ep.reason = 'plano não veio'; ep.usd = m.cost.usd - usd0; continue }
     if (m.state === 'awaiting_plan') return // dúvida do planejador: espera você; decide('start'/'answer') volta para cá
     const res = await runStories()
