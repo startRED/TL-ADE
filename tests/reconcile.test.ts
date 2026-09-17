@@ -297,26 +297,6 @@ describe('reconciler releases local intents', () => {
     expect(openIntents(events).map((i) => i.step_id)).toContain('T042:no-tree-before')
   })
 
-  // Classes fora do escopo desta fatia (local_commit fica na s5) não podem ser liberadas sem
-  // evidência: o reconciler recusa reconciliá-las em vez de fechar a intenção silenciosamente.
-  test('out_of_scope_effect_classes_are_refused_instead_of_silently_released', async () => {
-    const missionDir = makeMissionDir()
-    const journal = openJournal({ missionDir, runtimeStamp: RUNTIME_STAMP })
-
-    await journal.append({
-      kind: 'step_intent',
-      step_id: 'T042:local-commit',
-      effect_class: 'local_commit',
-      input_digest: '0000000000000000',
-    })
-
-    const intent = loadIntent(missionDir, 'T042:local-commit')
-    await expect(reconcileIntent({ intent, journal, gitPort: null, missionDir })).rejects.toThrow(/fora desta fatia/)
-
-    const events = readEvents(missionDir)
-    expect(openIntents(events).map((i) => i.step_id)).toContain('T042:local-commit')
-  })
-
   // AC4: `reconcileAll` devolve um veredicto por intenção aberta, na ordem crescente de `seq`.
   test('reconcile_all_walks_open_intents_in_seq_order', async () => {
     const missionDir = makeMissionDir()
@@ -626,5 +606,125 @@ describe('reconciler handles model_call', () => {
     const events = readEvents(missionDir)
     expect(events.filter((ev) => ev.kind === 'step_result')).toEqual([])
     expect(openIntents(events).map((i) => i.step_id)).toContain('T042-model-call-corrupt-receipt')
+  })
+})
+
+describe('reconciler handles local_commit', () => {
+  // AC1: HEAD ainda no parent_commit gravado libera a intenção sem criar commit novo.
+  test('local_commit_with_head_at_parent_is_released', async () => {
+    const repo = makeRepo()
+    repoDirs.push(repo.dir)
+    writeFileSync(path.join(repo.dir, 'base.txt'), 'base\n')
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'commit inicial'])
+    const parent = repo.git(['rev-parse', 'HEAD']).trim()
+    const treeBefore = repo.git(['rev-parse', 'HEAD^{tree}']).trim()
+
+    const gitPort = createGitPort({ worktreeDir: repo.dir })
+    const commitSpy = vi.spyOn(gitPort, 'commit')
+
+    const missionDir = makeMissionDir()
+    const journal = openJournal({ missionDir, runtimeStamp: RUNTIME_STAMP })
+
+    await journal.append({
+      kind: 'step_intent',
+      step_id: 'T042:commit',
+      effect_class: 'local_commit',
+      input_digest: '0000000000000000',
+      intent_context: { parent_commit: parent, tree_before: treeBefore },
+    })
+
+    const countBefore = repo.git(['rev-list', '--count', 'HEAD']).trim()
+    const intent = loadIntent(missionDir, 'T042:commit')
+    const verdict = await reconcileIntent({ intent, journal, gitPort, missionDir })
+
+    expect(verdict.verdict).toBe('released')
+    expect(verdict.reason).toBe('head_at_parent')
+    expect(commitSpy).not.toHaveBeenCalled()
+    expect(repo.git(['rev-list', '--count', 'HEAD']).trim()).toBe(countBefore)
+
+    const events = readEvents(missionDir)
+    expect(openIntents(events)).toEqual([])
+  })
+
+  // AC2: HEAD avançou com a árvore e o pai esperados adota o commit existente, sem commitar de novo.
+  test('local_commit_with_matching_tree_and_parent_is_adopted', async () => {
+    const repo = makeRepo()
+    repoDirs.push(repo.dir)
+    writeFileSync(path.join(repo.dir, 'base.txt'), 'base\n')
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'commit inicial'])
+    const parent = repo.git(['rev-parse', 'HEAD']).trim()
+
+    // Simula o efeito já ter comitado antes de o processo cair.
+    writeFileSync(path.join(repo.dir, 'novo.txt'), 'novo\n')
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'commit do step'])
+    const adoptedCommit = repo.git(['rev-parse', 'HEAD']).trim()
+    const adoptedTree = repo.git(['rev-parse', 'HEAD^{tree}']).trim()
+
+    const gitPort = createGitPort({ worktreeDir: repo.dir })
+    const commitSpy = vi.spyOn(gitPort, 'commit')
+
+    const missionDir = makeMissionDir()
+    const journal = openJournal({ missionDir, runtimeStamp: RUNTIME_STAMP })
+
+    await journal.append({
+      kind: 'step_intent',
+      step_id: 'T042:commit',
+      effect_class: 'local_commit',
+      input_digest: '0000000000000000',
+      intent_context: { parent_commit: parent, tree_before: adoptedTree },
+    })
+
+    const countBefore = repo.git(['rev-list', '--count', 'HEAD']).trim()
+    const intent = loadIntent(missionDir, 'T042:commit')
+    const verdict = await reconcileIntent({ intent, journal, gitPort, missionDir })
+
+    expect(verdict.verdict).toBe('ok')
+    expect(verdict.reason).toBe('commit_adopted')
+    expect(verdict.result).toMatchObject({ commit: adoptedCommit, tree: adoptedTree })
+    expect(commitSpy).not.toHaveBeenCalled()
+    expect(repo.git(['rev-list', '--count', 'HEAD']).trim()).toBe(countBefore)
+  })
+
+  // AC3: HEAD avançou para um commit de outra árvore: ambiguous, nada é adotado.
+  test('local_commit_with_foreign_head_is_ambiguous', async () => {
+    const repo = makeRepo()
+    repoDirs.push(repo.dir)
+    writeFileSync(path.join(repo.dir, 'base.txt'), 'base\n')
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'commit inicial'])
+    const parent = repo.git(['rev-parse', 'HEAD']).trim()
+
+    // A árvore esperada não corresponde a nenhum commit real: HEAD avança para um
+    // commit estranho, de outra árvore.
+    writeFileSync(path.join(repo.dir, 'estranho.txt'), 'estranho\n')
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'commit estranho'])
+    const foreignTree = repo.git(['rev-parse', 'HEAD^{tree}']).trim()
+
+    const gitPort = createGitPort({ worktreeDir: repo.dir })
+
+    const missionDir = makeMissionDir()
+    const journal = openJournal({ missionDir, runtimeStamp: RUNTIME_STAMP })
+
+    await journal.append({
+      kind: 'step_intent',
+      step_id: 'T042:commit',
+      effect_class: 'local_commit',
+      input_digest: '0000000000000000',
+      intent_context: { parent_commit: parent, tree_before: 'a'.repeat(40) },
+    })
+
+    const intent = loadIntent(missionDir, 'T042:commit')
+    const verdict = await reconcileIntent({ intent, journal, gitPort, missionDir })
+
+    expect(verdict.verdict).toBe('ambiguous')
+    expect(verdict.reason).toBe('commit_ambiguous')
+    expect(verdict.result).toBeNull()
+
+    // HEAD e a árvore não foram tocados: nada foi adotado.
+    expect(repo.git(['rev-parse', 'HEAD^{tree}']).trim()).toBe(foreignTree)
   })
 })
