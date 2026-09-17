@@ -35,6 +35,7 @@ const STORY_FLOW = [
 ]
 const STATUS_PT = { pending: 'ainda não', running: 'fazendo agora', done: 'feito', failed: 'deu problema', warn: 'com avisos', skipped: 'pulado' }
 const STATE = {
+  stopped: { label: 'Arquivada (feito guardado)', tone: 'mute' },
   planning: { label: 'Entendendo o pedido', tone: 'accent' },
   awaiting_plan: { label: 'Plano pronto', tone: 'warn' },
   running: { label: 'Em andamento', tone: 'accent' },
@@ -204,7 +205,8 @@ export default function App() {
     try { const saved = localStorage.getItem(draftKey(state.dir)); if (saved != null && saved !== request) setRequest(saved) } catch {}
   }, [state.dir]) // eslint-disable-line
   useEffect(() => { try { if (state.dir !== undefined) localStorage.setItem(draftKey(state.dir), request) } catch {} }, [request]) // eslint-disable-line
-  const [dirtyReq, setDirtyReq] = useState(null) // pedido que esbarrou em alterações pendentes; "Commitar e continuar" reenvia com commit_first
+  const [dirtyReq, setDirtyReq] = useState(null)
+  const [pendingReq, setPendingReq] = useState(null) // pedido novo por cima de missão pausada: "Guardar o feito e mandar" reenvia com replace // pedido que esbarrou em alterações pendentes; "Commitar e continuar" reenvia com commit_first
   async function ask(text) {
     const q = (text ?? request).trim()
     if (!q || !state.dir || state.chat_busy) return
@@ -217,11 +219,12 @@ export default function App() {
     if (mode === 'ask' && text == null) return ask()
     const req = (text ?? request).trim()
     if (!req || busy) return
-    setPage(null); setError(null); setCleared(null); setRequest(''); setDirtyReq(null); setView('mission')
-    const r = await post('/api/run', { request: req, dir: state.dir, ...(opts.commitFirst ? { commit_first: true } : {}) })
+    setPage(null); setError(null); setCleared(null); setRequest(''); setDirtyReq(null); setPendingReq(null); setView('mission')
+    const r = await post('/api/run', { request: req, dir: state.dir, ...(opts.commitFirst ? { commit_first: true } : {}), ...(opts.replace ? { replace: true } : {}) })
     if (!r.ok) {
       const j = await r.json().catch(() => ({})); setRequest(req)
       if (j.code === 'dirty') { setDirtyReq(req); setError(j.error); return }
+      if (j.code === 'pending') { setPendingReq(req); setError(j.error); return }
       setError(j.error || 'Não deu para começar.'); if (/git|pasta/i.test(j.error || '')) setPage('projects'); if (/Modelos/.test(j.error || '')) setPage('models')
     }
   }
@@ -337,9 +340,10 @@ export default function App() {
           {!page && <button className={`ghost-btn${drawer ? ' on' : ''}`} onClick={() => setDrawer((v) => !v)}><Terminal /> Atividade completa</button>}
         </header>
 
-        {error && <div className={'errbar' + (dirtyReq ? ' ask' : '')}><Warning weight="fill" /><span>{error}</span>
+        {error && <div className={'errbar' + (dirtyReq || pendingReq ? ' ask' : '')}><Warning weight="fill" /><span>{error}</span>
           {dirtyReq && <button className="btn primary sm" onClick={() => run(dirtyReq, { commitFirst: true })}>Commitar e continuar</button>}
-          <button onClick={() => { setError(null); setDirtyReq(null) }} aria-label="Fechar"><X /></button></div>}
+          {pendingReq && <button className="btn primary sm" onClick={() => run(pendingReq, { replace: true })}>Guardar o feito e mandar este</button>}
+          <button onClick={() => { setError(null); setDirtyReq(null); setPendingReq(null) }} aria-label="Fechar"><X /></button></div>}
 
         {page ? (
           <div className="page">
@@ -394,13 +398,13 @@ export default function App() {
                       )}
                     </div>
                     <textarea
-                      ref={askRef} className="ask" rows={1} value={request} disabled={mode === 'ask' ? !p : live}
+                      ref={askRef} className="ask" rows={1} value={request} disabled={mode === 'ask' ? !p : busy}
                       onChange={(e) => setRequest(e.target.value)} onPaste={onPaste}
                       onInput={(e) => { e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 176)}px` }}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run() } }}
-                      placeholder={mode === 'ask' ? (p ? `Pergunte sobre ${p.name}, sobre o andamento ou peça algo pequeno; a resposta não altera arquivos.` : 'Escolha uma pasta primeiro, no botão +') : busy ? 'Rodando… pause ou espere' : paused ? 'Missão pausada: continue ou descarte ao lado' : live ? 'Esperando a sua decisão ao lado' : p ? `O que construir em ${p.name}? Escreva do seu jeito; cole imagens com Ctrl+V.` : 'Escolha uma pasta primeiro, no botão +'}
+                      placeholder={mode === 'ask' ? (p ? `Pergunte sobre ${p.name}, sobre o andamento ou peça algo pequeno; a resposta não altera arquivos.` : 'Escolha uma pasta primeiro, no botão +') : busy ? 'Rodando… pause ou espere' : paused ? 'Missão pausada: continue ou descarte ao lado, ou escreva outro pedido (o que já foi gravado fica)' : live ? 'Esperando a sua decisão ao lado' : p ? `O que construir em ${p.name}? Escreva do seu jeito; cole imagens com Ctrl+V.` : 'Escolha uma pasta primeiro, no botão +'}
                     />
-                    <button className="run" type="submit" disabled={mode === 'ask' ? (!p || state.chat_busy || !request.trim()) : (live || !request.trim())}>{mode === 'ask' ? (state.chat_busy ? 'Respondendo' : 'Perguntar') : busy ? 'Rodando' : 'Rodar'}</button>
+                    <button className="run" type="submit" disabled={mode === 'ask' ? (!p || state.chat_busy || !request.trim()) : (busy || !request.trim())}>{mode === 'ask' ? (state.chat_busy ? 'Respondendo' : 'Perguntar') : busy ? 'Rodando' : 'Rodar'}</button>
                   </div>
                 </div>
                 {s && <p className="composer-hint"><span className="mono">{s.roles.planner.model}</span> planeja · <span className="mono">{s.roles.maker.model}</span> escreve · <span className="mono">{s.roles.checker.model}</span> revisa · comandos {s.allow_commands ? 'liberados' : 'bloqueados'}</p>}

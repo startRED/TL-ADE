@@ -675,6 +675,7 @@ async function checker(diff, tests, st) {
     'Você é o revisor. Outra IA (Claude) fez a alteração abaixo no projeto. Não escreva código; só avalie.',
     'Regras: toda mudança de comportamento vem com uma prova (teste) que falha antes e passa depois; sem mudanças fora do escopo; sem quebrar acessibilidade; sem segredos em código; interface sem cara de template (cores saturadas, gradiente roxo, três cards iguais).',
     `Pedido do usuário: ${m.request}`, `Story em revisão: ${st.title}. Critérios de aceite: ${(st.acceptance || []).join('; ')}`,
+    st.scope_paths?.length ? `Contrato da story: só podia alterar ${st.scope_paths.join(', ')}${st.do_not_touch?.length ? `; proibido alterar ${st.do_not_touch.join(', ')}` : ''}${st.interfaces?.length ? `; interfaces: ${st.interfaces.join(' | ')}` : ''}. Alteração fora do contrato ou interface quebrada = achado high.` : '',
     `Skills que o autor tinha de seguir: ${(m.skills.maker || []).map((s) => s.id).join(', ') || 'nenhuma'}.`,
     `O harness JÁ RODOU as provas fora da sandbox: ${tests.failed} falharam de ${tests.total} (runner: ${tests.runner}); a prova nova falhou antes da implementação e passou depois. Não tente rodar provas nem instalar nada (sua sandbox é somente leitura e isso vai falhar); avalie o código e o diff. Arquivos de lock (package-lock.json) e dependências não fazem parte do escopo revisado.`,
     tests.tests?.length ? `Provas que rodaram e passaram (nomes): ${tests.tests.filter((t) => t.status === 'passed').map((t) => t.name).slice(0, 60).join(' | ')}. Um critério coberto por uma dessas provas está provado; não peça prova extra para ele.` : '',
@@ -841,6 +842,7 @@ function planPrompt() {
     '- needs_ui, needs_backend: booleanos.',
     '- research_questions: só fatos externos que mudariam a implementação (versão de API, regra de negócio pública); normalmente vazio.',
     '- questions: só se o pedido for ambíguo a ponto de gerar trabalho errado; no máximo 2; normalmente vazio (prefira uma escolha razoável e registre em summary).',
+    '- CONTRATO de cada story (quem implementa é um modelo mais barato; o contrato é o que evita erro): scope_paths (arquivos que ela pode criar ou alterar; caminhos reais do projeto ou nomes novos), do_not_touch (arquivos que NÃO pode alterar), out_of_scope (o que fica de fora, em 1 linha cada), interfaces (assinaturas que ela expõe ou consome, ex.: "appendEvent(event) → Promise<seq>", "GET /api/items → [{id,name}]"). acceptance no formato "Dado …, quando …, então …", cada um provável por UMA prova automatizada sem chamada real de rede, CLI ou serviço (dublês). test_hint diz o arquivo de prova e como simular dependências.',
     '- stories: 1 a 6 stories PEQUENAS, em ordem de execução. TAMANHO É REGRA: cada story = um comportamento observável, request com no máximo 120 palavras, acceptance com 2 a 4 critérios, diff esperado de até ~300 linhas, provável de passar numa revisão rigorosa em 1 ou 2 rodadas. Nunca junte dois comportamentos com "e também". Se o trabalho não cabe em 6 stories desse tamanho, faça só a primeira fatia coerente e diga em summary o que ficou para o próximo épico. Cada uma: id (s1, s2…), title, request (instrução completa e autossuficiente para a IA que vai implementar, incluindo o estilo visual quando houver interface), acceptance, test_hint (como provar), depends_on (ids das stories anteriores de que esta depende; [] se independente).',
     p.runner === 'none' ? '- Não há runner de provas: a primeira story deve incluir criar o mínimo para rodar provas (JS: package.json + vitest; Python: pytest).' : '',
     '- Se o pedido é visual e não há index.html, uma story deve entregar index.html na raiz funcionando como arquivos estáticos (ES modules, sem build), para abrir no navegador.',
@@ -858,7 +860,7 @@ const PLAN_JSON_SCHEMA = {
     research_questions: { type: 'array', items: { type: 'string' } }, questions: { type: 'array', items: { type: 'string' } },
     assets_style: { type: 'string' },
     assets: { type: 'array', maxItems: 6, items: { type: 'object', additionalProperties: false, properties: { file: { type: 'string' }, prompt: { type: 'string' }, purpose: { type: 'string' } }, required: ['file', 'prompt', 'purpose'] } },
-    stories: { type: 'array', minItems: 1, maxItems: 6, items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, title: { type: 'string' }, request: { type: 'string' }, acceptance: { type: 'array', items: { type: 'string' } }, test_hint: { type: 'string' }, depends_on: { type: 'array', items: { type: 'string' } } }, required: ['id', 'title', 'request', 'acceptance', 'test_hint', 'depends_on'] } },
+    stories: { type: 'array', minItems: 1, maxItems: 6, items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, title: { type: 'string' }, request: { type: 'string' }, acceptance: { type: 'array', items: { type: 'string' } }, test_hint: { type: 'string' }, depends_on: { type: 'array', items: { type: 'string' } }, scope_paths: { type: 'array', items: { type: 'string' } }, do_not_touch: { type: 'array', items: { type: 'string' } }, out_of_scope: { type: 'array', items: { type: 'string' } }, interfaces: { type: 'array', items: { type: 'string' } } }, required: ['id', 'title', 'request', 'acceptance', 'test_hint', 'depends_on', 'scope_paths', 'do_not_touch', 'out_of_scope', 'interfaces'] } },
   },
   required: ['title', 'summary', 'explanation', 'complexity', 'domains', 'keywords', 'needs_ui', 'needs_backend', 'research_questions', 'questions', 'assets_style', 'assets', 'stories'],
 }
@@ -917,7 +919,7 @@ function epicsPrompt() {
 }
 // tamanho de story: regra sem IA. Story grande demais volta ao planejador para dividir (uma vez).
 const WORDS = (t) => String(t || '').trim().split(/\s+/).length
-function tooBig(st) { return (st.acceptance || []).length > 4 || WORDS(st.request) > 140 || /\b(e tamb[ée]m|al[ée]m disso)\b/i.test(st.request || '') }
+function tooBig(st) { return (st.acceptance || []).length > 4 || WORDS(st.request) > 140 || /\b(e tamb[ée]m|al[ée]m disso)\b/i.test(st.request || '') || !(st.scope_paths || []).length }
 
 // ---------- prompts do maker ----------
 function common(st) {
@@ -928,6 +930,7 @@ function common(st) {
     `Story atual: ${st.title}. Instrução: ${st.request}`,
     attachBlock(m.attachments),
     `Critérios de aceite: ${(st.acceptance || []).map((a, i) => `(${i + 1}) ${a}`).join(' ')}`,
+    st.scope_paths?.length ? `CONTRATO. Pode criar ou alterar SÓ: ${st.scope_paths.join(', ')}${st.do_not_touch?.length ? `. NÃO altere: ${st.do_not_touch.join(', ')}` : ''}${st.out_of_scope?.length ? `. Fora do escopo (não faça): ${st.out_of_scope.join('; ')}` : ''}${st.interfaces?.length ? `. Interfaces a respeitar: ${st.interfaces.join(' | ')}` : ''}. Precisa tocar em outro arquivo? Faça o mínimo e diga na frase final.` : '',
     'Trabalhe só dentro do diretório atual; não suba para diretórios acima. Leia antes de escrever.',
     scoutBlock(m.scout),
     'Arquivos grandes: use o MAPA DO CÓDIGO e leia só o trecho (Read com offset e limit); não leia inteiro um arquivo com mais de 300 linhas sem precisar. Código novo vai em módulo novo e pequeno quando o arquivo de destino já passa de 400 linhas; nunca reescreva um arquivo inteiro para mudar um trecho.',
@@ -943,7 +946,7 @@ function common(st) {
 }
 function testPrompt(st, pack) {
   return [`Pedido original do usuário: ${state.mission.request}`, ...common(st),
-    `FASE 1 de 2: escreva APENAS as provas novas (testes automatizados) desta story: uma função de teste por critério de aceite, todas no mesmo arquivo, com nomes que digam o critério. Todas devem FALHAR (ou nem carregar) no código atual, porque o comportamento ainda não existe. Dica de prova: ${st.test_hint}. Não implemente o comportamento ainda.`,
+    `FASE 1 de 2: escreva APENAS as provas novas (testes automatizados) desta story: uma função de teste por critério de aceite, todas no mesmo arquivo, com nomes que digam o critério. Todas devem FALHAR (ou nem carregar) no código atual, porque o comportamento ainda não existe. Dica de prova: ${st.test_hint}. Não implemente o comportamento ainda. Provas NUNCA fazem chamada real de rede, CLI externa ou serviço: simule com dublês (stub/mock) e teste o comportamento observável; prova que depende do ambiente vira falha falsa e trava a parte.`,
     pack, 'Ao terminar, escreva uma frase com o nome do arquivo de prova e os nomes das provas novas.'].filter(Boolean).join('\n')
 }
 function fixPrompt(st, round, review, visual, pack) {
@@ -1067,7 +1070,7 @@ async function makePlan({ inProgram = false } = {}) {
   const big = plan.stories.filter(tooBig)
   if (big.length && !m.split_tried) {
     m.split_tried = true
-    m.plan_feedback = [...(m.plan_feedback || []), `Divida a(s) parte(s) ${big.map((x) => x.id).join(', ')} em 2 ou 3 partes menores: cada uma com UM comportamento, até 4 critérios e até 120 palavras; mantenha as outras.`]
+    m.plan_feedback = [...(m.plan_feedback || []), `Divida a(s) parte(s) ${big.map((x) => x.id).join(', ')} em 2 ou 3 partes menores: cada uma com UM comportamento, até 4 critérios, até 120 palavras e scope_paths preenchido; mantenha as outras.`]
     m.stories = plan.stories.map((s) => ({ ...s, state: 'queued', steps: [], round: 0 })); m.plan = { ...(m.plan || {}), ...plan }
     log('engine', `plano com parte(s) grande(s) demais (${big.map((x) => x.id).join(', ')}); pedindo divisão ao planejador`, 'warn')
     return makePlan({ inProgram })
@@ -1103,12 +1106,15 @@ async function runStories() {
       m.current = i; st.state = 'running'; broadcast()
       let ok = await runStory(st)
       // rejeitada pelo revisor com achado grave depois das rodadas: o trabalho fica e vira uma parte de correção só com os achados (uma vez)
-      if (!ok && m.reason === 'review_changes' && state.settings.autonomy !== 'ask' && !st.fix_attempted && (st.review?.findings || []).some((f) => f.severity === 'high')) {
-        const highs = st.review.findings.filter((f) => f.severity === 'high')
-        const fix = { id: `${st.id}f`, title: `Corrigir: ${st.title.slice(0, 56)}`, request: `Os arquivos da parte anterior ("${st.title}") já estão alterados no projeto (não commitados). NÃO refaça a parte: corrija APENAS os achados do revisor abaixo, no código existente. Achados:\n${highs.map((f) => `- ${f.file}: ${f.problem} Correção sugerida: ${f.fix}`).join('\n')}`, acceptance: highs.map((f) => `Achado corrigido: ${String(f.problem).slice(0, 180)}`).slice(0, 4), test_hint: 'uma prova que reproduza cada achado (falha hoje) e passe depois da correção', depends_on: [], fix_of: st.id, state: 'queued', steps: [], round: 0, red_tests: [], tests_after: null, diff: '', review: null, visual: null }
-        st.fix_attempted = true; st.state = 'skipped'; st.skipped_reason = `rejeitada pelo revisor; correção na parte ${fix.id}`
+      const highs = (st.review?.findings || []).filter((f) => f.severity === 'high')
+      const reds = (st.tests_after?.tests || []).filter((t) => t.status !== 'passed').slice(0, 6)
+      const fixable = !ok && state.settings.autonomy !== 'ask' && !st.fix_attempted && ((m.reason === 'review_changes' && highs.length) || (m.reason === 'tests_red' && reds.length))
+      if (fixable) {
+        const problems = m.reason === 'tests_red' ? reds.map((t) => `- prova vermelha ${t.name}: ${(t.message || '').slice(0, 300)}`) : highs.map((f) => `- ${f.file}: ${f.problem} Correção sugerida: ${f.fix}`)
+        const fix = { id: `${st.id}f`, title: `Corrigir: ${st.title.slice(0, 56)}`, request: `Os arquivos da parte anterior ("${st.title}") já estão alterados no projeto (não commitados). NÃO refaça a parte: corrija APENAS os problemas abaixo, no código existente. Se uma prova vermelha depende de rede, CLI externa ou ambiente, troque a dependência por um dublê na prova; não apague provas.\n${problems.join('\n')}`, acceptance: (m.reason === 'tests_red' ? reds.map((t) => `A prova "${t.name.slice(0, 100)}" passa`) : highs.map((f) => `Achado corrigido: ${String(f.problem).slice(0, 180)}`)).slice(0, 4), test_hint: m.reason === 'tests_red' ? 'as provas vermelhas listadas já existem; não escreva novas' : 'uma prova que reproduza cada achado (falha hoje) e passe depois da correção', depends_on: [], scope_paths: st.scope_paths || [], do_not_touch: st.do_not_touch || [], out_of_scope: st.out_of_scope || [], interfaces: st.interfaces || [], fix_of: st.id, state: 'queued', steps: [], round: 0, red_tests: [], tests_after: null, diff: '', review: null, visual: null }
+        st.fix_attempted = true; st.state = 'skipped'; st.skipped_reason = `${m.reason === 'tests_red' ? 'provas vermelhas' : 'rejeitada pelo revisor'}; correção na parte ${fix.id}`
         m.stories.splice(i + 1, 0, fix); m.state = 'running'; m.reason = null
-        log('engine', `revisor rejeitou "${st.title}" com achado grave; o trabalho fica e vira a parte "${fix.title}" só com os achados`, 'warn'); broadcast(); continue
+        log('engine', `"${st.title}" parou em ${m.reason === 'tests_red' ? 'provas vermelhas' : 'achado grave do revisor'}; o trabalho fica e vira a parte "${fix.title}" com o modelo forte`, 'warn'); broadcast(); continue
       }
       if (!ok && state.settings.unattended && m.reason !== 'budget' && m.reason !== 'engine_error') {
         if (['review_failed', 'review_changes'].includes(m.reason) && st.tests_after?.ok && !(st.review?.findings || []).some((f) => f.severity === 'high')) {
@@ -1163,7 +1169,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   }
   // Escalada: só na 3ª rodada em diante E quando sobrou problema grave (achado high do revisor ou prova vermelha). Pedido de cobertura/estilo continua no maker barato.
   const grave = (previousReview?.findings || []).some((f) => f.severity === 'high') || (st.tests_after && !st.tests_after.ok)
-  const escalate = round >= 3 && grave && state.settings.roles.planner.model !== state.settings.roles.maker.model
+  const escalate = (st.fix_of || (round >= 3 && grave)) && plannerChoice().model !== state.settings.roles.maker.model // parte de correção já nasce com o modelo forte
   const makerModel = escalate ? state.settings.roles.planner.model : state.settings.roles.maker.model
   if (escalate) log('engine', `rodada ${round}: problema grave persiste; maker sobe para ${makerModel} (teto 20 ações)`)
   setStep('fix', 'running', { round }); const rf = await claudeCall({ role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), model: makerModel, effort: effortOf('maker'), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 }); remember(st, rf); await refreshProject(); setStep('fix', 'done', { round })
@@ -1353,7 +1359,10 @@ http.createServer(async (req, res) => {
       if (!request?.trim()) return json(res, 400, { error: 'Pedido vazio.' })
       const e = await targetEngine(req, url, b); if (!e?.project) return json(res, 400, { error: 'Escolha uma pasta primeiro.' })
       if (busyOf(e)) return json(res, 409, { error: 'Já há uma missão rodando nesta pasta. Pause-a ou espere; em outra pasta pode rodar em paralelo.' })
-      if (e.mission && ['awaiting_plan', 'awaiting_operator', 'paused'].includes(e.mission.state)) return json(res, 409, { error: 'A missão anterior desta pasta ainda espera uma decisão sua (continuar ou descartar).' })
+      if (e.mission && ['awaiting_plan', 'awaiting_operator', 'paused'].includes(e.mission.state)) {
+        if (!b.replace) return json(res, 409, { code: 'pending', error: 'A missão anterior desta pasta está pausada ou esperando você. Continue, descarte, ou guarde o que já foi feito e mande este pedido.' })
+        await withEngine(e, async () => { const m = state.mission; await gitDiscard(state.project.dir); await refreshProject(); m.state = 'stopped'; m.reason = 'replaced'; log('operador', `guardou o feito (${m.stories.filter((x) => x.state === 'done').length} parte(s) commitada(s)) e mandou outro pedido; o resto desta missão foi arquivado`); finish() })
+      }
       activeDir = path.resolve(e.project.dir)
       const err = await withEngine(e, () => startMission(request.trim(), { commitFirst: !!b.commit_first })); return err ? json(res, 400, typeof err === 'string' ? { error: err } : err) : json(res, 202, { ok: true })
     }
