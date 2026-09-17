@@ -5,6 +5,7 @@ import {
   Circle, CircleDashed, CaretRight, GitDiff, GitCommit, FolderSimple, FolderOpen, ClockCounterClockwise, GearSix,
   Sparkle, UserCircle, Cpu, MagnifyingGlass, Plus, Paperclip, File as FileIcon, X, NotePencil, ListChecks,
   TestTube, Wrench, Eye, ShieldCheck, ListBullets, Terminal, ImageSquare, Compass, Table, Storefront, List,
+  Kanban, ChatCircle, Binoculars, Broom,
 } from '@phosphor-icons/react'
 
 /* ========================= textos e mapas ========================= */
@@ -16,6 +17,7 @@ const STEP = {
   intent: { title: 'Entender o pedido', help: 'Uma IA lê o seu pedido, decide o tamanho, os domínios e quais skills cada papel (planejador, maker, revisor, pesquisador) vai receber.' },
   plan: { title: 'Montar o plano', help: 'O planejador, já com as skills dele, explora o projeto e divide o trabalho em partes, cada uma com critérios de aceite e como provar.' },
   research: { title: 'Pesquisar fatos', help: 'Só quando o plano depende de algo externo, como a versão de uma API ou uma regra pública. A busca responde com fontes.' },
+  scout: { title: 'Batedor', help: 'Gemini lê o projeto (e a web, se preciso) e devolve um recibo curto: onde ficam as coisas, fatos, arquivos e linhas. O planejador e o maker leem só o trecho apontado, em vez de tudo.' },
   prepare: { title: 'Conferir o projeto', help: 'Roda o que o projeto já tem de verificação, para saber o ponto de partida.' },
   assets: { title: 'Gerar imagens', help: 'Quando o plano pede fotos ou ilustrações, a segunda IA gera as imagens e salva no projeto antes de qualquer parte começar.' },
   test: { title: 'Prova', help: 'Uma "prova" é um mini-programa que checa se o que você pediu funciona. A IA escreve só isso, sem mexer no código ainda.' },
@@ -53,7 +55,14 @@ const REASON = {
   plan_failed: 'Não deu para transformar o pedido em plano. Reescreva o pedido com mais contexto.',
   approve_plan: 'O plano tem várias partes. Confira e aprove.',
   questions: 'A IA precisa de uma resposta sua antes de começar.',
+  planner_choice: 'O entendedor mediu a dificuldade e recomenda outro modelo para planejar. Escolha.',
 }
+const DIFF_PT = { easy: 'leve', normal: 'normal', hard: 'pesada' }
+const EFFORT_PT = { low: 'baixo', medium: 'médio', high: 'alto' }
+const modelName = (r) => `${r?.model || ''}${r?.effort ? ` · esforço ${EFFORT_PT[r.effort] || r.effort}` : ''}`
+const EPIC_PT = { queued: 'na fila', running: 'em andamento', done: 'pronto', failed: 'falhou', blocked: 'bloqueado' }
+// pergunta ou pedido pequeno vai para a conversa (só leitura), não vira missão
+const looksQuestion = (t) => { const x = (t || '').trim(); return /\?\s*$/.test(x) || /^(o que|oque|que |qual|quais|como|por que|porque|pq|quando|onde|quanto|quem|será|sera|existe|tem |há |ha |vc |você|voce|me (explique|diga|mostre|fale|conte)|explique|explica|resuma|resume)\b/i.test(x) }
 const COMPLEXITY_PT = { trivial: 'pedido pequeno', bounded: 'pedido curto', feature: 'funcionalidade', subsystem: 'trabalho grande' }
 const ROLE_CARD = {
   intent: { label: 'Entender o pedido', icon: Compass, note: 'Lê o que você escreveu, mede o tamanho e escolhe as skills de cada papel.' },
@@ -61,6 +70,7 @@ const ROLE_CARD = {
   maker: { label: 'Escrever código e provas', icon: Wrench, note: 'Escreve a prova primeiro e depois o código que faz a prova passar.' },
   checker: { label: 'Revisar', icon: ShieldCheck, note: 'De outra empresa. Lê a mudança e aprova ou aponta problemas. Quem escreve nunca aprova.' },
   research: { label: 'Pesquisar fatos', icon: MagnifyingGlass, note: 'Busca na internet quando o plano depende de uma informação de fora.' },
+  scout: { label: 'Batedor', icon: Binoculars, note: 'Gemini lê muito (projeto, documentação, web, GitHub) e devolve um recibo curto, para os outros não gastarem tokens. Antes de planejar e sob demanda por quem escreve.' },
 }
 const PAGE_TITLE = { skills: 'Skills', models: 'Modelos', history: 'Pedidos anteriores', projects: 'Projetos', options: 'Opções' }
 const SUGGESTIONS = [
@@ -119,9 +129,10 @@ function storySummary(st) {
   return bits.join(' · ')
 }
 
-const pendingDecision = (m) => !m ? null : m.state === 'awaiting_plan' ? (m.reason === 'questions' ? 'questions' : 'plan') : m.state === 'awaiting_operator' ? 'operator' : null
+const pendingDecision = (m) => !m ? null : m.state === 'awaiting_plan' ? (m.reason === 'questions' ? 'questions' : m.reason === 'planner_choice' ? 'planner' : 'plan') : m.state === 'awaiting_operator' ? 'operator' : null
 const PENDING_WHY = {
   questions: 'A IA quer saber como você prefere o programa antes de montar o plano.',
+  planner: 'O entendedor mediu a dificuldade do pedido e recomenda quem deve planejar. Você escolhe.',
   plan: 'O plano está pronto. Confira as partes e diga se pode começar.',
 }
 
@@ -130,6 +141,12 @@ export default function App() {
   const [state, setState] = useState({ dir: null, project: null, mission: null, log: [], history: [], live: null, recent: [], settings: null, catalog: [], registry: {}, attachments: [], engines: [] })
   const [request, setRequest] = useState('')
   const [menu, setMenu] = useState(false)
+  const [mode, setMode] = useState('build') // build: vira missão · ask: conversa só leitura com o modelo escolhido
+  const [modeManual, setModeManual] = useState(false)
+  const [chatModel, setChatModel] = useState(() => { try { return localStorage.getItem('ade.chat.model') || 'claude|sonnet' } catch { return 'claude|sonnet' } })
+  const [chatEffort, setChatEffort] = useState(() => { try { return localStorage.getItem('ade.chat.effort') || 'medium' } catch { return 'medium' } })
+  useEffect(() => { try { localStorage.setItem('ade.chat.model', chatModel); localStorage.setItem('ade.chat.effort', chatEffort) } catch {} }, [chatModel, chatEffort])
+  const [view, setView] = useState('mission') // mission | chat | board
   const [attachErr, setAttachErr] = useState(null)
   const [connected, setConnected] = useState(false)
   const [page, setPage] = useState(null)
@@ -139,7 +156,7 @@ export default function App() {
   const [side, setSide] = useState(false)
   const [cleared, setCleared] = useState(null)
   const [resumeErr, setResumeErr] = useState(null)
-  const ask = useRef(null)
+  const askRef = useRef(null)
 
   useEffect(() => {
     const es = new EventSource('/api/events')
@@ -189,10 +206,20 @@ export default function App() {
   }, [state.dir]) // eslint-disable-line
   useEffect(() => { try { if (state.dir !== undefined) localStorage.setItem(draftKey(state.dir), request) } catch {} }, [request]) // eslint-disable-line
   const [dirtyReq, setDirtyReq] = useState(null) // pedido que esbarrou em alterações pendentes; "Commitar e continuar" reenvia com commit_first
+  useEffect(() => { if (!modeManual) setMode(looksQuestion(request) ? 'ask' : 'build') }, [request]) // eslint-disable-line
+  async function ask(text) {
+    const q = (text ?? request).trim()
+    if (!q || !state.dir || state.chat_busy) return
+    const [family, model] = chatModel.split('|')
+    setPage(null); setError(null); setRequest(''); setView('chat'); setModeManual(false)
+    const r = await post('/api/chat', { text: q, dir: state.dir, family, model, effort: chatEffort })
+    if (!r.ok) { const j = await r.json().catch(() => ({})); setRequest(q); setError(j.error || 'Não deu para perguntar.') }
+  }
   async function run(text, opts = {}) {
+    if (mode === 'ask' && text == null) return ask()
     const req = (text ?? request).trim()
     if (!req || busy) return
-    setPage(null); setError(null); setCleared(null); setRequest(''); setDirtyReq(null)
+    setPage(null); setError(null); setCleared(null); setRequest(''); setDirtyReq(null); setView('mission'); setModeManual(false)
     const r = await post('/api/run', { request: req, dir: state.dir, ...(opts.commitFirst ? { commit_first: true } : {}) })
     if (!r.ok) {
       const j = await r.json().catch(() => ({})); setRequest(req)
@@ -217,7 +244,7 @@ export default function App() {
   function novoPedido() {
     setPage(null); setNav(false); setError(null)
     if (m) setCleared(m.id)
-    setTimeout(() => ask.current?.focus(), 30)
+    setTimeout(() => askRef.current?.focus(), 30)
   }
 
   const showSide = !page && !!shown
@@ -306,6 +333,9 @@ export default function App() {
             <button className="ghost-btn" onClick={pause} disabled={!!shown.pause_requested}><Pause weight="fill" /> {shown.pause_requested ? 'pausando…' : 'Pausar'}</button>
           )}
           {showSide && <button className={`ghost-btn only-mid${need ? ' warn' : ''}`} onClick={() => setSide(true)}><ListChecks /> Sua vez</button>}
+          {!page && (view !== 'mission') && <button className="ghost-btn" onClick={() => setView('mission')}><ArrowLeft /> Pedido</button>}
+          {!page && shown && view !== 'board' && <button className="ghost-btn" onClick={() => setView('board')}><Kanban /> Quadro</button>}
+          {!page && view !== 'chat' && (state.chat?.length > 0 || mode === 'ask') && <button className="ghost-btn" onClick={() => setView('chat')}><ChatCircle /> Conversa{state.chat?.length ? ` (${state.chat.length})` : ''}</button>}
           {!page && <button className={`ghost-btn${drawer ? ' on' : ''}`} onClick={() => setDrawer((v) => !v)}><Terminal /> Atividade completa</button>}
         </header>
 
@@ -323,8 +353,9 @@ export default function App() {
           </div>
         ) : (
           <>
-            {shown
-              ? <Conversation state={state} m={shown} />
+            {view === 'chat' ? <ChatView turns={state.chat} onClear={() => post('/api/chat/clear', { dir: state.dir })} />
+              : view === 'board' ? <BoardView m={shown} />
+              : shown ? <Conversation state={state} m={shown} />
               : <Empty p={p} busy={busy} onPick={(t) => run(t)} />}
 
             <form className="composer" onSubmit={(e) => { e.preventDefault(); run() }} onDrop={(e) => { e.preventDefault(); onPaste({ clipboardData: e.dataTransfer, preventDefault() {} }) }} onDragOver={(e) => e.preventDefault()}>
@@ -342,6 +373,17 @@ export default function App() {
                       {attachErr && <span className="att-chip bad">{attachErr}</span>}
                     </div>
                   )}
+                  <div className="mode-row">
+                    <button type="button" className={`mode-chip${mode === 'build' ? ' on' : ''}`} onClick={() => { setMode('build'); setModeManual(true) }}><Wrench /> Pedido</button>
+                    <button type="button" className={`mode-chip${mode === 'ask' ? ' on' : ''}`} onClick={() => { setMode('ask'); setModeManual(true) }}><ChatCircle /> Pergunta</button>
+                    {mode === 'ask' && <>
+                      <select className="sel sm" value={chatModel} onChange={(e) => setChatModel(e.target.value)} aria-label="Modelo da conversa">
+                        {Object.entries(state.registry || {}).map(([fam, fr]) => <optgroup key={fam} label={fr.label}>{fr.models.map((mo) => <option key={mo.id} value={`${fam}|${mo.id}`}>{mo.label}</option>)}</optgroup>)}
+                      </select>
+                      <select className="sel sm" value={chatEffort} onChange={(e) => setChatEffort(e.target.value)} aria-label="Esforço da conversa"><option value="low">esforço baixo</option><option value="medium">esforço médio</option><option value="high">esforço alto</option></select>
+                      <span className="mode-note">{!modeManual ? 'parece pergunta · ' : ''}só leitura, não vira missão</span>
+                    </>}
+                  </div>
                   <div className="composer-row">
                     <div className="plus-wrap">
                       <button type="button" className="plus" aria-label="Anexar" onClick={() => setMenu((v) => !v)} disabled={live}><Plus weight="bold" /></button>
@@ -353,13 +395,13 @@ export default function App() {
                       )}
                     </div>
                     <textarea
-                      ref={ask} className="ask" rows={1} value={request} disabled={live}
+                      ref={askRef} className="ask" rows={1} value={request} disabled={mode === 'ask' ? !p : live}
                       onChange={(e) => setRequest(e.target.value)} onPaste={onPaste}
                       onInput={(e) => { e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 176)}px` }}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run() } }}
-                      placeholder={busy ? 'Rodando… pause ou espere' : paused ? 'Missão pausada: continue ou descarte ao lado' : live ? 'Esperando a sua decisão ao lado' : p ? `O que construir em ${p.name}? Escreva do seu jeito; cole imagens com Ctrl+V.` : 'Escolha uma pasta primeiro, no botão +'}
+                      placeholder={mode === 'ask' ? (p ? `Pergunte sobre ${p.name}, sobre o andamento ou peça algo pequeno; a resposta não altera arquivos.` : 'Escolha uma pasta primeiro, no botão +') : busy ? 'Rodando… pause ou espere' : paused ? 'Missão pausada: continue ou descarte ao lado' : live ? 'Esperando a sua decisão ao lado' : p ? `O que construir em ${p.name}? Escreva do seu jeito; cole imagens com Ctrl+V.` : 'Escolha uma pasta primeiro, no botão +'}
                     />
-                    <button className="run" type="submit" disabled={live || !request.trim()}>{busy ? 'Rodando' : 'Rodar'}</button>
+                    <button className="run" type="submit" disabled={mode === 'ask' ? (!p || state.chat_busy || !request.trim()) : (live || !request.trim())}>{mode === 'ask' ? (state.chat_busy ? 'Respondendo' : 'Perguntar') : busy ? 'Rodando' : 'Rodar'}</button>
                   </div>
                 </div>
                 {s && <p className="composer-hint"><span className="mono">{s.roles.planner.model}</span> planeja · <span className="mono">{s.roles.maker.model}</span> escreve · <span className="mono">{s.roles.checker.model}</span> revisa · comandos {s.allow_commands ? 'liberados' : 'bloqueados'}</p>}
@@ -388,6 +430,77 @@ export default function App() {
   )
 }
 
+/* ========================= conversa (chat) e quadro ========================= */
+function Rich({ text }) { // markdown mínimo: blocos ``` viram <pre>; o resto fica com quebras de linha
+  const parts = String(text || '').split(/```[a-z]*\r?\n?/i)
+  return <div className="chat-txt">{parts.map((p, i) => i % 2 ? <pre key={i}>{p.replace(/\n$/, '')}</pre> : <span key={i}>{p}</span>)}</div>
+}
+function ChatView({ turns, onClear }) {
+  const endRef = useRef(null)
+  const last = turns?.[turns.length - 1]
+  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }) }, [turns?.length, last?.text?.length])
+  if (!turns?.length) return (
+    <div className="talk empty"><div className="empty-inner">
+      <h1 className="empty-h">Pergunte o que quiser</h1>
+      <p className="empty-p">Dúvidas sobre o projeto, o andamento de um pedido, uma biblioteca, um erro, ou um pedido pequeno. Escolha o modelo abaixo. A resposta é só leitura e não vira missão.</p>
+    </div></div>
+  )
+  return (
+    <div className="talk">
+      <div className="talk-inner">
+        <div className="chat-tools"><button className="link" onClick={onClear}><Broom /> Limpar conversa</button></div>
+        {turns.map((t, i) => t.role === 'user'
+          ? <You key={i} time={t.ts}><p className="you-text">{t.text}</p></You>
+          : <Ade key={i} time={t.ts}>
+              {t.pending && !t.text ? <Skeleton lines={2} /> : <Rich text={t.text} />}
+              <p className="chat-meta"><span className="mono">{t.model}</span>{t.effort && <span>esforço {EFFORT_PT[t.effort] || t.effort}</span>}{t.usd > 0 && <span>{fmtUsd(t.usd)}</span>}{t.pending && <span className="dot-accent dot-live">respondendo…</span>}</p>
+            </Ade>)}
+        <div ref={endRef} />
+      </div>
+    </div>
+  )
+}
+const STORY_PT = (s) => s.state === 'done' ? 'pronta' : s.state === 'running' ? `rodada ${s.round || 1}` : s.state === 'skipped' ? `pulada: ${s.skipped_reason || ''}` : s.state === 'blocked' ? 'parada' : 'na fila'
+const BoardRow = ({ s }) => (
+  <div className={`story-row ${s.state}`}>
+    <span className="story-ico">{s.state === 'done' ? <CheckCircle weight="fill" /> : s.state === 'running' ? <Circle weight="fill" /> : s.state === 'skipped' ? <SkipForward /> : s.state === 'blocked' ? <XCircle weight="fill" /> : <Circle />}</span>
+    <span title={s.title}>{s.id} · {s.title}</span>
+    <small>{STORY_PT(s)}{s.depends_on?.length ? ` · após ${s.depends_on.join(', ')}` : ''}</small>
+  </div>
+)
+function BoardView({ m }) {
+  if (!m) return <div className="talk empty"><div className="empty-inner"><h1 className="empty-h">Sem pedido nesta pasta</h1><p className="empty-p">O quadro mostra os épicos e as partes do pedido atual: o que está pronto, o que falta, o que foi pulado e quanto custou.</p></div></div>
+  const epics = m.program?.epics || [], cur = m.epic?.id
+  const storiesOf = (e) => e.id === cur ? m.stories : (e.stories || [])
+  const all = epics.length ? epics.flatMap(storiesOf) : m.stories
+  const done = all.filter((s) => s.state === 'done').length, skipped = all.filter((s) => s.state === 'skipped').length
+  const epicsDone = epics.filter((e) => e.state === 'done').length
+  const pct = epics.length ? (epicsDone + (cur && m.stories.length ? done - epics.filter((e) => e.state === 'done').flatMap(storiesOf).filter((s) => s.state === 'done').length : 0) / (m.stories.length || 1)) / epics.length : (all.length ? done / all.length : 0)
+  return (
+    <div className="talk"><div className="talk-inner board">
+      <h3 className="msg-h">{m.plan?.title || m.request}</h3>
+      <div className="board-sum">
+        {epics.length > 0 && <div><b>{epicsDone}/{epics.length}</b><small>épicos prontos</small></div>}
+        <div><b>{done}/{all.length}{epics.length && epics.some((e) => e.state === 'queued') ? '+' : ''}</b><small>partes prontas{skipped ? ` · ${skipped} pulada${skipped > 1 ? 's' : ''}` : ''}</small></div>
+        <div><b>{fmtUsd(m.cost?.usd || 0)}</b><small>gasto até agora</small></div>
+      </div>
+      <div className="pbar"><i style={{ width: `${Math.round(Math.min(1, Math.max(0, pct)) * 100)}%` }} /></div>
+      {epics.length ? epics.map((e, i) => {
+        const stories = storiesOf(e)
+        const tone = e.state === 'done' ? 'good' : e.state === 'running' ? 'accent' : ['failed', 'blocked'].includes(e.state) ? 'warn' : 'mute'
+        return (
+          <section className={`epic ${e.state}`} key={e.id}>
+            <div className="epic-head"><span className={`dot-${tone}${e.state === 'running' ? ' dot-live' : ''}`} aria-hidden="true">●</span><b>{i + 1}. {e.title}</b><span className="mono">{EPIC_PT[e.state] || e.state}{e.usd ? ` · ${fmtUsd(e.usd)}` : ''}</span></div>
+            {e.reason && <p className="epic-note warn">{e.reason}</p>}
+            {stories.length ? <div className="epic-body">{stories.map((s) => <BoardRow key={s.id} s={s} />)}</div>
+              : e.state === 'queued' ? <p className="epic-note">{e.depends_on?.length ? `depende de ${e.depends_on.join(', ')} · ` : ''}planejado quando chegar a vez · {e.goal?.slice(0, 160)}</p> : null}
+          </section>
+        )
+      }) : <section className="epic"><div className="epic-body">{m.stories.map((s) => <BoardRow key={s.id} s={s} />)}</div></section>}
+    </div></div>
+  )
+}
+
 /* ========================= painel "Sua vez" ========================= */
 function TurnPanel({ m, state, decide, need, onNew, onResume, err, onClose }) {
   const [text, setText] = useState('')
@@ -407,7 +520,18 @@ function TurnPanel({ m, state, decide, need, onNew, onResume, err, onClose }) {
       </div>
 
       <div className="turn-body">
-        {need === 'questions' && <Interview questions={m.plan.questions} onAnswer={(answers) => decide('answer', { answers })} onSkip={() => decide('start')} />}
+        {need === 'questions' && <Interview questions={m.plan.questions} plannerOptions={!m.planner && m.planner_options} onAnswer={(answers, planner) => decide('answer', { answers, planner })} onSkip={(planner) => decide('start', { planner })} />}
+
+        {need === 'planner' && m.planner_options && (
+          <>
+            <p className="turn-note">Dificuldade medida: <b>{DIFF_PT[m.planner_options.difficulty] || m.planner_options.difficulty}</b>. {m.planner_options.why}</p>
+            <div className="decide">
+              <button className="act primary" onClick={() => decide('planner', { choice: 'recommended' })}><Sparkle weight="fill" /><span><b>Planejar com {modelName(m.planner_options.recommended)}</b><small>Recomendado para este pedido.</small></span></button>
+              <button className="act" onClick={() => decide('planner', { choice: 'configured' })}><GearSix /><span><b>Manter {modelName(m.planner_options.configured)}</b><small>O que está em Modelos.</small></span></button>
+              <button className="act danger" onClick={() => decide('discard')}><Trash /><span><b>Descartar</b><small>Nada é alterado no projeto.</small></span></button>
+            </div>
+          </>
+        )}
 
         {need === 'plan' && (
           <>
@@ -581,11 +705,28 @@ function Conversation({ state, m }) {
           </Ade>
         )}
 
+        {m.state === 'awaiting_plan' && m.reason === 'planner_choice' && (
+          <Ade kind="ask"><h3 className="msg-h">Quem planeja?</h3><p className="msg-p">Medi a dificuldade como <b>{DIFF_PT[m.planner_options?.difficulty] || m.planner_options?.difficulty}</b>. {m.planner_options?.why} Escolha ao lado entre o modelo recomendado e o configurado.</p></Ade>
+        )}
+        {m.scout && (
+          <Ade>
+            <h3 className="msg-h">O batedor leu o projeto</h3>
+            <p className="msg-p">{m.scout.summary}</p>
+            {(m.scout.files?.length > 0 || m.scout.facts?.length > 0) && (
+              <Fold title="Ver o recibo" icon={<Binoculars />} meta={`${m.scout.files?.length || 0} arquivo${m.scout.files?.length === 1 ? '' : 's'} · ${m.scout.model}`}>
+                {m.scout.facts?.length > 0 && <ul className="plan-lines">{m.scout.facts.map((f, i) => <li key={i}>{f}</li>)}</ul>}
+                {m.scout.files?.length > 0 && <ul className="plan-lines">{m.scout.files.map((f, i) => <li key={i}><span className="mono">{f.path}</span> linhas {f.lines}: {f.why}</li>)}</ul>}
+                {m.scout.sources?.length > 0 && <ul className="plan-lines">{m.scout.sources.map((u, i) => <li key={i}><a href={u} target="_blank" rel="noreferrer">{u}</a></li>)}</ul>}
+              </Fold>
+            )}
+          </Ade>
+        )}
         {m.state === 'awaiting_plan' && m.reason === 'questions' && (
           <Ade kind="ask"><h3 className="msg-h">Tenho uma dúvida</h3><p className="msg-p">Antes de montar o plano, responda ao lado, no painel "Precisa de você". São perguntas de múltipla escolha e a primeira opção já é a recomendada.</p></Ade>
         )}
 
         {m.answers?.length > 0 && <You><p className="you-text">{m.answers.map((a) => a.answer).join(' · ')}</p></You>}
+        {m.planner && <You><p className="you-text">Planejar com {modelName(m.planner)} ({m.planner.source})</p></You>}
         {(m.plan_feedback || []).map((f, i) => <You key={i}><p className="you-text">{f}</p></You>)}
 
         {m.state === 'planning' && !m.plan && (
@@ -779,15 +920,27 @@ function StoryRow({ st, i, m, state }) {
 }
 
 /* ========================= entrevista ========================= */
-function Interview({ questions, onAnswer, onSkip }) {
+function Interview({ questions, plannerOptions, onAnswer, onSkip }) {
   const qs = (questions || []).map((q, i) => typeof q === 'string' ? { id: `q${i + 1}`, question: q, why: '', options: [], allow_other: true } : q)
   const [picked, setPicked] = useState(() => Object.fromEntries(qs.map((q) => [q.id, q.options?.[0]?.label || ''])))
   const [other, setOther] = useState({})
+  const [planner, setPlanner] = useState('recommended')
   const answers = qs.map((q) => ({ id: q.id, question: q.question, answer: picked[q.id] === '__other' ? (other[q.id] || '').trim() : picked[q.id] }))
   const ready = answers.every((a) => a.answer)
   return (
     <>
       <p className="dim small">A primeira opção é sempre a recomendada. Não sabe? Deixe como está.</p>
+      {plannerOptions && (
+        <div className="q-card">
+          <b>Quem planeja?</b><small className="dim"> Dificuldade medida: {DIFF_PT[plannerOptions.difficulty] || plannerOptions.difficulty}. {plannerOptions.why}</small>
+          {[['recommended', plannerOptions.recommended, 'recomendado para este pedido'], ['configured', plannerOptions.configured, 'o que está em Modelos']].map(([k, r, hint], i) => (
+            <label className={'q-opt' + (planner === k ? ' on' : '')} key={k}>
+              <input type="radio" name="planner" checked={planner === k} onChange={() => setPlanner(k)} />
+              <span><b>{modelName(r)}{i === 0 && <em>recomendado</em>}</b><small>{hint}</small></span>
+            </label>
+          ))}
+        </div>
+      )}
       {qs.map((q) => (
         <div className="q-card" key={q.id}>
           <b>{q.question}</b>{q.why && <small className="dim"> {q.why}</small>}
@@ -806,8 +959,8 @@ function Interview({ questions, onAnswer, onSkip }) {
         </div>
       ))}
       <div className="decide two">
-        <button className="act primary" disabled={!ready} onClick={() => onAnswer(answers)}><CheckCircle weight="fill" /><span><b>Responder e montar o plano</b><small>O planejador usa as suas escolhas.</small></span></button>
-        <button className="act" onClick={onSkip}><Play weight="fill" /><span><b>Seguir com as recomendações</b><small>A IA escolhe por você.</small></span></button>
+        <button className="act primary" disabled={!ready} onClick={() => onAnswer(answers, plannerOptions ? planner : undefined)}><CheckCircle weight="fill" /><span><b>Responder e montar o plano</b><small>O planejador usa as suas escolhas.</small></span></button>
+        <button className="act" onClick={() => onSkip(plannerOptions ? 'recommended' : undefined)}><Play weight="fill" /><span><b>Seguir com as recomendações</b><small>A IA escolhe por você.</small></span></button>
       </div>
     </>
   )
@@ -963,13 +1116,16 @@ function ModelsPage({ state, save }) {
         {Object.entries(ROLE_CARD).map(([role, { label, icon: Ico, note }]) => (
           <Card key={role} className="role-card">
             <div className="role-card-top"><span className="role-ico"><Ico weight="fill" /></span><div><b>{label}</b><p>{note}</p></div></div>
-            <select className="sel" aria-label={label} value={`${(s.roles[role] || {}).family || 'claude'}|${(s.roles[role] || {}).model || ''}`} onChange={(e) => { const [f, mo] = e.target.value.split('|'); save({ roles: { [role]: { family: f, model: mo } } }) }}>
+            <select className="sel" aria-label={label} value={`${(s.roles[role] || {}).family || 'claude'}|${(s.roles[role] || {}).model || ''}`} onChange={(e) => { const [f, mo] = e.target.value.split('|'); save({ roles: { [role]: { ...(s.roles[role] || {}), family: f, model: mo } } }) }}>
               {Object.entries(registry).map(([fam, fr]) => <optgroup key={fam} label={fr.label}>{fr.models.map((mo) => <option key={mo.id} value={`${fam}|${mo.id}`}>{mo.label}{mo.note ? ` · ${mo.note}` : ''}</option>)}</optgroup>)}
+            </select>
+            <select className="sel effort" aria-label={`Esforço de ${label}`} value={(s.roles[role] || {}).effort || 'medium'} onChange={(e) => save({ roles: { [role]: { ...(s.roles[role] || {}), effort: e.target.value } } })}>
+              <option value="low">esforço baixo · rápido e barato</option><option value="medium">esforço médio</option><option value="high">esforço alto · pensa mais, custa mais</option>
             </select>
           </Card>
         ))}
       </div>
-      <p className="page-foot">Fable é o mais forte e o mais caro, cerca de US$ 0,60 só de abertura por chamada. Use para planejar pedidos grandes, não para escrever código linha a linha.</p>
+      <p className="page-foot">Esforço é quanto o modelo pensa antes de responder: alto custa e demora mais. Fable é o mais forte e o mais caro, cerca de US$ 0,60 só de abertura por chamada; o entendedor recomenda Fable para planejar só pedidos pesados. Gemini entra pelo Antigravity (Pro só tem esforço alto ou baixo).</p>
     </Page>
   )
 }
@@ -985,6 +1141,8 @@ function OptionsPage({ s, save }) {
           <Row title="Depois de 4 rodadas de revisão" note="Segue sozinha: com as provas verdes e nada grave, aceita e vai para a próxima parte. Para e pergunta: você decide." control={<select className="sel" value={s.autonomy || 'auto'} onChange={(e) => save({ autonomy: e.target.value })}><option value="auto">segue sozinha</option><option value="ask">para e pergunta</option></select>} />
           <Row title="Modo noturno (sem perguntar)" note="Responde a entrevista com as recomendações, aprova o plano sozinha e, se uma parte travar sem saída, pula a parte e segue. Para só se estourar o teto da missão ou der erro do motor." control={<Switch checked={!!s.unattended} onCheckedChange={(v) => save({ unattended: v })} />} />
           <Row title="Teto por missão (US$ no Claude)" note="Estourou: a missão pausa e espera você." control={<input className="ta" style={{ width: 80 }} type="number" min={5} step={5} value={s.max_usd_per_mission ?? 60} onChange={(e) => save({ max_usd_per_mission: Number(e.target.value) || 60 })} />} />
+          <Row title="Recomendar quem planeja" note="O entendedor mede a dificuldade (leve, normal, pesada) e sugere o modelo do planejador: leve → Sonnet, normal → Opus médio, pesada → Fable alto. Você escolhe; no modo noturno ela segue a recomendação." control={<Switch checked={s.planner_recommend !== false} onCheckedChange={(v) => save({ planner_recommend: v })} />} />
+          <Row title="Batedor (Gemini lê antes)" note="Antes de planejar um pedido de funcionalidade para cima, o Gemini lê o projeto e devolve um recibo curto; quem escreve pode chamá-lo sob demanda para documentação, arquivos grandes e pesquisa na web." control={<Switch checked={s.scout_enabled !== false} onCheckedChange={(v) => save({ scout_enabled: v })} />} />
           <Row title="Faixa rápida para correções pequenas" note="Pedido curto do tipo corrija, ajuste, troque, em projeto existente: pula a entrevista e o plano e vai direto para prova, correção e revisão." control={<Switch checked={s.fast_lane !== false} onCheckedChange={(v) => save({ fast_lane: v })} />} />
         </Card>
         <Card title="Custo" note="O teto de gasto por parte do trabalho.">

@@ -1254,7 +1254,7 @@ async function decide(option, payload = {}) {
     }
     if (option === 'start' && m.reason === 'questions') { m.answers = (m.plan.questions || []).map((q) => ({ id: q.id, question: q.question, answer: q.options?.[0]?.label || 'não sei' })); log('operador', 'seguiu com as recomendações'); return continuePlanning() }
     if (option === 'start') { log('operador', 'aprovou o plano'); return m.program ? runProgram() : runStories() }
-    if (option === 'answer' && m.planner_options && !m.planner && payload.planner) { const pick = payload.planner === 'recommended' ? 'recommended' : 'configured'; m.planner = { ...m.planner_options[pick], source: pick === 'recommended' ? 'recomendado' : 'configurado' }; log('operador', `planejar com ${m.planner.model} (${m.planner.effort}, ${m.planner.source})`) }
+    if ((option === 'answer' || option === 'start') && m.planner_options && !m.planner && payload.planner) { const pick = payload.planner === 'recommended' ? 'recommended' : 'configured'; m.planner = { ...m.planner_options[pick], source: pick === 'recommended' ? 'recomendado' : 'configurado' }; log('operador', `planejar com ${m.planner.model} (${m.planner.effort}, ${m.planner.source})`) }
     if (option === 'answer') {
       m.answers = payload.answers?.length ? payload.answers : [{ id: 'livre', question: 'resposta livre', answer: payload.text || '' }]
       log('operador', `respondeu: ${m.answers.map((a) => `${a.question} → ${a.answer}`).join(' | ')}`)
@@ -1366,7 +1366,7 @@ http.createServer(async (req, res) => {
       return json(res, 202, { ok: true })
     }
     if (url.pathname === '/api/chat/clear' && req.method === 'POST') { const b = await body(req); const e = await targetEngine(req, url, b); if (!e?.project) return json(res, 400, {}); e.chat = []; await saveChat(e.project.dir, []).catch(() => {}); broadcast(); return json(res, 200, { ok: true }) }
-    if (url.pathname === '/api/decide' && req.method === 'POST') { const b = await body(req); const e = await targetEngine(req, url, b); if (!e) return json(res, 400, {}); withEngine(e, () => guard(() => decide(b.option, { text: b.text, answers: b.answers }))); return json(res, 202, { ok: true }) }
+    if (url.pathname === '/api/decide' && req.method === 'POST') { const b = await body(req); const e = await targetEngine(req, url, b); if (!e) return json(res, 400, {}); withEngine(e, () => guard(() => decide(b.option, { text: b.text, answers: b.answers, choice: b.choice, planner: b.planner }))); return json(res, 202, { ok: true }) }
     if (url.pathname === '/api/skill' && url.searchParams.get('id')) { const c = state.catalog.find((x) => x.id === url.searchParams.get('id')); return c ? json(res, 200, { id: c.id, body: c.body }) : json(res, 404, {}) }
     if (url.pathname === '/api/app' || url.pathname.startsWith('/api/app/')) {
       const e = (url.searchParams.get('dir') && engines.get(path.resolve(url.searchParams.get('dir')))) || activeEngine()
