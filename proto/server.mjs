@@ -64,6 +64,7 @@ const DEFAULT_SETTINGS = {
     scout: { family: 'agy', model: 'gemini-3.8-flash', effort: 'medium' }, // batedor: lê muito (projeto, web, GitHub) e devolve um recibo curto
   },
   planner_recommend: true, // o entendedor mede a dificuldade e recomenda quem planeja; você escolhe (modo noturno segue a recomendação)
+  epic_plans_cheaper: true, // com Fable como planejador, ele só divide o pedido em épicos; o plano de cada épico sai no Opus alto (medido: US$ 5,60 e 13 min por épico no Fable, 74k tokens de saída)
   plan_critic: true, // outra IA (o revisor) lê o plano antes de qualquer código e aponta o que obrigaria quem escreve a decidir; o planejador corrige uma vez
   scout_enabled: true, // batedor antes de planejar (pedido de funcionalidade para cima, em projeto que já tem código) e sob demanda pelo maker
   allow_commands: true,
@@ -1133,7 +1134,8 @@ async function makePlan({ inProgram = false } = {}) {
   // revisão automática (dividir, detalhar, crítica) é edição de um plano que já existe: modelo mais barato, poucos turnos, sem reexplorar.
   // Medido em 17/09: uma revisão no Fable custou US$ 4,83 (42 turnos, 63k tokens de saída) porque reescrevia tudo.
   const revising = !!(m.plan?.stories?.length && m.plan_feedback?.length && (m.split_tried || m.spec_tried || m.critic_tried) && m.auto_revision)
-  const who = revising && plannerChoice().model === 'fable' ? { model: 'opus', effort: 'medium' } : revising ? { model: plannerChoice().model, effort: 'medium' } : plannerChoice()
+  const perEpic = inProgram && plannerChoice().model === 'fable' && state.settings.epic_plans_cheaper !== false ? { model: 'opus', effort: 'high' } : plannerChoice()
+  const who = revising && plannerChoice().model === 'fable' ? { model: 'opus', effort: 'medium' } : revising ? { model: plannerChoice().model, effort: 'medium' } : perEpic
   m.auto_revision = false
   const r = await claudeCall({ role: revising ? 'revisão do plano' : 'plano', prompt: planPrompt(revising), model: who.model, effort: who.effort, tools: ['Read', 'Glob', 'Grep'], schema: PLAN_JSON_SCHEMA, maxTurns: revising ? 6 : 16 })
   const plan = r?.structured_output
