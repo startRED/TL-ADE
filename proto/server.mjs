@@ -3,6 +3,7 @@
 // prova vermelha -> implementação -> provas verdes -> portão visual -> revisão por outra família.
 // Sem durabilidade de verdade (estado em memória; journal só registra). Esse é o slice 1.
 
+import { SCOUT_SCHEMA, scoutPrompt } from './scout.mjs'
 import http from 'node:http'
 import { spawn } from 'node:child_process'
 import { readFile, writeFile, mkdir, appendFile, rm, stat, access, readdir, realpath } from 'node:fs/promises'
@@ -638,6 +639,15 @@ async function research(questions) {
   const m = state.mission, dir = state.project.dir
   const model = agyModel(state.settings.roles.research.model, effortOf('research'))
   const prompt = `Responda em português, com fontes verificáveis (URL), às perguntas abaixo, no formato JSON exigido. Seja curto e factual; se não souber, diga desconhecido.\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n')}`
+  const rrole = state.settings.roles.research
+  if (rrole.family === 'claude') { // pesquisa num modelo Claude (papel configurado em Modelos): busca na web, mesmo formato de resposta
+    const rc = await claudeCall({ role: 'pesquisa', prompt, model: rrole.model, effort: effortOf('research'), tools: ['WebSearch', 'WebFetch'], schema: JSON.parse(RESEARCH_SCHEMA), maxTurns: 12 })
+    const parsed = rc?.structured_output || null
+    for (const f of parsed?.findings || []) log('claude', `${f.question}: ${f.answer} ${f.sources?.length ? `(${f.sources.join(', ')})` : ''}`, 'text')
+    if (!parsed) log('engine', 'pesquisa sem resposta (claude não devolveu o JSON)', 'error')
+    return parsed
+  }
+  if (rrole.family !== 'agy') { log('engine', `pesquisa: família ${rrole.family} não suportada (use Claude ou Gemini em Modelos); sigo sem pesquisa`, 'warn'); return null }
   log('engine', `agy (pesquisa, ${model})`)
   setLive({ source: 'agy', kind: 'thinking', text: 'pesquisando…' })
   const r = await run('agy', [`--print=${prompt.replace(/"/g, "'")}`, '--output-format', 'json', '--model', model, '--json-schema', RESEARCH_SCHEMA, '--dangerously-skip-permissions'], { cwd: dir, timeoutMs: 5 * 60 * 1000 })
@@ -706,6 +716,18 @@ async function chatTurn(e, text, { family, model, effort }) {
 const SCOUT_SCRIPT = path.join(ROOT, 'scout.mjs')
 async function scout(question, { web = false, files = [] } = {}) {
   const m = state.mission
+  // batedor num modelo Claude (papel configurado em Modelos): mesmo prompt e mesmo schema do scout.mjs, só leitura.
+  // Antes o motor só sabia chamar o agy e mandava `--model sonnet` para o Gemini, que recusava.
+  const role = state.settings.roles.scout
+  if (role.family === 'claude') {
+    log('engine', `batedor (claude ${role.model}, esforço ${effortOf('scout')}): ${question.slice(0, 140)}`)
+    const r = await claudeCall({ role: 'batedor', prompt: scoutPrompt(question, { web, files }), model: role.model, effort: effortOf('scout'), tools: web ? ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'] : ['Read', 'Glob', 'Grep'], schema: SCOUT_SCHEMA, maxTurns: 14 })
+    const rec = r?.structured_output
+    if (!rec?.summary) { log('engine', 'batedor sem recibo (claude não devolveu o JSON do recibo)', 'error'); return null }
+    log('claude', `recibo do batedor: ${rec.summary}`, 'text')
+    return { summary: rec.summary, facts: rec.facts || [], files: rec.files || [], sources: rec.sources || [], model: role.model, question, at: now() }
+  }
+  if (role.family !== 'agy') { log('engine', `batedor: família ${role.family} não suportada (use Claude ou Gemini em Modelos); sigo sem recibo`, 'warn'); return null }
   const model = agyModel(state.settings.roles.scout.model, effortOf('scout'))
   log('engine', `batedor (agy ${model}): ${question.slice(0, 140)}`)
   setLive({ source: 'agy', kind: 'thinking', text: 'batedor lendo o projeto…' })
