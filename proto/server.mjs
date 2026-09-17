@@ -572,13 +572,14 @@ async function chatTurn(e, text, { family, model, effort }) {
   const turns = e.chat || (e.chat = [])
   const history = turns.slice(-8).map((t) => `${t.role === 'user' ? 'Usuário' : 'Assistente'}: ${t.text.slice(0, 1500)}`).join('\n')
   const tree = await projectTree(dir)
+  const atts = e.attachments.splice(0) // anexos colados/escolhidos vão com a pergunta e saem da barra
   const prompt = [
     `Você é o assistente de conversa da TL-ADE no projeto ${e.project.name} (${dir}). Responda em português, direto e curto (até ~250 palavras, salvo pedido de detalhe); listas curtas e blocos de código quando ajudarem. Só leitura: não edite arquivos nem rode nada que altere o projeto. Se a pergunta for sobre o projeto, leia só o necessário.`,
     m ? `Missão atual desta pasta: "${m.request.slice(0, 200)}" · estado ${m.state}${m.reason ? ` (${m.reason})` : ''} · custo US$ ${m.cost.usd.toFixed(2)} · partes: ${m.stories.map((s) => `${s.id} ${s.state}`).join(', ') || 'nenhuma'}${m.program ? ` · épicos: ${m.program.epics.map((x) => `${x.id} ${x.state}`).join(', ')}` : ''}. Detalhes das partes ficam em .ade/missions/${m.id}.json na pasta do TL-ADE (${ADE_DIR}).` : 'Sem missão nesta pasta agora.',
     `Arquivos do projeto (${tree.length}): ${tree.slice(0, 150).join(', ')}`,
-    history ? `Conversa até aqui:\n${history}` : '', `Usuário: ${text}`,
+    history ? `Conversa até aqui:\n${history}` : '', attachBlock(atts), `Usuário: ${text}`,
   ].filter(Boolean).join('\n')
-  const user = { role: 'user', text, ts: now() }, ai = { role: 'ai', text: '', pending: true, family, model, effort, ts: now(), usd: 0 }
+  const user = { role: 'user', text, ts: now(), attachments: atts }, ai = { role: 'ai', text: '', pending: true, family, model, effort, ts: now(), usd: 0 }
   turns.push(user, ai); e.chat_busy = true; broadcast()
   const stream = (t) => { ai.text = t; broadcastSoon() }
   let answer = '', usd = 0

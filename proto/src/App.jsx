@@ -353,7 +353,7 @@ export default function App() {
           </div>
         ) : (
           <>
-            {view === 'chat' ? <ChatView turns={state.chat} onClear={() => post('/api/chat/clear', { dir: state.dir })} />
+            {view === 'chat' ? <ChatView turns={state.chat} dir={state.dir} onClear={() => post('/api/chat/clear', { dir: state.dir })} />
               : view === 'board' ? <BoardView m={shown} />
               : shown ? <Conversation state={state} m={shown} />
               : <Empty p={p} busy={busy} onPick={(t) => run(t)} />}
@@ -431,11 +431,15 @@ export default function App() {
 }
 
 /* ========================= conversa (chat) e quadro ========================= */
-function Rich({ text }) { // markdown mínimo: blocos ``` viram <pre>; o resto fica com quebras de linha
-  const parts = String(text || '').split(/```[a-z]*\r?\n?/i)
-  return <div className="chat-txt">{parts.map((p, i) => i % 2 ? <pre key={i}>{p.replace(/\n$/, '')}</pre> : <span key={i}>{p}</span>)}</div>
+function Inline({ text }) { // **negrito** e `código` no meio do texto
+  const bits = String(text || '').split(/(\*\*[^*\n]+\*\*|`[^`\n]+`)/)
+  return bits.map((b, i) => b.startsWith('**') ? <b key={i}>{b.slice(2, -2)}</b> : b.startsWith('`') ? <code key={i}>{b.slice(1, -1)}</code> : b)
 }
-function ChatView({ turns, onClear }) {
+function Rich({ text }) { // markdown mínimo: blocos ``` viram <pre>; negrito e código inline; o resto fica com quebras de linha
+  const parts = String(text || '').split(/```[a-z]*\r?\n?/i)
+  return <div className="chat-txt">{parts.map((p, i) => i % 2 ? <pre key={i}>{p.replace(/\n$/, '')}</pre> : <span key={i}><Inline text={p} /></span>)}</div>
+}
+function ChatView({ turns, dir, onClear }) {
   const endRef = useRef(null)
   const last = turns?.[turns.length - 1]
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }) }, [turns?.length, last?.text?.length])
@@ -450,7 +454,16 @@ function ChatView({ turns, onClear }) {
       <div className="talk-inner">
         <div className="chat-tools"><button className="link" onClick={onClear}><Broom /> Limpar conversa</button></div>
         {turns.map((t, i) => t.role === 'user'
-          ? <You key={i} time={t.ts}><p className="you-text">{t.text}</p></You>
+          ? <You key={i} time={t.ts}>
+              {t.attachments?.length > 0 && (
+                <div className="thumbs">
+                  {t.attachments.map((a) => a.image
+                    ? <img key={a.name} src={appUrl(a.path, dir)} alt={a.name} title={a.name} />
+                    : <span key={a.name} className="thumb-file"><FileIcon /> {a.name}</span>)}
+                </div>
+              )}
+              <p className="you-text">{t.text}</p>
+            </You>
           : <Ade key={i} time={t.ts}>
               {t.pending && !t.text ? <Skeleton lines={2} /> : <Rich text={t.text} />}
               <p className="chat-meta"><span className="mono">{t.model}</span>{t.effort && <span>esforço {EFFORT_PT[t.effort] || t.effort}</span>}{t.usd > 0 && <span>{fmtUsd(t.usd)}</span>}{t.pending && <span className="dot-accent dot-live">respondendo…</span>}</p>

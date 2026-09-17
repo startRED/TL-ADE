@@ -277,6 +277,9 @@ button { font: inherit; color: inherit; }
 .chat-txt { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; line-height: 1.6; }
 .chat-txt pre { white-space: pre; overflow-x: auto; margin: 8px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--bg-0); font-family: var(--code-font-family); font-size: 12px; line-height: 1.55; }
 .chat-meta { display: flex; gap: 10px; margin: 8px 0 0; font-size: 11px; color: var(--gray-9); }
+.chat-txt code { padding: 1px 5px; border-radius: 4px; background: var(--gray-a3); font-family: var(--code-font-family); font-size: 12px; }
+.chat-txt b { font-weight: 600; color: var(--gray-12); }
+.msg.you .thumbs { margin-bottom: 8px; }
 
 /* quadro de épicos e partes */
 .board-sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 0 0 10px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-ctl); overflow: hidden; }
