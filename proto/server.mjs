@@ -245,7 +245,7 @@ function run(cmd, args, { cwd, stdin, onLine, timeoutMs = 20 * 60 * 1000, env = 
     // (mensagem de commit, prompt do agy, schema JSON) precisa de escape estilo MSVC aqui, uma vez só.
     const quoted = IS_WIN ? args.map((a) => /[\s"&|<>^()]/.test(a) ? '"' + a.replace(/(\\*)"/g, '$1$1\\"') + '"' : a) : args
     const eng = als.getStore(); if (eng?.mission?.pause_requested) return reject(PAUSE)
-    const child = spawn(cmd, quoted, { cwd, shell: IS_WIN, env: { ...process.env, ...env }, windowsHide: true })
+    const child = spawn(cmd, quoted, { cwd, shell: IS_WIN, env: { ...process.env, DISABLE_AUTOUPDATER: '1', DISABLE_TELEMETRY: '1', ...env }, windowsHide: true })
     if (eng) eng.children.add(child)
     let out = '', err = '', buf = ''
     const timer = setTimeout(() => killTree(child), timeoutMs)
@@ -567,7 +567,7 @@ function describeTool(c, dir) {
 // ---------- chamada Claude (maker / planner) ----------
 async function claudeCall({ role, prompt, model, effort, tools, skipPermissions, schema, maxTurns = 40 }) {
   const m = state.mission, dir = state.project.dir
-  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--safe-mode', '--max-turns', String(maxTurns), '--model', model]
+  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--safe-mode', '--no-session-persistence', '--max-turns', String(maxTurns), '--model', model]
   if (EFFORTS.includes(effort)) args.push('--effort', effort)
   // Cache de prompt (medido em 17/09): o cache é por prefixo exato e dura 5 min, renovado a cada leitura. Cada chamada nossa é uma sessão nova;
   // com as skills dentro do prompt do usuário, ~37k tokens eram REESCRITOS no cache a cada chamada (US$ 0,15). Com a parte estável (skills) no
@@ -681,7 +681,7 @@ async function chatTurn(e, text, { family, model, effort }) {
   let answer = '', usd = 0
   try {
     if (family === 'claude') {
-      const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--safe-mode', '--max-turns', '12', '--model', model, '--permission-mode', 'plan', '--exclude-dynamic-system-prompt-sections', '--tools', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch']
+      const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--safe-mode', '--no-session-persistence', '--max-turns', '12', '--model', model, '--permission-mode', 'plan', '--exclude-dynamic-system-prompt-sections', '--tools', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch']
       if (EFFORTS.includes(effort)) args.push('--effort', effort)
       let buf = ''
       const r = await run('claude', args, { cwd: dir, stdin: prompt, env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' }, timeoutMs: 8 * 60 * 1000, onLine: (line) => {
