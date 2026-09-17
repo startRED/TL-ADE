@@ -1,0 +1,47 @@
+# TL-ADE — guia para agentes
+
+## O que é
+
+A TL-ADE é um scheduler durável, compilador de contexto e compilador de intenção para execução autônoma de missões por agentes de IA.
+O Slice 1 entrega a execução via `ade run --plan` de uma story com garantias de durabilidade e integridade; ver `PROJECT_CHARTER.md`.
+
+## Comandos de prova
+
+```bash
+node node_modules/vitest/vitest.mjs run
+node node_modules/typescript/bin/tsc --noEmit
+npm run lint
+```
+
+Nunca use `npx`: `spawn('npx.cmd')` sem shell falha com EINVAL no Windows (ADR 0022). Os três saem 0 antes de qualquer commit.
+
+## Convenções
+
+- Produção em `src/**/*.js` ESM com JSDoc (ADR 0023); onde os planos dizem `src/...ts`, leia `.js`.
+- Testes em `tests/**/*.test.ts`, um arquivo por módulo, nomes snake_case em inglês.
+- Eval antes do código (a prova nasce vermelha).
+- Todo `execFile`/`spawnSync` com `maxBuffer` explícito e sem `shell`.
+- Erros lançados são subclasses de `AdeError` de `src/journal/errors.js` com `exitCode`.
+- Dependências de produção: só `ajv` e `canonicalize`.
+- Textos e comentários em português.
+
+## Proibições
+
+- Tocar `proto/**`; a demo fica intocada.
+- Converter arquivo para `.ts` ou criar passo de build.
+- Criar `workspaces` ou `packages/`.
+- Suprimir regra de tipo ou lint (diretivas ts-ignore, ts-expect-error, ts-nocheck, oxlint-disable) ou afrouxar `strict`.
+- Editar ADR aceito (abrir um novo que emenda).
+- Alterar o formato dos 8 `schemas/*.schema.json` sem story própria.
+- Criar item novo na raiz fora da allowlist de `tests/meta.test.ts`.
+- `git push`.
+- Pôr em `src/` item da lista "fora do slice 1" do charter.
+
+## Leia antes
+
+- Vai mexer em escopo → `PROJECT_CHARTER.md`
+- Vai implementar story → `docs/plans/slice-1.md` §3
+- Vai decidir arquitetura → `docs/adr/README.md`
+- Dúvida de método ou portões → `docs/development-method.md`
+
+Conhecimento condicional vai para `docs/reference/<cicatriz>.md` quando um agente errar, nunca para este arquivo.
