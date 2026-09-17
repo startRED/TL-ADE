@@ -14,7 +14,7 @@ export function buildRuntimeStamp({
   coreVersion = CORE_VERSION,
   configDigest,
   capabilitiesDigest,
-} = {}) {
+} = /** @type {any} */ ({})) {
   const stamp = `${coreVersion}:${configDigest}:${capabilitiesDigest}`
   if (!Number.isInteger(coreVersion) || coreVersion < 0 || !STAMP_PATTERN.test(stamp)) {
     throw new TypeError('runtime_stamp inválido: ' + stamp)
@@ -41,8 +41,7 @@ export function parseRuntimeStamp(stamp) {
 
 /**
  * Localiza intenções abertas emitidas sob core_version incompatível com o atual (s4).
- * @param {unknown} [_intents]
- * @param {number} [_currentCoreVersion]
+ * @param {...unknown} _args
  */
 export function findStaleIntents(..._args) {
   throw new AdeError('not_implemented', 'não implementado: s4', 2)
@@ -50,7 +49,7 @@ export function findStaleIntents(..._args) {
 
 /**
  * Assegura que o stamp em uso é compatível com a sessão corrente (s4).
- * @param {unknown} [_stamp]
+ * @param {...unknown} _args
  */
 export function assertStampCurrent(..._args) {
   throw new AdeError('not_implemented', 'não implementado: s4', 2)
@@ -58,7 +57,7 @@ export function assertStampCurrent(..._args) {
 
 /**
  * Grava decisão autorizando prosseguimento com versão desatualizada (s4).
- * @param {unknown} [_options]
+ * @param {...unknown} _args
  */
 export function acceptStaleVersion(..._args) {
   throw new AdeError('not_implemented', 'não implementado: s4', 2)

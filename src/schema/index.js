@@ -1,4 +1,4 @@
-import Ajv from 'ajv'
+import { Ajv } from 'ajv'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -6,8 +6,12 @@ import path from 'node:path'
 const SCHEMA_DIR = fileURLToPath(new URL('../../schemas/', import.meta.url))
 
 const ajv = new Ajv({ allErrors: true })
+/** @type {Map<string, import('ajv').ValidateFunction>} */
 const validators = new Map()
 
+/**
+ * @param {string} schemaName
+ */
 function loadValidator(schemaName) {
   let validateFn = validators.get(schemaName)
   if (validateFn) return validateFn
@@ -19,6 +23,9 @@ function loadValidator(schemaName) {
   return validateFn
 }
 
+/**
+ * @param {import('ajv').ErrorObject} error
+ */
 function errorPath(error) {
   if (error.keyword === 'additionalProperties') {
     const base = error.instancePath || ''
@@ -27,6 +34,11 @@ function errorPath(error) {
   return error.instancePath || '/'
 }
 
+/**
+ * @param {string} schemaName
+ * @param {unknown} doc
+ * @returns {{valid: true, errors: []} | {valid: false, errors: Array<{path: string, message: string}>, code: 4}}
+ */
 export function validate(schemaName, doc) {
   const validateFn = loadValidator(schemaName)
   const ok = validateFn(doc)
