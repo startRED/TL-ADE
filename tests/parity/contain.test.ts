@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import {
@@ -643,5 +643,163 @@ describe('contain parity', () => {
     expect(stopped.restoredTree).toBe(null)
     expect(gitSecret.restoreCalls).toEqual([])
     expect(gitSecret.legacyRestoreCalls).toEqual([])
+  })
+
+  // AC1: Dado um arquivo alterado que casa a lista de caminhos sensíveis, quando contain roda,
+  // então o lote é parado por segurança com o motivo de caminho sensível.
+  test('sensitive_path_stops_batch', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    const port = createGitPort({ worktreeDir: repo.dir })
+
+    // Repositório com src/a.js commitado
+    const srcDir = path.join(repo.dir, 'src')
+    mkdirSync(srcDir, { recursive: true })
+    writeFileSync(path.join(srcDir, 'a.js'), 'export const a = 1\n')
+    const initialCommit = await port.commit({ message: 'commit inicial' })
+
+    // Escrever .env com PORT=3000 (inofensivo, sem segredo)
+    writeFileSync(path.join(repo.dir, '.env'), 'PORT=3000\n')
+
+    // Chamar contain com scopePaths: ['**']
+    const result = await contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore: initialCommit.tree,
+      scopePaths: ['**'],
+    })
+
+    // Exemplo 1: .env alterado com PORT=3000 e scopePaths: ['**']
+    // -> { ok: false, reason: 'sensitive_path', failureClass: 'security', action: 'stop_batch' } com quarantineRef preenchido
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('sensitive_path')
+    expect(result.failureClass).toBe('security')
+    expect(result.action).toBe('stop_batch')
+    expect(result.quarantineRef).toBe('refs/ade/quarantine/S10/1')
+
+    // Exemplo 3: arquivo deploy/chave.pem alterado sem conteúdo de chave -> reason === 'sensitive_path'
+    const deployDir = path.join(repo.dir, 'deploy')
+    mkdirSync(deployDir, { recursive: true })
+    writeFileSync(path.join(deployDir, 'chave.pem'), 'conteudo publico sem chave privada\n')
+
+    const resPem = await contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore: initialCommit.tree,
+      scopePaths: ['**'],
+    })
+    expect(resPem.ok).toBe(false)
+    expect(resPem.reason).toBe('sensitive_path')
+    expect(resPem.failureClass).toBe('security')
+    expect(resPem.action).toBe('stop_batch')
+
+    // Exemplo 4: contain com sensitivePaths: [] e apenas .env alterado dentro do escopo -> { ok: true, action: 'continue' }
+    unlinkSync(path.join(deployDir, 'chave.pem'))
+    const resEmpty = await contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore: initialCommit.tree,
+      scopePaths: ['**'],
+      sensitivePaths: [],
+    })
+    expect(resEmpty.ok).toBe(true)
+    expect(resEmpty.reason).toBe(null)
+    expect(resEmpty.action).toBe('continue')
+  })
+
+  // AC2: Dado esse mesmo caso, quando contain termina, então existe uma referência sob
+  // refs/ade/quarantine/ apontando para a árvore do worktree.
+  test('sensitive_path_creates_quarantine_ref_pointing_to_worktree', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    const port = createGitPort({ worktreeDir: repo.dir })
+
+    const srcDir = path.join(repo.dir, 'src')
+    mkdirSync(srcDir, { recursive: true })
+    writeFileSync(path.join(srcDir, 'a.js'), 'export const a = 1\n')
+    const initialCommit = await port.commit({ message: 'commit inicial' })
+
+    writeFileSync(path.join(repo.dir, '.env'), 'PORT=3000\n')
+
+    const treeBeforeContain = await port.worktreeTree()
+    const headBefore = (await port.run(['rev-parse', 'HEAD'], { maxBuffer: 1 << 20 })).text
+
+    const result = await contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore: initialCommit.tree,
+      scopePaths: ['**'],
+    })
+
+    // AC2: Referência sob refs/ade/quarantine/ apontando para a árvore do worktree
+    expect(result.quarantineRef).toBe('refs/ade/quarantine/S10/1')
+
+    const quarantineTree = (
+      await port.run(['rev-parse', `${result.quarantineRef}^{tree}`], { maxBuffer: 1 << 20 })
+    ).text
+    expect(quarantineTree).toBe(treeBeforeContain)
+
+    // Confere a referência listada sob refs/ade/quarantine
+    const forEachRefRes = await port.run(
+      ['for-each-ref', '--format=%(refname)', 'refs/ade/quarantine'],
+      { maxBuffer: 1 << 20 },
+    )
+    expect(forEachRefRes.text).toContain('refs/ade/quarantine/S10/1')
+
+    // HEAD permanece o mesmo de antes da chamada (sem commit de entrega)
+    const headAfter = (await port.run(['rev-parse', 'HEAD'], { maxBuffer: 1 << 20 })).text
+    expect(headAfter).toBe(headBefore)
+  })
+
+  // AC3: Dado um arquivo sensível sem nenhum segredo dentro e outro arquivo fora do escopo,
+  // quando contain roda, então o motivo é caminho sensível e a violação de escopo também aparece na lista.
+  test('sensitive_path_with_scope_violation_stops_batch_and_preserves_scope', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    const rawPort = createGitPort({ worktreeDir: repo.dir })
+    const port = {
+      ...rawPort,
+      restore: (tree: string, options: { label: string }) => rawPort.restoreTree(tree, options),
+    }
+
+    const srcDir = path.join(repo.dir, 'src')
+    mkdirSync(srcDir, { recursive: true })
+    writeFileSync(path.join(srcDir, 'a.js'), 'export const a = 1\n')
+    const initialCommit = await port.commit({ message: 'commit inicial' })
+
+    // .env alterado e também src/a.js fora do escopo, sem nenhum segredo
+    writeFileSync(path.join(repo.dir, '.env'), 'PORT=3000\n')
+    writeFileSync(path.join(srcDir, 'a.js'), 'export const a = 2\n')
+
+    // scopePaths contempla apenas .env; src/a.js fica fora do escopo
+    const result = await contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore: initialCommit.tree,
+      scopePaths: ['.env'],
+    })
+
+    // Exemplo 2: reason === 'sensitive_path' e violations contém um item kind 'scope' com path 'src/a.js'
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('sensitive_path')
+    expect(result.failureClass).toBe('security')
+    expect(result.action).toBe('stop_batch')
+
+    const scopeViolation = result.violations.find(
+      (v) => v.kind === 'scope' && v.path === 'src/a.js',
+    )
+    expect(scopeViolation).toBeDefined()
+    expect(scopeViolation?.path).toBe('src/a.js')
+
+    const sensitiveViolation = result.violations.find(
+      (v) => v.kind === 'sensitive_path' && v.path === '.env',
+    )
+    expect(sensitiveViolation).toBeDefined()
+    expect(sensitiveViolation?.path).toBe('.env')
+
+    // Precedência: sensitive_path deve anteceder scope na ordenação de violations
+    const sensitiveIdx = result.violations.findIndex((v) => v.kind === 'sensitive_path')
+    const scopeIdx = result.violations.findIndex((v) => v.kind === 'scope')
+    expect(sensitiveIdx).toBeLessThan(scopeIdx)
   })
 })
