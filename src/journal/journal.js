@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { canonicalize, digest16 } from './canonical.js'
-import { AdeError, InvalidEventError } from './errors.js'
+import { AdeError, InvalidEventError, JournalCorruptError } from './errors.js'
 import { validate } from '../schema/index.js'
 
 export const GENESIS_PREV = '0000000000000000'
@@ -250,10 +250,100 @@ export function openJournal({
 
 /**
  * Lê e valida sequencialmente o diário e a cadeia de hash (s3).
- * @param {string} _filePath
+ * @param {string} filePath
+ * @returns {{
+ *   events: Array<Record<string, unknown>>,
+ *   tornTail: null | { line: number, bytesDropped: number, validBytes: number }
+ * }}
  */
-export function readJournal(_filePath) {
-  throw new AdeError('not_implemented', 'não implementado: s3', 2)
+export function readJournal(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return { events: [], tornTail: null }
+  }
+
+  const buf = fs.readFileSync(filePath)
+  if (buf.length === 0) {
+    return { events: [], tornTail: null }
+  }
+
+  const lastLf = buf.lastIndexOf(10)
+
+  if (lastLf === -1) {
+    return {
+      events: [],
+      tornTail: {
+        line: 1,
+        bytesDropped: buf.length,
+        validBytes: 0,
+      },
+    }
+  }
+
+  const validBytes = lastLf + 1
+  const completeBuf = buf.subarray(0, validBytes)
+  const segments = completeBuf.toString('utf8').slice(0, -1).split('\n')
+
+  /** @type {null | { line: number, bytesDropped: number, validBytes: number }} */
+  let tornTail = null
+  if (lastLf < buf.length - 1) {
+    const bytesDropped = buf.length - validBytes
+    tornTail = {
+      line: segments.length + 1,
+      bytesDropped,
+      validBytes,
+    }
+  }
+
+  /** @type {Array<Record<string, unknown>>} */
+  const events = []
+  let expectedPrev = GENESIS_PREV
+
+  for (let i = 0; i < segments.length; i++) {
+    const line = i + 1
+
+    let parsed
+    try {
+      parsed = JSON.parse(segments[i])
+    } catch {
+      throw new JournalCorruptError(line, 'invalid_json')
+    }
+
+    const result = validate('journal-event', parsed)
+    if (!result.valid) {
+      throw new JournalCorruptError(line, 'schema_invalid')
+    }
+
+    /** @type {Record<string, unknown>} */
+    const ev = parsed
+
+    if (ev.format_version !== 1) {
+      throw new JournalCorruptError(line, 'unknown_format_version')
+    }
+
+    if (ev.seq !== line) {
+      throw new JournalCorruptError(line, 'seq_gap')
+    }
+
+    if (ev.prev !== expectedPrev) {
+      throw new JournalCorruptError(line, 'prev_mismatch')
+    }
+
+    let canonical
+    try {
+      canonical = canonicalize(ev)
+    } catch {
+      throw new JournalCorruptError(line, 'not_canonical')
+    }
+
+    if (canonical !== segments[i]) {
+      throw new JournalCorruptError(line, 'not_canonical')
+    }
+
+    events.push(ev)
+    expectedPrev = digest16(ev)
+  }
+
+  return { events, tornTail }
 }
 
 /**
