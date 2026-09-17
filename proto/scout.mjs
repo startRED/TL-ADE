@@ -29,10 +29,11 @@ const prompt = [
   files.length ? `Comece por estes arquivos: ${files.join(', ')}.` : 'Leia o projeto atual só onde for preciso (busque por nome e conteúdo antes de abrir arquivos).',
   web ? 'Pode pesquisar na internet e no GitHub; cite a URL de cada fato externo.' : 'Não pesquise fora do projeto.',
   'Só leitura: não edite, não crie e não rode nada que altere arquivos.',
+  'PRAZO: você tem 4 minutos e no máximo 12 leituras ou buscas. Passou disso, pare e responda com o que já tem; recibo parcial vale, recibo que não chega não vale nada.',
   `Pergunta: ${question}`,
 ].join(' ')
 
-const r = spawnSync('agy', ['--print', prompt, '--output-format', 'json', '--model', model, '--mode', 'plan', '--json-schema', SCHEMA, '--dangerously-skip-permissions'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 6 * 60 * 1000, windowsHide: true })
+const r = spawnSync('agy', ['--print', prompt, '--output-format', 'json', '--model', model, '--mode', 'plan', '--json-schema', SCHEMA, '--dangerously-skip-permissions', '--print-timeout', '6m'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 6.5 * 60 * 1000, windowsHide: true })
 let rec = null, usage = null
 try {
   const j = JSON.parse(r.stdout)
