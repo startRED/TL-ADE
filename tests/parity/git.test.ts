@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
@@ -15,6 +15,11 @@ interface GitPortWithTreeAndDirty {
   commit(options: { message: string }): Promise<{ commit: string; tree: string }>
   worktreeTree(): Promise<string>
   dirtyPaths(): Promise<string[]>
+}
+
+interface GitPortWithCheckpointAndRestore extends GitPortWithTreeAndDirty {
+  checkpoint(label: string): Promise<{ ref: string; commit: string; tree: string; n: number }>
+  restoreTree(tree: string, options: { label: string }): Promise<{ tree: string; discardedRef: string }>
 }
 
 let tmpDirs: string[] = []
@@ -242,6 +247,144 @@ describe('git port parity', () => {
     expect(renameDirty).toContain('secrets/x')
     expect(renameDirty).toContain('pkg/x')
     expect(renameDirty).toEqual(['pkg/x', 'secrets/x'])
+  })
+
+  // AC1: Dado um worktree sujo, quando restoreTree(arvoreAnterior, {label}) roda,
+  // então a árvore descartada continua recuperável por git rev-parse <ref>^{tree} sob refs/ade/discarded/.
+  // AC3: Dado um id que existe mas não é árvore (um blob), quando restoreTree é chamado com ele,
+  // então é lançado erro da família AdeError com motivo de objeto que não é árvore, sem tocar no worktree.
+  test('discarded_tree_is_kept_under_a_ref', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    const port = createGitPort({ worktreeDir: repo.dir }) as unknown as GitPortWithCheckpointAndRestore
+
+    // Validações de entrada: tree que não casa /^[0-9a-f]{40}$/ ou label inválido lançam TypeError
+    await expect(port.restoreTree('naoehumarvore', { label: 'm1' })).rejects.toThrow(TypeError)
+    await expect(port.restoreTree(123 as unknown as string, { label: 'm1' })).rejects.toThrow(TypeError)
+    await expect(port.restoreTree('4b825dc642cb6eb9a060e54bf8d69288fbee4904', { label: '' })).rejects.toThrow(TypeError)
+    await expect(port.restoreTree('4b825dc642cb6eb9a060e54bf8d69288fbee4904', { label: 'm1/..' })).rejects.toThrow(TypeError)
+
+    // Cria commit base
+    const fileA = path.join(repo.dir, 'file.txt')
+    writeFileSync(fileA, 'base content\n')
+    await port.commit({ message: 'initial base' })
+    const baseTree = await port.worktreeTree()
+
+    // AC3 e Exemplo: id de blob existente rejeita com GitError('not_a_tree'), code: 'git_not_a_tree', exitCode: 2 sem tocar no worktree
+    const blobSha = repo.git(['rev-parse', 'HEAD:file.txt']).trim()
+    const untouchedMarker = path.join(repo.dir, 'untouched.txt')
+    writeFileSync(untouchedMarker, 'preserve this')
+    let blobErr: unknown = null
+    try {
+      await port.restoreTree(blobSha, { label: 'm1' })
+    } catch (err) {
+      blobErr = err
+    }
+    expect(blobErr).toBeInstanceOf(AdeError)
+    expect(blobErr).toBeInstanceOf(GitError)
+    expect((blobErr as GitError).code).toBe('git_not_a_tree')
+    expect((blobErr as GitError).exitCode).toBe(2)
+    // Sem tocar no worktree
+    expect(existsSync(untouchedMarker)).toBe(true)
+    rmSync(untouchedMarker)
+
+    // Modifica o worktree para deixá-lo sujo
+    writeFileSync(fileA, 'modified content\n')
+    const untrackedFile = path.join(repo.dir, 'extra.txt')
+    writeFileSync(untrackedFile, 'extra untracked\n')
+    const dirtyTree = await port.worktreeTree()
+    expect(dirtyTree).not.toBe(baseTree)
+
+    // AC1 e Exemplo: worktree sujo -> await port.restoreTree(base, {label:'m1'})
+    const restoreResult = await port.restoreTree(baseTree, { label: 'm1' })
+    expect(restoreResult).toEqual({
+      tree: baseTree,
+      discardedRef: 'refs/ade/discarded/m1/1',
+    })
+
+    // git rev-parse refs/ade/discarded/m1/1^{tree} devolve a árvore suja
+    const savedDiscardedTree = repo.git(['rev-parse', 'refs/ade/discarded/m1/1^{tree}']).trim()
+    expect(savedDiscardedTree).toBe(dirtyTree)
+
+    // Confirma restauração no disco
+    expect(readFileSync(fileA, 'utf8')).toBe('base content\n')
+    expect(existsSync(untrackedFile)).toBe(false)
+  })
+
+  // AC2: Dado um .gitignore não commitado que ignora notes.txt e o próprio notes.txt no disco,
+  // quando a árvore anterior (sem esse .gitignore) é restaurada,
+  // então notes.txt continua no disco e o .gitignore some.
+  test('restore_keeps_a_file_ignored_only_by_the_discarded_rules', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    const port = createGitPort({ worktreeDir: repo.dir }) as unknown as GitPortWithCheckpointAndRestore
+
+    // Commit inicial sem .gitignore
+    writeFileSync(path.join(repo.dir, 'app.js'), 'console.log("hello")\n')
+    await port.commit({ message: 'commit inicial' })
+    const base = await port.worktreeTree()
+
+    // Escrever .gitignore com notes.txt e escrever notes.txt
+    const gitignorePath = path.join(repo.dir, '.gitignore')
+    const notesPath = path.join(repo.dir, 'notes.txt')
+    writeFileSync(gitignorePath, 'notes.txt\n')
+    writeFileSync(notesPath, 'anotações importantes do operador\n')
+
+    // Restaura a árvore base com label 'm/s'
+    const result = await port.restoreTree(base, { label: 'm/s' })
+    expect(result.tree).toBe(base)
+    expect(result.discardedRef).toBe('refs/ade/discarded/m/s/1')
+
+    // Exigir existsSync(notes.txt) === true e existsSync(.gitignore) === false
+    expect(existsSync(notesPath)).toBe(true)
+    expect(readFileSync(notesPath, 'utf8')).toBe('anotações importantes do operador\n')
+    expect(existsSync(gitignorePath)).toBe(false)
+  })
+
+  // AC4: Dado dois checkpoints seguidos com o mesmo rótulo,
+  // quando ambos terminam, então existem duas refs distintas numeradas em sequência sob refs/ade/checkpoints/.
+  test('checkpoint_allocates_sequential_refs_for_same_label', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    const port = createGitPort({ worktreeDir: repo.dir }) as unknown as GitPortWithCheckpointAndRestore
+
+    // Validação de rótulo inválido: lança TypeError e nenhuma ref nova aparece sob refs/ade/
+    const refsBefore = repo.git(['for-each-ref', '--format=%(refname)', 'refs/ade/']).trim()
+    await expect(port.checkpoint('')).rejects.toThrow(TypeError)
+    await expect(port.checkpoint(123 as unknown as string)).rejects.toThrow(TypeError)
+    await expect(port.checkpoint('m1/..')).rejects.toThrow(TypeError)
+    const refsAfter = repo.git(['for-each-ref', '--format=%(refname)', 'refs/ade/']).trim()
+    expect(refsAfter).toBe(refsBefore)
+
+    // Cria commit base para HEAD existir
+    writeFileSync(path.join(repo.dir, 'tracked.txt'), 'tracked\n')
+    await port.commit({ message: 'primeiro commit' })
+
+    // Exemplo e AC4: Primeiro checkpoint sob o rótulo 'm1/s1'
+    const cp1 = await port.checkpoint('m1/s1')
+    expect(cp1.ref).toBe('refs/ade/checkpoints/m1/s1/1')
+    expect(cp1.n).toBe(1)
+    expect(cp1.commit).toMatch(/^[0-9a-f]{40}$/)
+    expect(cp1.tree).toMatch(/^[0-9a-f]{40}$/)
+
+    // Modifica o arquivo para gerar novo estado de árvore
+    writeFileSync(path.join(repo.dir, 'tracked.txt'), 'tracked alterado\n')
+
+    // Segundo checkpoint logo depois sob o mesmo rótulo
+    const cp2 = await port.checkpoint('m1/s1')
+    expect(cp2.ref).toBe('refs/ade/checkpoints/m1/s1/2')
+    expect(cp2.n).toBe(2)
+    expect(cp2.commit).toMatch(/^[0-9a-f]{40}$/)
+    expect(cp2.tree).toMatch(/^[0-9a-f]{40}$/)
+    expect(cp2.commit).not.toBe(cp1.commit)
+    expect(cp2.tree).not.toBe(cp1.tree)
+
+    // Verifica que ambas as refs existem no git real
+    const allRefs = repo.git(['for-each-ref', '--format=%(refname)', 'refs/ade/checkpoints/m1/s1/']).trim().split('\n')
+    expect(allRefs).toEqual([
+      'refs/ade/checkpoints/m1/s1/1',
+      'refs/ade/checkpoints/m1/s1/2',
+    ])
   })
 })
 

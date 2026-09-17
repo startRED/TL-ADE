@@ -78,6 +78,20 @@ function buildEnv(hooksDir, extra = {}) {
  */
 
 /**
+ * @typedef {Object} CheckpointResult
+ * @property {string} ref
+ * @property {string} commit
+ * @property {string} tree
+ * @property {number} n
+ */
+
+/**
+ * @typedef {Object} RestoreTreeResult
+ * @property {string} tree
+ * @property {string} discardedRef
+ */
+
+/**
  * @typedef {Object} GitPort
  * @property {string} worktreeDir
  * @property {(args: string[], options?: RunOptions) => Promise<RunResult>} run
@@ -86,6 +100,8 @@ function buildEnv(hooksDir, extra = {}) {
  * @property {(options: { message: string }) => Promise<CommitResult>} commit
  * @property {() => Promise<string>} worktreeTree
  * @property {() => Promise<string[]>} dirtyPaths
+ * @property {(label: string) => Promise<CheckpointResult>} checkpoint
+ * @property {(tree: string, options: { label: string }) => Promise<RestoreTreeResult>} restoreTree
  */
 
 /**
@@ -249,6 +265,116 @@ export function createGitPort(options) {
     return Array.from(set).sort()
   }
 
+  /**
+   * Valida o rótulo contra as regras de formato de ref do Git.
+   *
+   * @param {unknown} [label]
+   * @returns {Promise<void>}
+   */
+  async function assertLabel(label) {
+    if (typeof label !== 'string' || label.length === 0) {
+      throw new TypeError('label inválido')
+    }
+    const fmt = await run(['check-ref-format', `refs/ade/checkpoints/${label}/1`], {
+      maxBuffer: 1 << 20,
+      okCodes: [0, 1, 128],
+    })
+    if (fmt.code !== 0) {
+      throw new TypeError('label inválido')
+    }
+  }
+
+  /**
+   * Obtém o próximo número sequencial de ref sob o prefixo informado.
+   *
+   * @param {string} prefix
+   * @returns {Promise<number>}
+   */
+  async function nextRefNumber(prefix) {
+    const { text } = await run(['for-each-ref', '--format=%(refname)', prefix], {
+      maxBuffer: 1 << 24,
+    })
+    return text === '' ? 1 : text.split('\n').length + 1
+  }
+
+  /**
+   * Cria um commit apontando para a árvore especificada e atualiza a ref sequencialmente.
+   *
+   * @param {string} prefix
+   * @param {string} tree
+   * @param {string} message
+   * @returns {Promise<{ ref: string, commit: string, n: number }>}
+   */
+  async function writeTreeRef(prefix, tree, message) {
+    const head = await headInfo()
+    const parents = head.commit ? ['-p', head.commit] : []
+    const commit = (
+      await run(['commit-tree', tree, ...parents, '-m', message], {
+        maxBuffer: 1 << 20,
+      })
+    ).text
+    const n = await nextRefNumber(prefix)
+    const ref = `${prefix}/${n}`
+    await run(['update-ref', ref, commit], { maxBuffer: 1 << 20 })
+    return { ref, commit, n }
+  }
+
+  /**
+   * Cria um checkpoint durável da árvore do worktree sob refs/ade/checkpoints/<label>/<n>.
+   *
+   * @param {string} label
+   * @returns {Promise<CheckpointResult>}
+   */
+  async function checkpoint(label) {
+    await assertLabel(label)
+    const tree = await worktreeTree()
+    const { ref, commit, n } = await writeTreeRef(
+      `refs/ade/checkpoints/${label}`,
+      tree,
+      `ade checkpoint ${label}`,
+    )
+    return { ref, commit, tree, n }
+  }
+
+  /**
+   * Restaura o worktree para a árvore especificada, salvando a árvore atual em refs/ade/discarded/<label>/<n>.
+   *
+   * ATENÇÃO (I20): A ordem de execução é obrigatoriamente `git clean -fd` e depois `git read-tree --reset -u`.
+   * Inverter essa ordem apaga arquivo do operador; o arquivo ignorado apenas pela regra que está sendo descartada
+   * tem de continuar no disco.
+   *
+   * @param {string} tree
+   * @param {{ label: string }} options
+   * @returns {Promise<RestoreTreeResult>}
+   */
+  async function restoreTree(tree, options) {
+    if (typeof tree !== 'string' || !/^[0-9a-f]{40}$/.test(tree)) {
+      throw new TypeError('tree inválida')
+    }
+    const label = options && typeof options === 'object' ? options.label : undefined
+    await assertLabel(label)
+
+    const probe = await run(['cat-file', '-t', tree], {
+      maxBuffer: 1 << 20,
+      okCodes: [0, 128],
+    })
+    if (probe.code !== 0 || probe.stdout.toString('utf8').trim() !== 'tree') {
+      throw new GitError('not_a_tree', 'objeto não é uma árvore', { tree })
+    }
+
+    const current = await worktreeTree()
+    const { ref: discardedRef } = await writeTreeRef(
+      `refs/ade/discarded/${label}`,
+      current,
+      `ade discarded ${label}`,
+    )
+
+    await run(['clean', '-fd'], { maxBuffer: 1 << 26 })
+    await run(['read-tree', '--reset', '-u', tree], { maxBuffer: 1 << 26 })
+
+    return { tree, discardedRef }
+  }
+
   return {
     worktreeDir,
     run,
@@ -257,5 +383,7 @@ export function createGitPort(options) {
     commit,
     worktreeTree,
     dirtyPaths,
+    checkpoint,
+    restoreTree,
   }
 }
