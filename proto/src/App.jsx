@@ -141,12 +141,11 @@ export default function App() {
   const [state, setState] = useState({ dir: null, project: null, mission: null, log: [], history: [], live: null, recent: [], settings: null, catalog: [], registry: {}, attachments: [], engines: [] })
   const [request, setRequest] = useState('')
   const [menu, setMenu] = useState(false)
-  const [mode, setMode] = useState('build') // build: vira missão · ask: conversa só leitura com o modelo escolhido
-  const [modeManual, setModeManual] = useState(false)
   const [chatModel, setChatModel] = useState(() => { try { return localStorage.getItem('ade.chat.model') || 'claude|sonnet' } catch { return 'claude|sonnet' } })
   const [chatEffort, setChatEffort] = useState(() => { try { return localStorage.getItem('ade.chat.effort') || 'medium' } catch { return 'medium' } })
   useEffect(() => { try { localStorage.setItem('ade.chat.model', chatModel); localStorage.setItem('ade.chat.effort', chatEffort) } catch {} }, [chatModel, chatEffort])
   const [view, setView] = useState('mission') // mission | chat | board
+  const mode = view === 'chat' ? 'ask' : 'build' // na Conversa o compositor pergunta (só leitura); nas outras vistas manda pedido
   const [attachErr, setAttachErr] = useState(null)
   const [connected, setConnected] = useState(false)
   const [page, setPage] = useState(null)
@@ -206,12 +205,11 @@ export default function App() {
   }, [state.dir]) // eslint-disable-line
   useEffect(() => { try { if (state.dir !== undefined) localStorage.setItem(draftKey(state.dir), request) } catch {} }, [request]) // eslint-disable-line
   const [dirtyReq, setDirtyReq] = useState(null) // pedido que esbarrou em alterações pendentes; "Commitar e continuar" reenvia com commit_first
-  useEffect(() => { if (!modeManual) setMode(looksQuestion(request) ? 'ask' : 'build') }, [request]) // eslint-disable-line
   async function ask(text) {
     const q = (text ?? request).trim()
     if (!q || !state.dir || state.chat_busy) return
     const [family, model] = chatModel.split('|')
-    setPage(null); setError(null); setRequest(''); setView('chat'); setModeManual(false)
+    setPage(null); setError(null); setRequest(''); setView('chat')
     const r = await post('/api/chat', { text: q, dir: state.dir, family, model, effort: chatEffort })
     if (!r.ok) { const j = await r.json().catch(() => ({})); setRequest(q); setError(j.error || 'Não deu para perguntar.') }
   }
@@ -219,7 +217,7 @@ export default function App() {
     if (mode === 'ask' && text == null) return ask()
     const req = (text ?? request).trim()
     if (!req || busy) return
-    setPage(null); setError(null); setCleared(null); setRequest(''); setDirtyReq(null); setView('mission'); setModeManual(false)
+    setPage(null); setError(null); setCleared(null); setRequest(''); setDirtyReq(null); setView('mission')
     const r = await post('/api/run', { request: req, dir: state.dir, ...(opts.commitFirst ? { commit_first: true } : {}) })
     if (!r.ok) {
       const j = await r.json().catch(() => ({})); setRequest(req)
@@ -335,7 +333,7 @@ export default function App() {
           {showSide && <button className={`ghost-btn only-mid${need ? ' warn' : ''}`} onClick={() => setSide(true)}><ListChecks /> Sua vez</button>}
           {!page && (view !== 'mission') && <button className="ghost-btn" onClick={() => setView('mission')}><ArrowLeft /> Pedido</button>}
           {!page && shown && view !== 'board' && <button className="ghost-btn" onClick={() => setView('board')}><Kanban /> Quadro</button>}
-          {!page && view !== 'chat' && (state.chat?.length > 0 || mode === 'ask') && <button className="ghost-btn" onClick={() => setView('chat')}><ChatCircle /> Conversa{state.chat?.length ? ` (${state.chat.length})` : ''}</button>}
+          {!page && view !== 'chat' && <button className="ghost-btn" onClick={() => setView('chat')}><ChatCircle /> Conversa{state.chat?.length ? ` (${state.chat.length})` : ''}</button>}
           {!page && <button className={`ghost-btn${drawer ? ' on' : ''}`} onClick={() => setDrawer((v) => !v)}><Terminal /> Atividade completa</button>}
         </header>
 
@@ -373,17 +371,18 @@ export default function App() {
                       {attachErr && <span className="att-chip bad">{attachErr}</span>}
                     </div>
                   )}
-                  <div className="mode-row">
-                    <button type="button" className={`mode-chip${mode === 'build' ? ' on' : ''}`} onClick={() => { setMode('build'); setModeManual(true) }}><Wrench /> Pedido</button>
-                    <button type="button" className={`mode-chip${mode === 'ask' ? ' on' : ''}`} onClick={() => { setMode('ask'); setModeManual(true) }}><ChatCircle /> Pergunta</button>
-                    {mode === 'ask' && <>
+                  {mode === 'ask' ? (
+                    <div className="mode-row">
+                      <span className="mode-chip on"><ChatCircle /> Pergunta</span>
                       <select className="sel sm" value={chatModel} onChange={(e) => setChatModel(e.target.value)} aria-label="Modelo da conversa">
                         {Object.entries(state.registry || {}).map(([fam, fr]) => <optgroup key={fam} label={fr.label}>{fr.models.map((mo) => <option key={mo.id} value={`${fam}|${mo.id}`}>{mo.label}</option>)}</optgroup>)}
                       </select>
                       <select className="sel sm" value={chatEffort} onChange={(e) => setChatEffort(e.target.value)} aria-label="Esforço da conversa"><option value="low">esforço baixo</option><option value="medium">esforço médio</option><option value="high">esforço alto</option></select>
-                      <span className="mode-note">{!modeManual ? 'parece pergunta · ' : ''}só leitura, não vira missão</span>
-                    </>}
-                  </div>
+                      <span className="mode-note">só leitura, não vira missão</span>
+                    </div>
+                  ) : looksQuestion(request) && p ? (
+                    <div className="mode-row"><span className="mode-note">Parece pergunta, não pedido.</span><button type="button" className="link" onClick={() => setView('chat')}>Mandar para a Conversa</button></div>
+                  ) : null}
                   <div className="composer-row">
                     <div className="plus-wrap">
                       <button type="button" className="plus" aria-label="Anexar" onClick={() => setMenu((v) => !v)} disabled={live}><Plus weight="bold" /></button>
