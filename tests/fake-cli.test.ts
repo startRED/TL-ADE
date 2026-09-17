@@ -437,4 +437,247 @@ describe('fake-cli', () => {
       expect(existsSync(path.join(scenarioDir, 'maker.count'))).toBe(false)
     }
   }, 20000)
+
+  // AC1: Dada uma ação que declara arquivos a criar e caminhos a apagar, quando a invocação roda,
+  // então os arquivos aparecem com o conteúdo exato relativos ao diretório de trabalho e os caminhos pedidos somem.
+  test('fake_cli_writes_and_deletes_files_per_action', () => {
+    const scenarioSrc = path.join(ROOT, 'fixtures/scenarios/file-actions')
+    const scenarioDest = path.join(tmpDir, 'scenario')
+    cpSync(scenarioSrc, scenarioDest, { recursive: true })
+
+    const workdir = path.join(tmpDir, 'work')
+    mkdirSync(workdir, { recursive: true })
+    const alvoFile = path.join(workdir, 'alvo.txt')
+    writeFileSync(alvoFile, 'apagar preexistente\n')
+
+    const resultFile = path.join(tmpDir, 'result.json')
+    const packFile = path.join(tmpDir, 'pack.md')
+    writeFileSync(packFile, '# pack\n')
+
+    const res = spawnSync(process.execPath, [CLI_PATH, packFile], {
+      cwd: workdir,
+      env: {
+        ...process.env,
+        ADE_FAKE_SCENARIO: scenarioDest,
+        ADE_FAKE_ROLE: 'maker',
+        ADE_FAKE_RESULT_FILE: resultFile,
+      },
+      encoding: 'utf8',
+      maxBuffer: 1 << 26,
+      windowsHide: true,
+      shell: false,
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    } as EngineSpawnSyncOptions)
+
+    expect(res.status).toBe(0)
+    expect(res.stdout).toBe('feito')
+    expect(existsSync(path.join(workdir, 'novo/a.txt'))).toBe(true)
+    expect(readFileSync(path.join(workdir, 'novo/a.txt'), 'utf8')).toBe('conteudo A')
+    expect(existsSync(alvoFile)).toBe(false)
+  }, 20000)
+
+  // AC2: Dada uma ação de fuga apontando para fora do diretório de trabalho, quando a invocação roda,
+  // então o arquivo é criado lá fora mesmo assim e o desfecho continua bem-sucedido.
+  test('fake_cli_escape_writes_outside_workdir', () => {
+    const scenarioSrc = path.join(ROOT, 'fixtures/scenarios/escape-action')
+    const scenarioDest = path.join(tmpDir, 'scenario')
+    cpSync(scenarioSrc, scenarioDest, { recursive: true })
+
+    const workdir = path.join(tmpDir, 'work')
+    mkdirSync(workdir, { recursive: true })
+
+    const resultFile = path.join(tmpDir, 'result.json')
+    const packFile = path.join(tmpDir, 'pack.md')
+    writeFileSync(packFile, '# pack\n')
+
+    const res = spawnSync(process.execPath, [CLI_PATH, packFile], {
+      cwd: workdir,
+      env: {
+        ...process.env,
+        ADE_FAKE_SCENARIO: scenarioDest,
+        ADE_FAKE_ROLE: 'maker',
+        ADE_FAKE_RESULT_FILE: resultFile,
+      },
+      encoding: 'utf8',
+      maxBuffer: 1 << 26,
+      windowsHide: true,
+      shell: false,
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    } as EngineSpawnSyncOptions)
+
+    expect(res.status).toBe(0)
+    expect(res.stdout).toBe('fugiu')
+    const foraFile = path.join(tmpDir, 'fora.txt')
+    expect(existsSync(foraFile)).toBe(true)
+    expect(readFileSync(foraFile, 'utf8')).toBe('ade-escape\n')
+  }, 20000)
+
+  // AC3: Dada uma ação que pede para não gravar resultado, quando a invocação roda sem a variável de resultado,
+  // então nenhum arquivo de resultado é criado e a saída é bem-sucedida; e uma ação de queda com código próprio termina com esse código e sem resultado.
+  test('fake_cli_no_result_and_crash_exit_codes', () => {
+    const scenarioSrc = path.join(ROOT, 'fixtures/scenarios/no-result-crash')
+    const scenarioDest = path.join(tmpDir, 'scenario')
+    cpSync(scenarioSrc, scenarioDest, { recursive: true })
+
+    const resultFile = path.join(tmpDir, 'result.json')
+    const packFile = path.join(tmpDir, 'pack.md')
+    writeFileSync(packFile, '# pack\n')
+
+    const envWithoutResult: Record<string, string | undefined> = {
+      ...process.env,
+      ADE_FAKE_SCENARIO: scenarioDest,
+      ADE_FAKE_ROLE: 'maker',
+    }
+    delete envWithoutResult.ADE_FAKE_RESULT_FILE
+
+    // Ação 0: {"no_result":true,"stdout":"sem resultado"} sem ADE_FAKE_RESULT_FILE
+    const res1 = spawnSync(process.execPath, [CLI_PATH, packFile], {
+      cwd: tmpDir,
+      env: envWithoutResult as Record<string, string>,
+      encoding: 'utf8',
+      maxBuffer: 1 << 26,
+      windowsHide: true,
+      shell: false,
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    } as EngineSpawnSyncOptions)
+
+    expect(res1.status).toBe(0)
+    expect(res1.stdout).toBe('sem resultado')
+    expect(existsSync(resultFile)).toBe(false)
+
+    // Ação 1: {"crash":true,"exit":3,"stderr":"boom"}
+    const res2 = spawnSync(process.execPath, [CLI_PATH, packFile], {
+      cwd: tmpDir,
+      env: envWithoutResult as Record<string, string>,
+      encoding: 'utf8',
+      maxBuffer: 1 << 26,
+      windowsHide: true,
+      shell: false,
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    } as EngineSpawnSyncOptions)
+
+    expect(res2.status).toBe(3)
+    expect(res2.stderr).toBe('boom')
+    expect(existsSync(resultFile)).toBe(false)
+  }, 20000)
+
+  // AC4: Dada uma ação que manda rodar um comando que não existe, quando a invocação roda,
+  // então a falha é ignorada, a saída padrão e o código de saída são os da ação e o resultado é gravado normalmente.
+  test('fake_cli_ignores_failing_argv_command', () => {
+    const scenarioSrc = path.join(ROOT, 'fixtures/scenarios/bad-argv')
+    const scenarioDest = path.join(tmpDir, 'scenario')
+    cpSync(scenarioSrc, scenarioDest, { recursive: true })
+
+    const resultFile = path.join(tmpDir, 'result.json')
+    const packFile = path.join(tmpDir, 'pack.md')
+    writeFileSync(packFile, '# pack\n')
+
+    const res = spawnSync(process.execPath, [CLI_PATH, packFile], {
+      cwd: tmpDir,
+      env: {
+        ...process.env,
+        ADE_FAKE_SCENARIO: scenarioDest,
+        ADE_FAKE_ROLE: 'maker',
+        ADE_FAKE_RESULT_FILE: resultFile,
+      },
+      encoding: 'utf8',
+      maxBuffer: 1 << 26,
+      windowsHide: true,
+      shell: false,
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    } as EngineSpawnSyncOptions)
+
+    expect(res.status).toBe(0)
+    expect(res.stdout).toBe('seguiu')
+    expect(res.stderr).toBe('')
+    expect(existsSync(resultFile)).toBe(true)
+    expect(JSON.parse(readFileSync(resultFile, 'utf8'))).toEqual({
+      status: 'ok',
+      role: 'maker',
+      call: 0,
+    })
+  }, 20000)
+
+  test('fake_cli_replays_recorded_stdout', async () => {
+    const scenarioSrc = path.join(ROOT, 'fixtures/scenarios/replay-stdout')
+    const scenarioDest = path.join(tmpDir, 'scenarios/replay-stdout')
+    cpSync(scenarioSrc, scenarioDest, { recursive: true })
+
+    const transcriptSrc = path.join(ROOT, 'fixtures/transcripts/hello')
+    const transcriptDest = path.join(tmpDir, 'transcripts/hello')
+    cpSync(transcriptSrc, transcriptDest, { recursive: true })
+
+    const resultFile = path.join(tmpDir, 'result.json')
+    const packFile = path.join(tmpDir, 'pack.md')
+    writeFileSync(packFile, '# pack\n')
+
+    const expectedStdout = readFileSync(path.join(transcriptDest, 'stdout.json'), 'utf8')
+
+    const res = spawnSync(process.execPath, [CLI_PATH, packFile], {
+      cwd: tmpDir,
+      env: {
+        ...process.env,
+        ADE_FAKE_SCENARIO: scenarioDest,
+        ADE_FAKE_ROLE: 'maker',
+        ADE_FAKE_RESULT_FILE: resultFile,
+      },
+      encoding: 'utf8',
+      maxBuffer: 1 << 26,
+      windowsHide: true,
+      shell: false,
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    } as EngineSpawnSyncOptions)
+
+    expect(res.status).toBe(0)
+    expect(res.stdout).toBe(expectedStdout)
+    expect(res.stdout).not.toContain('ignorado')
+
+    // Transcript ausente: lança AdeError 'fake_scenario_invalid' e sai 2
+    const missingScenarioDir = path.join(tmpDir, 'scenarios/missing-transcript')
+    mkdirSync(missingScenarioDir, { recursive: true })
+    writeFileSync(
+      path.join(missingScenarioDir, 'maker.json'),
+      JSON.stringify([{ stdout_from: 'transcripts/nao-existe' }]),
+    )
+
+    try {
+      await runFakeCli([packFile], {
+        ADE_FAKE_SCENARIO: missingScenarioDir,
+        ADE_FAKE_ROLE: 'maker',
+        ADE_FAKE_RESULT_FILE: resultFile,
+      })
+      expect.unreachable('deve lançar AdeError para transcript ausente')
+    } catch (err: unknown) {
+      expect(err).toBeInstanceOf(AdeError)
+      const adeErr = err as AdeError
+      expect(adeErr.code).toBe('fake_scenario_invalid')
+      expect(adeErr.exitCode).toBe(2)
+      expect(adeErr.message).toContain('transcript ausente')
+    }
+
+    const resMissing = spawnSync(process.execPath, [CLI_PATH, packFile], {
+      cwd: tmpDir,
+      env: {
+        ...process.env,
+        ADE_FAKE_SCENARIO: missingScenarioDir,
+        ADE_FAKE_ROLE: 'maker',
+        ADE_FAKE_RESULT_FILE: resultFile,
+      },
+      encoding: 'utf8',
+      maxBuffer: 1 << 26,
+      windowsHide: true,
+      shell: false,
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    } as EngineSpawnSyncOptions)
+
+    expect(resMissing.status).toBe(2)
+    expect(resMissing.stderr).toContain('transcript ausente')
+  }, 20000)
 })
