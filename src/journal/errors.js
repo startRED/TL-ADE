@@ -93,3 +93,31 @@ export class LeaseAwaitingOperatorError extends AdeError {
     super('awaiting_operator', `awaiting_operator: ${reason}`, 3, { owner, reason })
   }
 }
+
+/**
+ * Sinaliza falha em comando ou operação do Git.
+ */
+export class GitError extends AdeError {
+  /**
+   * @param {string} reason
+   * @param {string} message
+   * @param {Record<string, unknown>} [details]
+   */
+  constructor(reason, message, details = {}) {
+    super('git_' + reason, message, 2, { ...details, reason })
+  }
+}
+
+/**
+ * Sinaliza estado inesperado na árvore ou saída truncada do Git.
+ */
+export class UnexpectedTreeStateError extends AdeError {
+  /**
+   * @param {string} message
+   * @param {Record<string, unknown>} [details]
+   */
+  constructor(message, details = {}) {
+    super('unexpected_tree_state', message, 2, details)
+  }
+}
+
