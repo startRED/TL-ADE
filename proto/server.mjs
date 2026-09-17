@@ -296,6 +296,7 @@ async function loadSavedMissions() {
       if (!m.plan || !m.stories.length) { m.steps = [] }
       j.log = [...(j.log || []), { ts: now(), source: 'engine', kind: 'warn', text: 'o servidor foi reiniciado no meio; a missão ficou pausada. Continuar retoma da parte pendente.' }]
     }
+    if (m.program && m.epic) m.epic = m.program.epics.find((x) => x.id === m.epic.id) || null
     e.mission = m; e.log = j.log || []; e.live = null
   }
   if (saved.active && engines.get(path.resolve(saved.active))?.project) activeDir = path.resolve(saved.active)
@@ -1227,7 +1228,7 @@ async function runStories() {
       st.state = 'done'; broadcast(); await persistMission().catch(() => {})
     }
     if (m.program && m.epic) { // fim de um épico: quem fecha é a fila
-      const ep = m.epic; if (ep.state === 'running') closeEpic(ep, m.stories)
+      const ep = m.program.epics.find((x) => x.id === m.epic.id) || m.epic; if (ep.state === 'running') closeEpic(ep, m.stories)
       m.current = null; m.epic = null; broadcast(); await persistMission().catch(() => {})
       if (m.program.current != null && m.program.epics.some((e) => ['queued', 'incomplete'].includes(e.state))) return runProgram()
       return 'ok'
