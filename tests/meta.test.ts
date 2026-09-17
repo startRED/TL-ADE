@@ -91,3 +91,102 @@ describe('ci workflow', () => {
   })
 })
 
+function isWithinAgentsLimit(bytes: number): boolean {
+  return bytes > 0 && bytes <= 8192
+}
+
+const READ_BEFORE_PATHS = [
+  'PROJECT_CHARTER.md',
+  'docs/plans/slice-1.md',
+  'docs/adr/README.md',
+  'docs/development-method.md',
+]
+
+describe('AGENTS.md e CLAUDE.md', () => {
+  test('agents_md_stays_under_8kb', () => {
+    expect(isWithinAgentsLimit(8192)).toBe(true)
+    expect(isWithinAgentsLimit(8193)).toBe(false)
+    expect(isWithinAgentsLimit(0)).toBe(false)
+
+    const agentsPath = path.join(ROOT, 'AGENTS.md')
+    expect(existsSync(agentsPath), 'AGENTS.md deve existir na raiz').toBe(true)
+
+    const content = readFileSync(agentsPath)
+    const size = Buffer.byteLength(content)
+    expect(size).toBeGreaterThan(0)
+    expect(size).toBeLessThanOrEqual(8192)
+    expect(isWithinAgentsLimit(size)).toBe(true)
+  })
+
+  test('claude_md_is_single_line_pointing_to_agents_md', () => {
+    const claudePath = path.join(ROOT, 'CLAUDE.md')
+    expect(existsSync(claudePath), 'CLAUDE.md deve existir na raiz').toBe(true)
+
+    const content = readFileSync(claudePath, 'utf8')
+    expect(content.trim()).toBe('@AGENTS.md')
+
+    const nonEmptyLines = content.split(/\r?\n/).filter((line) => line.trim().length > 0)
+    expect(nonEmptyLines).toHaveLength(1)
+  })
+
+  test('agents_md_routes_to_proof_commands_rules_and_existing_docs', () => {
+    const agentsPath = path.join(ROOT, 'AGENTS.md')
+    expect(existsSync(agentsPath), 'AGENTS.md deve existir na raiz').toBe(true)
+
+    const content = readFileSync(agentsPath, 'utf8')
+
+    const proofCommands = [
+      'node node_modules/vitest/vitest.mjs run',
+      'node node_modules/typescript/bin/tsc --noEmit',
+      'npm run lint',
+    ]
+    for (const cmd of proofCommands) {
+      expect(content).toContain(cmd)
+    }
+
+    const requiredTriggers = ['npx', 'proto/', 'maxBuffer', 'JSDoc', 'src/journal/errors.js']
+    for (const trigger of requiredTriggers) {
+      expect(content).toContain(trigger)
+    }
+
+    for (const docPath of READ_BEFORE_PATHS) {
+      expect(content).toContain(docPath)
+      expect(
+        existsSync(path.join(ROOT, docPath)),
+        `${docPath} listado em "Leia antes" deve existir no disco`,
+      ).toBe(true)
+    }
+  })
+
+  test('ci_workflow_scripts_exist_in_package_json', () => {
+    const sampleWorkflow = 'steps:\n  - run: npm run coverage\n'
+    const sampleScripts: Record<string, string> = { test: 'vitest' }
+    const sampleMatches = [...sampleWorkflow.matchAll(/npm run ([\w:-]+)/g)].map((m) => m[1])
+    const missingInSample = sampleMatches.filter((name) => !(name in sampleScripts))
+    expect(missingInSample).toContain('coverage')
+
+    expect(existsSync(CI_WORKFLOW_PATH), '.github/workflows/ci.yml deve existir').toBe(true)
+    const ciContent = readFileSync(CI_WORKFLOW_PATH, 'utf8')
+
+    const packageJsonPath = path.join(ROOT, 'package.json')
+    expect(existsSync(packageJsonPath), 'package.json deve existir').toBe(true)
+    const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as {
+      scripts?: Record<string, string>
+    }
+
+    expect(pkg.scripts, 'package.json deve conter scripts').toBeDefined()
+    expect(pkg.scripts?.test, 'package.json deve conter script test').toBeDefined()
+
+    const extractedScripts = [...ciContent.matchAll(/npm run ([\w:-]+)/g)].map((m) => m[1])
+    expect(extractedScripts.length).toBeGreaterThan(0)
+
+    for (const scriptName of extractedScripts) {
+      expect(
+        pkg.scripts,
+        `Script "${scriptName}" do CI deve existir em package.json.scripts`,
+      ).toHaveProperty(scriptName)
+    }
+  })
+})
+
+
