@@ -17,6 +17,11 @@ Duplo clique em `abrir.bat`. Na primeira vez instala as dependências (1 a 2 min
 9. Faixa rápida: pedido curto de correção ("corrija o botão…") num projeto existente pula entrevista e plano; vai direto para prova, correção e revisão (~US$ 0,9 medido). Desligável em Opções.
 10. Pedido grande (vários subsistemas): a ADE divide sozinha em **épicos** com dependências, um por vez; cada épico é planejado na hora (vendo o código dos anteriores) e roda como missão pequena. Parte grande demais (mais de 4 critérios, mais de 120 palavras, "e também") volta ao planejador para dividir antes de gastar. Parte que depende de outra não concluída é pulada sem gastar. Parte rejeitada pelo revisor com achado grave vira uma parte de correção só com os achados, mantendo o trabalho feito.
 11. Economia medida: cada fase é uma sessão nova do Claude, mas o prompt já leva a árvore do projeto, o conteúdo dos arquivos tocados e o resumo da fase anterior (pacote de contexto); turnos por chamada caíram pela metade. Telemetria por chamada em `.ade/journal.jsonl` (`model_call`).
+12. Esforço por papel (Modelos): baixo, médio ou alto. Claude recebe `--effort`; Codex `model_reasoning_effort`; Antigravity usa o sufixo do modelo (`gemini-3.8-flash-medium`; Pro só tem alto/baixo). Padrão: entender médio, planejar alto, escrever alto, revisar médio.
+13. Batedor (Gemini via Antigravity, `scout.mjs`): lê muito e devolve um recibo curto (resumo, fatos, arquivos com linhas, fontes). O motor chama antes de planejar um pedido de funcionalidade para cima em projeto com código (e a cada épico); quem escreve chama sob demanda (`node scout.mjs "pergunta" [arquivos] [--web]`) para documentação, arquivo grande ou pesquisa na web/GitHub. Junto vai o **mapa do código** (símbolo@linha, sem IA) para ler só o trecho.
+14. Quem planeja: o entendedor mede a dificuldade (leve, normal, pesada) e recomenda o planejador (Sonnet médio, Opus médio, Fable alto). Se diferir do configurado, você escolhe no painel "Sua vez" (ou na entrevista); no modo noturno a recomendação vale.
+15. Conversa (chip "Pergunta" no compositor): pergunta ou pedido pequeno vai para um chat só leitura com o modelo e o esforço que você escolher (Claude, Codex ou Antigravity), sem virar missão. Detecta pergunta sozinha ("?", "como", "o que"…); histórico por pasta em `.ade/chats/`.
+16. Quadro: botão no topo que mostra épicos e partes do pedido atual (prontas, em andamento, na fila, puladas, dependências e custo por épico).
 
 ## O que acontece por baixo
 
@@ -49,9 +54,9 @@ Quem escreve e quem revisa têm de ser de empresas diferentes. Modelos por papel
   - **Codex**: cada sessão grava `rate_limits` em `~/.codex/sessions/…jsonl`; a ADE lê a sessão mais recente (as revisões da ADE também contam, por isso rodam sem `--ephemeral`).
   - **Antigravity**: não deixa nada legível; abra o `agy` → Models & Quota.
 - Tokens acima de 1000k aparecem em M; custo em dólar com vírgula (US$ 1,41).
-- Sem retomada após queda do servidor: uma missão interrompida fica registrada em `.ade/journal.jsonl`, mas não continua sozinha.
-- Um projeto por vez.
-- O seletor de pasta é um campo de texto, não uma janela do Windows.
+- Queda do servidor no meio de uma parte: a missão volta como pausada e a parte em andamento recomeça do zero ao continuar.
+- O Gemini CLI (`gemini`) fica de fora enquanto não estiver logado (`oauth_creds.json`); o Gemini entra pelo Antigravity (`agy`).
+- A conversa é só leitura: para mudar arquivos, mande um pedido.
 
 ## Arquivos
 
