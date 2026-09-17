@@ -92,6 +92,8 @@ const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Typ
 const appUrl = (rel, dir, extra) => `/api/app/${rel}?${new URLSearchParams({ ...(dir ? { dir } : {}), ...(extra || {}) })}`
 const folderName = (dir) => (dir || '').split(/[\\/]/).filter(Boolean).pop() || dir || ''
 const secsBetween = (a, b) => Math.max(0, Math.round(((b ? new Date(b) : new Date()) - new Date(a)) / 1000))
+// tempo ativo da missão (planejando ou rodando); pausas e esperas por você não contam
+const activeSecs = (m) => m.active_ms == null && !m.active_since ? secsBetween(m.started_at, m.finished_at) : Math.round(((m.active_ms || 0) + (m.active_since ? Math.max(0, Date.now() - new Date(m.active_since)) : 0)) / 1000)
 const missionStep = (m, name) => (m?.steps || []).find((x) => x.name === name)
 const tail = (text, n = 2) => (text || '').trim().split('\n').filter(Boolean).slice(-n).join(' ').slice(-200)
 const cur = (m) => m && m.current != null ? m.stories[m.current] : (m?.stories?.find((s) => s.state === 'blocked') || null)
@@ -672,8 +674,8 @@ function MissionChip({ m }) {
   const s = STATE[m.state] || { label: m.state, tone: 'mute' }
   const [, tick] = useState(0)
   useEffect(() => { if (!['running', 'planning'].includes(m.state)) return; const id = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(id) }, [m.state])
-  const secs = secsBetween(m.started_at, m.finished_at)
-  return <span className="head-chip"><Chip tone={s.tone}>{s.label}</Chip><span className="mono dim small">{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}</span></span>
+  const secs = activeSecs(m), h = Math.floor(secs / 3600)
+  return <span className="head-chip"><Chip tone={s.tone}>{s.label}</Chip><span className="mono dim small" title="Tempo ativo: planejando ou rodando. Pausas não contam.">{h ? `${h}h ${String(Math.floor(secs / 60) % 60).padStart(2, '0')}min` : `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`}</span></span>
 }
 
 /* ========================= a conversa ========================= */
@@ -825,7 +827,7 @@ function Conversation({ state, m }) {
               <div><span>Custo</span><b className="mono">{fmtUsd(m.cost.usd)}</b></div>
               <div><span>Chamadas de IA</span><b className="mono">{m.cost.calls}</b></div>
               <div><span>Tokens</span><b className="mono">{fmtTok(m.cost.tokens_in + m.cost.tokens_out)}</b></div>
-              <div><span>Tempo</span><b className="mono">{Math.max(1, Math.round(secsBetween(m.started_at, m.finished_at) / 60))} min</b></div>
+              <div><span>Tempo</span><b className="mono">{Math.max(1, Math.round(activeSecs(m) / 60))} min</b></div>
             </div>
             <p className="dim small">O que fazer agora está no painel ao lado.</p>
           </Ade>

@@ -202,7 +202,15 @@ function pub() {
     history: G.history, recent: G.recent, settings: G.settings, registry: G.registry, quota: G.quota, catalog: G.catalog.map(({ body, ...c }) => c),
   }
 }
-function broadcast() { const data = `data: ${JSON.stringify(pub())}\n\n`; for (const res of clients) res.write(data); persistSoon() }
+function tickClock() {
+  for (const e of engines.values()) {
+    const m = e.mission; if (!m) continue
+    const on = ['running', 'planning'].includes(m.state)
+    if (on && !m.active_since) m.active_since = now()
+    else if (!on && m.active_since) { m.active_ms = (m.active_ms || 0) + Math.max(0, Date.now() - new Date(m.active_since)); m.active_since = null }
+  }
+}
+function broadcast() { tickClock(); const data = `data: ${JSON.stringify(pub())}\n\n`; for (const res of clients) res.write(data); persistSoon() }
 function broadcastSoon() { if (pending) return; pending = setTimeout(() => { pending = null; broadcast() }, 150) }
 function setLive(live) { state.live = live; broadcastSoon() }
 
@@ -311,6 +319,11 @@ async function resumeMission() {
   if (!m.plan || !m.stories.length) { m.state = 'planning'; m.steps = []; return guard(planMission) }
   return guard(runStories)
 }
+async function journalWallMs(id) {
+  let total = 0
+  try { for (const line of (await readFile(path.join(ADE_DIR, 'journal.jsonl'), 'utf8')).split('\n')) { if (!line.includes(id)) continue; try { const j = JSON.parse(line); if (j.mission === id) total += j.wall_ms || 0 } catch {} } } catch {}
+  return total
+}
 async function loadSavedMissions() {
   const saved = await loadJson('engines.json', { dirs: [], active: null })
   for (const d of saved.dirs || []) { try { const e = engineFor(d); e.project = await discover(d); if (e.project.error) engines.delete(path.resolve(d)) } catch { engines.delete(path.resolve(d)) } }
@@ -332,6 +345,8 @@ async function loadSavedMissions() {
       j.log = [...(j.log || []), { ts: now(), source: 'engine', kind: 'warn', text: 'o servidor foi reiniciado no meio; a missão ficou pausada. Continuar retoma da parte pendente.' }]
     }
     if (m.program && m.epic) m.epic = m.program.epics.find((x) => x.id === m.epic.id) || null
+    if (m.active_since) { m.active_ms = (m.active_ms || 0) + Math.max(0, new Date(j.saved_at || m.active_since) - new Date(m.active_since)); m.active_since = null } // caiu rodando: conta até a última gravação
+    if (m.active_ms == null) m.active_ms = await journalWallMs(m.id) // missão anterior ao relógio: soma a duração das chamadas de modelo do journal
     e.mission = m; e.log = j.log || []; e.live = null
     if (m.state === 'paused' && m.reason === 'quota') scheduleQuotaResume(e)
   }
