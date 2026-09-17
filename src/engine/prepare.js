@@ -1,9 +1,39 @@
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createGitPort } from '../git/gitport.js'
 import { UnexpectedTreeStateError } from '../journal/errors.js'
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+/**
+ * Calcula o hash SHA-256 de package-lock.json no diretório ou null se inexistente.
+ *
+ * @param {string} dir
+ * @returns {string | null}
+ */
+function lockHash(dir) {
+  const p = path.join(dir, 'package-lock.json')
+  return fs.existsSync(p) ? createHash('sha256').update(fs.readFileSync(p)).digest('hex') : null
+}
+
+/**
+ * Vincula node_modules da base ao worktree por junction (Windows) ou dir (outros).
+ *
+ * @param {string} repoDir
+ * @param {string} worktreeDir
+ * @returns {'linked' | 'absent' | 'already_present'}
+ */
+function linkNodeModules(repoDir, worktreeDir) {
+  if (fs.existsSync(path.join(worktreeDir, 'node_modules'))) return 'already_present'
+  if (!fs.existsSync(path.join(repoDir, 'node_modules'))) return 'absent'
+  fs.symlinkSync(
+    path.join(repoDir, 'node_modules'),
+    path.join(worktreeDir, 'node_modules'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  )
+  return 'linked'
+}
 
 /**
  * @typedef {Object} PrepareStoryOptions
@@ -19,6 +49,8 @@ const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
  * @property {string} branch
  * @property {string | null} baseCommit
  * @property {string} treeBefore
+ * @property {'linked' | 'absent' | 'already_present'} nodeModules
+ * @property {number} prepareDependencyMs
  */
 
 /**
@@ -32,7 +64,7 @@ const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 /**
  * @typedef {Object} PrepareAwaitingOperatorResult
  * @property {'awaiting_operator'} status
- * @property {'takeover_open' | 'stale_branch' | 'branch_in_use'} reason
+ * @property {'takeover_open' | 'stale_branch' | 'branch_in_use' | 'environment'} reason
  * @property {number} exitCode
  * @property {string} worktreeDir
  * @property {string} branch
@@ -44,6 +76,7 @@ const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
 /**
  * Prepara o worktree e a branch para execução da story.
+ * Formato completo (substitui o incremental da story s4).
  *
  * @param {PrepareStoryOptions} options
  * @returns {Promise<PrepareStoryResult>}
@@ -186,11 +219,45 @@ export async function prepareStory(options) {
   const baseCommit = (await basePort.headInfo()).commit
   const treeBefore = await wtPort.worktreeTree()
 
+  const t0 = Date.now()
+  const baseHash = lockHash(repoDir)
+  const wtHash = lockHash(worktreeDir)
+
+  /** @type {'linked' | 'absent' | 'already_present'} */
+  let nodeModules
+
+  if (baseHash === null && wtHash === null) {
+    nodeModules = 'absent'
+  } else if (baseHash !== wtHash) {
+    return {
+      status: 'awaiting_operator',
+      reason: 'environment',
+      exitCode: 3,
+      worktreeDir,
+      branch,
+    }
+  } else {
+    nodeModules = linkNodeModules(repoDir, worktreeDir)
+  }
+
+  if (nodeModules === 'linked') {
+    const currentExclude = fs.existsSync(excludePath) ? fs.readFileSync(excludePath, 'utf8') : ''
+    const currentLines = currentExclude.split(/\r?\n/)
+    if (!currentLines.includes('/node_modules')) {
+      const sep = currentExclude.length > 0 && !currentExclude.endsWith('\n') ? '\n' : ''
+      fs.writeFileSync(excludePath, `${currentExclude}${sep}/node_modules\n`, 'utf8')
+    }
+  }
+
+  const prepareDependencyMs = Date.now() - t0
+
   return {
-    status: 'ready',
+    status: /** @type {const} */ ('ready'),
     worktreeDir,
     branch,
     baseCommit,
     treeBefore,
+    nodeModules,
+    prepareDependencyMs,
   }
 }

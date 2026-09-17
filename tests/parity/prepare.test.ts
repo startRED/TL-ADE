@@ -212,6 +212,8 @@ describe('prepare parity', () => {
       branch: 'ade/m1/s1',
       baseCommit: headCommit,
       treeBefore: expect.stringMatching(/^[0-9a-f]{40}$/),
+      nodeModules: 'absent',
+      prepareDependencyMs: expect.any(Number),
     })
 
     // Diretório .ade/wt/<story> existente
@@ -316,6 +318,8 @@ describe('prepare parity', () => {
       branch: 'ade/m1/s1',
       baseCommit: headCommit,
       treeBefore: expect.stringMatching(/^[0-9a-f]{40}$/),
+      nodeModules: 'absent',
+      prepareDependencyMs: expect.any(Number),
     })
     expect(existsSync(wtDir)).toBe(true)
 
@@ -393,6 +397,8 @@ describe('prepare parity', () => {
       branch: 'ade/m1/s1',
       baseCommit: headCommit,
       treeBefore: expect.stringMatching(/^[0-9a-f]{40}$/),
+      nodeModules: 'absent',
+      prepareDependencyMs: expect.any(Number),
     })
     expect(existsSync(wtDir)).toBe(true)
 
