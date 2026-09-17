@@ -1,4 +1,3 @@
-import { fold } from './journal.js'
 import { AdeError } from './errors.js'
 
 export const CORE_VERSION = 1

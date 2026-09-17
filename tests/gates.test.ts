@@ -113,3 +113,106 @@ describe('typecheck gate', () => {
     expect(digest16({})).toBe('44136fa355b3678a')
   })
 })
+
+// Provas do portão de lint com oxlint
+describe('lint gate', () => {
+  // AC1: .oxlintrc.json e package.json devidamente configurados com regras padrão
+  test('lint_gate_is_configured_with_default_rules', () => {
+    const configPath = path.join(ROOT, '.oxlintrc.json')
+    expect(existsSync(configPath), '.oxlintrc.json deve existir na raiz').toBe(true)
+
+    const config = JSON.parse(readFileSync(configPath, 'utf8'))
+    expect(config.categories?.correctness).toBe('error')
+
+    expect(config.rules?.['no-unused-vars']).toBeDefined()
+    const noUnusedVars = config.rules['no-unused-vars']
+    expect(Array.isArray(noUnusedVars)).toBe(true)
+    expect(noUnusedVars[0]).toBe('error')
+    expect(noUnusedVars[1]?.argsIgnorePattern).toBe('^_')
+    expect(noUnusedVars[1]?.varsIgnorePattern).toBe('^_')
+    expect(noUnusedVars[1]?.caughtErrorsIgnorePattern).toBe('^_')
+
+    const expectedIgnores = [
+      'proto/**',
+      'node_modules/**',
+      'docs/**',
+      'fixtures/**',
+      'schemas/**',
+    ]
+    expect(config.ignorePatterns).toBeDefined()
+    for (const pattern of expectedIgnores) {
+      expect(
+        config.ignorePatterns,
+        `ignorePatterns deve conter ${pattern}`
+      ).toContain(pattern)
+    }
+
+    const pkgPath = path.join(ROOT, 'package.json')
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+    expect(pkg.devDependencies?.oxlint).toBeDefined()
+    expect(pkg.scripts?.lint).toBeDefined()
+    expect(pkg.scripts.lint.startsWith('node node_modules/oxlint/')).toBe(true)
+    expect(pkg.scripts.lint.endsWith(' src tests')).toBe(true)
+    expect(pkg.scripts.lint.includes('npx')).toBe(false)
+  })
+
+  // AC2: bin do oxlint executa sobre src tests e sai com código 0
+  test('lint_gate_exits_zero_over_src_and_tests', () => {
+    const pkgPath = path.join(ROOT, 'node_modules/oxlint/package.json')
+    expect(existsSync(pkgPath), 'node_modules/oxlint/package.json deve existir').toBe(true)
+
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+    const binRel: string = typeof pkg.bin === 'string' ? pkg.bin : (pkg.bin?.oxlint ?? '')
+    const bin = path.join(ROOT, 'node_modules/oxlint', binRel)
+
+    const result = spawnSync(
+      process.execPath,
+      [bin, 'src', 'tests'],
+      { cwd: ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }
+    )
+    const output = `status: ${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr ?? ''}`
+    expect(result.status, output).toBe(0)
+  }, 120000)
+
+  // AC3: oxlint falha em arquivo contendo apenas debugger
+  test('lint_gate_fails_on_debugger_statement', () => {
+    const tmpDir = mkdtempSync(path.join(tmpdir(), 'ade-lint-'))
+    try {
+      const badFile = path.join(tmpDir, 'bad.js')
+      writeFileSync(badFile, 'debugger\n', 'utf8')
+
+      const configPath = path.join(ROOT, '.oxlintrc.json')
+      expect(existsSync(configPath), '.oxlintrc.json deve existir na raiz').toBe(true)
+
+      const pkgPath = path.join(ROOT, 'node_modules/oxlint/package.json')
+      expect(existsSync(pkgPath), 'node_modules/oxlint/package.json deve existir').toBe(true)
+
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+      const binRel: string = typeof pkg.bin === 'string' ? pkg.bin : (pkg.bin?.oxlint ?? '')
+      const bin = path.join(ROOT, 'node_modules/oxlint', binRel)
+
+      const result = spawnSync(
+        process.execPath,
+        [bin, '-c', configPath, badFile],
+        { cwd: ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }
+      )
+      expect(result.status).not.toBe(0)
+      const combinedOutput = `${result.stdout ?? ''}\n${result.stderr ?? ''}`
+      expect(combinedOutput).toContain('no-debugger')
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
+  }, 120000)
+
+  // AC4: docs/roadmap.md registra o plugin anti-slop na linha 11 do backlog pós-v1
+  test('roadmap_backlog_registers_anti_slop_plugin', () => {
+    const roadmapPath = path.join(ROOT, 'docs/roadmap.md')
+    expect(existsSync(roadmapPath), 'docs/roadmap.md deve existir').toBe(true)
+
+    const content = readFileSync(roadmapPath, 'utf8')
+    const lines = content.split('\n')
+    const line11 = lines.find((line) => line.trim().startsWith('| 11 |'))
+    expect(line11, 'Linha começando com | 11 | deve existir em docs/roadmap.md').toBeDefined()
+    expect(line11).toContain('anti-slop')
+  })
+})

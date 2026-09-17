@@ -442,6 +442,7 @@ E37 **não** são recalculados agora: a medição da semana 1 do slice 1 replane
 | 8 | **CI loop (`ci_query`/`ci_rerun` ativos)** | repositório alvo com CI que a ADE não controla e ≥1 merge bloqueado por CI por semana |
 | 9 | **Tauri (painel como app)** | painel usado diariamente por ≥1 mês e `ade serve` virando fricção |
 | 10 | **Graft** | consulta de contexto recuperado passando de 6k tokens com `rg` em repositório real |
+| 11 | **Plugin `dmmulroy/anti-slop` do oxlint, pinado por SHA** (o portão 2 de `slice-1.md` §6 entrou só com regras padrão) | ≥3 achados do Checker num mês que uma regra do plugin teria barrado |
 
 Ordem por sinal, não por desejo: nada sobe sem o número.
 
