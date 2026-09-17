@@ -245,7 +245,7 @@ button { font: inherit; color: inherit; }
 .proj-add:hover { background: var(--gray-a2); color: var(--gray-12); border-color: var(--teal-8); }
 .side-tip { margin: 0; padding: 0 4px; font-size: 11px; line-height: 1.45; color: var(--gray-9); }
 
-.side-hist { min-height: 0; overflow: auto; display: grid; gap: 2px; align-content: start; margin: 0 -4px; padding: 0 4px; }
+.side-hist { min-height: 0; overflow: auto; overflow-x: hidden; display: grid; gap: 2px; align-content: start; margin: 0 -4px; padding: 0 4px; }
 .hist-item { display: grid; gap: 2px; width: 100%; padding: 7px 9px; border: 0; border-radius: var(--r-ctl); background: none; color: inherit; text-align: left; cursor: pointer; transition: background .15s; }
 .hist-item:hover { background: var(--gray-a3); }
 .hist-item.now { background: var(--teal-a2); }
@@ -255,7 +255,53 @@ button { font: inherit; color: inherit; }
 .hist-top > span:last-child { font-size: 9px; line-height: 1; }
 .hist-sub { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--gray-9); }
 .hist-sub > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.eng-list { max-height: 152px; }
+.eng-list { max-height: 34vh; }
+.sidebar { overflow-x: hidden; }
+.hist-item { min-width: 0; overflow: hidden; }
+.hist-item > * { min-width: 0; }
+.hist-sub > span:last-child { flex-shrink: 0; white-space: nowrap; }
+.hist-wrap { min-width: 0; }
+
+/* compositor: modo pedido/pergunta */
+.mode-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 10px 0; }
+.mode-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--gray-10); font: inherit; font-size: 12px; cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
+.mode-chip:hover { color: var(--gray-12); }
+.mode-chip.on { background: var(--teal-a3); border-color: var(--teal-9); color: var(--gray-12); }
+.mode-note { font-size: 11px; color: var(--gray-9); }
+.sel.sm { width: auto; padding: 3px 24px 3px 8px; font-size: 12px; }
+.sel.effort { margin-top: 6px; }
+
+/* conversa */
+.chat-tools { display: flex; justify-content: flex-end; }
+.chat-tools .link { display: inline-flex; align-items: center; gap: 5px; }
+.chat-txt { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; line-height: 1.6; }
+.chat-txt pre { white-space: pre; overflow-x: auto; margin: 8px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--bg-0); font-family: var(--code-font-family); font-size: 12px; line-height: 1.55; }
+.chat-meta { display: flex; gap: 10px; margin: 8px 0 0; font-size: 11px; color: var(--gray-9); }
+
+/* quadro de épicos e partes */
+.board-sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 0 0 10px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-ctl); overflow: hidden; }
+.board-sum > div { background: var(--bg-1); padding: 10px 12px; min-width: 0; }
+.board-sum b { display: block; font-size: 18px; font-weight: 600; letter-spacing: -.01em; }
+.board-sum small { color: var(--gray-9); font-size: 11.5px; }
+.pbar { height: 4px; border-radius: 2px; background: var(--gray-a4); overflow: hidden; margin-bottom: 14px; }
+.pbar > i { display: block; height: 100%; background: var(--teal-9); transition: width .4s; }
+.talk-inner.board { gap: 8px; }
+.epic { border: 1px solid var(--line); border-radius: var(--r-ctl); overflow: hidden; background: var(--bg-1); }
+.epic.running { border-color: var(--teal-9); }
+.epic-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; background: var(--bg-2); min-width: 0; }
+.epic-head b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; font-size: 13.5px; }
+.epic-head .mono { font-size: 11px; color: var(--gray-9); white-space: nowrap; }
+.epic-body { padding: 4px 12px 8px; display: grid; gap: 1px; }
+.epic-note { margin: 0; padding: 6px 12px 10px; font-size: 12px; color: var(--gray-9); line-height: 1.45; }
+.epic-note.warn { color: var(--amber-11); }
+.story-row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 0; font-size: 12.5px; }
+.story-row > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.story-row small { color: var(--gray-9); white-space: nowrap; font-size: 11.5px; }
+.story-ico { display: inline-flex; color: var(--gray-8); }
+.story-row.done .story-ico { color: var(--green-11); }
+.story-row.running .story-ico { color: var(--teal-9); animation: fade-pulse 1.4s ease-in-out infinite; }
+.story-row.skipped .story-ico, .story-row.blocked .story-ico { color: var(--amber-11); }
+.story-row.skipped > span:nth-child(2) { text-decoration: line-through; color: var(--gray-9); }
 .hist-wrap { display: grid; gap: 2px; }
 .hist-resume { justify-self: start; display: inline-flex; align-items: center; gap: 5px; margin: 0 0 4px 9px; }
 .hist-resume svg { width: 10px; height: 10px; }
