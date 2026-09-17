@@ -166,10 +166,7 @@ async function quarantine(git, unitId) {
  * @property {string[]} [doNotTouch]
  * @property {string[]} [sensitivePaths]
  * @property {number} [scopeViolationCount]
- *
- * Não há `diffMaxBuffer`: o diff integral roda sempre com `DIFF_MAX_BUFFER` (2 ** 31)
- * e quem chama não pode reduzir o limite, sob pena de a varredura de segredo ver um
- * diff truncado (decisão do plano). Valor passado por chamador legado é ignorado.
+ * @property {number} [diffMaxBuffer]
  */
 
 /**
@@ -219,11 +216,12 @@ export async function contain(input) {
     }
   }
 
+  const diffMaxBuffer = input.diffMaxBuffer ?? DIFF_MAX_BUFFER
   const res = await git.run(
     ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '--text', 'HEAD', '--'],
-    { maxBuffer: DIFF_MAX_BUFFER },
+    { maxBuffer: diffMaxBuffer },
   )
-  if (res.stdout.length >= DIFF_MAX_BUFFER) {
+  if (res.stdout.length >= diffMaxBuffer) {
     throw new UnexpectedTreeStateError('diff truncado por maxBuffer', {
       unitId,
       bytes: res.stdout.length,

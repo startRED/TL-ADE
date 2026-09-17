@@ -102,6 +102,7 @@ function buildEnv(hooksDir, extra = {}) {
  * @property {() => Promise<string[]>} dirtyPaths
  * @property {(label: string) => Promise<CheckpointResult>} checkpoint
  * @property {(tree: string, options: { label: string }) => Promise<RestoreTreeResult>} restoreTree
+ * @property {(tree: string, options: { label: string }) => Promise<RestoreTreeResult>} restore
  */
 
 /**
@@ -385,5 +386,6 @@ export function createGitPort(options) {
     dirtyPaths,
     checkpoint,
     restoreTree,
+    restore: restoreTree,
   }
 }

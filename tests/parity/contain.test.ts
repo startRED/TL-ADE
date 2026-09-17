@@ -1,4 +1,4 @@
-import fs, { mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import fs, { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import {
@@ -518,9 +518,8 @@ describe('contain parity', () => {
     expect(result.quarantineRef).toBe('refs/ade/quarantine/S10/1')
   })
 
-  // AC2: Dado um chamador que passa diffMaxBuffer menor, quando contain roda o diff,
-  // então o maxBuffer usado continua sendo 2 ** 31.
-  test('the_diff_always_runs_with_the_full_max_buffer_even_when_the_caller_asks_for_less', async () => {
+  // AC2: Por padrão, o diff roda com o buffer integral maxBuffer = 2 ** 31; quando diffMaxBuffer é informado, ele é respeitado.
+  test('the_diff_runs_with_the_full_max_buffer_by_default_and_respects_explicit_limit', async () => {
     const worktreeDir = makeTmpDir('ade-contain-fake-')
     tmpDirs.push(worktreeDir)
 
@@ -536,25 +535,13 @@ describe('contain parity', () => {
 
     const git = makeFakeGit({ worktreeDir, dirtyPaths: ['src/ok.js'], diff })
 
-    // Prova de contrato no nível de tipo: `diffMaxBuffer` NÃO é parâmetro aceito por
-    // contain. Se a propriedade voltar ao ContainInput, o tipo abaixo vira `never`,
-    // a atribuição não compila e `npm run typecheck` fica vermelho.
-    type ContainInput = NonNullable<Parameters<typeof contain>[0]>
-    type DiffMaxBufferForaDoContrato = 'diffMaxBuffer' extends keyof ContainInput ? never : true
-    const diffMaxBufferForaDoContrato: DiffMaxBufferForaDoContrato = true
-    expect(diffMaxBufferForaDoContrato).toBe(true)
-
-    // Chamador legado tentando encolher o limite: como o campo não faz parte do contrato,
-    // a entrada só chega até aqui por cast. O valor tem de ser ignorado pelo contain.
-    const entradaComLimiteReduzido = {
+    // Por padrão (sem diffMaxBuffer), maxBuffer usado é 2 ** 31
+    const result = await contain({
       git,
       unitId: 'S10',
       treeBefore: 'e'.repeat(40),
       scopePaths: ['src/**'],
-      diffMaxBuffer: 1024,
-    } as unknown as ContainInput
-
-    const result = await contain(entradaComLimiteReduzido)
+    })
 
     expect(result.ok).toBe(true)
     expect(result.action).toBe('continue')
@@ -572,6 +559,20 @@ describe('contain parity', () => {
       '--',
     ])
     expect(diffCalls[0].options.maxBuffer).toBe(2 ** 31)
+
+    // Quando diffMaxBuffer explícito é informado, é repassado ao git.run
+    const gitWithLimit = makeFakeGit({ worktreeDir, dirtyPaths: ['src/ok.js'], diff })
+    const resultWithLimit = await contain({
+      git: gitWithLimit,
+      unitId: 'S10',
+      treeBefore: 'e'.repeat(40),
+      scopePaths: ['src/**'],
+      diffMaxBuffer: 1024,
+    })
+    expect(resultWithLimit.ok).toBe(true)
+    const limitDiffCalls = gitWithLimit.runCalls.filter((c) => c.args.includes('diff'))
+    expect(limitDiffCalls).toHaveLength(1)
+    expect(limitDiffCalls[0].options.maxBuffer).toBe(1024)
   })
 
   // AC3: Dado que contain precisa restaurar, então chama git.restore(treeBefore, { label: unitId })
@@ -756,11 +757,7 @@ describe('contain parity', () => {
   test('sensitive_path_with_scope_violation_stops_batch_and_preserves_scope', async () => {
     const repo = makeRepo()
     tmpDirs.push(repo.dir)
-    const rawPort = createGitPort({ worktreeDir: repo.dir })
-    const port = {
-      ...rawPort,
-      restore: (tree: string, options: { label: string }) => rawPort.restoreTree(tree, options),
-    }
+    const port = createGitPort({ worktreeDir: repo.dir })
 
     const srcDir = path.join(repo.dir, 'src')
     mkdirSync(srcDir, { recursive: true })
@@ -808,11 +805,7 @@ describe('contain parity', () => {
   test('clean_change_passes_without_violations', async () => {
     const repo = makeRepo()
     tmpDirs.push(repo.dir)
-    const rawPort = createGitPort({ worktreeDir: repo.dir })
-    const port = {
-      ...rawPort,
-      restore: (tree: string, options: { label: string }) => rawPort.restoreTree(tree, options),
-    }
+    const port = createGitPort({ worktreeDir: repo.dir })
 
     const srcDir = path.join(repo.dir, 'src')
     mkdirSync(srcDir, { recursive: true })
@@ -871,11 +864,7 @@ describe('contain parity', () => {
   test('clean_change_creates_no_quarantine_ref_and_preserves_head', async () => {
     const repo = makeRepo()
     tmpDirs.push(repo.dir)
-    const rawPort = createGitPort({ worktreeDir: repo.dir })
-    const port = {
-      ...rawPort,
-      restore: (tree: string, options: { label: string }) => rawPort.restoreTree(tree, options),
-    }
+    const port = createGitPort({ worktreeDir: repo.dir })
 
     const srcDir = path.join(repo.dir, 'src')
     mkdirSync(srcDir, { recursive: true })
@@ -910,11 +899,7 @@ describe('contain parity', () => {
   test('clean_change_inspects_changed_paths_matching_diff', async () => {
     const repo = makeRepo()
     tmpDirs.push(repo.dir)
-    const rawPort = createGitPort({ worktreeDir: repo.dir })
-    const port = {
-      ...rawPort,
-      restore: (tree: string, options: { label: string }) => rawPort.restoreTree(tree, options),
-    }
+    const port = createGitPort({ worktreeDir: repo.dir })
 
     const srcDir = path.join(repo.dir, 'src')
     mkdirSync(srcDir, { recursive: true })
@@ -958,11 +943,7 @@ describe('contain parity', () => {
   test('secret_with_scope_violation_still_stops', async () => {
     const repo = makeRepo()
     tmpDirs.push(repo.dir)
-    const rawPort = createGitPort({ worktreeDir: repo.dir })
-    const port = {
-      ...rawPort,
-      restore: (tree: string, options: { label: string }) => rawPort.restoreTree(tree, options),
-    }
+    const port = createGitPort({ worktreeDir: repo.dir })
 
     const srcDir = path.join(repo.dir, 'src')
     mkdirSync(srcDir, { recursive: true })
@@ -1048,11 +1029,7 @@ describe('contain parity', () => {
   test('secret_in_a_file_git_would_quote_is_caught', async () => {
     const repo = makeRepo()
     tmpDirs.push(repo.dir)
-    const rawPort = createGitPort({ worktreeDir: repo.dir })
-    const port = {
-      ...rawPort,
-      restore: (tree: string, options: { label: string }) => rawPort.restoreTree(tree, options),
-    }
+    const port = createGitPort({ worktreeDir: repo.dir })
 
     const srcDir = path.join(repo.dir, 'src')
     mkdirSync(srcDir, { recursive: true })
@@ -1106,5 +1083,94 @@ describe('contain parity', () => {
     })
     expect(resOrdered.changedPaths).toEqual(['src/a.js', 'src/b.js'])
   })
+
+  // AC1: Dado um arquivo alterado fora do escopo e nenhuma violação anterior, quando contain roda,
+  // então a árvore volta ao estado anterior e o resultado indica restauração.
+  // AC2: Dado que a árvore foi restaurada e nada mais mudou, quando contain roda de novo,
+  // então o resultado é falha semântica por ausência de mudanças.
+  // AC3: Dado um arquivo fora do escopo e uma violação de escopo já registrada para a unidade,
+  // quando contain roda, então a unidade é estacionada e a árvore permanece como estava, sem restauração.
+  test('scope_expansion_restores_tree_then_parks_on_repeat', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    const port = createGitPort({ worktreeDir: repo.dir })
+
+    // Criar repositório, commitar src/a.js
+    const srcDir = path.join(repo.dir, 'src')
+    mkdirSync(srcDir, { recursive: true })
+    writeFileSync(path.join(srcDir, 'a.js'), 'export const a = 1\n')
+    await port.commit({ message: 'commit inicial' })
+
+    // Guardar treeBefore = await git.worktreeTree()
+    const treeBefore = await port.worktreeTree()
+
+    // Validação: contain com scopeViolationCount 0 e treeBefore ausente, havendo violação de escopo -> lança TypeError
+    const foraDir = path.join(repo.dir, 'fora')
+    mkdirSync(foraDir, { recursive: true })
+    const foraFile = path.join(foraDir, 'b.txt')
+    writeFileSync(foraFile, 'conteudo fora do escopo\n')
+
+    await expect(
+      contain({
+        git: port,
+        unitId: 'S10',
+        scopePaths: ['src/**'],
+        scopeViolationCount: 0,
+      }),
+    ).rejects.toThrow(TypeError)
+
+    // Primeira chamada com fora/b.txt fora do escopo e scopeViolationCount 0
+    const firstResult = await contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore,
+      scopePaths: ['src/**'],
+      scopeViolationCount: 0,
+    })
+
+    // -> { ok: false, reason: 'scope', failureClass: 'scope', action: 'restore', restoredTree: <tree de treeBefore> }
+    // e o arquivo desaparece do worktree
+    expect(firstResult.ok).toBe(false)
+    expect(firstResult.reason).toBe('scope')
+    expect(firstResult.failureClass).toBe('scope')
+    expect(firstResult.action).toBe('restore')
+    expect(firstResult.restoredTree).toBe(treeBefore)
+    expect(existsSync(foraFile)).toBe(false)
+
+    // Segunda chamada logo após a restauração, árvore limpa
+    // -> { ok: false, reason: 'no_changes', failureClass: 'semantic', action: 'rework' }
+    const secondResult = await contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore,
+      scopePaths: ['src/**'],
+    })
+
+    expect(secondResult.ok).toBe(false)
+    expect(secondResult.reason).toBe('no_changes')
+    expect(secondResult.failureClass).toBe('semantic')
+    expect(secondResult.action).toBe('rework')
+
+    // Terceira chamada com fora/b.txt recriado e scopeViolationCount 1
+    // -> { ok: false, reason: 'scope', action: 'park', restoredTree: null }
+    // e o arquivo continua existindo
+    mkdirSync(foraDir, { recursive: true })
+    writeFileSync(foraFile, 'conteudo fora do escopo\n')
+
+    const thirdResult = await contain({
+      git: port,
+      unitId: 'S10',
+      treeBefore,
+      scopePaths: ['src/**'],
+      scopeViolationCount: 1,
+    })
+
+    expect(thirdResult.ok).toBe(false)
+    expect(thirdResult.reason).toBe('scope')
+    expect(thirdResult.action).toBe('park')
+    expect(thirdResult.restoredTree).toBeNull()
+    expect(existsSync(foraFile)).toBe(true)
+  })
 })
+
 
