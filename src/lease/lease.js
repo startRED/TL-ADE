@@ -54,22 +54,23 @@ function readOwner(leaseDir) {
 }
 
 /**
- * Obtém o mtime em milissegundos do heartbeat, ou fallback para owner.json, ou fallback para a pasta leaseDir.
+ * Calcula a idade em milissegundos do lease com base no mtime de heartbeat, owner.json ou pasta.
+ * Usa Date.now() real para a decisão de TTL, garantindo que relógios injetados não alterem a expiração física.
  * @param {string} leaseDir
  * @returns {number}
  */
-function getLeaseMtimeMs(leaseDir) {
+function leaseAgeMs(leaseDir) {
   const heartbeatPath = path.join(leaseDir, 'heartbeat')
   try {
-    return fs.statSync(heartbeatPath).mtimeMs
+    return Date.now() - fs.statSync(heartbeatPath).mtimeMs
   } catch {
     try {
-      return fs.statSync(path.join(leaseDir, 'owner.json')).mtimeMs
+      return Date.now() - fs.statSync(path.join(leaseDir, 'owner.json')).mtimeMs
     } catch {
       try {
-        return fs.statSync(leaseDir).mtimeMs
+        return Date.now() - fs.statSync(leaseDir).mtimeMs
       } catch {
-        return 0
+        return Infinity
       }
     }
   }
@@ -131,115 +132,86 @@ function requireOwnStartTime(startTime) {
  * Trata colisão quando a pasta lease/ já existe: avalia TTL do heartbeat e identidade do dono.
  * @param {string} leaseDir
  * @param {Required<LeaseOptions>} opts
- * @param {string | null} ownStartTime start_time do adquirente, resolvido antes de qualquer reivindicação.
- * @returns {Promise<Lease>}
+ * @returns {Promise<{ previousOwner: Record<string, unknown>, staleDir: string }>}
  */
-async function handleExisting(leaseDir, opts, ownStartTime) {
-  const previousOwner = readOwner(leaseDir)
-  const mtimeMs = getLeaseMtimeMs(leaseDir)
-  // A decisão de TTL usa sempre o relógio real: `now` injetado cobre só
-  // acquired_at e o primeiro heartbeat, nunca o cálculo de idade do lease.
-  const ageMs = Date.now() - mtimeMs
-
-  if (ageMs <= opts.ttlMs) {
+async function handleExisting(leaseDir, opts) {
+  const owner = readOwner(leaseDir)
+  if (leaseAgeMs(leaseDir) <= opts.ttlMs) {
     throw new CoordinatorConflictError(
-      /** @type {{ pid?: number | string } | null} */ (previousOwner),
+      /** @type {{ pid?: number | string } | null} */ (owner),
     )
   }
 
-  const prevPid =
-    previousOwner && typeof previousOwner.pid === 'number' && previousOwner.pid > 0
-      ? previousOwner.pid
-      : null
+  if (
+    owner === null ||
+    typeof owner !== 'object' ||
+    !Number.isInteger(owner.pid) ||
+    typeof owner.pid !== 'number' ||
+    owner.pid <= 0 ||
+    typeof owner.start_time !== 'string' ||
+    owner.start_time === ''
+  ) {
+    throw new LeaseAwaitingOperatorError(null, 'owner inválido')
+  }
 
-  if (prevPid !== null) {
-    let alive = false
+  const validOwner = /** @type {Record<string, unknown> & { pid: number, start_time: string }} */ (owner)
+
+  /** @type {boolean} */
+  let alive = false
+  try {
+    alive = opts.isAlive(validOwner.pid)
+  } catch {
+    // Sem saber se o dono ainda vive, nunca se rouba o lease.
+    throw new LeaseAwaitingOperatorError(
+      validOwner,
+      'estado do pid ' + validOwner.pid + ' indeterminado',
+    )
+  }
+
+  if (alive) {
+    /** @type {string | null} */
+    let current = null
     try {
-      alive = opts.isAlive(prevPid)
-    } catch (err) {
+      current = await opts.getStartTime(validOwner.pid)
+    } catch {
       throw new LeaseAwaitingOperatorError(
-        previousOwner,
-        'falha ao verificar se processo dono está vivo: ' +
-          (err && typeof err === 'object' && 'message' in err ? err.message : String(err)),
+        validOwner,
+        'start_time do pid ' + validOwner.pid + ' indeterminado',
       )
     }
 
-    if (alive) {
-      /** @type {string | null} */
-      let currentStartTime = null
-      try {
-        currentStartTime = await opts.getStartTime(prevPid)
-      } catch (err) {
-        throw new LeaseAwaitingOperatorError(
-          previousOwner,
-          'falha ao obter start_time do processo dono: ' +
-            (err && typeof err === 'object' && 'message' in err ? err.message : String(err)),
-        )
-      }
-
-      if (currentStartTime === null) {
-        // Identidade do dono anterior não pôde ser confirmada: nunca adota na dúvida.
-        throw new LeaseAwaitingOperatorError(
-          previousOwner,
-          'lease expirado mas identidade do processo dono anterior não pôde ser confirmada',
-        )
-      }
-
-      const prevStartTime =
-        previousOwner &&
-        typeof previousOwner.start_time === 'string' &&
-        previousOwner.start_time !== ''
-          ? previousOwner.start_time
-          : null
-
-      if (prevStartTime === null || currentStartTime === prevStartTime) {
-        // Processo dono continua vivo com o mesmo start_time (ou sem start_time para desambiguação)
-        throw new LeaseAwaitingOperatorError(
-          previousOwner,
-          'lease expirado mas processo dono anterior ainda está ativo',
-        )
-      }
-      // PID reciclado: processo com aquele PID existe mas start_time difere (dono original morreu)
+    if (current === validOwner.start_time) {
+      throw new LeaseAwaitingOperatorError(
+        validOwner,
+        'dono vivo com lease expirado',
+      )
     }
   }
 
-  // A identidade do novo dono já tem de estar resolvida aqui: entre a
-  // reivindicação e a gravação de owner.json não pode haver nenhum await.
-  const startTime = requireOwnStartTime(ownStartTime)
-
-  // Reivindicação atômica do lease expirado: renomeia o diretório antigo para um
-  // nome único antes de recriá-lo. Só quem vencer o rename cria o novo diretório;
-  // quem perder encontra o caminho ausente ou já reocupado e trata como conflito.
-  const staleDir = `${leaseDir}.stale-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const staleDir = leaseDir + '.stale-' + opts.pid + '-' + opts.now().getTime()
+  let renamed = false
   try {
     fs.renameSync(leaseDir, staleDir)
-  } catch {
-    throw new CoordinatorConflictError(readOwner(leaseDir))
-  }
-
-  try {
+    renamed = true
     fs.mkdirSync(leaseDir)
   } catch {
-    // Outro processo recriou o diretório entre o rename e o mkdir: conflito.
-    fs.rmSync(staleDir, { recursive: true, force: true })
-    throw new CoordinatorConflictError(readOwner(leaseDir))
+    if (renamed) {
+      // Perdemos a corrida: outro processo já recriou lease/ entre o rename e
+      // o mkdir. Removemos só o staleDir desta tentativa; o lease/ do
+      // vencedor não é nosso para tocar.
+      fs.rmSync(staleDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      })
+    }
+    throw new CoordinatorConflictError(
+      /** @type {{ pid?: number | string } | null} */ (validOwner),
+    )
   }
 
-  try {
-    const { owner, worker } = takeOwnership(leaseDir, opts, startTime)
-    fs.rmSync(staleDir, { recursive: true, force: true })
-    return createLeaseObject(leaseDir, owner, worker, true, previousOwner)
-  } catch (err) {
-    // Falhou depois de reivindicar: remove só o que esta tentativa criou agora e
-    // restaura o estado anterior renomeado, sem perder os dados do dono expirado.
-    fs.rmSync(leaseDir, { recursive: true, force: true })
-    try {
-      fs.renameSync(staleDir, leaseDir)
-    } catch {
-      // se não conseguir restaurar, os dados ficam preservados em staleDir
-    }
-    throw err
-  }
+  return { previousOwner: validOwner, staleDir }
 }
 
 /**
@@ -350,13 +322,17 @@ export async function acquireLease(options) {
     requireOwnStartTime(ownStartTime)
   }
 
+  /** @type {{ previousOwner: Record<string, unknown>, staleDir: string } | null} */
+  let adoption = null
+
   try {
     fs.mkdirSync(leaseDir)
   } catch (err) {
     if (err && typeof err === 'object' && 'code' in err && err.code === 'EEXIST') {
-      return handleExisting(leaseDir, resolvedOpts, ownStartTime)
+      adoption = await handleExisting(leaseDir, resolvedOpts)
+    } else {
+      throw err
     }
-    throw err
   }
 
   try {
@@ -365,10 +341,28 @@ export async function acquireLease(options) {
       resolvedOpts,
       requireOwnStartTime(ownStartTime),
     )
+    if (adoption !== null) {
+      fs.rmSync(adoption.staleDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      })
+      return createLeaseObject(leaseDir, owner, worker, true, adoption.previousOwner)
+    }
     return createLeaseObject(leaseDir, owner, worker, false, null)
   } catch (err) {
-    // Diretório recém-criado por esta chamada: seguro remover por inteiro.
-    fs.rmSync(leaseDir, { recursive: true, force: true })
+    if (adoption !== null) {
+      fs.rmSync(leaseDir, { recursive: true, force: true })
+      try {
+        fs.renameSync(adoption.staleDir, leaseDir)
+      } catch {
+        // se não conseguir restaurar, os dados ficam preservados em staleDir
+      }
+    } else {
+      // Diretório recém-criado por esta chamada: seguro remover por inteiro.
+      fs.rmSync(leaseDir, { recursive: true, force: true })
+    }
     throw err
   }
 }
