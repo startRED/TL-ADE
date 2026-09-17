@@ -284,7 +284,7 @@ button { font: inherit; color: inherit; }
 .board-sum b { display: block; font-size: 18px; font-weight: 600; letter-spacing: -.01em; }
 .board-sum small { color: var(--gray-9); font-size: 11.5px; }
 .pbar { height: 4px; border-radius: 2px; background: var(--gray-a4); overflow: hidden; margin-bottom: 14px; }
-.pbar > i { display: block; height: 100%; background: var(--teal-9); transition: width .4s; }
+.pbar > i { display: block; width: 100%; height: 100%; background: var(--teal-9); transform-origin: left; transition: transform .4s; }
 .talk-inner.board { gap: 8px; }
 .epic { border: 1px solid var(--line); border-radius: var(--r-ctl); overflow: hidden; background: var(--bg-1); }
 .epic.running { border-color: var(--teal-9); }

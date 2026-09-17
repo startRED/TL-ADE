@@ -484,7 +484,7 @@ function BoardView({ m }) {
         <div><b>{done}/{all.length}{epics.length && epics.some((e) => e.state === 'queued') ? '+' : ''}</b><small>partes prontas{skipped ? ` · ${skipped} pulada${skipped > 1 ? 's' : ''}` : ''}</small></div>
         <div><b>{fmtUsd(m.cost?.usd || 0)}</b><small>gasto até agora</small></div>
       </div>
-      <div className="pbar"><i style={{ width: `${Math.round(Math.min(1, Math.max(0, pct)) * 100)}%` }} /></div>
+      <div className="pbar"><i style={{ transform: `scaleX(${Math.min(1, Math.max(0, pct)).toFixed(3)})` }} /></div>
       {epics.length ? epics.map((e, i) => {
         const stories = storiesOf(e)
         const tone = e.state === 'done' ? 'good' : e.state === 'running' ? 'accent' : ['failed', 'blocked'].includes(e.state) ? 'warn' : 'mute'
