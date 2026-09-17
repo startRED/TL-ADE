@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -5,9 +6,17 @@ import { AdeError } from '../../journal/errors.js'
 
 /**
  * @typedef {Object} FakeAction
+ * @property {Record<string, string>} [files]
+ * @property {string[]} [delete]
+ * @property {string[]} [argv]
  * @property {string} [stdout]
  * @property {string} [stderr]
+ * @property {boolean} [crash]
  * @property {number} [exit]
+ * @property {boolean} [no_result]
+ * @property {number} [sleep]
+ * @property {string} [stdout_from]
+ * @property {string[]} [escape]
  * @property {Record<string, unknown>} [result]
  */
 
@@ -17,7 +26,20 @@ import { AdeError } from '../../journal/errors.js'
  * @property {() => string} [now]
  */
 
-const ALLOWED_ACTION_KEYS = new Set(['stdout', 'stderr', 'exit', 'result'])
+const ALLOWED_ACTION_KEYS = new Set([
+  'files',
+  'delete',
+  'argv',
+  'stdout',
+  'stderr',
+  'crash',
+  'exit',
+  'no_result',
+  'sleep',
+  'stdout_from',
+  'escape',
+  'result',
+])
 
 /**
  * Valida se uma ação do cenário segue estritamente o contrato da story.
@@ -54,6 +76,46 @@ function validateAction(acao, scenarioFile) {
     (typeof rec.result !== 'object' || rec.result === null || Array.isArray(rec.result))
   ) {
     throw new AdeError('fake_scenario_invalid', 'cenário inválido: ' + scenarioFile, 2)
+  }
+  if (rec.files !== undefined) {
+    if (typeof rec.files !== 'object' || rec.files === null || Array.isArray(rec.files)) {
+      throw new AdeError('fake_scenario_invalid', 'cenário inválido: ' + scenarioFile, 2)
+    }
+    for (const [k, v] of Object.entries(rec.files)) {
+      if (typeof k !== 'string' || typeof v !== 'string') {
+        throw new AdeError('fake_scenario_invalid', 'cenário inválido: ' + scenarioFile, 2)
+      }
+    }
+  }
+  if (rec.delete !== undefined) {
+    if (!Array.isArray(rec.delete) || rec.delete.some((x) => typeof x !== 'string')) {
+      throw new AdeError('fake_scenario_invalid', 'cenário inválido: ' + scenarioFile, 2)
+    }
+  }
+  if (rec.argv !== undefined) {
+    if (!Array.isArray(rec.argv) || rec.argv.some((x) => typeof x !== 'string')) {
+      throw new AdeError('fake_scenario_invalid', 'cenário inválido: ' + scenarioFile, 2)
+    }
+  }
+  if (rec.crash !== undefined && typeof rec.crash !== 'boolean') {
+    throw new AdeError('fake_scenario_invalid', 'cenário inválido: ' + scenarioFile, 2)
+  }
+  if (rec.no_result !== undefined && typeof rec.no_result !== 'boolean') {
+    throw new AdeError('fake_scenario_invalid', 'cenário inválido: ' + scenarioFile, 2)
+  }
+  if (
+    rec.sleep !== undefined &&
+    (typeof rec.sleep !== 'number' || Number.isNaN(rec.sleep) || rec.sleep < 0)
+  ) {
+    throw new AdeError('fake_scenario_invalid', 'cenário inválido: ' + scenarioFile, 2)
+  }
+  if (rec.stdout_from !== undefined && typeof rec.stdout_from !== 'string') {
+    throw new AdeError('fake_scenario_invalid', 'cenário inválido: ' + scenarioFile, 2)
+  }
+  if (rec.escape !== undefined) {
+    if (!Array.isArray(rec.escape) || rec.escape.some((x) => typeof x !== 'string')) {
+      throw new AdeError('fake_scenario_invalid', 'cenário inválido: ' + scenarioFile, 2)
+    }
   }
 }
 
@@ -182,10 +244,6 @@ export async function runFakeCli(argv, env, deps = {}) {
     process.stderr.write('ADE_FAKE_SCENARIO ausente\n')
     return 2
   }
-  if (!env.ADE_FAKE_RESULT_FILE) {
-    process.stderr.write('ADE_FAKE_RESULT_FILE ausente\n')
-    return 2
-  }
 
   const scenarioDir = env.ADE_FAKE_SCENARIO
   const role = env.ADE_FAKE_ROLE ?? 'maker'
@@ -211,13 +269,20 @@ export async function runFakeCli(argv, env, deps = {}) {
     throw new AdeError('fake_scenario_invalid', 'cenário inválido: ' + scenarioFile, 2)
   }
 
-  for (const acao of acoes) {
-    validateAction(acao, scenarioFile)
+  for (const a of acoes) {
+    validateAction(a, scenarioFile)
+  }
+
+  const currentCount = readCounter(scenarioDir, role)
+  /** @type {FakeAction} */
+  const acao = /** @type {FakeAction} */ (acoes[Math.min(currentCount, acoes.length - 1)] ?? {})
+
+  if (acao.no_result !== true && acao.crash !== true && !env.ADE_FAKE_RESULT_FILE) {
+    process.stderr.write('ADE_FAKE_RESULT_FILE ausente\n')
+    return 2
   }
 
   const i = bumpCounter(scenarioDir, role)
-  /** @type {FakeAction} */
-  const acao = /** @type {FakeAction} */ (acoes[Math.min(i, acoes.length - 1)] ?? {})
 
   let packContent = ''
   for (const arg of argv) {
@@ -243,18 +308,67 @@ export async function runFakeCli(argv, env, deps = {}) {
   const argvPath = path.join(scenarioDir, `${role}-${i}.argv.json`)
   fs.writeFileSync(argvPath, JSON.stringify(argv, null, 2) + '\n', 'utf8')
 
-  if (acao.stdout !== undefined && acao.stdout !== null) {
+  const sleepSec = acao.sleep
+  if (typeof sleepSec === 'number') {
+    await new Promise((r) => setTimeout(r, sleepSec * 1000))
+  }
+
+  for (const [rel, texto] of Object.entries(acao.files ?? {})) {
+    const alvo = path.resolve(cwd, rel)
+    fs.mkdirSync(path.dirname(alvo), { recursive: true })
+    fs.writeFileSync(alvo, texto)
+  }
+
+  for (const p of acao.delete ?? []) {
+    fs.rmSync(path.resolve(cwd, p), { force: true, recursive: true })
+  }
+
+  for (const p of acao.escape ?? []) {
+    const alvo = path.resolve(cwd, p)
+    fs.mkdirSync(path.dirname(alvo), { recursive: true })
+    fs.writeFileSync(alvo, 'ade-escape\n')
+  }
+
+  if (acao.argv && acao.argv.length > 0) {
+    try {
+      execFileSync(acao.argv[0], acao.argv.slice(1), {
+        cwd,
+        shell: false,
+        windowsHide: true,
+        maxBuffer: 1 << 26,
+        stdio: 'ignore',
+      })
+    } catch {
+      // falha é engolida de propósito e não altera desfecho
+    }
+  }
+
+  if (acao.stdout_from) {
+    const arquivo = path.join(path.resolve(scenarioDir, '..', '..'), acao.stdout_from, 'stdout.json')
+    if (!fs.existsSync(arquivo)) {
+      throw new AdeError('fake_scenario_invalid', 'transcript ausente: ' + arquivo, 2, { arquivo })
+    }
+    const bytes = fs.readFileSync(arquivo)
+    process.stdout.write(bytes)
+  } else if (acao.stdout !== undefined && acao.stdout !== null) {
     process.stdout.write(String(acao.stdout))
   }
+
   if (acao.stderr !== undefined && acao.stderr !== null) {
     process.stderr.write(String(acao.stderr))
   }
 
-  const resultFile = env.ADE_FAKE_RESULT_FILE
-  const resultDir = path.dirname(resultFile)
-  fs.mkdirSync(resultDir, { recursive: true })
-  const resultData = acao.result ?? { status: 'ok', role, call: i }
-  fs.writeFileSync(resultFile, JSON.stringify(resultData) + '\n', 'utf8')
+  if (acao.crash === true) {
+    return acao.exit ?? 1
+  }
+
+  if (acao.no_result !== true) {
+    const resultFile = /** @type {string} */ (env.ADE_FAKE_RESULT_FILE)
+    const resultDir = path.dirname(resultFile)
+    fs.mkdirSync(resultDir, { recursive: true })
+    const resultData = acao.result ?? { status: 'ok', role, call: i }
+    fs.writeFileSync(resultFile, JSON.stringify(resultData) + '\n', 'utf8')
+  }
 
   return acao.exit ?? 0
 }
