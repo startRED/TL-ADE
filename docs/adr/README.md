@@ -45,12 +45,13 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | [0020](0020-metodo-de-desenvolvimento-da-propria-ade.md) | Método de desenvolvimento da própria ADE | aceito 2026-09-17 |
 | [0021](0021-versionamento-do-journal-e-engine-stamp.md) | Versionamento do journal e `runtime_stamp` do engine | aceito 2026-09-17 |
 | [0022](0022-restricoes-windows.md) | Restrições do Windows como requisito de primeira classe | aceito 2026-09-17 |
+| [0023](0023-js-esm-com-jsdoc-e-checkjs.md) | JS ESM com JSDoc e `checkJs`: portão de tipos sem build (emenda o ADR 0001) | proposto, pendente de confirmação do Erick |
 
 ## Mapa decisão → onde ela aparece
 
 | Tema | ADRs | Seção de `architecture.md` |
 | :--- | :--- | :--- |
-| Stack e repositório | 0001, 0022 | §2, §6, §11 E29 |
+| Stack e repositório | 0001, 0022, 0023 | §2, §6, §11 E29 |
 | Durabilidade e recuperação | 0002, 0003, 0012, 0014, 0021 | §6, §11 E6, E7, E21, E25–E27 |
 | Modelos, transporte e papéis | 0004, 0005, 0006, 0015 | §7, §11 E10, E16, E23, E24 |
 | Intenção, contrato e prova | 0007, 0008, 0016 | §4, §5, §11 E1–E4, E12, E18–E20 |
