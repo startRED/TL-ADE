@@ -641,7 +641,7 @@ async function research(questions) {
   const prompt = `Responda em português, com fontes verificáveis (URL), às perguntas abaixo, no formato JSON exigido. Seja curto e factual; se não souber, diga desconhecido.\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n')}`
   const rrole = state.settings.roles.research
   if (rrole.family === 'claude') { // pesquisa num modelo Claude (papel configurado em Modelos): busca na web, mesmo formato de resposta
-    const rc = await claudeCall({ role: 'pesquisa', prompt, model: rrole.model, effort: effortOf('research'), tools: ['WebSearch', 'WebFetch'], schema: JSON.parse(RESEARCH_SCHEMA), maxTurns: 12 })
+    const rc = await claudeCall({ role: 'pesquisa', prompt, model: rrole.model, effort: effortOf('research'), tools: ['WebSearch', 'WebFetch'], schema: JSON.parse(await readFile(RESEARCH_SCHEMA, 'utf8')), maxTurns: 12 })
     const parsed = rc?.structured_output || null
     for (const f of parsed?.findings || []) log('claude', `${f.question}: ${f.answer} ${f.sources?.length ? `(${f.sources.join(', ')})` : ''}`, 'text')
     if (!parsed) log('engine', 'pesquisa sem resposta (claude não devolveu o JSON)', 'error')
