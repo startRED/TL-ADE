@@ -1170,7 +1170,7 @@ async function agyMaker({ role, prompt, model, effort }) {
   const status = async () => new Set((await run('git', ['status', '--porcelain'], { cwd: dir })).out.split('\n').map((l) => l.slice(3).trim()).filter(Boolean))
   const before = await status(), t0 = Date.now()
   log('engine', `agy (${role}, ${id})`); setLive({ source: 'agy', kind: 'thinking', text: `${role}: Gemini trabalhando (sem transmissão ao vivo)…` })
-  let r; try { r = await run('agy', [`--print=Leia o arquivo ${rel} e execute exatamente as instruções dele neste projeto. Não altere nem apague esse arquivo. Não use git. Termine com uma frase dizendo o que mudou.`, '--output-format', 'json', '--model', id, '--mode', 'accept-edits', '--dangerously-skip-permissions', '--print-timeout', '20m'], { cwd: dir, timeoutMs: 22 * 60 * 1000 }) }
+  let r; try { r = await run('agy', [`--print=Leia o arquivo ${path.join(dir, rel).split(path.sep).join('/')} e execute exatamente as instruções dele neste projeto. Não altere nem apague esse arquivo. Não use git. Termine com uma frase dizendo o que mudou.`, '--output-format', 'json', '--model', id, '--mode', 'accept-edits', '--dangerously-skip-permissions', '--print-timeout', '20m'], { cwd: dir, timeoutMs: 22 * 60 * 1000 }) }
   finally { setLive(null); await rm(path.join(dir, rel), { force: true }).catch(() => {}) }
   m.cost.calls += 1
   let j = null; try { j = JSON.parse(r.out) } catch {}
