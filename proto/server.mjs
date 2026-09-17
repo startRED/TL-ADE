@@ -247,7 +247,7 @@ function run(cmd, args, { cwd, stdin, onLine, timeoutMs = 20 * 60 * 1000, env = 
     const child = spawn(cmd, quoted, { cwd, shell: IS_WIN, env: { ...process.env, ...env }, windowsHide: true })
     if (eng) eng.children.add(child)
     let out = '', err = '', buf = ''
-    const timer = setTimeout(() => { try { child.kill() } catch {} }, timeoutMs)
+    const timer = setTimeout(() => killTree(child), timeoutMs)
     child.stdout.on('data', (d) => {
       out += d
       if (!onLine) return
@@ -624,6 +624,12 @@ async function claudeCall({ role, prompt, model, effort, tools, skipPermissions,
     readQuota().then(broadcastSoon)
     if (result.is_error) log('engine', `claude reportou erro: ${result.result || result.subtype}`, 'error')
   } else log('engine', `claude saiu com código ${r.code}: ${(r.err || r.out).slice(0, 300)}`, 'error')
+  const failText = !result || result.is_error ? String(result?.result || r.err || r.out || '') : ''
+  if (state.mission && /usage limit|rate limit|limit reached|out of extra usage/i.test(failText)) {
+    await readQuota().catch(() => {})
+    const resets = [state.quota.claude?.five_hour, state.quota.claude?.seven_day].filter((w) => w?.resets_at && w.used >= 99 && new Date(w.resets_at) > new Date()).map((w) => +new Date(w.resets_at))
+    quotaPause('Claude', new Date(resets.length ? Math.max(...resets) + 60 * 1000 : Date.now() + 60 * 60 * 1000).toISOString())
+  }
   return result
 }
 
@@ -793,6 +799,8 @@ async function checker(diff, tests, st) {
     'Critérios de aceite sobre detalhe decorativo (borda lateral colorida, gradiente, cor exata) cedem ao portão visual (Impeccable): não peça mudanças para reintroduzir isso; avalie a intenção do critério.',
     'Severidade: high = comportamento errado, critério de aceite não atendido, segurança, acessibilidade quebrada, mudança fora do escopo. Cobertura de prova além do necessário, estilo de código, nomes e refatorações são low e NÃO impedem approve: registre como achado low e aprove.',
     'Responda em português no formato JSON exigido. verdict = "approve" só se não houver achado high.',
+    diff.length > 60000 ? `ATENÇÃO: o diff tem ${diff.length} caracteres e abaixo vão só os primeiros 60000. Arquivos alterados: ${[...diff.matchAll(/^diff --git a\/(\S+)/gm)].map((x) => x[1]).join(', ')}. Abra com as suas ferramentas os que não aparecerem inteiros antes de aprovar.` : '',
+    (() => { const names = new Set((st.tests_after?.tests || []).map((t) => t.name)); const gone = (st.red_tests || []).map((t) => t.name).filter((n) => n && !/[\\/]|\.test\./.test(n) && !names.has(n)); return gone.length ? `PROVAS QUE NASCERAM VERMELHAS E NÃO EXISTEM MAIS: ${gone.slice(0, 8).join(' | ')}. Confira se foram só renomeadas; prova apagada ou asserção enfraquecida para passar é achado high.` : '' })(),
     '--- DIFF ---', diff.slice(0, 60000),
   ].join('\n') + skillsBlock(m.skills.checker || [])
   // Receita de chamada curta (architecture.md E16): sem config, regras e skills do usuário; sessão efêmera.
@@ -1250,8 +1258,8 @@ async function makePlan({ inProgram = false } = {}) {
     return makePlan({ inProgram })
   }
   if (state.settings.plan_critic !== false && !m.critic_tried && ['feature', 'subsystem', 'project'].includes(m.intent?.complexity)) {
-    m.critic_tried = true
     const crit = await planCritic(plan)
+    if (crit) m.critic_tried = true
     if (crit?.verdict === 'revise' && crit.issues?.length) {
       m.plan_feedback = [...(m.plan_feedback || []), `Outra IA leu o plano como se fosse implementar e apontou onde teria de decidir sozinha. Corrija cada ponto na story indicada (recipe, examples, interfaces, decisions) e mantenha o resto: ${crit.issues.slice(0, 10).map((x) => `[${x.story}] ${x.problem} → ${x.fix}`).join(' | ')}`]
       m.stories = plan.stories.map((s) => ({ ...s, state: 'queued', steps: [], round: 0 })); m.plan = { ...(m.plan || {}), ...plan }
@@ -1315,6 +1323,7 @@ async function runStories() {
       }
       if (!ok) { finish(); return 'stopped' }
       await gitCommit(state.project.dir, `ade: ${st.title.slice(0, 72)}`)
+      if (st.tests_after?.tests?.length) m.tests_before = st.tests_after
       await refreshProject()
       log('engine', `commit feito: ${st.title}`)
       st.state = 'done'; broadcast(); await persistMission().catch(() => {})
@@ -1543,7 +1552,10 @@ async function targetEngine(req, url, b) { const dir = b?.dir || url.searchParam
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x')
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  const origin = req.headers.origin, host = String(req.headers.host || '').split(':')[0]
+  const localOrigin = !origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+  if (!localOrigin || !['localhost', '127.0.0.1'].includes(host)) { res.writeHead(403, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'origem não permitida' })) } // página de fora ou DNS rebinding
+  if (origin) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin') }
   try {
     if (url.pathname === '/api/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' })
