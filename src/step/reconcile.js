@@ -5,7 +5,7 @@ import { openIntents } from '../journal/fold.js'
 import { readJournal } from '../journal/journal.js'
 import { getProcessStartTime, isProcessAlive } from '../lease/process-info.js'
 import { readReceipt, receiptPath } from '../runner/receipt.js'
-import { EFFECT_CLASSES } from './step.js'
+import { EFFECT_CLASSES, priorStepResult } from './step.js'
 
 /** Veredictos fechados desta fatia do reconciler. */
 export const VERDICTS = ['ok', 'released', 'ambiguous']
@@ -128,6 +128,55 @@ async function reconcileModelCall(intent, journal, gitPort, missionDir, deps) {
 }
 
 /**
+ * Reconcilia uma intenção `local_commit`: adota o commit existente quando `HEAD` já avançou com a
+ * árvore e o pai esperados, libera quando `HEAD` ainda está no pai gravado, e nunca commita de novo.
+ * @param {Record<string, any>} intent
+ * @param {{ append: (partial: Record<string, unknown>) => Promise<Record<string, unknown>> }} journal
+ * @param {import('../git/gitport.js').GitPort | null} gitPort
+ * @param {string} _missionDir
+ * @returns {Promise<{ step_id: string, effect_class: string, verdict: 'ok' | 'released' | 'ambiguous', reason: string, evidence: Record<string, unknown>, result: unknown }>}
+ */
+async function reconcileLocalCommit(intent, journal, gitPort, _missionDir) {
+  if (!gitPort) {
+    return close(journal, intent, 'ambiguous', 'commit_ambiguous', { reason_detail: 'sem gitPort' })
+  }
+
+  const head = await gitPort.headInfo()
+  const { parent_commit: parent, tree_before: expectedTree } = intent.intent_context ?? {}
+
+  if (!parent || !expectedTree) {
+    return close(journal, intent, 'ambiguous', 'commit_ambiguous', { head: head.commit })
+  }
+
+  if (head.commit === parent) {
+    return close(journal, intent, 'released', 'head_at_parent', { head: head.commit, parent })
+  }
+
+  const tree = (await gitPort.run(['rev-parse', 'HEAD^{tree}'], { maxBuffer: 1 << 20 })).text
+  const firstParent = (
+    await gitPort.run(['rev-parse', 'HEAD^'], { maxBuffer: 1 << 20, okCodes: [0, 128] })
+  ).text
+
+  if (tree === expectedTree && firstParent === parent) {
+    return close(
+      journal,
+      intent,
+      'ok',
+      'commit_adopted',
+      { head: head.commit, tree, parent },
+      { commit: head.commit, tree },
+    )
+  }
+
+  return close(journal, intent, 'ambiguous', 'commit_ambiguous', {
+    head: head.commit,
+    tree,
+    parent_found: firstParent,
+    parent_expected: parent,
+  })
+}
+
+/**
  * Reconcilia uma única intenção aberta, liberando as classes locais.
  * @param {{
  *   intent: Record<string, any>,
@@ -191,6 +240,10 @@ export async function reconcileIntent({
     return reconcileModelCall(intent, journal, gitPort, missionDir, { isAlive, getStartTime })
   }
 
+  if (intent.effect_class === 'local_commit') {
+    return reconcileLocalCommit(intent, journal, gitPort, missionDir)
+  }
+
   throw new Error(
     "reconciliação de effect_class '" + intent.effect_class + "' fica fora desta fatia (entra nas stories s4/s5)",
   )
@@ -229,4 +282,34 @@ export async function reconcileAll({ journal, missionDir, gitPort = null, deps =
     verdicts.push(await reconcileIntent({ intent, journal, gitPort, missionDir, deps }))
   }
   return verdicts
+}
+
+/**
+ * Verifica se o commit local de um step foi entregue: alcançável a partir do `HEAD` atual.
+ * @param {{
+ *   events: Array<Record<string, any>>,
+ *   gitPort: { run: (args: string[], options?: Record<string, unknown>) => Promise<{ code: number }> },
+ *   stepId: string,
+ * }} options
+ * @returns {Promise<{ delivered: boolean, reason: 'commit_on_branch' | 'amended_after_journal' | 'no_local_commit', commit: string | null, handoff: 'awaiting_operator' | null }>}
+ */
+export async function verifyDelivery({ events, gitPort, stepId }) {
+  const prior = priorStepResult(events, stepId)
+  const priorData = /** @type {Record<string, any>} */ (prior?.data ?? {})
+  const commit = /** @type {string | undefined} */ (priorData.result?.commit)
+
+  if (!prior || prior.status !== 'ok' || !commit) {
+    return { delivered: false, reason: 'no_local_commit', commit: null, handoff: 'awaiting_operator' }
+  }
+
+  const probe = await gitPort.run(['merge-base', '--is-ancestor', commit, 'HEAD'], {
+    maxBuffer: 1 << 20,
+    okCodes: [0, 1, 128],
+  })
+
+  if (probe.code === 0) {
+    return { delivered: true, reason: 'commit_on_branch', commit, handoff: null }
+  }
+
+  return { delivered: false, reason: 'amended_after_journal', commit, handoff: 'awaiting_operator' }
 }
