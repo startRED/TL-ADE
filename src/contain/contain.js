@@ -246,6 +246,7 @@ export async function contain(input) {
     }
   }
 
+  const sensitive = input.sensitivePaths ?? DEFAULT_SENSITIVE_PATHS
   for (const rel of changedPaths) {
     const absPath = path.resolve(git.worktreeDir, rel)
     if (!pathWithin(git.worktreeDir, absPath)) {
@@ -259,6 +260,16 @@ export async function contain(input) {
         path: rel,
         pattern: f.pattern,
         source: 'file',
+      })
+    }
+
+    const isSensitive = sensitive.some((pattern) => matchesGlob(pattern, rel))
+    if (isSensitive) {
+      violations.push({
+        kind: 'sensitive_path',
+        path: rel,
+        pattern: null,
+        source: null,
       })
     }
 
@@ -318,29 +329,16 @@ export async function contain(input) {
 
   const reason = violations[0].kind
 
-  if (reason === 'secret') {
+  if (reason === 'secret' || reason === 'sensitive_path') {
     const quarantineRef = await quarantine(git, unitId)
     return {
       ok: false,
-      reason: 'secret',
+      reason,
       failureClass: 'security',
       action: 'stop_batch',
       violations,
       changedPaths,
       quarantineRef,
-      restoredTree: null,
-    }
-  }
-
-  if (reason === 'sensitive_path') {
-    return {
-      ok: false,
-      reason: 'sensitive_path',
-      failureClass: 'security',
-      action: 'stop_batch',
-      violations,
-      changedPaths,
-      quarantineRef: null,
       restoredTree: null,
     }
   }
