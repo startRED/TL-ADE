@@ -804,7 +804,7 @@ async function checker(diff, tests, st) {
   const m = state.mission, dir = state.project.dir
   const { model } = state.settings.roles.checker
   const prompt = [
-    'Você é o revisor. Outra IA (Claude) fez a alteração abaixo no projeto. Não escreva código; só avalie.',
+    'Você é o revisor. Outra IA, de outro fornecedor, fez a alteração abaixo no projeto. Não escreva código; só avalie.',
     'Regras: toda mudança de comportamento vem com uma prova (teste) que falha antes e passa depois; sem mudanças fora do escopo; sem quebrar acessibilidade; sem segredos em código; interface sem cara de template (cores saturadas, gradiente roxo, três cards iguais).',
     st.early_impl || st.no_red ? 'ATENÇÃO: nesta story o harness NÃO viu as provas novas falharem antes da implementação. Confira você se as provas realmente exercitam o comportamento novo (falhariam sem o código); prova que passa sem o código = achado high.' : '',
     m.plan?.decisions?.length ? `DECISÕES DO PLANO (são contrato, já aprovadas; um achado que contradiz uma decisão NÃO é achado, por melhor que seja a ideia):\n${m.plan.decisions.map((d) => `- ${d}`).join('\n')}` : '',
@@ -813,13 +813,16 @@ async function checker(diff, tests, st) {
       `Resposta de quem escreveu: ${String(st.last_summary || '(sem resposta)').slice(0, 1800)}`,
       'Regras desta rodada: (1) confira se cada achado anterior foi corrigido; (2) se quem escreveu RECUSOU um achado citando uma decisão do plano, o contrato da story ou um critério de aceite, e a citação procede, RETIRE o achado (não repita); (3) achado NOVO só vale se for high E tiver sido introduzido pelo diff desta rodada ou violar um critério de aceite; melhorias que você não pediu na primeira rodada viram no máximo low. O objetivo é convergir, não reabrir a story.',
     ].join('\n') : '',
-    `Pedido do usuário: ${m.request}`, `Story em revisão: ${st.title}. Critérios de aceite: ${(st.acceptance || []).join('; ')}`,
+    `Pedido do usuário: ${m.request}`, `Story em revisão: ${st.title}. Critérios de aceite: ${(st.acceptance || []).map((a, i) => `(${i + 1}) ${a}`).join(' ')}`,
+    st.assumptions?.length ? `SUPOSIÇÕES que quem escreveu declarou (faltava decisão no plano). Julgue cada uma: cabe no contrato e nos critérios = aceite e não comente; fixa comportamento que um critério ou decisão cobre de outro jeito = achado citando o critério:\n${st.assumptions.map((a) => `- ${a}`).join('\n')}` : '',
+    st.contract_issue ? `Quem escreveu alegou CONTRATO ERRADO: ${st.contract_issue}. Diga no summary se a alegação procede.` : '',
     st.scope_paths?.length ? `Contrato da story: só podia alterar ${st.scope_paths.join(', ')}${st.do_not_touch?.length ? `; proibido alterar ${st.do_not_touch.join(', ')}` : ''}${st.interfaces?.length ? `; interfaces: ${st.interfaces.join(' | ')}` : ''}. Alteração fora do contrato ou interface quebrada = achado high. EXCEÇÃO legítima (não é achado): atualizar asserções de provas antigas que afirmavam o formato ou comportamento que esta story manda mudar, mesmo em arquivo da lista proibida, desde que a mudança se limite a essas asserções.` : '',
     `Skills que o autor tinha de seguir: ${(m.skills.maker || []).map((s) => s.id).join(', ') || 'nenhuma'}.`,
     `O harness JÁ RODOU as provas fora da sandbox: ${tests.failed} falharam de ${tests.total} (runner: ${tests.runner}); a prova nova falhou antes da implementação e passou depois. Não tente rodar provas nem instalar nada (sua sandbox é somente leitura e isso vai falhar); avalie o código e o diff. Arquivos de lock (package-lock.json) e dependências não fazem parte do escopo revisado.`,
     tests.tests?.length ? `Provas que rodaram e passaram (nomes): ${tests.tests.filter((t) => t.status === 'passed').map((t) => t.name).slice(0, 60).join(' | ')}. Um critério coberto por uma dessas provas está provado; não peça prova extra para ele.` : '',
     'Critérios de aceite sobre detalhe decorativo (borda lateral colorida, gradiente, cor exata) cedem ao portão visual (Impeccable): não peça mudanças para reintroduzir isso; avalie a intenção do critério.',
     'Severidade: high = comportamento errado, critério de aceite não atendido, segurança, acessibilidade quebrada, mudança fora do escopo. Cobertura de prova além do necessário, estilo de código, nomes e refatorações são low e NÃO impedem approve: registre como achado low e aprove.',
+    'Inspecione nesta ordem: corretude (caminhos que não são o feliz: nulo, borda, erro, assíncrono, estado), segurança, tratamento de erro (catch vazio, erro engolido, recurso que vaza), contrato e interfaces, aderência às decisões, adequação das provas (prova que só confere o dublê e não o comportamento = achado). Separe "está errado" de "eu faria diferente": preferência é low. Não promova detalhe a high nem esconda defeito real como low; se não tem certeza da gravidade, diga o risco em vez de chutar. Todo achado high cita o critério de aceite pelo número, a decisão do plano ou o item do contrato que ele viola; sem citação possível, não é high. Um achado por problema: não repita o mesmo problema arquivo por arquivo. A correção sugerida vai em palavras, nunca em código.',
     'Responda em português no formato JSON exigido. verdict = "approve" só se não houver achado high.',
     diff.length > 60000 ? `ATENÇÃO: o diff tem ${diff.length} caracteres e abaixo vão só os primeiros 60000. Arquivos alterados: ${[...diff.matchAll(/^diff --git a\/(\S+)/gm)].map((x) => x[1]).join(', ')}. Abra com as suas ferramentas os que não aparecerem inteiros antes de aprovar.` : '',
     (() => { const names = new Set((st.tests_after?.tests || []).map((t) => t.name)); const gone = (st.red_tests || []).map((t) => t.name).filter((n) => n && !/[\\/]|\.test\./.test(n) && !names.has(n)); return gone.length ? `PROVAS QUE NASCERAM VERMELHAS E NÃO EXISTEM MAIS: ${gone.slice(0, 8).join(' | ')}. Confira se foram só renomeadas; prova apagada ou asserção enfraquecida para passar é achado high.` : '' })(),
@@ -1092,7 +1095,8 @@ function common(st) {
     `Story atual: ${st.title}. Instrução: ${st.request}`,
     st.recipe?.length ? `RECEITA (siga na ordem; um passo de cada vez):\n${st.recipe.map((x, i) => `${i + 1}. ${x}`).join('\n')}` : '',
     st.examples?.length ? `EXEMPLOS que têm de valer (entrada → saída):\n${st.examples.map((x) => `- ${x}`).join('\n')}` : '',
-    st.recipe?.length ? 'Não tome decisões de desenho: se faltar um detalhe, escolha o mais simples que satisfaz os exemplos e diga qual foi na frase final.' : '',
+    'DECISÃO FALTANDO: confira se a story, as DECISÕES e os EXEMPLOS dizem de onde vem cada valor que você precisa produzir. Escolha entre opções que o contrato já permite (nome de variável, ordem de um laço) é detalhe seu. Se a escolha fixa a origem de um dado ou um comportamento cobrado num critério, NÃO adivinhe calado: adote a opção mais simples que satisfaz os exemplos e escreva no fim uma linha `SUPOSIÇÃO: <o que faltava> -> <o que você adotou>` para cada uma (o revisor vai julgar). Na dúvida, é suposição.',
+    'Siga o padrão que o código já usa (erros, nomes, estrutura de módulo); introduzir padrão novo é decisão, não detalhe.',
     attachBlock(m.attachments),
     `Critérios de aceite: ${(st.acceptance || []).map((a, i) => `(${i + 1}) ${a}`).join(' ')}`,
     st.scope_paths?.length ? `CONTRATO. Pode criar ou alterar SÓ: ${st.scope_paths.join(', ')}${st.do_not_touch?.length ? `. NÃO altere: ${st.do_not_touch.join(', ')}` : ''}${st.out_of_scope?.length ? `. Fora do escopo (não faça): ${st.out_of_scope.join('; ')}` : ''}${st.interfaces?.length ? `. Interfaces a respeitar: ${st.interfaces.join(' | ')}` : ''}. Precisa tocar em outro arquivo? Faça o mínimo e diga na frase final.` : '',
@@ -1100,7 +1104,7 @@ function common(st) {
     scoutBlock(m.scout),
     'Arquivos grandes: use o MAPA DO CÓDIGO e leia só o trecho (Read com offset e limit); não leia inteiro um arquivo com mais de 300 linhas sem precisar. Código novo vai em módulo novo e pequeno quando o arquivo de destino já passa de 400 linhas; nunca reescreva um arquivo inteiro para mudar um trecho.',
     m.allow_commands && state.settings.scout_enabled !== false ? `Batedor sob demanda (Gemini, barato e rápido): quando precisar de documentação, de um arquivo com mais de 500 linhas, de um fato de biblioteca/API ou de algo na internet/GitHub, NÃO leia você: rode  node "${SCOUT_SCRIPT}" "pergunta objetiva" [arquivos]  (acrescente --web para pesquisar fora) e use o recibo impresso. Uma chamada por dúvida, pergunta curta e específica.` : '',
-    m.allow_commands ? 'Você pode rodar comandos (instalar dependências, inicializar projeto). Não rode servidores que fiquem abertos; não use git.' : 'Você só tem ferramentas de leitura e edição; o harness roda as provas.',
+    m.allow_commands ? 'Você pode rodar comandos (instalar dependências, inicializar projeto). Não rode servidores que fiquem abertos; não use git. PROVAS: rode no máximo o arquivo de prova desta parte, uma vez depois de cada mudança; NUNCA a suíte inteira, modo watch ou comando que fique esperando: o motor roda a suíte completa depois de você. Não fique aguardando processo.' : 'Você só tem ferramentas de leitura e edição; o harness roda as provas.',
     p.runner === 'none' ? 'Não há runner de provas: crie o mínimo (JS: package.json com vitest e "test": "vitest run"; Python: requirements.txt com pytest e as dependências) antes da prova.' : '',
     p.language === 'python' || /python|fastapi|django|flask|pytest/i.test(m.request) ? 'Python: o harness cria .venv com uv e instala requirements.txt + pytest antes de cada rodada de provas. Liste toda dependência em requirements.txt; para rodar algo você mesmo use .venv\\Scripts\\python.exe (o "python" do PATH é o stub da Microsoft Store, sem pacotes). Não instale nada globalmente.' : '',
     p.has_index ? 'Há um index.html na raiz; o que for visual tem de aparecer nele.' : (m.plan.needs_ui ? 'Se esta story é visual, entregue/atualize index.html na raiz funcionando como arquivos estáticos (ES modules, sem build).' : ''),
@@ -1113,6 +1117,7 @@ function testPrompt(st, pack) {
   return [`Pedido original do usuário: ${state.mission.request}`, ...common(st),
     `FASE 1 de 2: escreva APENAS as provas novas (testes automatizados) desta story: uma função de teste por critério de aceite, todas no mesmo arquivo, com nomes que digam o critério. Todas devem FALHAR (ou nem carregar) no código atual, porque o comportamento ainda não existe. ${st.test_file ? `Arquivo de prova: ${st.test_file}. ` : ''}${st.examples?.length ? 'Cada EXEMPLO acima vira uma asserção. ' : ''}Dica de prova: ${st.test_hint}. Não implemente o comportamento ainda. Provas NUNCA fazem chamada real de rede, CLI externa ou serviço: simule com dublês (stub/mock) e teste o comportamento observável; prova que depende do ambiente vira falha falsa e trava a parte.`,
     'PROIBIDO nesta fase: criar ou alterar qualquer arquivo que não seja arquivo de prova. Se você implementar agora, as provas nascem verdes e não provam nada.',
+    'QUALIDADE DA PROVA: (a) se o arquivo de prova já existe, ACRESCENTE; nunca crie um arquivo paralelo nem reescreva ou apague prova que já está lá; (b) nome da prova é uma frase que diz o critério; um conceito por prova; preparar, agir, conferir; (c) teste a interface pública e a saída observável, nunca estado interno nem "a função privada foi chamada"; (d) dublê só na fronteira do sistema (processo filho, relógio, sistema de arquivos, rede), nunca em módulo do próprio projeto; (e) determinística: sem hora real, sem depender da ordem das provas; congele o relógio quando o tempo importa; todo await presente; (f) valores concretos dos EXEMPLOS: prova que só repete o critério com outras palavras não prova nada; (g) cobertura nesta ordem: caminho feliz, bordas, erros, transições de estado; pelo menos uma prova de borda ou de falha; (h) se a parte mexe com processo filho, caminho de arquivo, hash ou entrada de fora, inclua um caso adverso (entrada malformada ou maliciosa, caminho que sai da pasta, hash adulterado).',
     st.red_retry ? 'SEGUNDA TENTATIVA: na primeira, nenhuma prova nova falhou no código atual. Escreva provas que exercitem o comportamento que AINDA NÃO EXISTE (importe o que será criado, chame, confira o resultado dos EXEMPLOS). Se a parte é só configuração ou documentação, prove o efeito observável: arquivo existe com tal conteúdo, comando sai com código 0, script do package.json existe.' : '',
     pack, 'Ao terminar, escreva uma frase com o nome do arquivo de prova e os nomes das provas novas.'].filter(Boolean).join('\n')
 }
@@ -1123,6 +1128,9 @@ function fixPrompt(st, round, review, visual, pack) {
     st.red_regress?.length ? `Provas ANTIGAS que ficaram vermelhas depois que a prova nova entrou (em geral portão de tipos/lint reclamando do que ainda não existe). Têm de voltar a passar com a sua implementação; não as altere:\n${st.red_regress.map((t) => `- ${t.name}: ${t.message}`).join('\n')}` : '',
     'Agora implemente o necessário para a prova passar e os critérios de aceite valerem. Não modifique a prova. Não toque em nada fora do escopo da story. Seja direto: você tem no máximo 30 ações; não investigue ferramentas do harness, não reescreva provas antigas, não amplie o escopo.',
     'CONFLITO DE CONTRATO: se uma prova ANTIGA fica vermelha só porque afirma o formato ou comportamento que ESTA story manda mudar (ex.: igualdade estrita com o formato anterior), atualize APENAS essas asserções, mesmo que o arquivo esteja na lista de "não altere"; não mexa em mais nada desse arquivo e diga na frase final quais asserções mudou e por quê. Não reverta o comportamento pedido para agradar a prova antiga.',
+    'REGRAS DE IMPLEMENTAÇÃO: falhe fechado na fronteira (entrada inválida é erro, não valor padrão calado); falhe alto se faltar configuração obrigatória; nada de catch vazio; invariantes valem com duas chamadas ao mesmo tempo; nova tentativa só limitada e idempotente. Código que você substitui SAI: o antigo e o novo não convivem; depois de remover, procure quem ainda cita o símbolo. Nunca enfraqueça asserção, apague prova ou marque prova como skip para passar: se a prova estiver errada, escreva `PROVA ERRADA: <nome> - <motivo>` na frase final e não mexa nela.',
+    round > 1 && st.tests_after && !st.tests_after.ok ? `DEPURAÇÃO (rodada ${round}; a tentativa anterior não deixou as provas verdes): (1) antes de mudar qualquer linha, explique em uma frase POR QUE a prova falha; (2) reproduza rodando só o arquivo de prova; (3) uma hipótese por vez sobre a CAUSA, não o sintoma; teste com a menor mudança; hipótese refutada = desfaça a mudança antes da próxima; (4) correção mínima na causa provada, sem refatoração de carona; (5) depois de verde, procure o mesmo padrão errado nos outros arquivos do escopo.` : '',
+    'CONTRATO ERRADO: se a parte é irrealizável como está escrita (um critério contradiz uma decisão, um exemplo é impossível, a prova exige o que o contrato proíbe), não force nem contorne: escreva `CONTRATO ERRADO: <o que contradiz o quê>` na frase final e pare. O planejador corrige a parte; insistir só gasta rodadas.',
     'Ao terminar, escreva uma frase dizendo o que mudou.']
   if (round > 1 && review) { base.push('Se um pedido do revisor contradiz uma DECISÃO DO PLANO, o contrato ou um critério de aceite, não o aplique: na frase final cite literalmente a decisão ou o critério que o impede (o revisor vai ler a sua resposta). Todo o resto, corrija.'); base.push(`Rodada ${round}. O revisor (outra IA) pediu mudanças: ${review.summary}`); for (const f of review.findings) base.push(`- [${f.severity}] ${f.file}: ${f.problem} Correção sugerida: ${f.fix}`) }
   if (visual?.length) { base.push('O portão visual (Impeccable detect) apontou; corrija. Se um achado conflita com um detalhe decorativo de um critério de aceite (borda lateral, gradiente, cor), o portão vence: satisfaça a intenção do critério de outro jeito, sem investigar o detector, e diga isso na frase final.'); for (const f of visual) base.push(`- ${f.file}${f.line ? ':' + f.line : ''} [${f.rule}] ${f.message}`) }
@@ -1336,7 +1344,7 @@ async function runStories() {
           st.auto_accepted = true; ok = true; log('engine', `modo noturno: ${m.reason} com provas verdes e nada grave; parte aceita`, 'warn')
         } else {
           log('engine', `modo noturno: parada "${m.reason}" sem saída; parte pulada e arquivos dela desfeitos; segue para a próxima`, 'warn')
-          st.state = 'skipped'; st.skipped_reason = m.reason; await gitDiscard(state.project.dir); await refreshProject(); m.state = 'running'; m.reason = null; broadcast()
+          st.state = 'skipped'; st.skipped_reason = st.contract_issue ? `contrato errado: ${st.contract_issue}` : m.reason; await gitDiscard(state.project.dir); await refreshProject(); m.state = 'running'; m.reason = null; broadcast()
           // duas partes puladas em sequência = base que as próximas precisam não existe; continuar só queima dinheiro. Pausa e espera você (ADR 0015).
           if (m.stories[i - 1]?.state === 'skipped' && !m.stories[i - 1]?.fix_attempted) { m.state = 'paused'; m.reason = 'skips'; log('engine', 'modo noturno: duas partes seguidas puladas; as próximas dependem delas. Missão pausada para você replanejar.', 'error'); await persistMission().catch(() => {}); return finish() }
           continue
@@ -1411,7 +1419,16 @@ async function agyMaker({ role, prompt, model, effort }) {
   return { result: text, touched, num_turns: j.num_turns || 0, total_cost_usd: 0 }
 }
 
-function remember(st, r) { if (!r) return; st.files = [...new Set([...(st.files || []), ...(r.touched || [])])]; if (typeof r.result === 'string' && r.result.trim()) st.last_summary = r.result.trim() }
+function remember(st, r) {
+  if (!r) return
+  st.files = [...new Set([...(st.files || []), ...(r.touched || [])])]
+  if (typeof r.result !== 'string' || !r.result.trim()) return
+  st.last_summary = r.result.trim()
+  const found = [...st.last_summary.matchAll(/^[\s>*`-]*SUPOSI[ÇC][ÃA]O:\s*(.+)$/gim)].map((x) => x[1].replace(/`+$/, '').trim().slice(0, 300))
+  if (found.length) { st.assumptions = [...new Set([...(st.assumptions || []), ...found])].slice(0, 8); for (const a of found) log('engine', `suposição de quem escreve em "${st.title}": ${a}`, 'warn') }
+  const wrong = /^[\s>*`-]*CONTRATO ERRADO:\s*(.+)$/im.exec(st.last_summary)
+  st.contract_issue = wrong ? wrong[1].replace(/`+$/, '').trim().slice(0, 400) : null // vale a última resposta: alegação não repetida caduca
+}
 async function runStory(st, round = 1, previousReview = null, previousVisual = null) {
   const m = state.mission
   const stop = (reason) => { m.state = 'awaiting_operator'; m.reason = reason; st.state = 'blocked'; log('engine', `parada: ${reason}`, 'error'); return false }
@@ -1455,6 +1472,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   if (!st.tests_after.ok) {
     const spentNow = m.cost.usd - (st.usd_start || 0)
     const redNow = st.tests_after.tests.filter((t) => t.status !== 'passed').map((t) => t.name).sort().join('|')
+    if (st.contract_issue && round >= 2) { log('engine', `quem escreve diz que o contrato da parte está errado: ${st.contract_issue}. Paro de gastar rodadas; a parte volta ao planejador com esse motivo`, 'warn'); return stop('contract_wrong') }
     const stuck = round >= 5 && st.last_red === redNow; st.last_red = redNow
     if (stuck) log('engine', 'as mesmas provas seguem vermelhas depois de duas rodadas no modelo mais forte: impasse (provável conflito no plano); paro de gastar rodadas nesta parte', 'warn')
     if (!stuck && round < MAX_ROUNDS && spentNow <= (state.settings.max_usd_per_story || 4)) {
