@@ -1021,6 +1021,7 @@ function fixPrompt(st, round, review, visual, pack) {
   const red = st.red_tests.map((t) => `- ${t.name}: ${t.message}`).join('\n')
   const base = [`Pedido original do usuário: ${state.mission.request}`, ...common(st), pack,
     `FASE 2 de 2: a prova nova está vermelha, como esperado:\n${red}`,
+    st.red_regress?.length ? `Provas ANTIGAS que ficaram vermelhas depois que a prova nova entrou (em geral portão de tipos/lint reclamando do que ainda não existe). Têm de voltar a passar com a sua implementação; não as altere:\n${st.red_regress.map((t) => `- ${t.name}: ${t.message}`).join('\n')}` : '',
     'Agora implemente o necessário para a prova passar e os critérios de aceite valerem. Não modifique a prova. Não toque em nada fora do escopo da story. Seja direto: você tem no máximo 30 ações; não investigue ferramentas do harness, não reescreva provas antigas, não amplie o escopo.',
     'Ao terminar, escreva uma frase dizendo o que mudou.']
   if (round > 1 && review) { base.push(`Rodada ${round}. O revisor (outra IA) pediu mudanças: ${review.summary}`); for (const f of review.findings) base.push(`- [${f.severity}] ${f.file}: ${f.problem} Correção sugerida: ${f.fix}`) }
@@ -1216,13 +1217,13 @@ async function runStories() {
       // rejeitada pelo revisor com achado grave depois das rodadas: o trabalho fica e vira uma parte de correção só com os achados (uma vez)
       const highs = (st.review?.findings || []).filter((f) => f.severity === 'high')
       const reds = (st.tests_after?.tests || []).filter((t) => t.status !== 'passed').slice(0, 6)
-      const fixable = !ok && state.settings.autonomy !== 'ask' && !st.fix_attempted && ((m.reason === 'review_changes' && highs.length) || (m.reason === 'tests_red' && reds.length))
+      const fixable = !ok && state.settings.autonomy !== 'ask' && !st.fix_attempted && !st.fix_of && ((m.reason === 'review_changes' && highs.length) || (m.reason === 'tests_red' && reds.length))
       if (fixable) {
         const problems = m.reason === 'tests_red' ? reds.map((t) => `- prova vermelha ${t.name}: ${(t.message || '').slice(0, 300)}`) : highs.map((f) => `- ${f.file}: ${f.problem} Correção sugerida: ${f.fix}`)
-        const fix = { id: `${st.id}f`, title: `Corrigir: ${st.title.slice(0, 56)}`, request: `Os arquivos da parte anterior ("${st.title}") já estão alterados no projeto (não commitados). NÃO refaça a parte: corrija APENAS os problemas abaixo, no código existente. Se uma prova vermelha depende de rede, CLI externa ou ambiente, troque a dependência por um dublê na prova; não apague provas.\n${problems.join('\n')}`, acceptance: (m.reason === 'tests_red' ? reds.map((t) => `A prova "${t.name.slice(0, 100)}" passa`) : highs.map((f) => `Achado corrigido: ${String(f.problem).slice(0, 180)}`)).slice(0, 4), test_hint: m.reason === 'tests_red' ? 'as provas vermelhas listadas já existem; não escreva novas' : 'uma prova que reproduza cada achado (falha hoje) e passe depois da correção', depends_on: [], scope_paths: st.scope_paths || [], do_not_touch: st.do_not_touch || [], out_of_scope: st.out_of_scope || [], interfaces: st.interfaces || [], fix_of: st.id, state: 'queued', steps: [], round: 0, red_tests: [], tests_after: null, diff: '', review: null, visual: null }
+        const fix = { id: `${st.id}f`, title: `Corrigir: ${st.title.slice(0, 56)}`, request: `Os arquivos da parte anterior ("${st.title}") já estão alterados no projeto (não commitados). NÃO refaça a parte: corrija APENAS os problemas abaixo, no código existente. Se uma prova vermelha depende de rede, CLI externa ou ambiente, troque a dependência por um dublê na prova; não apague provas.\n${problems.join('\n')}`, acceptance: (m.reason === 'tests_red' ? reds.map((t) => `A prova "${t.name.slice(0, 100)}" passa`) : highs.map((f) => `Achado corrigido: ${String(f.problem).slice(0, 180)}`)).slice(0, 4), test_hint: m.reason === 'tests_red' ? 'as provas vermelhas listadas já existem; não escreva novas' : 'uma prova que reproduza cada achado (falha hoje) e passe depois da correção', depends_on: [], no_test_phase: m.reason === 'tests_red', scope_paths: st.scope_paths || [], do_not_touch: st.do_not_touch || [], out_of_scope: st.out_of_scope || [], interfaces: st.interfaces || [], fix_of: st.id, state: 'queued', steps: [], round: 0, red_tests: [], tests_after: null, diff: '', review: null, visual: null }
         st.fix_attempted = true; st.state = 'skipped'; st.skipped_reason = `${m.reason === 'tests_red' ? 'provas vermelhas' : 'rejeitada pelo revisor'}; correção na parte ${fix.id}`
         m.stories.splice(i + 1, 0, fix); m.state = 'running'; m.reason = null
-        log('engine', `"${st.title}" parou em ${m.reason === 'tests_red' ? 'provas vermelhas' : 'achado grave do revisor'}; o trabalho fica e vira a parte "${fix.title}" com o modelo forte`, 'warn'); broadcast(); continue
+        log('engine', `"${st.title}" parou em ${fix.no_test_phase ? 'provas vermelhas' : 'achado grave do revisor'}; o trabalho fica e vira a parte "${fix.title}" com o modelo forte`, 'warn'); broadcast(); continue
       }
       if (!ok && state.settings.unattended && m.reason !== 'budget' && m.reason !== 'engine_error') {
         if (['review_failed', 'review_changes'].includes(m.reason) && st.tests_after?.ok && !(st.review?.findings || []).some((f) => f.severity === 'high')) {
@@ -1265,7 +1266,7 @@ function makerLadder() {
   const mk = { family: state.settings.roles.maker.family || 'claude', model: state.settings.roles.maker.model, effort: effortOf('maker') }, steps = [mk]
   if (mk.family === 'agy' && /^gemini/.test(mk.model) && mk.effort !== 'high') steps.push({ ...mk, effort: 'high' })
   if (mk.family !== 'claude') steps.push({ family: 'claude', model: 'sonnet', effort: 'high' })
-  const pl = plannerChoice(); steps.push({ family: 'claude', model: pl.model, effort: pl.effort || 'high' })
+  const pl = plannerChoice(); steps.push(pl.model === 'fable' ? { family: 'claude', model: 'opus', effort: 'high' } : { family: 'claude', model: pl.model, effort: pl.effort || 'high' }) // Fable planeja; escrever código no Fable é caro demais
   return steps.filter((x, i, a) => a.findIndex((y) => y.family === x.family && y.model === x.model && y.effort === x.effort) === i)
 }
 function makerStep(st, round, grave) { const l = makerLadder(); const i = st.fix_of ? l.length - 1 : grave ? Math.min(l.length - 1, Math.max(0, round - 2)) : 0; return { ...l[i], step: i } }
@@ -1300,7 +1301,10 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   const stop = (reason) => { m.state = 'awaiting_operator'; m.reason = reason; st.state = 'blocked'; log('engine', `parada: ${reason}`, 'error'); return false }
   if (m.cost.usd > (state.settings.max_usd_per_mission || 60)) return stop('budget')
   st.round = round
-  if (round === 1) {
+  if (round === 1 && st.no_test_phase) { // correção de provas vermelhas: as provas já existem; direto para a implementação
+    st.usd_start = m.cost.usd; setStep('test', 'skipped'); setStep('red', 'skipped')
+    const now0 = await runTests(state.project); st.red_tests = now0.tests.filter((t) => t.status !== 'passed').map((t) => ({ name: t.name, status: 'failed', message: t.message || '' }))
+  } else if (round === 1) {
     if (m.plan.needs_ui && state.settings.visual_gate) st.visual_before = await visualGate()
     st.usd_start = m.cost.usd
     setStep('test', 'running'); const rt = await makerCall(makerStep(st, 1, false), { role: 'prova', prompt: testPrompt(st, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: 20 }); remember(st, rt); await refreshProject(); setStep('test', 'done')
@@ -1311,8 +1315,9 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     st.red_tests = generic ? after.tests.filter((t) => t.status !== 'passed') : after.tests.filter((t) => !before.has(t.name) && t.status !== 'passed')
     const regress = generic ? [] : after.tests.filter((t) => before.has(t.name) && t.status !== 'passed')
     log('engine', `prova vermelha: ${st.red_tests.length} vermelha(s)${generic ? ' (runner genérico)' : `, ${regress.length} antiga(s) quebrada(s)`}`)
-    if (regress.length > 0) { setStep('red', 'failed'); st.tests_after = after; st.diff = await gitDiff(state.project.dir); return stop('tests_red') }
-    if (st.red_tests.length === 0) {
+    if (regress.length > 0) { st.red_regress = regress.map((t) => ({ name: t.name, status: 'failed', message: (t.message || '').slice(0, 400) })); log('engine', `${regress.length} prova(s) antiga(s) quebraram na fase de prova (comum com portão de tipos ou lint: a prova nova cita o que ainda não existe); sigo para a implementação, que tem de deixar tudo verde`, 'warn') }
+    if (st.red_tests.length === 0 && regress.length) setStep('red', 'done') // o arquivo de prova nem carrega (import do que não existe): conta como vermelho
+    else if (st.red_tests.length === 0) {
       // Sem prova vermelha. (a) quem escreve já implementou junto com a prova (comum no Gemini): provas novas verdes + código alterado → segue para verificação e revisão;
       // (b) não escreveu prova que falha: repete a fase de prova uma vez com o motivo; (c) parte sem comportamento testável (config, docs): implementa sem prova vermelha e o revisor julga.
       const fresh = generic ? [] : after.tests.filter((t) => !before.has(t.name))
