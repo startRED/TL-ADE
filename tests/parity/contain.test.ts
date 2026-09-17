@@ -380,4 +380,268 @@ describe('contain parity', () => {
     expect(diffSecretViolation?.pattern).toBe('aws_access_key_id')
     expect(diffSecretViolation?.path).toBe('src/big_diff.txt')
   }, 30_000)
+
+  // Dublê de git na fronteira do processo filho: registra cada chamada de `run` (com as
+  // opções recebidas) e cada chamada de método de restauração, sem tocar em git de verdade.
+  interface FakeRunCall {
+    args: string[]
+    options: { maxBuffer?: number }
+  }
+
+  function makeFakeGit(opts: { worktreeDir: string; dirtyPaths: string[]; diff: string }) {
+    const runCalls: FakeRunCall[] = []
+    const restoreCalls: Array<{ tree: string; options: { label?: string } }> = []
+    const legacyRestoreCalls: string[] = []
+    const quarantineTree = 'b'.repeat(40)
+    const quarantineCommit = 'c'.repeat(40)
+    const restoredTree = 'd'.repeat(40)
+
+    // `stdout` é a fonte integral (bytes Latin-1); `text` é o campo UTF-8 já degradado.
+    // Para o diff os dois divergem de propósito: `text` vem truncado no cabeçalho, sem
+    // nenhum segredo, então uma implementação que varresse `text` em vez de
+    // `stdout.toString('latin1')` não acharia nada e as provas ficariam vermelhas.
+    const reply = (out: string, text: string = out) => ({
+      code: 0,
+      stdout: Buffer.from(out, 'latin1'),
+      stderr: '',
+      text,
+    })
+
+    /** Recorte do diff que sobra no campo `text`: só o primeiro cabeçalho. */
+    const truncatedDiffText = opts.diff.slice(0, opts.diff.indexOf('\n') + 1)
+
+    return {
+      worktreeDir: opts.worktreeDir,
+      runCalls,
+      restoreCalls,
+      legacyRestoreCalls,
+      restoredTree,
+      truncatedDiffText,
+      async headInfo() {
+        return { commit: 'a'.repeat(40), branch: 'main', detached: false }
+      },
+      async dirtyPaths() {
+        return [...opts.dirtyPaths]
+      },
+      async worktreeTree() {
+        return quarantineTree
+      },
+      async run(args: string[], options: { maxBuffer?: number } = {}) {
+        runCalls.push({ args: [...args], options: { ...options } })
+        if (args.includes('diff')) {
+          return reply(opts.diff, truncatedDiffText)
+        }
+        if (args[0] === 'commit-tree') {
+          return reply(quarantineCommit)
+        }
+        return reply('')
+      },
+      async restore(tree: string, options: { label?: string }) {
+        restoreCalls.push({ tree, options: { ...options } })
+        return { tree: restoredTree, discardedRef: 'refs/ade/discarded/S10/1' }
+      },
+      // Método de restauração alternativo: existe só para provar que o contain NÃO o usa.
+      async restoreTree(tree: string) {
+        legacyRestoreCalls.push(tree)
+        return { tree, discardedRef: 'refs/ade/discarded/legacy' }
+      },
+    }
+  }
+
+  // AC1: Dado um diff com segredos dentro de arquivos, quando contain roda, então cada achado
+  // traz o caminho relativo do arquivo (nunca null) e os achados saem ordenados por caminho.
+  test('secret_findings_from_the_diff_carry_the_relative_path_and_are_sorted_by_path', async () => {
+    const worktreeDir = makeTmpDir('ade-contain-fake-')
+    tmpDirs.push(worktreeDir)
+
+    const awsKey = 'AKIA' + 'ABCDEFGHIJ234567'
+    const githubToken = 'gh' + 'p_' + 'a'.repeat(36)
+    const openaiKey = 'sk-' + '12345678901234567890'
+
+    // Seções na ordem inversa da alfabética; a última é um arquivo apagado,
+    // cujo caminho só aparece no cabeçalho `--- a/...` (o `+++` é /dev/null).
+    const diff = [
+      'diff --git a/src/z.js b/src/z.js',
+      'index 1111111..2222222 100644',
+      '--- a/src/z.js',
+      '+++ b/src/z.js',
+      '@@ -1,0 +1,1 @@',
+      '+const chave = "' + awsKey + '"',
+      'diff --git a/src/a.js b/src/a.js',
+      'index 3333333..4444444 100644',
+      '--- a/src/a.js',
+      '+++ b/src/a.js',
+      '@@ -1,0 +1,1 @@',
+      '+const token = "' + githubToken + '"',
+      'diff --git a/src/m.txt b/src/m.txt',
+      'deleted file mode 100644',
+      'index 5555555..0000000',
+      '--- a/src/m.txt',
+      '+++ /dev/null',
+      '@@ -1,1 +0,0 @@',
+      '-valor antigo: ' + openaiKey,
+      '',
+    ].join('\n')
+
+    const git = makeFakeGit({
+      worktreeDir,
+      dirtyPaths: ['src/z.js', 'src/a.js', 'src/m.txt'],
+      diff,
+    })
+
+    // O campo `text` do dublê não tem nenhum dos segredos: o achado só pode vir de
+    // `stdout.toString('latin1')`, a fonte integral exigida pela decisão do plano.
+    expect(git.truncatedDiffText).not.toBe(diff)
+    for (const segredo of [awsKey, githubToken, openaiKey]) {
+      expect(git.truncatedDiffText).not.toContain(segredo)
+    }
+
+    const result = await contain({
+      git,
+      unitId: 'S10',
+      treeBefore: 'e'.repeat(40),
+      scopePaths: ['src/**'],
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('secret')
+    expect(result.failureClass).toBe('security')
+    expect(result.action).toBe('stop_batch')
+
+    const secretViolations = result.violations.filter((v) => v.kind === 'secret')
+    expect(secretViolations).toEqual([
+      { kind: 'secret', path: 'src/a.js', pattern: 'github_token', source: 'diff' },
+      { kind: 'secret', path: 'src/m.txt', pattern: 'openai_api_key', source: 'diff' },
+      { kind: 'secret', path: 'src/z.js', pattern: 'aws_access_key_id', source: 'diff' },
+    ])
+    expect(secretViolations.every((v) => v.path !== null)).toBe(true)
+    expect(result.quarantineRef).toBe('refs/ade/quarantine/S10/1')
+  })
+
+  // AC2: Dado um chamador que passa diffMaxBuffer menor, quando contain roda o diff,
+  // então o maxBuffer usado continua sendo 2 ** 31.
+  test('the_diff_always_runs_with_the_full_max_buffer_even_when_the_caller_asks_for_less', async () => {
+    const worktreeDir = makeTmpDir('ade-contain-fake-')
+    tmpDirs.push(worktreeDir)
+
+    const diff = [
+      'diff --git a/src/ok.js b/src/ok.js',
+      'index 1111111..2222222 100644',
+      '--- a/src/ok.js',
+      '+++ b/src/ok.js',
+      '@@ -1,0 +1,1 @@',
+      '+const valor = 1',
+      '',
+    ].join('\n')
+
+    const git = makeFakeGit({ worktreeDir, dirtyPaths: ['src/ok.js'], diff })
+
+    // Prova de contrato no nível de tipo: `diffMaxBuffer` NÃO é parâmetro aceito por
+    // contain. Se a propriedade voltar ao ContainInput, o tipo abaixo vira `never`,
+    // a atribuição não compila e `npm run typecheck` fica vermelho.
+    type ContainInput = NonNullable<Parameters<typeof contain>[0]>
+    type DiffMaxBufferForaDoContrato = 'diffMaxBuffer' extends keyof ContainInput ? never : true
+    const diffMaxBufferForaDoContrato: DiffMaxBufferForaDoContrato = true
+    expect(diffMaxBufferForaDoContrato).toBe(true)
+
+    // Chamador legado tentando encolher o limite: como o campo não faz parte do contrato,
+    // a entrada só chega até aqui por cast. O valor tem de ser ignorado pelo contain.
+    const entradaComLimiteReduzido = {
+      git,
+      unitId: 'S10',
+      treeBefore: 'e'.repeat(40),
+      scopePaths: ['src/**'],
+      diffMaxBuffer: 1024,
+    } as unknown as ContainInput
+
+    const result = await contain(entradaComLimiteReduzido)
+
+    expect(result.ok).toBe(true)
+    expect(result.action).toBe('continue')
+
+    const diffCalls = git.runCalls.filter((c) => c.args.includes('diff'))
+    expect(diffCalls).toHaveLength(1)
+    expect(diffCalls[0].args).toEqual([
+      '-c',
+      'core.quotePath=false',
+      'diff',
+      '--no-color',
+      '--no-ext-diff',
+      '--text',
+      'HEAD',
+      '--',
+    ])
+    expect(diffCalls[0].options.maxBuffer).toBe(2 ** 31)
+  })
+
+  // AC3: Dado que contain precisa restaurar, então chama git.restore(treeBefore, { label: unitId })
+  // e nenhum outro método de restauração; sem restauração, nenhum deles é chamado.
+  test('restore_uses_only_git_restore_with_tree_before_and_the_unit_label', async () => {
+    const worktreeDir = makeTmpDir('ade-contain-fake-')
+    tmpDirs.push(worktreeDir)
+
+    const cleanDiff = [
+      'diff --git a/fora/b.txt b/fora/b.txt',
+      'new file mode 100644',
+      'index 0000000..1111111',
+      '--- /dev/null',
+      '+++ b/fora/b.txt',
+      '@@ -0,0 +1,1 @@',
+      '+conteudo fora do escopo',
+      '',
+    ].join('\n')
+    const treeBefore = 'e'.repeat(40)
+
+    // Primeira violação de escopo: restaura a árvore pelo único método aceito.
+    const git = makeFakeGit({ worktreeDir, dirtyPaths: ['fora/b.txt'], diff: cleanDiff })
+    const restored = await contain({
+      git,
+      unitId: 'S10',
+      treeBefore,
+      scopePaths: ['src/**'],
+    })
+
+    expect(restored.reason).toBe('scope')
+    expect(restored.action).toBe('restore')
+    expect(restored.restoredTree).toBe(git.restoredTree)
+    expect(git.restoreCalls).toEqual([{ tree: treeBefore, options: { label: 'S10' } }])
+    expect(git.legacyRestoreCalls).toEqual([])
+
+    // Repetição: estaciona sem chamar nenhum método de restauração.
+    const gitRepeat = makeFakeGit({ worktreeDir, dirtyPaths: ['fora/b.txt'], diff: cleanDiff })
+    const parked = await contain({
+      git: gitRepeat,
+      unitId: 'S10',
+      treeBefore,
+      scopePaths: ['src/**'],
+      scopeViolationCount: 1,
+    })
+    expect(parked.action).toBe('park')
+    expect(parked.restoredTree).toBe(null)
+    expect(gitRepeat.restoreCalls).toEqual([])
+    expect(gitRepeat.legacyRestoreCalls).toEqual([])
+
+    // Segredo: para o lote sem restaurar nada.
+    const secretDiff = [
+      'diff --git a/src/a.js b/src/a.js',
+      'index 1111111..2222222 100644',
+      '--- a/src/a.js',
+      '+++ b/src/a.js',
+      '@@ -1,0 +1,1 @@',
+      '+const chave = "' + 'AKIA' + 'ABCDEFGHIJ234567' + '"',
+      '',
+    ].join('\n')
+    const gitSecret = makeFakeGit({ worktreeDir, dirtyPaths: ['src/a.js'], diff: secretDiff })
+    const stopped = await contain({
+      git: gitSecret,
+      unitId: 'S10',
+      treeBefore,
+      scopePaths: ['src/**'],
+    })
+    expect(stopped.reason).toBe('secret')
+    expect(stopped.action).toBe('stop_batch')
+    expect(stopped.restoredTree).toBe(null)
+    expect(gitSecret.restoreCalls).toEqual([])
+    expect(gitSecret.legacyRestoreCalls).toEqual([])
+  })
 })
