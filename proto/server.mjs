@@ -289,6 +289,11 @@ async function guard(fn) {
     m.state = 'awaiting_operator'; m.reason = 'engine_error'; log('engine', `erro do engine: ${err.message}`, 'error'); await persistMission().catch(() => {}); return finish()
   }
 }
+function quotaPause(who, until) {
+  const m = state.mission; m.quota_until = until
+  log('engine', `cota do ${who} esgotada: a missão pausa sem gastar rodadas e retoma sozinha ${new Date(until).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}. Para não esperar, troque o modelo desse papel em Modelos e continue.`, 'warn')
+  scheduleQuotaResume(currentEngine()); throw PAUSE
+}
 function scheduleQuotaResume(e) {
   const m = e.mission; if (!m?.quota_until) return
   setTimeout(() => { if (e.mission === m && m.state === 'paused' && m.reason === 'quota' && !busyOf(e)) withEngine(e, () => guard(resumeMission)) }, Math.max(5000, new Date(m.quota_until) - Date.now()))
@@ -810,7 +815,15 @@ async function checker(diff, tests, st) {
   setLive(null)
   let review = null
   try { review = lastMessage ? JSON.parse(lastMessage) : null } catch {}
-  if (!review) log('engine', `codex falhou (código ${r.code}): ${(lastMessage || r.err || r.out).trim().slice(0, 300)}`, 'error')
+  if (!review) {
+    const msg = (lastMessage || r.err || r.out || '').trim()
+    log('engine', `codex falhou (código ${r.code}): ${msg.slice(0, 300)}`, 'error')
+    if (/usage limit|quota|rate limit/i.test(msg)) {
+      await readQuota().catch(() => {})
+      const resets = [state.quota.codex?.five_hour, state.quota.codex?.seven_day].filter((w) => w && w.used >= 99 && new Date(w.resets_at) > new Date()).map((w) => +new Date(w.resets_at))
+      quotaPause('Codex', new Date(resets.length ? Math.max(...resets) + 60 * 1000 : Date.now() + 60 * 60 * 1000).toISOString())
+    }
+  }
   m.cost.calls += 1
   journal({ type: 'model_call', family: 'codex', role: 'checker', model, story: m.current, tokens_in: usage?.input_tokens || 0, cache_read: usage?.cached_input_tokens || 0, tokens_out: usage?.output_tokens || 0, prompt_chars: prompt.length, verdict: review?.verdict || null }).catch(() => {})
   readQuota().then(broadcastSoon)
@@ -1357,9 +1370,7 @@ async function agyMaker({ role, prompt, model, effort }) {
     if (/quota reached|rate limit|RESOURCE_EXHAUSTED/i.test(msg)) {
       const t = /Resets in (?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/i.exec(msg) || []
       const wait = ((+t[1] || 0) * 3600 + (+t[2] || 0) * 60 + (+t[3] || 0)) * 1000 || 30 * 60 * 1000
-      m.quota_until = new Date(Date.now() + wait + 60 * 1000).toISOString()
-      log('engine', `cota do Gemini esgotada: a missão pausa sem gastar rodadas e retoma sozinha às ${new Date(m.quota_until).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}. Para não esperar, troque quem escreve em Modelos e continue.`, 'warn')
-      scheduleQuotaResume(currentEngine()); throw PAUSE
+      quotaPause('Gemini', new Date(Date.now() + wait + 60 * 1000).toISOString())
     }
     return null
   }
