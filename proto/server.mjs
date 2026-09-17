@@ -286,7 +286,7 @@ async function guard(fn) {
     if (err === PAUSE || (m.reason === 'budget' && state.settings.unattended)) {
       const byQuota = !m.pause_requested && !!m.quota_until
       m.pause_requested = false; m.state = 'paused'; m.reason = byQuota ? 'quota' : null
-      if (m.current != null && m.stories[m.current] && m.stories[m.current].state !== 'done') { const st = m.stories[m.current]; Object.assign(st, { state: 'queued', round: 0, steps: [], red_tests: [], tests_after: null, diff: '', review: null, visual: null }); if (state.project) await gitDiscard(state.project.dir).catch(() => {}); await refreshProject().catch(() => {}) }
+      if (m.current != null && m.stories[m.current] && m.stories[m.current].state !== 'done') { const st = m.stories[m.current]; Object.assign(st, { state: 'queued', round: 0, steps: [], red_tests: [], tests_after: null, diff: '', review: null, visual: null, base: null, maker_committed: false }); if (state.project) await gitDiscard(state.project.dir).catch(() => {}); await refreshProject().catch(() => {}) }
       state.live = null; log('operador', 'pausou; a parte em andamento volta do começo quando continuar')
       await persistMission().catch(() => {}); return finish()
     }
@@ -349,7 +349,7 @@ async function loadSavedMissions() {
     const e = engineFor(key); if (!e.project) { e.project = await discover(key); if (e.project.error) { engines.delete(key); continue } }
     if (['running', 'planning'].includes(m.state)) { // caiu no meio: vira pausada; a parte em andamento volta do começo ao continuar
       m.pause_requested = false; m.state = 'paused'; m.reason = null
-      if (m.current != null && m.stories[m.current] && m.stories[m.current].state !== 'done') Object.assign(m.stories[m.current], { state: 'queued', round: 0, steps: [], red_tests: [], tests_after: null, diff: '', review: null, visual: null })
+      if (m.current != null && m.stories[m.current] && m.stories[m.current].state !== 'done') Object.assign(m.stories[m.current], { state: 'queued', round: 0, steps: [], red_tests: [], tests_after: null, diff: '', review: null, visual: null, base: null, maker_committed: false })
       if (!m.plan || !m.stories.length) { m.steps = [] }
       j.log = [...(j.log || []), { ts: now(), source: 'engine', kind: 'warn', text: 'o servidor foi reiniciado no meio; a missão ficou pausada. Continuar retoma da parte pendente.' }]
     }
@@ -541,9 +541,12 @@ async function ensureIgnore(dir) {
   await writeFile(f, (cur.trimEnd() ? cur.trimEnd() + '\n' : '') + missing.join('\n') + '\n')
   await run('git', ['add', '.gitignore'], { cwd: dir }); await run('git', ['-c', 'user.name=TL-ADE', '-c', 'user.email=ade@local', 'commit', '-q', '-m', 'ade: .gitignore', '--', '.gitignore'], { cwd: dir })
 }
-async function gitDiff(dir) {
+async function gitHead(dir) { const r = await run('git', ['rev-parse', '--verify', '-q', 'HEAD'], { cwd: dir }); return r.code === 0 ? r.out.trim() : null }
+async function gitDiff(dir, base = null) {
   const a = await run('git', ['add', '-N', '--', '.'], { cwd: dir }) // ignorados pelo .gitignore ficam fora sozinhos; pathspec de exclusão aqui faz o git reclamar
-  const d = await run('git', ['diff', '--', '.', ...DIFF_EXCLUDES], { cwd: dir })
+  // a pasta do próprio motor nunca faz parte do diff de uma missão (dogfood: a demo vive dentro do repositório que ela desenvolve)
+  const self = path.relative(dir, ROOT).split(path.sep).join('/'), own = self && !self.startsWith('..') && !path.isAbsolute(self) ? [`:(exclude)${self}`] : []
+  const d = await run('git', ['diff', ...(base ? [base] : []), '--', '.', ...DIFF_EXCLUDES, ...own], { cwd: dir })
   if (a.code !== 0 || d.code !== 0) throw new Error(`git diff falhou: ${(a.err || d.err).trim().split('\n')[0]}`)
   return d.out
 }
@@ -1137,7 +1140,7 @@ function common(st) {
     scoutBlock(m.scout),
     'Arquivos grandes: use o MAPA DO CÓDIGO e leia só o trecho (Read com offset e limit); não leia inteiro um arquivo com mais de 300 linhas sem precisar. Código novo vai em módulo novo e pequeno quando o arquivo de destino já passa de 400 linhas; nunca reescreva um arquivo inteiro para mudar um trecho.',
     m.allow_commands && state.settings.scout_enabled !== false ? `Batedor sob demanda (Gemini, barato e rápido): quando precisar de documentação, de um arquivo com mais de 500 linhas, de um fato de biblioteca/API ou de algo na internet/GitHub, NÃO leia você: rode  node "${SCOUT_SCRIPT}" "pergunta objetiva" [arquivos]  (acrescente --web para pesquisar fora) e use o recibo impresso. Uma chamada por dúvida, pergunta curta e específica.` : '',
-    m.allow_commands ? 'Você pode rodar comandos (instalar dependências, inicializar projeto). Não rode servidores que fiquem abertos; não use git. PROVAS: rode no máximo o arquivo de prova desta parte, uma vez depois de cada mudança; NUNCA a suíte inteira, modo watch ou comando que fique esperando: o motor roda a suíte completa depois de você. Não fique aguardando processo.' : 'Você só tem ferramentas de leitura e edição; o harness roda as provas.',
+    m.allow_commands ? 'Você pode rodar comandos (instalar dependências, inicializar projeto). Não rode servidores que fiquem abertos. NUNCA use git para gravar ou desfazer (add, commit, stash, reset, checkout, restore, clean, push): o motor faz o commit depois das provas e da revisão; commit seu esconde o trabalho do revisor e derruba a parte. git status, diff e log, só para ler, pode. PROVAS: rode no máximo o arquivo de prova desta parte, uma vez depois de cada mudança; NUNCA a suíte inteira, modo watch ou comando que fique esperando: o motor roda a suíte completa depois de você. Não fique aguardando processo.' : 'Você só tem ferramentas de leitura e edição; o harness roda as provas.',
     p.runner === 'none' ? 'Não há runner de provas: crie o mínimo (JS: package.json com vitest e "test": "vitest run"; Python: requirements.txt com pytest e as dependências) antes da prova.' : '',
     p.language === 'python' || /python|fastapi|django|flask|pytest/i.test(m.request) ? 'Python: o harness cria .venv com uv e instala requirements.txt + pytest antes de cada rodada de provas. Liste toda dependência em requirements.txt; para rodar algo você mesmo use .venv\\Scripts\\python.exe (o "python" do PATH é o stub da Microsoft Store, sem pacotes). Não instale nada globalmente.' : '',
     p.has_index ? 'Há um index.html na raiz; o que for visual tem de aparecer nele.' : (m.plan.needs_ui ? 'Se esta story é visual, entregue/atualize index.html na raiz funcionando como arquivos estáticos (ES modules, sem build).' : ''),
@@ -1381,6 +1384,7 @@ async function runStories() {
           st.auto_accepted = true; ok = true; log('engine', `modo noturno: ${m.reason} com provas verdes e nada grave; parte aceita`, 'warn')
         } else {
           log('engine', `modo noturno: parada "${m.reason}" sem saída; parte pulada e arquivos dela desfeitos; segue para a próxima`, 'warn')
+          if (st.maker_committed) log('engine', `ATENÇÃO: a parte "${st.title}" foi pulada, mas quem escreve tinha feito commit por conta própria; esse commit ficou no histórico SEM revisão. Confira com git log`, 'error')
           st.state = 'skipped'; st.skipped_reason = st.contract_issue ? `contrato errado: ${st.contract_issue}` : m.reason; await gitDiscard(state.project.dir); await refreshProject(); m.state = 'running'; m.reason = null; broadcast()
           // duas partes puladas em sequência = base que as próximas precisam não existe; continuar só queima dinheiro. Pausa e espera você (ADR 0015).
           if (m.stories[i - 1]?.state === 'skipped' && !m.stories[i - 1]?.fix_attempted) { m.state = 'paused'; m.reason = 'skips'; log('engine', 'modo noturno: duas partes seguidas puladas; as próximas dependem delas. Missão pausada para você replanejar.', 'error'); await persistMission().catch(() => {}); return finish() }
@@ -1472,10 +1476,11 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   if (m.cost.usd > (state.settings.max_usd_per_mission || 60)) return stop('budget')
   st.round = round
   if (round === 1 && st.no_test_phase) { // correção de provas vermelhas: as provas já existem; direto para a implementação
-    st.usd_start = m.cost.usd; setStep('test', 'skipped'); setStep('red', 'skipped')
+    st.usd_start = m.cost.usd; setStep('test', 'skipped'); setStep('red', 'skipped'); st.base = await gitHead(state.project.dir)
     const now0 = await runTests(state.project); st.red_tests = now0.tests.filter((t) => t.status !== 'passed').map((t) => ({ name: t.name, status: 'failed', message: t.message || '' }))
   } else if (round === 1) {
     if (m.plan.needs_ui && state.settings.visual_gate) st.visual_before = await visualGate()
+    if (!st.red_retry || !st.base) st.base = await gitHead(state.project.dir)
     st.usd_start = m.cost.usd
     setStep('test', 'running'); const rt = await makerCall(makerStep(st, 1, false), { role: 'prova', prompt: testPrompt(st, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: 20 }); remember(st, rt); await refreshProject(); setStep('test', 'done')
     setStep('red', 'running')
@@ -1491,7 +1496,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
       // Sem prova vermelha. (a) quem escreve já implementou junto com a prova (comum no Gemini): provas novas verdes + código alterado → segue para verificação e revisão;
       // (b) não escreveu prova que falha: repete a fase de prova uma vez com o motivo; (c) parte sem comportamento testável (config, docs): implementa sem prova vermelha e o revisor julga.
       const fresh = generic ? [] : after.tests.filter((t) => !before.has(t.name))
-      const changed = (await gitDiff(state.project.dir)).trim()
+      const changed = (await gitDiff(state.project.dir, st.base)).trim()
       if (fresh.length && after.ok && changed) { st.early_impl = true; setStep('red', 'skipped'); log('engine', `quem escreve adiantou a implementação junto com a prova (${fresh.length} prova(s) nova(s) já verdes); sigo para verificação e revisão`, 'warn') }
       else if (!st.red_retry) { st.red_retry = true; setStep('red', 'failed'); log('engine', 'nenhuma prova nova ficou vermelha; repetindo a fase de prova uma vez com o motivo', 'warn'); return runStory(st, 1, null, null) }
       else { st.no_red = true; setStep('red', 'skipped'); log('engine', 'sem prova vermelha na segunda tentativa (parte de configuração ou documentação?); implemento assim mesmo e o revisor julga', 'warn') }
@@ -1503,7 +1508,8 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   if (escalate) log('engine', `rodada ${round}: ${st.fix_of ? 'parte de correção' : 'problema grave persiste'}; maker sobe para ${who.model} (esforço ${who.effort}, degrau ${who.step + 1} de ${makerLadder().length})`)
   if (st.early_impl && round === 1) setStep('fix', 'skipped', { round })
   else { setStep('fix', 'running', { round }); const rf = await makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 }); remember(st, rf); await refreshProject(); setStep('fix', 'done', { round }) }
-  setStep('tests', 'running'); st.tests_after = await runTests(state.project); st.diff = await gitDiff(state.project.dir)
+  setStep('tests', 'running'); st.tests_after = await runTests(state.project); st.diff = await gitDiff(state.project.dir, st.base)
+  { const head = await gitHead(state.project.dir); if (st.base && head && head !== st.base && !st.maker_committed) { st.maker_committed = true; log('engine', 'quem escreve fez commit por conta própria, contra a instrução; o trabalho continua visível porque o diff da parte é contado desde o começo dela. O commit dele fica; o motor não commita de novo o que já entrou', 'warn') } }
   log('engine', `provas depois: ${st.tests_after.total} no total, ${st.tests_after.failed} vermelha(s)`); setStep('tests', st.tests_after.ok ? 'done' : 'failed')
   if (st.tests_after.timeout) { log('engine', 'a suíte de provas estourou o tempo limite (5 min) e foi interrompida: isso não é prova vermelha. Paro a parte sem gastar rodadas; veja se alguma prova ficou pendurada (processo, servidor, espera sem fim)', 'error'); return stop('tests_timeout') }
   if (!st.diff.trim()) { setStep('checker', 'skipped'); return stop('no_changes') }
