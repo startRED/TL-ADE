@@ -115,7 +115,7 @@ function storySummary(st) {
   bits.push(`${st.round || 1} rodada${(st.round || 1) > 1 ? 's' : ''}`)
   if (st.tests_after) bits.push(`${st.tests_after.total - st.tests_after.failed}/${st.tests_after.total} provas`)
   if (st.review) bits.push(st.review.verdict === 'approve' ? 'aprovada' : 'com ajustes')
-  if (st.state === 'skipped') bits.push('pulada')
+  if (st.state === 'skipped') bits.push(st.skipped_reason ? `pulada: ${st.skipped_reason}` : 'pulada')
   return bits.join(' · ')
 }
 
@@ -592,10 +592,21 @@ function Conversation({ state, m }) {
           <Ade><h3 className="msg-h">Montando o plano</h3><p className="msg-p">Estou lendo o projeto para dividir o trabalho em partes pequenas, cada uma com o que precisa valer no fim.</p><Skeleton /><Typing live={state.live} /></Ade>
         )}
 
+        {m.plan?.epics?.length > 0 && (
+          <Ade>
+            <h3 className="msg-h">Pedido grande: {m.plan.epics.length} épicos, um por vez</h3>
+            {m.plan.explanation && <p className="msg-lead">{m.plan.explanation}</p>}
+            <ol className="plan-lines">
+              {m.plan.epics.map((e, i) => (
+                <li key={e.id}><span className="pl-n mono">{i + 1}</span><span className="pl-t">{e.title}{e.reason ? <small className="dim"> · {e.reason}</small> : null}{e.state === 'done' && e.summary ? <small className="dim"> · {e.summary.slice(0, 90)}</small> : null}</span><Chip tone={({ done: 'good', running: 'accent', blocked: 'warn', failed: 'bad', queued: 'mute' })[e.state] || 'mute'}>{({ done: 'pronto', running: 'em andamento', blocked: 'bloqueado', failed: 'falhou', queued: 'na fila' })[e.state] || e.state}</Chip></li>
+              ))}
+            </ol>
+          </Ade>
+        )}
         {m.plan && m.stories.length > 0 && (
           <Ade>
-            <h3 className="msg-h">O plano</h3>
-            {m.plan.explanation && <p className="msg-lead">{m.plan.explanation}</p>}
+            <h3 className="msg-h">{m.plan.epic_title ? `Plano do épico: ${m.plan.epic_title}` : 'O plano'}</h3>
+            {(m.plan.epic_explanation || (!m.plan.epics?.length && m.plan.explanation)) && <p className="msg-lead">{m.plan.epic_explanation || m.plan.explanation}</p>}
             {!started && (
               <ol className="plan-lines">
                 {m.stories.map((s, i) => (

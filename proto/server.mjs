@@ -58,7 +58,7 @@ const DEFAULT_SETTINGS = {
   research_enabled: true,
   visual_gate: true,
   fast_lane: true, // faixa rápida (ADR 0008 / E18): pedido curto de correção num projeto existente pula entrevista e plano no Opus
-  max_usd_per_story: 4, // orçamento por parte (spec E4): estourou com provas verdes → aceita; sem provas verdes → para
+  max_usd_per_story: 5, // orçamento por parte (spec E4): estourou com provas verdes → aceita; sem provas verdes → para
   unattended: false, // modo noturno (ADR 0015): responde a entrevista com as recomendações, aprova o plano, e em parada sem saída pula a parte e segue
   max_usd_per_mission: 60, // teto por missão (US$ no Claude): estourou → pausa em vez de continuar gastando
   autonomy: 'auto', // auto: após 4 rodadas com provas verdes e sem achado grave do revisor, aceita e segue; ask: para e pergunta
@@ -246,6 +246,7 @@ async function resumeMission() {
   if (!m || m.state !== 'paused') return 'Esta missão não está pausada.'
   const fresh = await discover(state.project.dir); if (fresh.dirty) { await gitDiscard(fresh.dir); }
   state.project = await discover(fresh.dir); m.finished_at = null; log('operador', 'continuou a missão')
+  if (m.program) { m.state = 'running'; return guard(async () => { if (m.epic && m.stories.length) { const r = await runStories(); return r } return runProgram() }) }
   if (!m.plan || !m.stories.length) { m.state = 'planning'; m.steps = []; return guard(planMission) }
   return guard(runStories)
 }
@@ -654,7 +655,7 @@ function newFindings(after, before) { const old = new Set((before?.findings || [
 const INTENT_JSON_SCHEMA = {
   type: 'object', additionalProperties: false,
   properties: {
-    summary: { type: 'string' }, complexity: { type: 'string', enum: ['trivial', 'bounded', 'feature', 'subsystem'] },
+    summary: { type: 'string' }, complexity: { type: 'string', enum: ['trivial', 'bounded', 'feature', 'subsystem', 'project'] },
     domains: { type: 'array', items: { type: 'string' } }, keywords: { type: 'array', items: { type: 'string' } },
     needs_ui: { type: 'boolean' }, needs_backend: { type: 'boolean' },
     research_questions: { type: 'array', items: { type: 'string' } },
@@ -674,7 +675,8 @@ function intentPrompt() {
     'Se há anexos, abra-os antes de decidir (uma imagem de referência muda domínios, skills e perguntas).',
     'Escolha, para cada papel, as skills do catálogo abaixo que elevam a qualidade daquele papel neste pedido (ids exatos; até 4 para o maker, até 3 para os outros; lista vazia é válida). Regras fixas: se há interface ou design, o maker recebe design-taste-frontend e impeccable (pode acrescentar frontend-design e accessibility); backend/API recebe backend-patterns e api-design; banco recebe postgres-patterns; o revisor recebe skills de revisão/segurança, não de estilo; o pesquisador raramente precisa de skill.',
     '- summary: 2 frases do que será entregue e das escolhas feitas por você quando o pedido é vago.',
-    '- complexity, domains (subconjunto de frontend, design, backend, api, database, testing, python, security, a11y, docs, devops), keywords (5 a 12, pt e en), needs_ui, needs_backend.',
+    '- complexity: trivial (1 arquivo, correção) | bounded (1 a 3 partes pequenas) | feature (4 a 6 partes de UM subsistema) | subsystem (precisaria de mais de 6 partes, ou toca mais de um subsistema: vira uma fila de épicos) | project (vários subsistemas ou fases, ex.: "faça o motor inteiro", "crie o app completo"). Na dúvida entre feature e subsystem, escolha subsystem: partes grandes demais falham na revisão.',
+    '- domains (subconjunto de frontend, design, backend, api, database, testing, python, security, a11y, docs, devops), keywords (5 a 12, pt e en), needs_ui, needs_backend.',
     '- research_questions: só fatos externos que mudariam a implementação; normalmente vazio.',
     interviewRule(),
     'CATÁLOGO DE SKILLS:', catalogListing(),
@@ -698,6 +700,8 @@ function planPrompt() {
   return [
     'Você é o Intent Compiler da TL-ADE. Transforme o pedido do usuário em um plano executável por outra IA, em português, no formato JSON exigido.',
     `Pedido: ${state.mission.request}`,
+    m.epic ? `ÉPICO ATUAL (planeje SÓ isto; o pedido acima é contexto): ${m.epic.title}. Objetivo: ${m.epic.goal}. Critérios do épico: ${(m.epic.acceptance || []).join('; ')}.` : '',
+    m.epic && m.program?.epics?.some((e) => e.state === 'done') ? `Épicos já concluídos e commitados (não refaça; construa em cima): ${m.program.epics.filter((e) => e.state === 'done').map((e) => `${e.title}: ${(e.summary || '').slice(0, 200)}`).join(' | ')}` : '',
     attachBlock(m.attachments),
     `Entendimento prévio (outra IA): ${state.mission.intent?.summary || ''} Domínios: ${(state.mission.intent?.domains || []).join(', ')}.`,
     m.answers?.length ? `ESCOLHAS DO USUÁRIO NA ENTREVISTA (obrigatórias): ${m.answers.map((a) => `${a.question} → ${a.answer}`).join(' | ')}` : '',
@@ -717,7 +721,7 @@ function planPrompt() {
     '- needs_ui, needs_backend: booleanos.',
     '- research_questions: só fatos externos que mudariam a implementação (versão de API, regra de negócio pública); normalmente vazio.',
     '- questions: só se o pedido for ambíguo a ponto de gerar trabalho errado; no máximo 2; normalmente vazio (prefira uma escolha razoável e registre em summary).',
-    '- stories: 1 a 6 stories pequenas e independentes, em ordem de execução. Cada uma: id (s1, s2…), title, request (instrução completa e autossuficiente para a IA que vai implementar, incluindo o estilo visual quando houver interface), acceptance (2 a 4 critérios verificáveis), test_hint (como provar).',
+    '- stories: 1 a 6 stories PEQUENAS, em ordem de execução. TAMANHO É REGRA: cada story = um comportamento observável, request com no máximo 120 palavras, acceptance com 2 a 4 critérios, diff esperado de até ~300 linhas, provável de passar numa revisão rigorosa em 1 ou 2 rodadas. Nunca junte dois comportamentos com "e também". Se o trabalho não cabe em 6 stories desse tamanho, faça só a primeira fatia coerente e diga em summary o que ficou para o próximo épico. Cada uma: id (s1, s2…), title, request (instrução completa e autossuficiente para a IA que vai implementar, incluindo o estilo visual quando houver interface), acceptance, test_hint (como provar), depends_on (ids das stories anteriores de que esta depende; [] se independente).',
     p.runner === 'none' ? '- Não há runner de provas: a primeira story deve incluir criar o mínimo para rodar provas (JS: package.json + vitest; Python: pytest).' : '',
     '- Se o pedido é visual e não há index.html, uma story deve entregar index.html na raiz funcionando como arquivos estáticos (ES modules, sem build), para abrir no navegador.',
     'Pedidos simples viram 1 ou 2 stories. Não invente escopo além do pedido. questions: normalmente vazio (a entrevista já aconteceu).',
@@ -728,13 +732,13 @@ function planPrompt() {
 const PLAN_JSON_SCHEMA = {
   type: 'object', additionalProperties: false,
   properties: {
-    title: { type: 'string' }, summary: { type: 'string' }, explanation: { type: 'string' }, complexity: { type: 'string', enum: ['trivial', 'bounded', 'feature', 'subsystem'] },
+    title: { type: 'string' }, summary: { type: 'string' }, explanation: { type: 'string' }, complexity: { type: 'string', enum: ['trivial', 'bounded', 'feature', 'subsystem', 'project'] },
     domains: { type: 'array', items: { type: 'string' } }, keywords: { type: 'array', items: { type: 'string' } },
     needs_ui: { type: 'boolean' }, needs_backend: { type: 'boolean' },
     research_questions: { type: 'array', items: { type: 'string' } }, questions: { type: 'array', items: { type: 'string' } },
     assets_style: { type: 'string' },
     assets: { type: 'array', maxItems: 6, items: { type: 'object', additionalProperties: false, properties: { file: { type: 'string' }, prompt: { type: 'string' }, purpose: { type: 'string' } }, required: ['file', 'prompt', 'purpose'] } },
-    stories: { type: 'array', minItems: 1, maxItems: 6, items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, title: { type: 'string' }, request: { type: 'string' }, acceptance: { type: 'array', items: { type: 'string' } }, test_hint: { type: 'string' } }, required: ['id', 'title', 'request', 'acceptance', 'test_hint'] } },
+    stories: { type: 'array', minItems: 1, maxItems: 6, items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, title: { type: 'string' }, request: { type: 'string' }, acceptance: { type: 'array', items: { type: 'string' } }, test_hint: { type: 'string' }, depends_on: { type: 'array', items: { type: 'string' } } }, required: ['id', 'title', 'request', 'acceptance', 'test_hint', 'depends_on'] } },
   },
   required: ['title', 'summary', 'explanation', 'complexity', 'domains', 'keywords', 'needs_ui', 'needs_backend', 'research_questions', 'questions', 'assets_style', 'assets', 'stories'],
 }
@@ -767,6 +771,31 @@ async function contextPack(st, extra = []) {
   if (st.last_summary) parts.push(`Resumo da sessão anterior desta parte: ${st.last_summary.slice(0, 1200)}`)
   return parts.join('\n')
 }
+
+// ---------- épicos (subsystem / project): fila de missões pequenas, uma por subsistema ----------
+const EPICS_JSON_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    title: { type: 'string' }, explanation: { type: 'string' },
+    epics: { type: 'array', minItems: 2, maxItems: 10, items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, title: { type: 'string' }, goal: { type: 'string' }, acceptance: { type: 'array', items: { type: 'string' } }, depends_on: { type: 'array', items: { type: 'string' } } }, required: ['id', 'title', 'goal', 'acceptance', 'depends_on'] } },
+  },
+  required: ['title', 'explanation', 'epics'],
+}
+function epicsPrompt() {
+  const p = state.project, m = state.mission
+  return [
+    'Você é o Intent Compiler da TL-ADE. O pedido é grande (vários subsistemas). NÃO escreva stories: divida em ÉPICOS, cada um um subsistema ou fatia coerente que cabe em 2 a 6 partes pequenas (cada parte ~300 linhas de diff, uma prova). Ordem de execução com dependências explícitas; a base vem antes do que depende dela.',
+    `Pedido: ${m.request}`,
+    attachBlock(m.attachments),
+    `Entendimento prévio: ${m.intent?.summary || ''} Domínios: ${(m.intent?.domains || []).join(', ')}.`,
+    m.answers?.length ? `Escolhas do usuário: ${m.answers.map((a) => `${a.question} → ${a.answer}`).join(' | ')}` : '',
+    `Projeto: ${p.name} em ${p.dir}; ${p.files} itens na raiz; linguagem: ${p.language || 'nenhuma'}; runner de provas: ${p.runner === 'none' ? 'nenhum' : p.test_cmd}. Explore só o necessário (Glob/Read/Grep). Se o projeto tem docs/ ou ADRs, cite os arquivos relevantes no goal de cada épico.`,
+    'Responda em português no JSON exigido: title (≤8 palavras); explanation (4 a 8 linhas leigas: o que existirá no fim e o que cada épico entrega); epics (2 a 10): id (e1, e2…), title (≤8 palavras), goal (instrução completa para planejar esse épico sozinho depois: o que construir, onde, quais arquivos/ADRs ler, o que NÃO fazer), acceptance (2 a 4 critérios observáveis do épico), depends_on (ids anteriores).',
+  ].filter(Boolean).join('\n') + skillsBlock(m.skills.planner || [])
+}
+// tamanho de story: regra sem IA. Story grande demais volta ao planejador para dividir (uma vez).
+const WORDS = (t) => String(t || '').trim().split(/\s+/).length
+function tooBig(st) { return (st.acceptance || []).length > 4 || WORDS(st.request) > 140 || /\b(e tamb[ée]m|al[ée]m disso)\b/i.test(st.request || '') }
 
 // ---------- prompts do maker ----------
 function common(st) {
@@ -847,22 +876,74 @@ async function continuePlanning() {
   if (intent.research_questions?.length && state.settings.research_enabled && !m.research) {
     setStep('research', 'running'); m.research = await research(intent.research_questions.slice(0, 3)); setStep('research', m.research ? 'done' : 'failed')
   }
+  if (['subsystem', 'project'].includes(intent.complexity) && !m.program) return makeProgram()
   return makePlan()
 }
-async function makePlan() {
+async function makeProgram() {
+  const m = state.mission, intent = m.intent
+  m.state = 'planning'; setStep('plan', 'running')
+  const r = await claudeCall({ role: 'épicos', prompt: epicsPrompt(), model: state.settings.roles.planner.model, tools: ['Read', 'Glob', 'Grep'], schema: EPICS_JSON_SCHEMA, maxTurns: 10 })
+  const pr = r?.structured_output
+  if (!pr?.epics?.length) { setStep('plan', 'failed'); m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'a divisão em épicos não veio no formato esperado', 'error'); return finish() }
+  m.program = { title: pr.title, explanation: pr.explanation, epics: pr.epics.map((e) => ({ ...e, state: 'queued', usd: 0, stories: [], summary: '' })), current: null }
+  m.plan = { title: pr.title, summary: pr.explanation.split('\n')[0], explanation: pr.explanation, complexity: intent.complexity, domains: intent.domains, needs_ui: intent.needs_ui, needs_backend: intent.needs_backend, questions: [], research_questions: [], assets: [], assets_style: '', epics: m.program.epics, stories: [] }
+  m.stories = []
+  setStep('plan', 'done')
+  log('engine', `pedido grande: dividido em ${m.program.epics.length} épicos, um por vez (${m.program.epics.map((e) => e.title).join(' → ')})`)
+  if (state.settings.unattended) { log('engine', 'modo noturno: fila de épicos aprovada automaticamente', 'warn'); return runProgram() }
+  m.state = 'awaiting_plan'; m.reason = 'approve_plan'; broadcast(); await persistMission().catch(() => {})
+}
+// roda os épicos em ordem: cada um é planejado na hora (vendo o código dos anteriores) e executado com o fluxo normal de stories
+async function runProgram() {
+  const m = state.mission, pg = m.program
+  if (!pg) return runStories()
+  for (let i = 0; i < pg.epics.length; i++) {
+    const ep = pg.epics[i]
+    if (['done', 'failed', 'blocked'].includes(ep.state)) continue
+    const bad = (ep.depends_on || []).filter((id) => pg.epics.find((x) => x.id === id)?.state !== 'done')
+    if (bad.length) { ep.state = 'blocked'; ep.reason = `depende de ${bad.join(', ')}`; log('engine', `épico "${ep.title}" bloqueado: depende de ${bad.join(', ')}, que não concluiu. Nada gasto.`, 'warn'); continue }
+    pg.current = i; ep.state = 'running'; m.epic = ep; m.stories = []; m.tests_before = null; m.split_tried = false; m.current = null
+    const usd0 = m.cost.usd
+    log('engine', `épico ${i + 1} de ${pg.epics.length}: ${ep.title}`)
+    m.state = 'planning'; broadcast()
+    const planned = await makePlan({ inProgram: true })
+    if (!planned) { ep.state = 'failed'; ep.reason = 'plano não veio'; ep.usd = m.cost.usd - usd0; continue }
+    if (m.state === 'awaiting_plan') return // dúvida do planejador: espera você; decide('start'/'answer') volta para cá
+    const res = await runStories()
+    ep.usd = m.cost.usd - usd0
+    if (res !== 'ok') return // pausou ou parou esperando você; ao continuar, runStories termina o épico e chama runProgram de novo
+    ep.state = 'done'; ep.summary = `${m.stories.filter((x) => x.state === 'done').length} de ${m.stories.length} partes; ${m.stories.map((x) => x.title).join('; ')}`; ep.stories = m.stories.map((x) => ({ id: x.id, title: x.title, state: x.state, skipped_reason: x.skipped_reason || null }))
+    m.epic = null; broadcast(); await persistMission().catch(() => {})
+  }
+  m.epic = null; m.current = null; m.state = 'complete'; m.reason = null
+  const failed = pg.epics.filter((e) => e.state !== 'done').length
+  log('engine', failed ? `fila de épicos terminou com ${failed} épico(s) não concluído(s) (veja o motivo em cada um)` : 'fila de épicos concluída: tudo provado, revisado e commitado', failed ? 'warn' : 'info')
+  return finish()
+}
+async function makePlan({ inProgram = false } = {}) {
   const m = state.mission, intent = m.intent
   m.state = 'planning'; setStep('plan', 'running')
   const r = await claudeCall({ role: 'plano', prompt: planPrompt(), model: state.settings.roles.planner.model, tools: ['Read', 'Glob', 'Grep'], schema: PLAN_JSON_SCHEMA, maxTurns: 10 })
   const plan = r?.structured_output
-  if (!plan?.stories?.length) { setStep('plan', 'failed'); m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'o plano não veio no formato esperado', 'error'); return finish() }
-  m.plan = { ...plan, needs_ui: plan.needs_ui || intent.needs_ui, needs_backend: plan.needs_backend || intent.needs_backend, domains: [...new Set([...(intent.domains || []), ...(plan.domains || [])])] }
+  if (!plan?.stories?.length) { setStep('plan', 'failed'); if (inProgram) return false; m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'o plano não veio no formato esperado', 'error'); return finish() }
+  // parte grande demais volta ao planejador uma vez, sem gastar com maker
+  const big = plan.stories.filter(tooBig)
+  if (big.length && !m.split_tried) {
+    m.split_tried = true
+    m.plan_feedback = [...(m.plan_feedback || []), `Divida a(s) parte(s) ${big.map((x) => x.id).join(', ')} em 2 ou 3 partes menores: cada uma com UM comportamento, até 4 critérios e até 120 palavras; mantenha as outras.`]
+    m.stories = plan.stories.map((s) => ({ ...s, state: 'queued', steps: [], round: 0 })); m.plan = { ...(m.plan || {}), ...plan }
+    log('engine', `plano com parte(s) grande(s) demais (${big.map((x) => x.id).join(', ')}); pedindo divisão ao planejador`, 'warn')
+    return makePlan({ inProgram })
+  }
+  const keep = m.program ? { epics: m.program.epics, explanation: m.program.explanation } : {}
+  m.plan = { ...plan, ...keep, title: m.program ? m.program.title : plan.title, epic_title: m.epic?.title || null, epic_explanation: m.program ? plan.explanation : null, needs_ui: plan.needs_ui || intent.needs_ui, needs_backend: plan.needs_backend || intent.needs_backend, domains: [...new Set([...(intent.domains || []), ...(plan.domains || [])])] }
   m.stories = plan.stories.map((s) => ({ ...s, state: 'queued', steps: [], round: 0, red_tests: [], tests_after: null, diff: '', review: null, visual: null }))
   setStep('plan', 'done')
-  log('engine', `plano: ${plan.title} · ${m.plan.complexity} · ${m.stories.length} story(s)`)
-  if (plan.questions?.length) { m.state = 'awaiting_plan'; m.reason = 'questions'; broadcast(); return }
-  // depois de um pedido de mudança o usuário sempre confere de novo
+  log('engine', `plano${m.epic ? ` do épico "${m.epic.title}"` : ''}: ${plan.title} · ${m.plan.complexity} · ${m.stories.length} story(s)`)
+  if (plan.questions?.length) { m.state = 'awaiting_plan'; m.reason = 'questions'; broadcast(); await persistMission().catch(() => {}); return inProgram ? true : undefined }
+  if (inProgram) return true
   if (state.settings.unattended) log('engine', `modo noturno: plano com ${m.stories.length} parte(s) aprovado automaticamente`, 'warn')
-  else if (m.plan_feedback?.length || m.stories.length > 2 || m.plan.complexity === 'subsystem') { m.state = 'awaiting_plan'; m.reason = 'approve_plan'; broadcast(); await persistMission().catch(() => {}); return }
+  else if (m.user_feedback || m.stories.length > 2) { m.state = 'awaiting_plan'; m.reason = 'approve_plan'; broadcast(); await persistMission().catch(() => {}); return }
   return runStories()
 }
 
@@ -879,8 +960,19 @@ async function runStories() {
     for (let i = 0; i < m.stories.length; i++) {
       const st = m.stories[i]
       if (st.state === 'done' || st.state === 'skipped') continue
+      // dependência não concluída: não gasta nada
+      const badDeps = (st.depends_on || []).filter((id) => { const d = m.stories.find((x) => x.id === id); return d && d.state !== 'done' })
+      if (badDeps.length) { st.state = 'skipped'; st.skipped_reason = `depende de ${badDeps.join(', ')}, que não concluiu`; log('engine', `parte "${st.title}" pulada sem gastar: ${st.skipped_reason}`, 'warn'); broadcast(); continue }
       m.current = i; st.state = 'running'; broadcast()
       let ok = await runStory(st)
+      // rejeitada pelo revisor com achado grave depois das rodadas: o trabalho fica e vira uma parte de correção só com os achados (uma vez)
+      if (!ok && m.reason === 'review_changes' && state.settings.autonomy !== 'ask' && !st.fix_attempted && (st.review?.findings || []).some((f) => f.severity === 'high')) {
+        const highs = st.review.findings.filter((f) => f.severity === 'high')
+        const fix = { id: `${st.id}f`, title: `Corrigir: ${st.title.slice(0, 56)}`, request: `Os arquivos da parte anterior ("${st.title}") já estão alterados no projeto (não commitados). NÃO refaça a parte: corrija APENAS os achados do revisor abaixo, no código existente. Achados:\n${highs.map((f) => `- ${f.file}: ${f.problem} Correção sugerida: ${f.fix}`).join('\n')}`, acceptance: highs.map((f) => `Achado corrigido: ${String(f.problem).slice(0, 180)}`).slice(0, 4), test_hint: 'uma prova que reproduza cada achado (falha hoje) e passe depois da correção', depends_on: [], fix_of: st.id, state: 'queued', steps: [], round: 0, red_tests: [], tests_after: null, diff: '', review: null, visual: null }
+        st.fix_attempted = true; st.state = 'skipped'; st.skipped_reason = `rejeitada pelo revisor; correção na parte ${fix.id}`
+        m.stories.splice(i + 1, 0, fix); m.state = 'running'; m.reason = null
+        log('engine', `revisor rejeitou "${st.title}" com achado grave; o trabalho fica e vira a parte "${fix.title}" só com os achados`, 'warn'); broadcast(); continue
+      }
       if (!ok && state.settings.unattended && m.reason !== 'budget' && m.reason !== 'engine_error') {
         if (['review_failed', 'review_changes'].includes(m.reason) && st.tests_after?.ok && !(st.review?.findings || []).some((f) => f.severity === 'high')) {
           st.auto_accepted = true; ok = true; log('engine', `modo noturno: ${m.reason} com provas verdes e nada grave; parte aceita`, 'warn')
@@ -888,22 +980,28 @@ async function runStories() {
           log('engine', `modo noturno: parada "${m.reason}" sem saída; parte pulada e arquivos dela desfeitos; segue para a próxima`, 'warn')
           st.state = 'skipped'; st.skipped_reason = m.reason; await gitDiscard(state.project.dir); await refreshProject(); m.state = 'running'; m.reason = null; broadcast()
           // duas partes puladas em sequência = base que as próximas precisam não existe; continuar só queima dinheiro. Pausa e espera você (ADR 0015).
-          if (m.stories[i - 1]?.state === 'skipped') { m.state = 'paused'; m.reason = 'skips'; log('engine', 'modo noturno: duas partes seguidas puladas; as próximas dependem delas. Missão pausada para você replanejar.', 'error'); await persistMission().catch(() => {}); return finish() }
+          if (m.stories[i - 1]?.state === 'skipped' && !m.stories[i - 1]?.fix_attempted) { m.state = 'paused'; m.reason = 'skips'; log('engine', 'modo noturno: duas partes seguidas puladas; as próximas dependem delas. Missão pausada para você replanejar.', 'error'); await persistMission().catch(() => {}); return finish() }
           continue
         }
         m.state = 'running'; m.reason = null; st.state = 'running'
       }
-      if (!ok) return finish()
+      if (!ok) { finish(); return 'stopped' }
       await gitCommit(state.project.dir, `ade: ${st.title.slice(0, 72)}`)
       await refreshProject()
       log('engine', `commit feito: ${st.title}`)
       st.state = 'done'; broadcast(); await persistMission().catch(() => {})
     }
+    if (m.program && m.epic) { // fim de um épico: quem fecha é a fila
+      const ep = m.epic; if (ep.state === 'running') { ep.state = 'done'; ep.summary = m.stories.map((x) => x.title).join('; '); ep.stories = m.stories.map((x) => ({ id: x.id, title: x.title, state: x.state, skipped_reason: x.skipped_reason || null })) }
+      m.current = null; m.epic = null; broadcast(); await persistMission().catch(() => {})
+      if (m.program.current != null && m.program.epics.some((e) => e.state === 'queued')) return runProgram()
+      return 'ok'
+    }
     m.state = 'complete'; m.reason = null; m.current = null
     const skipped = m.stories.filter((x) => x.state === 'skipped').length
     log('engine', skipped ? `missão pronta com ${skipped} parte(s) pulada(s) (veja o motivo em cada uma)` : 'missão pronta: todas as stories provadas, revisadas e commitadas', skipped ? 'warn' : 'info')
-  } catch (e) { if (e === PAUSE) throw e; m.state = 'awaiting_operator'; m.reason = 'engine_error'; log('engine', `erro do engine: ${e.message}`, 'error') }
-  return finish()
+  } catch (e) { if (e === PAUSE) throw e; m.state = 'awaiting_operator'; m.reason = 'engine_error'; log('engine', `erro do engine: ${e.message}`, 'error'); finish(); return 'stopped' }
+  finish(); return 'ok'
 }
 
 function remember(st, r) { if (!r) return; st.files = [...new Set([...(st.files || []), ...(r.touched || [])])]; if (typeof r.result === 'string' && r.result.trim()) st.last_summary = r.result.trim() }
@@ -1014,13 +1112,13 @@ async function decide(option, payload = {}) {
   journal({ type: 'decision', option }).catch(() => {})
   if (m.state === 'awaiting_plan') {
     if (option === 'start' && m.reason === 'questions') { m.answers = (m.plan.questions || []).map((q) => ({ id: q.id, question: q.question, answer: q.options?.[0]?.label || 'não sei' })); log('operador', 'seguiu com as recomendações'); return continuePlanning() }
-    if (option === 'start') { log('operador', 'aprovou o plano'); return runStories() }
+    if (option === 'start') { log('operador', 'aprovou o plano'); return m.program ? runProgram() : runStories() }
     if (option === 'answer') {
       m.answers = payload.answers?.length ? payload.answers : [{ id: 'livre', question: 'resposta livre', answer: payload.text || '' }]
       log('operador', `respondeu: ${m.answers.map((a) => `${a.question} → ${a.answer}`).join(' | ')}`)
       return continuePlanning()
     }
-    if (option === 'revise' && payload.text?.trim()) { m.plan_feedback = [...(m.plan_feedback || []), payload.text.trim()]; log('operador', `pediu mudanças no plano: ${payload.text.trim()}`); return makePlan() }
+    if (option === 'revise' && payload.text?.trim()) { m.plan_feedback = [...(m.plan_feedback || []), payload.text.trim()]; m.user_feedback = (m.user_feedback || 0) + 1; m.split_tried = false; log('operador', `pediu mudanças no plano: ${payload.text.trim()}`); if (m.program && !m.epic) { m.program = null; return makeProgram() } return makePlan() }
     if (option === 'discard') { m.state = 'discarded'; log('operador', 'descartou o plano'); return finish() }
     return
   }
