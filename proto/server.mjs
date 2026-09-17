@@ -1156,7 +1156,7 @@ async function runProgram() {
       log('engine', `teto da missão: gasto US$ ${m.cost.usd.toFixed(2)} + plano do próximo épico (~US$ ${planCost.toFixed(2)}) passa de US$ ${cap}. Pauso antes de planejar "${ep.title}"; aumente o teto em Opções e continue.`, 'warn')
       m.epic = null; m.current = null; m.state = 'paused'; m.reason = 'budget'; await persistMission().catch(() => {}); finish(); return 'stopped'
     }
-    pg.current = i; ep.state = 'running'; m.epic = ep; m.stories = []; m.tests_before = null; m.split_tried = false; m.spec_tried = false; m.critic_tried = false; m.current = null
+    pg.current = i; ep.state = 'running'; m.epic = ep; m.stories = []; m.plan_feedback = []; m.tests_before = null; m.split_tried = false; m.spec_tried = false; m.critic_tried = false; m.current = null
     const usd0 = m.cost.usd
     log('engine', `épico ${i + 1} de ${pg.epics.length}: ${ep.title}`)
     m.state = 'planning'; broadcast()
