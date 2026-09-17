@@ -497,7 +497,9 @@ function BoardView({ m }) {
       <h3 className="msg-h">{m.plan?.title || m.request}</h3>
       <div className="board-sum">
         {epics.length > 0 && <div><b>{epicsDone}/{epics.length}</b><small>épicos prontos</small></div>}
-        <div><b>{done}/{all.length}{epics.length && epics.some((e) => e.state === 'queued') ? '+' : ''}</b><small>partes prontas{skipped ? ` · ${skipped} pulada${skipped > 1 ? 's' : ''}` : ''}</small></div>
+        {all.length === 0
+          ? <div><b>planejando</b><small>as partes do épico atual ainda estão sendo planejadas</small></div>
+          : <div><b>{done} de {all.length}</b><small>partes prontas{epics.some((e) => e.state === 'queued') ? ' (épicos na fila ainda serão planejados)' : ''}{skipped ? ` · ${skipped} pulada${skipped > 1 ? 's' : ''}` : ''}</small></div>}
         <div><b>{fmtUsd(m.cost?.usd || 0)}</b><small>gasto até agora</small></div>
       </div>
       <div className="pbar"><i style={{ transform: `scaleX(${Math.min(1, Math.max(0, pct)).toFixed(3)})` }} /></div>
