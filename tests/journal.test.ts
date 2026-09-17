@@ -182,7 +182,7 @@ describe('journal append and durability', () => {
         e instanceof InvalidEventError &&
         e.exitCode === 4 &&
         e.code === 'schema_invalid' &&
-        e.details?.errors?.[0]?.path === '/seq'
+        (e.details as any)?.errors?.[0]?.path === '/seq'
       )
     })
     expect(readFileSync(filePath, 'utf8')).toBe('')
@@ -196,7 +196,7 @@ describe('journal append and durability', () => {
         return (
           e instanceof InvalidEventError &&
           e.exitCode === 4 &&
-          e.details?.errors?.[0]?.path === `/${field}`
+          (e.details as any)?.errors?.[0]?.path === `/${field}`
         )
       })
     }
@@ -300,7 +300,7 @@ describe('journal append and durability', () => {
     const journal = openJournal({
       missionDir,
       runtimeStamp: '1:aa:bb',
-      fsImpl,
+      fsImpl: fsImpl as unknown as typeof fs,
     })
 
     const event = await journal.append({

@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto'
 import canonicalizeJcs from 'canonicalize'
 
+/**
+ * @param {string} str
+ */
 function hasLoneSurrogate(str) {
   for (let i = 0; i < str.length; i++) {
     const code = str.charCodeAt(i)
@@ -15,6 +18,9 @@ function hasLoneSurrogate(str) {
   return false
 }
 
+/**
+ * @param {unknown} value
+ */
 function assertNoLoneSurrogate(value) {
   if (typeof value === 'string') {
     if (hasLoneSurrogate(value)) {
@@ -27,14 +33,19 @@ function assertNoLoneSurrogate(value) {
     return
   }
   if (value !== null && typeof value === 'object') {
-    for (const key of Object.keys(value)) {
+    const record = /** @type {Record<string, unknown>} */ (value)
+    for (const key of Object.keys(record)) {
       assertNoLoneSurrogate(key)
-      assertNoLoneSurrogate(value[key])
+      assertNoLoneSurrogate(record[key])
     }
   }
 }
 
 // RFC 8785 (JCS) sobre `canonicalize` (Apache-2.0, zero deps): nunca reimplementar JCS à mão.
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 export function canonicalize(value) {
   assertNoLoneSurrogate(value)
   const result = canonicalizeJcs(value)
@@ -44,11 +55,11 @@ export function canonicalize(value) {
   return result
 }
 
+// Devolve os 16 primeiros caracteres hex do SHA-256 do texto canônico em UTF-8.
 /**
  * @param {unknown} value
  * @returns {string}
  */
-// Devolve os 16 primeiros caracteres hex do SHA-256 do texto canônico em UTF-8.
 export function digest16(value) {
   return createHash('sha256').update(canonicalize(value), 'utf8').digest('hex').slice(0, 16)
 }

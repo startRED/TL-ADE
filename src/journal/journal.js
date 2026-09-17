@@ -52,6 +52,7 @@ export class Journal {
     this.runtimeStamp = runtimeStamp
     this.lastSeq = lastSeq
     this.lastDigest = lastDigest
+    /** @type {Promise<any>} */
     this.tail = Promise.resolve()
     this.closed = false
     this._fdClosed = false
@@ -87,7 +88,9 @@ export class Journal {
       }
 
       // Separa propriedades canônicas do envelope e atributos adicionais para preservação em data
+      /** @type {Record<string, unknown>} */
       const extra = {}
+      /** @type {Record<string, unknown>} */
       const cleanPartial = {}
       for (const [k, v] of Object.entries(partial)) {
         if (TOP_LEVEL_PROPERTIES.has(k)) {
@@ -196,7 +199,7 @@ export function openJournal({
   runtimeStamp,
   fsImpl = fs,
   now = () => new Date(),
-} = {}) {
+} = /** @type {any} */ ({})) {
   if (typeof runtimeStamp !== 'string' || !RUNTIME_STAMP_REGEX.test(runtimeStamp)) {
     throw new TypeError('runtime_stamp inválido: ' + runtimeStamp)
   }
