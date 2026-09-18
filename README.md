@@ -7,9 +7,9 @@ engine durável (journal com cadeia de hash, write-ahead, reconciliação após 
 portões e revisão de outra família, e devolve evidência. O usuário pode ser preguiçoso; a inteligência
 operacional mora no harness.
 
-**Estado: planejamento concluído (rodada de rearquitetação de 2026-09-16/17). Nenhum código ainda.**
+**Estado (2026-09-18): Slice 1 em construção por missão autônoma na demo (`proto/`): journal, GitPort, runner, lease, gates, pack, engine e `ade run` implementados e testados (épicos 1–9 de 10); validação com o Claude real e dogfood ficam no épico 10.**
 
-Repositório canônico: [`startRED/TL-ADE`](https://github.com/startRED/TL-ADE) (privado). Autor: Erick.
+Repositório canônico: [`startRED/TL-ADE`](https://github.com/startRED/TL-ADE) (público). Autor: Erick.
 Trabalho novo entra por branch + PR contra `main`; convenções em [`docs/development-method.md`](docs/development-method.md).
 
 ## Leia nesta ordem
