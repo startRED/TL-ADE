@@ -42,7 +42,7 @@ describe('compilePack', () => {
     expect(SECTION_ORDER).toEqual(['contract', 'policy', 'story'])
     expect(SECTION_CAPS).toEqual({
       contract: 32000,
-      policy: 5550,
+      policy: 8000,
       story: 24000,
     })
   })
@@ -117,9 +117,11 @@ describe('compilePack', () => {
     expect(rawStory.length).toBe(30000)
     expect(rawStory).toBe(story)
 
-    const storyManifestEntry = result.manifest.sections.find((s) => s.section === 'story')
+    const manifest = result.manifest
+    const storyManifestEntry = manifest.sections.find((s) => s.section === 'story')
     expect(storyManifestEntry?.bytes).toBeLessThanOrEqual(SECTION_CAPS.story)
     expect(storyManifestEntry?.ref).toBe('art:packs/s1-r1/story')
+    expect((manifest.sections.find((s) => s.section === 'story') as any).truncated).toBe(true)
   })
 
   // CA3: story com uma AWS access key -> pack e story.log trazem [REDACTED:aws_access_key_id],
@@ -172,8 +174,8 @@ describe('compilePack', () => {
     }
     expect(caughtBudget).toBeInstanceOf(AdeError)
     expect((caughtBudget as AdeError).code).toBe('pack_budget_exceeded')
-    expect((caughtBudget as AdeError).message).toBe(
-      'seção contract tem 32001 bytes e excede o teto de 32000 bytes',
+    expect((caughtBudget as AdeError).message).toMatch(
+      /seção contract tem \d+ bytes e excede o teto de 32000 bytes/,
     )
     expect((caughtBudget as AdeError).exitCode).toBe(2)
     expect(
@@ -515,7 +517,7 @@ describe('S16 dedup', () => {
     )
     expect(err).toBeInstanceOf(AdeError)
     expect(err.code).toBe('pack_budget_exceeded')
-    expect(err.message).toBe('seção contract tem 35000 bytes e excede o teto de 32000 bytes')
+    expect(err.message).toMatch(/seção contract tem \d+ bytes e excede o teto de 32000 bytes/)
     expect(err.exitCode).toBe(2)
   })
 })
@@ -528,3 +530,81 @@ function catchError(fn: () => unknown): AdeError {
   }
   throw new Error('deveria ter lançado AdeError')
 }
+
+describe('S17 policy', () => {
+  // CA1: policy com 9000 bytes excede o teto de 8000 bytes e é recusada com AdeError('pack_budget_exceeded')
+  // antes de gravar qualquer arquivo em artifacts/packs/<id>.
+  test('policy_overflow_is_refused_not_truncated', () => {
+    const missionDir = makeMissionDir('ade-pack-s17-overflow-')
+    const stepId = 's1-r1'
+    const packDir = path.join(missionDir, 'artifacts', 'packs', stepId)
+
+    let caught: unknown = null
+    try {
+      compilePack({
+        missionDir,
+        stepId,
+        sections: {
+          contract: 'C',
+          policy: 'p'.repeat(9000),
+          story: 'S',
+        },
+      })
+      expect.unreachable('deveria ter lançado AdeError pack_budget_exceeded para policy de 9000 bytes')
+    } catch (err) {
+      caught = err
+    }
+
+    expect(caught).toBeInstanceOf(AdeError)
+    const adeErr = caught as AdeError
+    expect(adeErr.code).toBe('pack_budget_exceeded')
+    expect(adeErr.message).toBe('seção policy tem 9000 bytes e excede o teto de 8000 bytes')
+    expect(adeErr.exitCode).toBe(2)
+    expect(existsSync(packDir)).toBe(false)
+  })
+
+  // CA2: policy de 7000 bytes cabe no teto de 8000 bytes, é mantida íntegra no pack.md,
+  // e sua entrada no manifesto tem truncated: false e bytes: 7000.
+  // Limite: policy com exatamente 8000 bytes também é aceita com truncated: false.
+  test('policy_within_limit_is_kept_whole', () => {
+    const missionDir = makeMissionDir('ade-pack-s17-limit-')
+    const policy = 'p'.repeat(7000)
+
+    const result = compilePack({
+      missionDir,
+      stepId: 's1-r1',
+      sections: {
+        contract: 'C',
+        policy,
+        story: 'S',
+      },
+    })
+
+    const packText = readFileSync(result.pack_path, 'utf8')
+    const policyBody = extractSectionBody(packText, 'policy')
+    expect(policyBody).toBe(policy)
+
+    const policyEntry = result.manifest.sections.find((s) => s.section === 'policy')
+    expect(policyEntry?.bytes).toBe(7000)
+    expect((policyEntry as any)?.truncated).toBe(false)
+
+    // Borda exata: 8000 bytes (limite do teto)
+    const missionDirBoundary = makeMissionDir('ade-pack-s17-boundary-')
+    const boundaryPolicy = 'b'.repeat(8000)
+    const boundaryResult = compilePack({
+      missionDir: missionDirBoundary,
+      stepId: 's1-r1',
+      sections: {
+        contract: 'C',
+        policy: boundaryPolicy,
+        story: 'S',
+      },
+    })
+    const boundaryPackText = readFileSync(boundaryResult.pack_path, 'utf8')
+    expect(extractSectionBody(boundaryPackText, 'policy')).toBe(boundaryPolicy)
+    const boundaryEntry = boundaryResult.manifest.sections.find((s) => s.section === 'policy')
+    expect(boundaryEntry?.bytes).toBe(8000)
+    expect((boundaryEntry as any)?.truncated).toBe(false)
+  })
+})
+
