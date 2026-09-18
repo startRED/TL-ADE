@@ -104,3 +104,42 @@ export function parseUsage(envelope, role = 'maker') {
 
   return { cost_usd: null, cost_source: 'unknown', cost_basis: costBasis, models }
 }
+
+/**
+ * @param {unknown} v
+ * @returns {v is number}
+ */
+function isNonNegInt(v) {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0
+}
+
+/**
+ * Extrai os contadores de tokens e custo de um envelope Claude.
+ *
+ * @param {Record<string, unknown> | null | undefined} envelope
+ * @returns {{ input: number, cache_write: number, cache_read: number, output: number, usd: number | null, source: 'reported' } | { source: 'unavailable' }}
+ */
+export function parseTokens(envelope) {
+  const u = /** @type {Record<string, unknown> | undefined} */ (envelope?.usage)
+
+  if (
+    u &&
+    isNonNegInt(u.input_tokens) &&
+    isNonNegInt(u.cache_creation_input_tokens) &&
+    isNonNegInt(u.cache_read_input_tokens) &&
+    isNonNegInt(u.output_tokens)
+  ) {
+    const c = envelope?.total_cost_usd
+    const usd = typeof c === 'number' && Number.isFinite(c) && c >= 0 ? c : null
+    return {
+      input: /** @type {number} */ (u.input_tokens),
+      cache_write: /** @type {number} */ (u.cache_creation_input_tokens),
+      cache_read: /** @type {number} */ (u.cache_read_input_tokens),
+      output: /** @type {number} */ (u.output_tokens),
+      usd,
+      source: 'reported',
+    }
+  }
+
+  return { source: 'unavailable' }
+}

@@ -309,7 +309,6 @@ export async function runStory(deps, input) {
     env: workerEnv,
   })
   const makerWallMs = Math.max(0, (deps.now?.() ?? Date.now()) - makerStartedAt)
-  void dispatch
 
   maybeEngineFault('after_maker_effect', env)
 
@@ -394,6 +393,7 @@ export async function runStory(deps, input) {
       role: 'maker',
       step_id: `${storyId}:r1:maker`,
       maker_wall_ms: makerWallMs,
+      tokens: dispatch?.tokens ?? { source: 'unavailable' },
     },
   })
 
