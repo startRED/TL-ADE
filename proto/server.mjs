@@ -53,7 +53,7 @@ function effortOf(role) { return state.settings.roles[role]?.effort || DEFAULT_S
 function agyModel(id, effort) { const mm = /^(gemini-[\d.]+-(flash|pro))(?:-(high|medium|low))?$/.exec(id || ''); if (!mm) return id; const e = mm[2] === 'pro' && effort === 'medium' ? 'high' : (effort || 'medium'); return `${mm[1]}-${e}` }
 // Recomendação de quem planeja, pela dificuldade que o entendedor mediu (Erick, 17/09): leve → Sonnet; normal → Opus médio; pesado → Fable alto.
 const PLANNER_BY_DIFFICULTY = { easy: { family: 'claude', model: 'sonnet', effort: 'medium' }, normal: { family: 'claude', model: 'opus', effort: 'medium' }, hard: { family: 'claude', model: 'fable', effort: 'high' } }
-function plannerChoice(kind = 'complex') { const r = state.settings.roles; const x = kind === 'light' ? (r.planner_light || r.planner) : r.planner; return { family: x.family || 'claude', model: x.model, effort: x.effort || 'high', key: kind === 'light' ? 'plan' : 'epics' } }
+function plannerChoice(kind = 'complex') { const key = kind === 'light' ? 'plan' : 'epics', x = chainOf(key)[0] || state.settings.roles.planner; return { family: x.family || 'claude', model: x.model, effort: x.effort || 'high', key } }
 // Planejador por família: Claude (saída estruturada do Claude Code) ou Codex (--output-schema, só leitura). Devolve { structured_output }.
 async function plannerCall(who, opts) {
   if (!who.key) return plannerOnce(who, opts)
@@ -1055,7 +1055,7 @@ function intentPrompt() {
     attachBlock(state.mission.attachments),
     '- difficulty: easy (mudança localizada, padrão conhecido, pouca decisão), normal (funcionalidade com algumas decisões de desenho), hard (arquitetura, concorrência, algoritmo delicado, muitas partes interligadas, regras de negócio densas). difficulty_why: uma frase. Isso define quem planeja: leve → modelo rápido; pesado → o mais forte.',
     `Projeto: ${p.name}; ${p.files} itens na raiz; linguagem: ${p.language || 'nenhuma'}; runner de provas: ${p.runner === 'none' ? 'nenhum' : p.test_cmd}; index.html: ${p.has_index ? 'sim' : 'não'}.`,
-    `Papéis e modelos: planejador ${s.roles.planner.model} (monta stories); maker ${s.roles.maker.model} (escreve provas e código); revisor ${s.roles.checker.model} (Codex, lê o diff, não escreve); pesquisador ${s.roles.research.model} (Google, só fatos externos).`,
+    `Papéis e modelos: planejador ${chainOf('plan')[0]?.model} (monta stories); maker ${chainOf('impl')[0]?.model} (escreve provas e código); revisor ${chainOf('checker')[0]?.model} (lê o diff, não escreve); pesquisador ${s.roles.research.model} (Google, só fatos externos).`,
     'Se há anexos, abra-os antes de decidir (uma imagem de referência muda domínios, skills e perguntas).',
     'Escolha, para cada papel, as skills do catálogo abaixo que elevam a qualidade daquele papel neste pedido (ids exatos; até 4 para o maker, até 3 para os outros; lista vazia é válida). Regras fixas: se há interface ou design, o maker recebe design-taste-frontend e impeccable (pode acrescentar frontend-design e accessibility); backend/API recebe backend-patterns e api-design; banco recebe postgres-patterns; o revisor recebe skills de revisão/segurança, não de estilo; o pesquisador raramente precisa de skill.',
     '- summary: 2 frases do que será entregue e das escolhas feitas por você quando o pedido é vago.',
@@ -1288,7 +1288,7 @@ async function planMission() {
   const fl = fastLane(m.request)
   if (fl) {
     m.intent = fl; m.skills = selectSkills(fl); setStep('intent', 'done', { fast: true })
-    log('engine', `faixa rápida: pedido pequeno de correção; sem entrevista e sem plano no ${state.settings.roles.planner.model}; skills do maker: ${m.skills.maker.map((x) => x.id).join(', ') || 'nenhuma'}`)
+    log('engine', `faixa rápida: pedido pequeno de correção; sem entrevista e sem plano no ${chainOf('plan')[0]?.model}; skills do maker: ${m.skills.maker.map((x) => x.id).join(', ') || 'nenhuma'}`)
     m.plan = { title: m.request.slice(0, 60), summary: m.request, explanation: 'Pedido pequeno: a ADE vai direto para a prova e a correção, sem entrevista nem plano longo. O revisor confere no fim.', complexity: 'trivial', domains: fl.domains, keywords: [], needs_ui: fl.needs_ui, needs_backend: fl.needs_backend, research_questions: [], questions: [], assets_style: '', assets: [],
       stories: [{ id: 's1', title: m.request.slice(0, 72), request: m.request, acceptance: ['O que o usuário pediu acontece de forma observável', 'Nada que funcionava antes quebrou (provas antigas continuam verdes)'], test_hint: 'uma prova que falha hoje e passa quando o pedido estiver atendido' }] }
     m.stories = m.plan.stories.map((st) => ({ ...st, state: 'queued', steps: [], round: 0, red_tests: [], tests_after: null, diff: '', review: null, visual: null }))

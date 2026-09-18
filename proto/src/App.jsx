@@ -66,12 +66,18 @@ const EPIC_PT = { incomplete: 'incompleto', queued: 'na fila', running: 'em anda
 // pergunta ou pedido pequeno vai para a conversa (só leitura), não vira missão
 const looksQuestion = (t) => { const x = (t || '').trim(); return /\?\s*$/.test(x) || /^(o que|oque|que |qual|quais|como|por que|porque|pq|quando|onde|quanto|quem|será|sera|existe|tem |há |ha |vc |você|voce|me (explique|diga|mostre|fale|conte)|explique|explica|resuma|resume)\b/i.test(x) }
 const COMPLEXITY_PT = { trivial: 'pedido pequeno', bounded: 'pedido curto', feature: 'funcionalidade', subsystem: 'trabalho grande' }
+// Cards da página Modelos. `chain` aponta para settings.chains (lista ordenada: o 1º é o titular, os outros são substitutos
+// usados quando a cota acaba ou a chamada falha); sem `chain`, o card é um papel simples em settings.roles.
 const ROLE_CARD = {
   intent: { label: 'Entender o pedido', icon: Compass, note: 'Lê o que você escreveu, mede o tamanho e escolhe as skills de cada papel.' },
-  planner: { label: 'Plano complexo', icon: ListChecks, note: 'Divide um pedido grande em épicos e faz o plano único quando a dificuldade é pesada. Roda pouco; vale o modelo mais forte (Fable, Astra).' },
-  planner_light: { label: 'Plano intermediário e simples', icon: ListBullets, note: 'Planeja as partes de cada épico, os planos leves e normais e as revisões automáticas de plano. Roda muito; é onde o custo se decide (Opus, GPT-5.6 Sol).' },
-  maker: { label: 'Escrever código e provas', icon: Wrench, note: 'Escreve a prova primeiro e depois o código que faz a prova passar.' },
-  checker: { label: 'Revisar', icon: ShieldCheck, note: 'De outra empresa. Lê a mudança e aprova ou aponta problemas. Quem escreve nunca aprova.' },
+  epics: { chain: 'epics', label: 'Plano complexo', icon: ListChecks, note: 'Divide um pedido grande em épicos e faz o plano único quando a dificuldade é pesada. Roda pouco; vale o modelo mais forte.' },
+  plan: { chain: 'plan', label: 'Plano intermediário e simples', icon: ListBullets, note: 'Planeja as partes de cada épico, os planos leves e normais e as revisões automáticas de plano. Roda muito; é onde o custo se decide.' },
+  prova: { chain: 'prova', label: 'Escrever a prova', icon: Wrench, note: 'Escreve a prova que nasce vermelha antes do código. Tarefa curta: modelo barato.' },
+  impl_light: { chain: 'impl_light', label: 'Código: parte leve', icon: Wrench, note: 'Configuração, documentação e ajustes pequenos.' },
+  impl: { chain: 'impl', label: 'Código: parte comum', icon: Wrench, note: 'A maioria das partes: um comportamento, poucos arquivos.' },
+  impl_hard: { chain: 'impl_hard', label: 'Código: parte grande', icon: Wrench, note: 'Interface larga, risco alto ou muitos critérios.' },
+  fix: { chain: 'fix', label: 'Correção', icon: Wrench, note: 'Quando a revisão reprova duas vezes ou a parte é de correção. Sobe um degrau a cada duas rodadas.' },
+  checker: { chain: 'checker', label: 'Revisar', icon: ShieldCheck, note: 'Lê a mudança e aprova ou aponta problemas. O motor pula quem for da mesma empresa de quem escreveu a rodada.' },
   research: { label: 'Pesquisar fatos', icon: MagnifyingGlass, note: 'Busca na internet quando o plano depende de uma informação de fora.' },
   scout: { label: 'Batedor', icon: Binoculars, note: 'Gemini lê muito (projeto, documentação, web, GitHub) e devolve um recibo curto, para os outros não gastarem tokens. Antes de planejar e sob demanda por quem escreve.' },
 }
@@ -1153,38 +1159,37 @@ function ModelsPage({ state, save }) {
   const { settings: s, registry } = state
   if (!s) return null
   return (
-    <Page title="Modelos" note="Cada papel tem um modelo. Quem escreve e quem revisa têm de ser de empresas diferentes: é a regra que faz a revisão valer alguma coisa.">
+    <Page title="Modelos" note="Cada papel tem um titular e substitutos em ordem: cota esgotada ou chamada que falhou passa ao próximo, e a missão só pausa se todos estiverem sem cota. Quem escreve e quem revisa têm de ser de empresas diferentes.">
       <div className="role-cards">
-        {Object.entries(ROLE_CARD).map(([role, { label, icon: Ico, note }]) => (
-          <Card key={role} className="role-card">
-            <div className="role-card-top"><span className="role-ico"><Ico weight="fill" /></span><div><b>{label}</b><p>{note}</p></div></div>
-            <select className="sel" aria-label={label} value={`${(s.roles[role] || {}).family || 'claude'}|${(s.roles[role] || {}).model || ''}`} onChange={(e) => { const [f, mo] = e.target.value.split('|'); save({ roles: { [role]: { ...(s.roles[role] || {}), family: f, model: mo } } }) }}>
-              {Object.entries(registry).map(([fam, fr]) => <optgroup key={fam} label={fr.label}>{fr.models.map((mo) => <option key={mo.id} value={`${fam}|${mo.id}`}>{mo.label}{mo.note ? ` · ${mo.note}` : ''}</option>)}</optgroup>)}
-            </select>
-            <select className="sel effort" aria-label={`Esforço de ${label}`} value={(s.roles[role] || {}).effort || 'medium'} onChange={(e) => save({ roles: { [role]: { ...(s.roles[role] || {}), effort: e.target.value } } })}>
-              <option value="low">esforço baixo · rápido e barato</option><option value="medium">esforço médio</option><option value="high">esforço alto · pensa mais, custa mais</option>
-            </select>
-          </Card>
-        ))}
+        {Object.entries(ROLE_CARD).map(([role, { label, icon: Ico, note, chain }]) => {
+          const list = chain ? (s.chains?.[chain] || []) : [s.roles[role] || {}]
+          const setAt = (i, patch) => chain ? save({ chains: { [chain]: list.map((w, j) => j === i ? { ...w, ...patch } : w) } }) : save({ roles: { [role]: { ...list[0], ...patch } } })
+          const drop = (i) => save({ chains: { [chain]: list.filter((_, j) => j !== i) } })
+          const add = () => save({ chains: { [chain]: [...list, { ...(list[list.length - 1] || { family: 'claude', model: 'sonnet' }), effort: 'medium' }] } })
+          return (
+            <Card key={role} className="role-card">
+              <div className="role-card-top"><span className="role-ico"><Ico weight="fill" /></span><div><b>{label}</b><p>{note}</p></div></div>
+              {list.map((w, i) => (
+                <div key={i} className={`chain-row${i ? ' sub' : ''}`}>
+                  <span className="chain-n" title={i ? `${i}º substituto` : 'titular'}>{`${i + 1}º`}</span>
+                  <div className="chain-sels">
+                    <select className="sel" aria-label={`${label}, modelo ${i + 1}`} value={`${w.family || 'claude'}|${w.model || ''}`} onChange={(e) => { const [f, mo] = e.target.value.split('|'); setAt(i, { family: f, model: mo }) }}>
+                      {Object.entries(registry).map(([fam, fr]) => <optgroup key={fam} label={fr.label}>{fr.models.map((mo) => <option key={mo.id} value={`${fam}|${mo.id}`}>{mo.label}{mo.note ? ` · ${mo.note}` : ''}</option>)}</optgroup>)}
+                    </select>
+                    <select className="sel" aria-label={`Esforço de ${label}, modelo ${i + 1}`} value={w.effort || 'medium'} onChange={(e) => setAt(i, { effort: e.target.value })}>
+                      <option value="low">esforço baixo · rápido e barato</option><option value="medium">esforço médio</option><option value="high">esforço alto · pensa mais, custa mais</option>
+                    </select>
+                  </div>
+                  {chain && list.length > 1 ? <button className="chain-x" aria-label="Tirar da cadeia" title="Tirar da cadeia" onClick={() => drop(i)}>×</button> : <span />}
+                </div>
+              ))}
+              {chain ? <button className="chain-add" onClick={add}>+ substituto</button> : null}
+            </Card>
+          )
+        })}
       </div>
-      <Card title="Cadeias por papel" note="Quem escreve e quem revisa, por fase e tamanho da parte, com os substitutos em ordem. Cota esgotada ou chamada que falhou passa ao próximo; a missão só pausa se a cadeia inteira estiver sem cota.">
-        <ChainsEditor chains={s.chains} save={save} />
-      </Card>
       <p className="page-foot">Esforço é quanto o modelo pensa antes de responder: alto custa e demora mais. Fable é o mais forte e o mais caro, cerca de US$ 0,60 só de abertura por chamada; o entendedor recomenda Fable para planejar só pedidos pesados. Gemini entra pelo Antigravity (Pro só tem esforço alto ou baixo).</p>
     </Page>
-  )
-}
-
-function ChainsEditor({ chains, save }) {
-  const [text, setText] = useState(() => JSON.stringify(chains || {}, null, 1))
-  const [err, setErr] = useState(null)
-  useEffect(() => { setText(JSON.stringify(chains || {}, null, 1)) }, [chains])
-  const apply = () => { try { const v = JSON.parse(text); setErr(null); save({ chains: v }) } catch (e) { setErr(String(e.message)) } }
-  return (
-    <div className="chains">
-      <textarea className="chains-text mono" rows={18} value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} />
-      <div className="chains-foot">{err ? <span className="err">{err}</span> : <span>família: claude · codex · agy (Gemini); efforts: low · medium · high</span>}<button className="btn" onClick={apply}>Salvar cadeias</button></div>
-    </div>
   )
 }
 
