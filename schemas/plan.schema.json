@@ -46,7 +46,9 @@
       "additionalProperties": false,
       "required": ["max_usd"],
       "properties": {
-        "max_usd": { "type": "number" }
+        "max_usd": { "type": "number" },
+        "max_wall_clock_seconds": { "type": "integer", "minimum": 1 },
+        "max_parked_units": { "type": "integer", "minimum": 0 }
       }
     },
     "budget": {
