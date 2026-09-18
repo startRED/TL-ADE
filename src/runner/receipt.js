@@ -52,7 +52,35 @@ export const RECEIPT_STATES = [
 
 const TERMINAL_STATES = ['exited', 'timeout', 'crashed', 'start_failed']
 
-const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+const ISO_INSTANT_PARTS_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.\d{3}Z$/
+
+/**
+ * Confere se os componentes numéricos capturados por um regex de instante ISO formam uma
+ * data/hora canônica (sem rollover): mês 1-12, dia dentro do mês (respeitando ano bissexto),
+ * hora 0-23, minuto e segundo 0-59.
+ *
+ * @param {RegExpExecArray} match
+ * @returns {boolean}
+ */
+function hasCanonicalDateComponents(match) {
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const hour = Number(match[4])
+  const minute = Number(match[5])
+  const second = Number(match[6])
+  if (month < 1 || month > 12) {
+    return false
+  }
+  if (hour > 23 || minute > 59 || second > 59) {
+    return false
+  }
+  // Calendário gregoriano puro sobre os quatro dígitos do ano: `Date.UTC` reinterpreta
+  // anos de 0 a 99 como 1900-1999, o que rejeitaria incorretamente '0000-02-29' (bissexto).
+  const isLeapYear = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
+  const daysInMonthByIndex = [31, isLeapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  return day >= 1 && day <= daysInMonthByIndex[month - 1]
+}
 
 /**
  * Valida se o valor é um instante ISO 8601 UTC no formato de `Date#toISOString()`.
@@ -61,16 +89,17 @@ const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
  * @returns {value is string}
  */
 function isValidIsoInstant(value) {
-  if (typeof value !== 'string' || !ISO_INSTANT_RE.test(value)) {
+  if (typeof value !== 'string') {
     return false
   }
-  const parsed = Date.parse(value)
-  if (Number.isNaN(parsed)) {
+  const match = ISO_INSTANT_PARTS_RE.exec(value)
+  if (!match) {
     return false
   }
-  // Só aceita o texto que o próprio `Date#toISOString()` produziria: rejeita instantes
-  // normalizados pelo parse, como '2026-02-30T00:00:00.000Z' ou '2026-01-01T24:00:00.000Z'.
-  return new Date(parsed).toISOString() === value
+  // Rejeita instantes normalizados por rollover, como '2026-02-30T00:00:00.000Z' ou
+  // '2026-01-01T24:00:00.000Z', que casam com a regex e com Date.parse mas nunca sairiam
+  // de Date#toISOString().
+  return hasCanonicalDateComponents(match)
 }
 
 /**
@@ -101,6 +130,38 @@ export function isValidRequest(request) {
   return true
 }
 
+// getProcessStartTime (src/lease/process-info.js) devolve dois formatos reais, não o ISO de 3
+// dígitos de `Date#toISOString()`: no Windows, `CreationDate.ToUniversalTime().ToString('o')`
+// do PowerShell (fração de 1 a 7 dígitos); no Linux, `<boot_id>:<ticks de /proc/pid/stat>`. O
+// dogfood real (ADE-D1) travou `ade run` com `TypeError: fingerprint inválido` em withRunning
+// porque isValidIsoInstant exige fração de exatos 3 dígitos.
+const ISO_FRACTIONAL_PARTS_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.\d{1,7}Z$/
+// boot_id do kernel é UUID canônico em minúsculas (8-4-4-4-12 hex); ticks é inteiro decimal.
+const LINUX_BOOT_TICKS_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9]+$/
+
+/**
+ * Valida o formato de start_time do fingerprint (ISO com fração variável no Windows,
+ * ou `boot_id:ticks` no Linux).
+ *
+ * @param {unknown} value
+ * @returns {value is string}
+ */
+function isValidFingerprintStartTime(value) {
+  if (typeof value !== 'string' || value.length === 0) {
+    return false
+  }
+  if (LINUX_BOOT_TICKS_RE.test(value)) {
+    return true
+  }
+  const match = ISO_FRACTIONAL_PARTS_RE.exec(value)
+  if (!match) {
+    return false
+  }
+  // Mesma checagem de canonicidade de isValidIsoInstant, mas com fração de 1 a 7 dígitos:
+  // rejeita instantes normalizados por rollover, como '2026-02-30...' ou '...T24:00:00...'.
+  return hasCanonicalDateComponents(match)
+}
+
 /**
  * Valida a estrutura e os tipos da impressão digital do processo.
  *
@@ -122,7 +183,7 @@ export function isValidFingerprint(fp) {
   if (typeof f.pid !== 'number' || !Number.isInteger(f.pid) || f.pid <= 0) {
     return false
   }
-  if (f.start_time !== null && !isValidIsoInstant(f.start_time)) {
+  if (f.start_time !== null && !isValidFingerprintStartTime(f.start_time)) {
     return false
   }
   if (typeof f.host !== 'string' || !f.host) {
