@@ -4,6 +4,7 @@ import { parseArgs } from 'node:util'
 import { main as doctorMain } from './doctor.js'
 import { exitCodeOf } from './exit-codes.js'
 import { runCommand } from './run.js'
+import { main as journalMain } from './journal.js'
 import { main as showMain } from './show.js'
 import { main as statusMain } from './status.js'
 
@@ -74,7 +75,11 @@ export async function main(argv, deps = {}) {
       return await statusMain(commandArgv, delegatedDeps)
     }
 
-    if (command === 'journal' || command === 'report') {
+    if (command === 'journal') {
+      return await journalMain(commandArgv, delegatedDeps)
+    }
+
+    if (command === 'report') {
       stderr.write(`não implementado: ${command}\n`)
       return 1
     }
