@@ -1,13 +1,19 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { resolveGateArgv, runContained } from '../../src/gates/command.js'
+import * as gatesModule from '../../src/gates/gates.js'
 import { createGateRunner } from '../../src/gates/gates.js'
 import { createGitPort } from '../../src/git/gitport.js'
 import { openJournal, readJournal } from '../../src/journal/journal.js'
 import { createStepRunner } from '../../src/step/step.js'
 import { makeRepo, removeRepo } from '../helpers/git-repo.js'
+
+const restorePendingGate = (gatesModule as Record<string, any>).restorePendingGate as (opts: {
+  missionDir: string
+  gitPort: any
+}) => Promise<{ restored: boolean; tree: string | null; blocked?: boolean }>
 
 
 describe('gate command and containment parity', () => {
@@ -540,6 +546,203 @@ describe('runGates with step() and cache parity', () => {
         packageJson: {},
       })
     }).toThrow(new TypeError('gitPort inválido'))
+  })
+})
+
+describe('gate restoration of leftovers parity', () => {
+  // CA1: Dado um gate que cria coverage/report.json no worktree, quando runGates termina
+  // e o engine commita com gitPort.commit, então o commit não contém coverage/report.json,
+  // o arquivo não existe mais no disco e a mudança candidata do Maker continua presente no commit.
+  test('gate_artifacts_never_reach_the_commit', async () => {
+    const { repo, missionDir, gitPort, step } = setupGateEnv()
+
+    const candidateFile = path.join(repo.dir, 'src', 'novo.js')
+    mkdirSync(path.dirname(candidateFile), { recursive: true })
+    writeFileSync(candidateFile, 'console.log("maker candidate");\n')
+
+    const tree = await gitPort.worktreeTree()
+
+    const gate = {
+      id: 'coverage',
+      kind: 'test',
+      when: 'always' as const,
+      argv: [
+        'node',
+        '-e',
+        'fs.mkdirSync("coverage");fs.writeFileSync("coverage/report.json","{}")',
+      ],
+    }
+
+    const runner = createGateRunner({ step, missionDir, gitPort, packageJson: {} })
+
+    const result = await runner.runGates({
+      gates: [gate],
+      flags: [],
+      tree,
+      unit: 'u1',
+      changedFiles: ['src/novo.js'],
+    })
+
+    expect(result.ok).toBe(true)
+
+    const reportPath = path.join(repo.dir, 'coverage', 'report.json')
+    expect(existsSync(reportPath)).toBe(false)
+    expect(existsSync(candidateFile)).toBe(true)
+
+    await gitPort.commit({ message: 'feat: candidate maker change' })
+
+    const show = await gitPort.run(['show', '--name-only', '--format=', 'HEAD'])
+    const filesInCommit = show.stdout.toString('utf8')
+    expect(filesInCommit).toContain('src/novo.js')
+    expect(filesInCommit).not.toContain('coverage')
+  })
+
+  // CA2: Dado um marcador gate-restore.json deixado no missionDir com a árvore anterior
+  // e um coverage/report.json presente no worktree (simulando crash no meio do gate),
+  // quando restorePendingGate roda, então o arquivo some, o marcador é apagado e o
+  // retorno traz {restored:true, tree:<tree_before>}.
+  test('gate_leftovers_after_crash_are_not_committed', async () => {
+    const { repo, missionDir, gitPort } = setupGateEnv()
+
+    const candidateFile = path.join(repo.dir, 'src', 'novo.js')
+    mkdirSync(path.dirname(candidateFile), { recursive: true })
+    writeFileSync(candidateFile, 'console.log("maker candidate");\n')
+    const treeBefore = await gitPort.worktreeTree()
+
+    const reportPath = path.join(repo.dir, 'coverage', 'report.json')
+    mkdirSync(path.dirname(reportPath), { recursive: true })
+    writeFileSync(reportPath, '{}')
+
+    const markerFile = path.join(missionDir, 'gate-restore.json')
+    writeFileSync(
+      markerFile,
+      JSON.stringify({
+        gate_id: 'cov',
+        tree_before: treeBefore,
+        worktree: gitPort.worktreeDir,
+      })
+    )
+
+    const result = await restorePendingGate({ missionDir, gitPort })
+
+    expect(result).toEqual({ restored: true, tree: treeBefore })
+    expect(existsSync(reportPath)).toBe(false)
+    expect(existsSync(markerFile)).toBe(false)
+    expect(existsSync(candidateFile)).toBe(true)
+
+    // Sem marcador pendente, chamada subsequente não restaura nada
+    const noopResult = await restorePendingGate({ missionDir, gitPort })
+    expect(noopResult).toEqual({ restored: false, tree: null })
+  })
+
+  // CA3: Dado um marcador com JSON ilegível, quando restorePendingGate roda,
+  // então o marcador continua no disco, o retorno traz {restored:false, tree:null, blocked:true}
+  // e runGates devolve {ok:false, results:[], error:'gate_restore_marker_invalid'} sem executar processo.
+  test('invalid_restore_marker_blocks_the_run', async () => {
+    const { missionDir, gitPort, step } = setupGateEnv()
+
+    const markerFile = path.join(missionDir, 'gate-restore.json')
+    writeFileSync(markerFile, 'não-json')
+
+    const restoreRes = await restorePendingGate({ missionDir, gitPort })
+    expect(restoreRes).toEqual({ restored: false, tree: null, blocked: true })
+    expect(existsSync(markerFile)).toBe(true)
+
+    const counterFile = path.join(missionDir, 'counter-blocked.txt')
+    const script = makeCounterScript(counterFile)
+    const gate = {
+      id: 'should-not-run',
+      kind: 'test',
+      when: 'always' as const,
+      argv: ['node', '-e', script],
+    }
+
+    const runner = createGateRunner({ step, missionDir, gitPort, packageJson: {} })
+    const tree = await gitPort.worktreeTree()
+
+    const runRes = await runner.runGates({
+      gates: [gate],
+      flags: [],
+      tree,
+      unit: 'u1',
+      changedFiles: [],
+    })
+
+    expect(runRes).toEqual({
+      ok: false,
+      results: [],
+      error: 'gate_restore_marker_invalid',
+    })
+    expect(existsSync(counterFile)).toBe(false)
+    expect(existsSync(markerFile)).toBe(true)
+
+    // Marcador de outro worktree preserva arquivo e bloqueia
+    writeFileSync(
+      markerFile,
+      JSON.stringify({
+        gate_id: 'cov',
+        tree_before: tree,
+        worktree: '/outro/worktree',
+      })
+    )
+    const mismatchRes = await restorePendingGate({ missionDir, gitPort })
+    expect(mismatchRes).toEqual({ restored: false, tree: null, blocked: true })
+    expect(existsSync(markerFile)).toBe(true)
+
+    // Marcador sem tree_before preserva arquivo e bloqueia
+    writeFileSync(
+      markerFile,
+      JSON.stringify({
+        gate_id: 'cov',
+        worktree: gitPort.worktreeDir,
+      })
+    )
+    const noTreeRes = await restorePendingGate({ missionDir, gitPort })
+    expect(noTreeRes).toEqual({ restored: false, tree: null, blocked: true })
+    expect(existsSync(markerFile)).toBe(true)
+  })
+
+  // CA4: Dado um gate que falha com código 1 depois de criar coverage/report.json,
+  // quando runGates devolve ok:false, então o artefato já foi restaurado e
+  // gitPort.dirtyPaths() não lista coverage/report.json.
+  test('failed_gate_still_restores_leftovers', async () => {
+    const { repo, missionDir, gitPort, step } = setupGateEnv()
+    const tree = await gitPort.worktreeTree()
+
+    const gate = {
+      id: 'failing-cov',
+      kind: 'test',
+      when: 'always' as const,
+      argv: [
+        'node',
+        '-e',
+        'fs.mkdirSync("coverage");fs.writeFileSync("coverage/report.json","{}");process.exit(1)',
+      ],
+    }
+
+    const runner = createGateRunner({ step, missionDir, gitPort, packageJson: {} })
+
+    const result = await runner.runGates({
+      gates: [gate],
+      flags: [],
+      tree,
+      unit: 'u1',
+      changedFiles: [],
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.results).toHaveLength(1)
+    expect(result.results[0].status).toBe('error')
+    expect(result.results[0].exit_code).toBe(1)
+
+    const reportPath = path.join(repo.dir, 'coverage', 'report.json')
+    expect(existsSync(reportPath)).toBe(false)
+
+    const dirty = await gitPort.dirtyPaths()
+    expect(dirty).toEqual([])
+
+    const markerPath = path.join(missionDir, 'gate-restore.json')
+    expect(existsSync(markerPath)).toBe(false)
   })
 })
 
