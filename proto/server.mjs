@@ -338,14 +338,36 @@ function storyTier(st) {
 }
 // Roda fn(who) com o primeiro modelo disponível da cadeia; cota esgotada ou resultado nulo passa ao próximo. avoidVendor tira da cadeia a
 // empresa de quem escreveu (revisão). start pula os primeiros degraus (escada de correção). list substitui a cadeia (planejador).
+// Cota usada da família (pior janela conhecida, em %). Gemini não expõe cota: conta 0.
+function quotaUsed(family) { const q = state.quota[family]; return q ? Math.max(q.five_hour?.used || 0, q.seven_day?.used || 0) : 0 }
+const RESERVE_PCT = 90 // acima disso a família fica reservada para quem não tem substituto de outra empresa
+const WAIT_RENEWAL_MS = 12 * 60 * 1000 // titular sem cota que renova em até isto: espera em vez de descer de modelo
+async function waitRenewal(key, who, until) {
+  log('engine', `${key}: ${who.model} renova ${fmtWhen(until)}; espero em vez de usar substituto`, 'warn')
+  setLive({ source: 'engine', kind: 'thinking', text: `${key}: esperando a cota do ${FAMILY_LABEL[who.family] || who.family} renovar (${fmtWhen(until)})` })
+  try { while (new Date(until) > new Date()) { if (currentEngine()?.mission?.pause_requested) throw PAUSE; await new Promise((r) => setTimeout(r, 15 * 1000)) } } finally { setLive(null) }
+  delete state.quota.exhausted[who.family]
+}
+// Roda fn(who) com o melhor modelo disponível da cadeia, na ordem. Desce para o próximo quando: cota da família esgotada;
+// chamada falhou ou voltou vazia; família com mais de RESERVE_PCT usada e existe substituto de outra empresa com folga
+// (reserva o resto da cota para papéis onde essa família é insubstituível). Titular sem cota que renova em minutos: espera.
+// avoidVendor tira a empresa de quem escreveu (revisão). start pula degraus (escada de correção, revisor mais forte).
 async function withChain(key, { avoidVendor = null, start = 0, list = null } = {}, fn) {
   const chain = (list || chainOf(key)).filter((w) => !avoidVendor || vendorOf(w.family, w.model) !== avoidVendor)
+  const first = Math.min(start, Math.max(0, chain.length - 1))
+  const titular = chain[first]
+  if (titular && !quotaAvailable(titular.family)) {
+    const until = state.quota.exhausted[titular.family]
+    if (new Date(until) - Date.now() <= WAIT_RENEWAL_MS) await waitRenewal(key, titular, until)
+  }
   let tried = 0
-  for (let i = Math.min(start, Math.max(0, chain.length - 1)); i < chain.length; i++) {
+  for (let i = first; i < chain.length; i++) {
     const who = chain[i]
     if (!quotaAvailable(who.family)) { log('engine', `${key}: ${who.model} sem cota até ${fmtWhen(state.quota.exhausted[who.family])}; pulo`, 'warn'); continue }
+    const rested = chain.slice(i + 1).find((w) => vendorOf(w.family, w.model) !== vendorOf(who.family, who.model) && quotaAvailable(w.family) && quotaUsed(w.family) < RESERVE_PCT)
+    if (quotaUsed(who.family) >= RESERVE_PCT && rested) { log('engine', `${key}: ${FAMILY_LABEL[who.family] || who.family} com ${quotaUsed(who.family)}% da cota usada; guardo o resto e uso ${rested.model}`, 'warn'); continue }
     tried++
-    journal({ type: 'model_chosen', role: key, family: who.family, model: who.model, effort: who.effort, story: state.mission?.current ?? null, step: i, reason: tried === 1 ? 'principal' : 'fallback' }).catch(() => {})
+    journal({ type: 'model_chosen', role: key, family: who.family, model: who.model, effort: who.effort, story: state.mission?.current ?? null, step: i, reason: tried === 1 && i === first ? 'principal' : 'fallback', quota_used: quotaUsed(who.family) }).catch(() => {})
     try {
       const r = await fn({ ...who, step: i }); if (r != null) return r
       log('engine', `${key}: ${who.model} não devolveu resultado; próximo da cadeia`, 'warn')
@@ -929,7 +951,9 @@ async function checker(diff, tests, st) {
   ].join('\n') + skillsBlock(m.skills.checker || [])
   // Receita de chamada curta (architecture.md E16): sem config, regras e skills do usuário; sessão efêmera.
   // skills.max_context_tokens=0 é rejeitado ("expected a nonzero usize"); 1 remove todas as skills do usuário. Sem --ephemeral: a sessão gravada em ~/.codex/sessions é de onde a cota é lida.
-  return withChain('checker', { avoidVendor: avoid }, async (who) => {
+  const strict = (st.round || 1) >= 3 || !!st.fix_of // já reprovou duas vezes ou é correção: revisor do degrau seguinte, mais rigoroso
+  if (strict) log('engine', `revisão da rodada ${st.round || 1}: uso o revisor mais forte da cadeia`)
+  return withChain('checker', { avoidVendor: avoid, start: strict ? 1 : 0 }, async (who) => {
     if (who.family === 'claude') {
       const r = await claudeCall({ role: 'revisão', prompt, model: who.model, effort: who.effort, tools: ['Read', 'Glob', 'Grep'], schema: REVIEW_JSON, maxTurns: 12 })
       const review = r?.structured_output || null

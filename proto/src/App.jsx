@@ -1159,7 +1159,7 @@ function ModelsPage({ state, save }) {
   const { settings: s, registry } = state
   if (!s) return null
   return (
-    <Page title="Modelos" note="Cada papel tem um titular e substitutos em ordem: cota esgotada ou chamada que falhou passa ao próximo, e a missão só pausa se todos estiverem sem cota. Quem escreve e quem revisa têm de ser de empresas diferentes.">
+    <Page title="Modelos" note="Cada papel tem um titular e substitutos em ordem. Desce para o próximo quando a cota acabou, a chamada falhou, ou a empresa já passou de 90 % da cota e há substituto de outra empresa com folga. Titular que renova em até 12 minutos espera em vez de descer. Quem escreve e quem revisa têm de ser de empresas diferentes.">
       <div className="role-cards">
         {Object.entries(ROLE_CARD).map(([role, { label, icon: Ico, note, chain }]) => {
           const list = chain ? (s.chains?.[chain] || []) : [s.roles[role] || {}]
