@@ -5,6 +5,7 @@ import { main as doctorMain } from './doctor.js'
 import { exitCodeOf } from './exit-codes.js'
 import { runCommand } from './run.js'
 import { main as showMain } from './show.js'
+import { main as statusMain } from './status.js'
 
 /**
  * Ponto de entrada e dispatch de subcomandos da CLI.
@@ -69,7 +70,11 @@ export async function main(argv, deps = {}) {
       )
     }
 
-    if (command === 'status' || command === 'journal' || command === 'report') {
+    if (command === 'status') {
+      return await statusMain(commandArgv, delegatedDeps)
+    }
+
+    if (command === 'journal' || command === 'report') {
       stderr.write(`não implementado: ${command}\n`)
       return 1
     }
