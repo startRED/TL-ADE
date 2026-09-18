@@ -951,9 +951,10 @@ async function checker(diff, tests, st) {
   ].join('\n') + skillsBlock(m.skills.checker || [])
   // Receita de chamada curta (architecture.md E16): sem config, regras e skills do usuário; sessão efêmera.
   // skills.max_context_tokens=0 é rejeitado ("expected a nonzero usize"); 1 remove todas as skills do usuário. Sem --ephemeral: a sessão gravada em ~/.codex/sessions é de onde a cota é lida.
-  const strict = (st.round || 1) >= 3 || !!st.fix_of // já reprovou duas vezes ou é correção: revisor do degrau seguinte, mais rigoroso
-  if (strict) log('engine', `revisão da rodada ${st.round || 1}: uso o revisor mais forte da cadeia`)
-  return withChain('checker', { avoidVendor: avoid, start: strict ? 1 : 0 }, async (who) => {
+  // Revisor sobe junto com o maker: rodada 3–4 no 2º da cadeia, 5–6 no 3º; correção e achado repetido sobem um a mais.
+  const round = st.round || 1, start = Math.min(Math.max(0, chainOf('checker').length - 1), ladderStep(round, { repeat: repeatedFindings(st, st.last_review) }) + (st.fix_of ? 1 : 0))
+  if (start) log('engine', `revisão da rodada ${round}: revisor do degrau ${start + 1} da cadeia, para não repetir rodadas`)
+  return withChain('checker', { avoidVendor: avoid, start }, async (who) => {
     if (who.family === 'claude') {
       const r = await claudeCall({ role: 'revisão', prompt, model: who.model, effort: who.effort, tools: ['Read', 'Glob', 'Grep'], schema: REVIEW_JSON, maxTurns: 12 })
       const review = r?.structured_output || null
@@ -1547,10 +1548,16 @@ function makerLadder() { return chainOf('fix') }
 // um degrau abaixo do último (Sonnet) e só sobe se ainda falhar.
 // Devolve { key, start }: rodada 1 usa a cadeia de implementação do tamanho da parte; a partir da 3ª rodada com problema grave (ou parte de
 // correção) entra na cadeia fix, subindo um degrau a cada duas rodadas.
-function makerStep(st, round, grave) {
+// Achados que o revisor repetiu de uma rodada para a outra (mesmo arquivo e mesmo começo de problema): sinal de que o
+// modelo atual não entende o pedido; sobe um degrau a mais para gastar menos rodadas.
+const findingKey = (f) => `${f.file || ''}::${String(f.problem || '').toLowerCase().replace(/\s+/g, ' ').slice(0, 60)}`
+function repeatedFindings(st, review) { const prev = new Set(st.prev_findings || []); return (review?.findings || []).filter((f) => prev.has(findingKey(f))).length }
+// Degrau da escada por rodada: 1–2 no titular, 3–4 no 2º, 5–6 no 3º; achado repetido ou problema grave sobem um a mais.
+function ladderStep(round, { grave = false, repeat = 0 } = {}) { return Math.floor((round - 1) / 2) + (repeat ? 1 : 0) + (grave && round >= 3 ? 1 : 0) }
+function makerStep(st, round, grave, repeat = 0) {
   if (round <= 2 && !grave && !st.fix_of) return { key: { light: 'impl_light', normal: 'impl', hard: 'impl_hard' }[storyTier(st)], start: 0 }
   const last = Math.max(0, chainOf('fix').length - 1)
-  return { key: 'fix', start: Math.min(last, Math.floor((round - 1) / 2)) }
+  return { key: 'fix', start: Math.min(last, ladderStep(round, { grave, repeat })) }
 }
 async function makerCall(who, opts) {
   const st = state.mission?.stories?.[state.mission.current]; if (st) st.last_maker = { family: who.family, model: who.model }
@@ -1697,8 +1704,9 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   }
   // Escalada: só na 3ª rodada em diante E quando sobrou problema grave (achado high do revisor ou prova vermelha). Pedido de cobertura/estilo continua no maker barato.
   const grave = (previousReview?.findings || []).some((f) => f.severity === 'high') || (st.tests_after && !st.tests_after.ok)
-  const pick = makerStep(st, round, grave), escalate = pick.key === 'fix'
-  if (escalate) log('engine', `rodada ${round}: ${st.fix_of ? 'parte de correção' : 'problema grave persiste'}; maker vai para a cadeia de correção, degrau ${pick.start + 1} de ${chainOf('fix').length}`)
+  const repeat = repeatedFindings(st, previousReview)
+  const pick = makerStep(st, round, grave, repeat), escalate = pick.key === 'fix'
+  if (escalate) log('engine', `rodada ${round}: ${st.fix_of ? 'parte de correção' : grave ? 'problema grave' : 'revisor ainda pede mudanças'}${repeat ? `, ${repeat} achado(s) repetido(s)` : ''}; maker vai para a cadeia de correção, degrau ${pick.start + 1} de ${chainOf('fix').length}`)
   if (st.early_impl && round === 1) setStep('fix', 'skipped', { round })
   else { setStep('fix', 'running', { round }); const rf = await withChain(pick.key, { start: pick.start }, async (who) => makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 })); remember(st, rf); await refreshProject(); setStep('fix', 'done', { round }) }
   setStep('tests', 'running'); st.tests_after = await runTests(state.project); st.diff = await storyDiff(st)
@@ -1743,6 +1751,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     }
   }
   setStep('checker', 'running'); st.review = await checker(st.diff, st.tests_after, st); setStep('checker', st.review ? (st.review.verdict === 'approve' ? 'done' : 'failed') : 'failed')
+  st.prev_findings = (st.last_review?.findings || []).map(findingKey); st.last_review = st.review
   if (st.review) {
     const pend = (st.review.findings || []).filter((f) => /^\s*PEND[ÊE]NCIA:/i.test(String(f.problem || '')))
     if (pend.length) {
