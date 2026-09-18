@@ -1182,6 +1182,7 @@ function fixPrompt(st, round, review, visual, pack) {
   const red = st.red_tests.map((t) => `- ${t.name}: ${t.message}`).join('\n')
   const base = [`Pedido original do usuário: ${state.mission.request}`, ...common(st), pack,
     `FASE 2 de 2: a prova nova está vermelha, como esperado:\n${red}`,
+    st.no_change_retry ? 'A tentativa anterior terminou SEM alterar arquivo algum (o tempo acabou, provavelmente esperando provas). NÃO rode a suíte inteira nem provas lentas de integração (as que sobem processos): o harness roda todas as provas depois de você. Vá direto às edições.' : '',
     st.red_regress?.length ? `Provas ANTIGAS que ficaram vermelhas depois que a prova nova entrou (em geral portão de tipos/lint reclamando do que ainda não existe). Têm de voltar a passar com a sua implementação; não as altere:\n${st.red_regress.map((t) => `- ${t.name}: ${t.message}`).join('\n')}` : '',
     'Agora implemente o necessário para a prova passar e os critérios de aceite valerem. Não modifique a prova. Não toque em nada fora do escopo da story. Seja direto: você tem no máximo 30 ações; não investigue ferramentas do harness, não reescreva provas antigas, não amplie o escopo.',
     'CONFLITO DE CONTRATO: se uma prova ANTIGA fica vermelha só porque afirma o formato ou comportamento que ESTA story manda mudar (ex.: igualdade estrita com o formato anterior), atualize APENAS essas asserções, mesmo que o arquivo esteja na lista de "não altere"; não mexa em mais nada desse arquivo e diga na frase final quais asserções mudou e por quê. Não reverta o comportamento pedido para agradar a prova antiga.',
@@ -1580,6 +1581,8 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   }
   log('engine', `provas depois: ${st.tests_after.total} no total, ${st.tests_after.failed} vermelha(s)`); setStep('tests', st.tests_after.ok ? 'done' : 'failed')
   if (st.tests_after.timeout) { log('engine', 'a suíte de provas estourou o tempo limite (5 min) e foi interrompida: isso não é prova vermelha. Paro a parte sem gastar rodadas; veja se alguma prova ficou pendurada (processo, servidor, espera sem fim)', 'error'); return stop('tests_timeout') }
+  // quem escreve terminou sem tocar em nada (épico 9, s3: Flash gastou a chamada inteira esperando a matriz de queda rodar e o agy estourou o tempo): uma repetição grátis com aviso antes de pular
+  if (!st.diff.trim() && !st.no_change_retry && round < MAX_ROUNDS) { st.no_change_retry = true; log('engine', 'quem escreve terminou sem alterar arquivo algum; repito a rodada uma vez pedindo para não rodar provas lentas', 'warn'); return runStory(st, round + 1, previousReview, null) }
   if (!st.diff.trim()) { setStep('checker', 'skipped'); return stop('no_changes') }
   if (!st.tests_after.ok) {
     const spentNow = m.cost.usd - (st.usd_start || 0)
