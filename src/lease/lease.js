@@ -33,6 +33,7 @@ import { getProcessStartTime, isProcessAlive } from './process-info.js'
  * @property {(pid: number) => Promise<string | null>} [getStartTime=getProcessStartTime] Leitor de start_time do processo.
  * @property {(pid: number) => boolean} [isAlive=isProcessAlive] Checagem de processo ativo.
  * @property {() => Date} [now=() => new Date()] Provedor de relógio para acquired_at e primeiro heartbeat.
+ * @property {boolean} [adoptDeadOwnerWithinTtl=false] Adota na hora dono comprovadamente morto no mesmo host.
  */
 
 /**
@@ -129,6 +130,80 @@ function requireOwnStartTime(startTime) {
 }
 
 /**
+ * Valida se um objeto owner possui formato mínimo íntegro.
+ * @param {unknown} owner
+ * @returns {boolean}
+ */
+function isValidOwner(owner) {
+  if (owner === null || typeof owner !== 'object') {
+    return false
+  }
+  const candidate = /** @type {Record<string, unknown>} */ (owner)
+  return (
+    Number.isInteger(candidate.pid) &&
+    typeof candidate.pid === 'number' &&
+    candidate.pid > 0 &&
+    typeof candidate.start_time === 'string' &&
+    candidate.start_time !== ''
+  )
+}
+
+/**
+ * Verifica se um dono é comprovadamente morto no mesmo host.
+ * @param {{ pid: number, start_time: string, host?: unknown }} owner
+ * @param {Required<LeaseOptions>} opts
+ * @returns {Promise<boolean>}
+ */
+async function ownerProvablyDead(owner, opts) {
+  if (owner.host !== os.hostname()) {
+    return false
+  }
+  try {
+    if (!opts.isAlive(owner.pid)) {
+      return true
+    }
+    const cur = await opts.getStartTime(owner.pid)
+    return typeof cur === 'string' && cur !== owner.start_time
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Move o lease expirado ou adotado para uma pasta temporária .stale-* e recria lease/.
+ * @param {string} leaseDir
+ * @param {Required<LeaseOptions>} opts
+ * @param {Record<string, unknown>} validOwner
+ * @returns {{ previousOwner: Record<string, unknown>, staleDir: string }}
+ */
+function renameForAdoption(leaseDir, opts, validOwner) {
+  const staleDir = leaseDir + '.stale-' + opts.pid + '-' + opts.now().getTime()
+  let renamed = false
+  try {
+    fs.renameSync(leaseDir, staleDir)
+    renamed = true
+    fs.mkdirSync(leaseDir)
+  } catch {
+    if (renamed) {
+      // Perdemos a corrida: outro processo já recriou lease/ entre o rename e
+      // o mkdir. Removemos só o staleDir desta tentativa; o lease/ do
+      // vencedor não é nosso para tocar.
+      fs.rmSync(staleDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 50,
+      })
+    }
+    throw new CoordinatorConflictError(
+      /** @type {{ pid?: number | string } | null} */ (validOwner),
+    )
+  }
+
+  return { previousOwner: validOwner, staleDir }
+}
+
+/**
  * Trata colisão quando a pasta lease/ já existe: avalia TTL do heartbeat e identidade do dono.
  * @param {string} leaseDir
  * @param {Required<LeaseOptions>} opts
@@ -137,20 +212,26 @@ function requireOwnStartTime(startTime) {
 async function handleExisting(leaseDir, opts) {
   const owner = readOwner(leaseDir)
   if (leaseAgeMs(leaseDir) <= opts.ttlMs) {
+    if (
+      opts.adoptDeadOwnerWithinTtl &&
+      isValidOwner(owner) &&
+      (await ownerProvablyDead(
+        /** @type {{ pid: number, start_time: string, host?: unknown }} */ (owner),
+        opts,
+      ))
+    ) {
+      return renameForAdoption(
+        leaseDir,
+        opts,
+        /** @type {Record<string, unknown>} */ (owner),
+      )
+    }
     throw new CoordinatorConflictError(
       /** @type {{ pid?: number | string } | null} */ (owner),
     )
   }
 
-  if (
-    owner === null ||
-    typeof owner !== 'object' ||
-    !Number.isInteger(owner.pid) ||
-    typeof owner.pid !== 'number' ||
-    owner.pid <= 0 ||
-    typeof owner.start_time !== 'string' ||
-    owner.start_time === ''
-  ) {
+  if (!isValidOwner(owner)) {
     throw new LeaseAwaitingOperatorError(null, 'owner inválido')
   }
 
@@ -188,30 +269,7 @@ async function handleExisting(leaseDir, opts) {
     }
   }
 
-  const staleDir = leaseDir + '.stale-' + opts.pid + '-' + opts.now().getTime()
-  let renamed = false
-  try {
-    fs.renameSync(leaseDir, staleDir)
-    renamed = true
-    fs.mkdirSync(leaseDir)
-  } catch {
-    if (renamed) {
-      // Perdemos a corrida: outro processo já recriou lease/ entre o rename e
-      // o mkdir. Removemos só o staleDir desta tentativa; o lease/ do
-      // vencedor não é nosso para tocar.
-      fs.rmSync(staleDir, {
-        recursive: true,
-        force: true,
-        maxRetries: 5,
-        retryDelay: 50,
-      })
-    }
-    throw new CoordinatorConflictError(
-      /** @type {{ pid?: number | string } | null} */ (validOwner),
-    )
-  }
-
-  return { previousOwner: validOwner, staleDir }
+  return renameForAdoption(leaseDir, opts, validOwner)
 }
 
 /**
@@ -276,6 +334,7 @@ export async function acquireLease(options) {
     getStartTime = getProcessStartTime,
     isAlive = isProcessAlive,
     now = () => new Date(),
+    adoptDeadOwnerWithinTtl = false,
   } = options
 
   if (
@@ -291,7 +350,8 @@ export async function acquireLease(options) {
     pid <= 0 ||
     typeof getStartTime !== 'function' ||
     typeof isAlive !== 'function' ||
-    typeof now !== 'function'
+    typeof now !== 'function' ||
+    typeof adoptDeadOwnerWithinTtl !== 'boolean'
   ) {
     throw new TypeError('opções de lease inválidas')
   }
@@ -306,6 +366,7 @@ export async function acquireLease(options) {
     getStartTime,
     isAlive,
     now,
+    adoptDeadOwnerWithinTtl,
   }
 
   fs.mkdirSync(missionDir, { recursive: true })
