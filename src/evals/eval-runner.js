@@ -87,11 +87,12 @@ function excerptCap(evalDef) {
  */
 function validateCmd0(cmd0) {
   // 'node' literal, caminho absoluto `.exe`, ou o próprio binário (`process.execPath`), que no
-  // Linux/macOS é `/…/bin/node` sem extensão — o CI Linux recusava esse caso.
+  // Linux/macOS é `/…/bin/node` sem extensão. `win32.isAbsolute` aceita `C:…` e `/…` em qualquer SO:
+  // a regra de paridade vale igual nos dois (o CI Linux recusava os dois casos).
   const isValid =
     cmd0 === 'node' ||
     (typeof cmd0 === 'string' &&
-      path.isAbsolute(cmd0) &&
+      path.win32.isAbsolute(cmd0) &&
       (cmd0.toLowerCase().endsWith('.exe') || path.basename(cmd0) === 'node'))
 
   if (!isValid) {
