@@ -133,6 +133,26 @@ obsoleto; o executor reporta `ready_for_verification`, nunca se aprova. (2) Cust
 (S19), não preço teórico. (3) Toda regra cara do harness (segundo planejador, crítica de plano, rodadas de
 revisão) tem no `ade-config` a justificativa e a condição de revisão; regra que não encontra defeito em N
 missões é candidata a sair (Managed Agents: proteção de um modelo vira peso morto no seguinte).
+(4) **Crítica do plano pelo Checker antes de qualquer código**, uma rodada de correção pelo Planner: provada
+na demo (`proto/`) na missão de 18/09 — 12 de 13 planos vieram com 1–11 achados, ~US$ 1,15 por correção,
+e os achados eram exatamente os que fariam o Maker decidir sozinho (valor sem origem, critério sem eval,
+arquivo fora do escopo). Entra como passo fixo do `prepare`, com `plan_critic` gravado no journal. (5) O
+Planner **sub-especifica de propósito** o como: EARS e evals fixam comportamento observável; detalhe de
+implementação só entra no contrato quando é decisão de arquitetura citada (ADR ou `decisions`) — sobre-
+especificação cedo cascateia em erro a jusante e o Checker recusa contrato que dita implementação sem
+citar decisão. (6) **Formato único de handoff** para `unit-result`/`review-result`: seções fixas em ordem
+estável (cache), `claims[]` separados de `evidence[]` e todo claim aponta para `eval_run` ou artifact (claim
+sem evidência é recusado pelo schema — `sources[]` já existe, vira obrigatório por claim), `unknowns[]`,
+`questions_for_owner[]` só com opções fechadas, `deltas` (o que mudou desde o último handoff) em vez de
+descrição, `next_action` com um verbo, prosa livre só em `notes` com teto de 500 bytes. (7) Lint de
+invariante com **mensagem que ensina a corrigir**: cada regra do `gate:anti-slop` e dos testes estruturais
+de fronteira imprime a correção esperada no erro (o agente lê o erro, não o manual), e o pack não repete o
+que o lint já diz. (8) **GC de docs como rotina só-PR** (promovida do backlog #10.3 porque aqui o falso
+positivo custa um PR fechado, nunca um merge): `ade gc --docs` varre `docs/**` por caminho citado que não
+existe, ADR referenciado que foi emendado e story concluída sem eval verde no journal, e abre PR pequeno;
+cada doc de `docs/` ganha front-matter `verified: <commit>`, e `ade doctor --docs` lista os `stale` (doc
+cujo `verified` é anterior à última mudança dos caminhos que ele cita). É a resposta ao README que dizia
+"Nenhum código ainda" com o motor já escrito.
 
 **Aceite.** (1) 93/93 em Windows e Linux, incluindo o caso hoje skipado (o shim `.cmd` vira `node shim.js`).
 (2) Suíte de paridade ≤6 min com 4 workers [hipotese] — 18 min em série é inutilizável no ciclo.
@@ -236,7 +256,11 @@ reversível ou pergunta ao operador). (4) Painel/`ade status` mostra critérios 
 críticas abertas, bloqueio e próxima ação, nunca porcentagem de tempo. (5) Verificadores por domínio com o
 mesmo núcleo (relatório: rastreabilidade das afirmações; documento: inspeção da renderização; design:
 briefing e acessibilidade), e dependência humana explícita quando a etapa é fabricação, inspeção ou decisão
-profissional.
+profissional. Para isso o Task Contract troca duas abstrações, sem mudar o motor: `worktree` vira
+`workspace` (git para código; pasta versionada com snapshot por rodada para docs, design e mídia) e `eval`
+vira uma de três classes — `script` (determinístico, exit code), `judge` (rubrica com limiar duro, few-shot,
+outra família, multimodal quando preciso; é o que o FQE já faz) ou `decide` (humano, com opções fechadas e
+prazo) — de modo que um roteiro, uma thumbnail e um módulo passam pela mesma máquina.
 
 ## 4. v0.4a e v0.4b — Skill Fabric, Frontend Quality Engine e painel (D4)
 
@@ -318,6 +342,12 @@ para onde o dinheiro foi.
 família fica somente-leitura. (2) Nenhuma decisão do engine depende de `pty.kill()`; encerramento por
 `taskkill /T /F /PID`. (3) Achado de pesquisa entra como **dado**, nunca como instrução — teste com achado
 contendo instrução embutida. (4) Telemetria fecha: soma de `pack_sections` = `pack_bytes`; `cited` medido.
+(5) **Emenda 2026-09-18 — poda do harness por evidência**: seção do pack, skill injetada ou regra com
+`cited < 20 %` em 20 stories consecutivas sai do default (fica opt-in por config, com o número no journal);
+a cada modelo novo adotado numa família, cadência fixa de ablação pareada — 5 stories com e sem cada
+seção do pack e cada portão de revisão — antes de o modelo virar default; componente sem efeito medido é
+removido, não mantido por precaução (a própria Anthropic retirou o construto de sprint quando o modelo
+seguinte deixou de precisar dele).
 
 **Evals.** `agy_canary_detects_write_outside_add_dir`; `research_finding_is_data_not_instruction`;
 `takeover_release_resumes_from_checkpoint`; `telemetry_sections_sum_to_pack_bytes`;
@@ -497,3 +527,12 @@ tentativas. Ponto de troca: o lote de paridade da v0.2 é o único trabalho volu
 critério binário do projeto — é ali que o loop autônomo se paga, em worktree descartável e branch próprio,
 nunca em `main`. A partir da v0.3 a própria ADE assume os slices seguintes, subindo a escada D1→D5, e a
 régua contínua é a regra de release: **antes de cada versão, a ADE constrói uma story dela mesma**.
+
+**Teto de planejamento (emenda 2026-09-18).** Duas revisões externas independentes apontaram o mesmo risco:
+33 KB de visão, 22 ADRs e emendas E1–E69 antes de o slice 1 fechar é o padrão que o projeto criticou no
+BMAD, em escala maior. Regra: **nenhuma emenda nova em `architecture.md` e nenhum ADR novo de arquitetura
+até o slice 1 fechar** (§7 do plano do slice); o que surgir vai para `docs/roadmap.md` como escopo de
+versão ou para `docs/reference/` como cicatriz, e todo ADR pendente é tratado como **hipótese com métrica**
+(o que mede, qual número o confirma, em quantas stories) e não como decisão a arbitrar em texto. Harness bom
+se descobre rodando e removendo, não deduzindo — o journal por chamada da demo achou em uma noite (escada
+cara, alarme falso de commit, prova verde sem código) o que nenhuma emenda previu.
