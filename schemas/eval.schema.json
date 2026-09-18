@@ -18,7 +18,7 @@
       "additionalProperties": false,
       "required": ["mode"],
       "properties": {
-        "mode": { "type": "string" }
+        "mode": { "type": "string", "enum": ["must_fail_before", "additive", "mutate"] }
       }
     },
     "author": { "type": "string" }
