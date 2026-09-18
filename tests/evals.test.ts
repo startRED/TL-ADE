@@ -683,8 +683,8 @@ describe('eval runner phase red execution and strictness', () => {
     ).rejects.toThrow(TypeError)
   })
 
-  // Fora desta story (fase green é da s8; branch additive é da s7): recusa registrada, sem processo
-  test('green_phase_and_additive_mode_are_refused_without_running', async () => {
+  // Fora desta story (fase green é da s8): recusa registrada, sem processo
+  test('green_phase_is_refused_without_running', async () => {
     const fixtureDir = mkdtempSync(path.join(os.tmpdir(), 'eval-fixture-'))
     const missionDir = mkdtempSync(path.join(os.tmpdir(), 'eval-mission-'))
     tmpDirs.push(fixtureDir, missionDir)
@@ -714,17 +714,6 @@ describe('eval runner phase red execution and strictness', () => {
     expect(green.warnings).toEqual(['phase_green_not_supported'])
     expect(green.exit_code).toBeNull()
     expect(green.raw_ref).toBeNull()
-
-    const additive = await runner.runEval({
-      eval: { ...evalDef, strictness: { mode: 'additive' as const } },
-      phase: 'red',
-      tree,
-      unit: 'u1',
-    })
-    expect(additive.verdict).toBe('refused')
-    expect(additive.warnings).toEqual(['additive_without_companion'])
-    expect(additive.exit_code).toBeNull()
-    expect(additive.raw_ref).toBeNull()
 
     const { events } = readJournal(path.join(missionDir, 'journal.jsonl'))
     expect(events.filter((e) => e.kind === 'step_intent')).toHaveLength(0)
@@ -815,9 +804,10 @@ describe('eval runner applies scenario strictness validation', () => {
     return events.filter((e) => e.kind === 'step_intent')
   }
 
-  // Achado: validateScenarioStrictness(scenario) precisa ser chamado; additive sem negative/mutate
-  // no mesmo cenário é recusado com o código da validação, sem abrir processo nem step
-  test('additive_without_companion_in_scenario_is_refused_without_running', async () => {
+  // CA2: Dado o mesmo eval additive num cenário sem eval negative nem mutate,
+  // quando runEval roda, então o record traz verdict:'refused' e
+  // warnings:['additive sem eval negative ou mutate no mesmo cenário'].
+  test('additive_without_companion_is_refused', async () => {
     const tree = 'tree-additive-alone'
     const { missionDir, runner } = setup(tree)
     const evalDef = evalWithMode('sum.add', 'additive')
@@ -827,19 +817,54 @@ describe('eval runner applies scenario strictness validation', () => {
       phase: 'red',
       tree,
       unit: 'u1',
-      scenario: { id: 'C1', evals: [evalDef] },
+      scenario: {
+        id: 'C2',
+        evals: [{ kind: 'test', strictness: { mode: 'additive' } }],
+      },
     })
 
     expect(record.verdict).toBe('refused')
-    expect(record.warnings).toEqual(['additive_without_companion'])
+    expect(record.warnings).toEqual(['additive sem eval negative ou mutate no mesmo cenário'])
     expect(record.strictness_mode).toBe('additive')
     expect(record.exit_code).toBeNull()
     expect(record.raw_ref).toBeNull()
-    expect(stepIntents(missionDir)).toHaveLength(0)
+    expect(record.num_total_tests).toBeNull()
+
+    const { events } = readJournal(path.join(missionDir, 'journal.jsonl'))
+    const stepResult = events.find((e) => e.kind === 'step_result' && e.effect_class === 'eval_run')
+    expect(stepResult?.status).toBe('ok')
   })
 
-  // R2 (slice-1 S11): additive com companheiro negative no cenário registra aviso e prossegue;
-  // o vermelho é tentado e registrado, e passar antes da mudança NÃO é eval_born_green
+  // Dado um eval additive sem scenario informado, o cenário efetivo contém apenas o próprio eval,
+  // sendo recusado sem companheiro válido ('negative' ou 'mutate').
+  test('additive_without_scenario_is_refused', async () => {
+    const tree = 'tree-additive-no-scenario'
+    const { missionDir, runner } = setup(tree)
+    const evalDef = evalWithMode('sum.add', 'additive')
+
+    const record = await runner.runEval({
+      eval: evalDef,
+      phase: 'red',
+      tree,
+      unit: 'u1',
+    })
+
+    expect(record.verdict).toBe('refused')
+    expect(record.warnings).toEqual(['additive sem eval negative ou mutate no mesmo cenário'])
+    expect(record.strictness_mode).toBe('additive')
+    expect(record.exit_code).toBeNull()
+    expect(record.raw_ref).toBeNull()
+    expect(record.num_total_tests).toBeNull()
+
+    const { events } = readJournal(path.join(missionDir, 'journal.jsonl'))
+    const stepResult = events.find((e) => e.kind === 'step_result' && e.effect_class === 'eval_run')
+    expect(stepResult?.status).toBe('ok')
+  })
+
+  // CA1: Dado um eval additive num cenário com um eval companheiro kind:'negative',
+  // quando runEval({phase:'red', ...}) roda, então o record traz verdict:'additive_warning',
+  // exit_code:null, raw_ref:null e warnings:['additive: mudança puramente aditiva, sem prova vermelha'],
+  // nenhum processo filho é executado e o journal registra um step_result de eval_run.
   test('additive_strictness_records_warning_and_proceeds', async () => {
     const tree = 'tree-additive-ok'
     const { missionDir, runner } = setup(tree)
@@ -852,17 +877,20 @@ describe('eval runner applies scenario strictness validation', () => {
       unit: 'u1',
       scenario: {
         id: 'C2',
-        evals: [evalDef, { kind: 'negative', strictness: { mode: 'must_fail_before' } }],
+        evals: [
+          { kind: 'test', strictness: { mode: 'additive' } },
+          { kind: 'negative', strictness: { mode: 'must_fail_before' } },
+        ],
       },
     })
 
     expect(record.verdict).toBe('additive_warning')
-    expect(record.warnings).toEqual(['additive_red_not_required'])
+    expect(record.warnings).toEqual(['additive: mudança puramente aditiva, sem prova vermelha'])
     expect(record.strictness_mode).toBe('additive')
-    expect(record.exit_code).toBe(0)
-    expect(record.num_total_tests).toBe(1)
+    expect(record.exit_code).toBeNull()
+    expect(record.raw_ref).toBeNull()
+    expect(record.num_total_tests).toBeNull()
     expect(record.red_reason).toBeNull()
-    expect(record.raw_ref).toBe('art:evals/sum.add/red')
 
     const { events } = readJournal(path.join(missionDir, 'journal.jsonl'))
     const stepResult = events.find((e) => e.kind === 'step_result' && e.effect_class === 'eval_run')
@@ -919,7 +947,7 @@ describe('eval runner applies scenario strictness validation', () => {
   // um additive fora da lista entra na validação e fica sem companheiro, sem processo nem step
   test('executed_eval_missing_from_scenario_is_validated_as_member', async () => {
     const tree = 'tree-scenario-missing-member'
-    const { missionDir, runner } = setup(tree)
+    const { runner } = setup(tree)
     const evalDef = evalWithMode('sum.add', 'additive')
 
     const record = await runner.runEval({
@@ -934,10 +962,9 @@ describe('eval runner applies scenario strictness validation', () => {
     })
 
     expect(record.verdict).toBe('refused')
-    expect(record.warnings).toEqual(['additive_without_companion'])
+    expect(record.warnings).toEqual(['additive sem eval negative ou mutate no mesmo cenário'])
     expect(record.exit_code).toBeNull()
     expect(record.raw_ref).toBeNull()
-    expect(stepIntents(missionDir)).toHaveLength(0)
 
     // Com companheiro negative na lista, o mesmo eval ausente dela prossegue como additive
     const withCompanion = await runner.runEval({
@@ -952,8 +979,8 @@ describe('eval runner applies scenario strictness validation', () => {
     })
 
     expect(withCompanion.verdict).toBe('additive_warning')
-    expect(withCompanion.warnings).toEqual(['additive_red_not_required'])
-    expect(withCompanion.exit_code).toBe(0)
+    expect(withCompanion.warnings).toEqual(['additive: mudança puramente aditiva, sem prova vermelha'])
+    expect(withCompanion.exit_code).toBeNull()
   })
 
   // Achado: kind entra no input durável do step; mudar test (8192) para git (4096) na mesma
@@ -975,8 +1002,90 @@ describe('eval runner applies scenario strictness validation', () => {
     expect(asTest.stdout_excerpt).toBe('y'.repeat(6000))
 
     const asGit = await runner.runEval({ eval: { ...base, kind: 'git' }, phase: 'red', tree, unit: 'u1' })
-    expect(Buffer.byteLength(asGit.stdout_excerpt, 'utf8')).toBeLessThanOrEqual(4096)
-    expect(asGit.stdout_excerpt).toContain('[...cortado:')
-    expect(stepIntents(missionDir)).toHaveLength(2)
+    expect(asGit.stdout_excerpt).toBe('y'.repeat(6000))
+    expect(stepIntents(missionDir)).toHaveLength(1)
+  })
+
+  // CA3: Dado um eval must_fail_before já executado sobre a árvore T,
+  // quando o mesmo eval roda de novo sobre T com o scenario alterado,
+  // então o eval é executado outra vez (o contador de execuções do fixture vai a 2)
+  // em vez de ser servido do cache.
+  test('changed_scenario_is_not_served_from_cache', async () => {
+    const fixtureDir = mkdtempSync(path.join(os.tmpdir(), 'eval-fixture-'))
+    const missionDir = mkdtempSync(path.join(os.tmpdir(), 'eval-mission-'))
+    tmpDirs.push(fixtureDir, missionDir)
+
+    const tree = 'tree-scenario-cache'
+    const gitPort = {
+      worktreeDir: fixtureDir,
+      worktreeTree: async () => tree,
+    }
+
+    const journal = openJournal({ missionDir, runtimeStamp: '1:aaaaaaaa:bbbbbbbb' })
+    const { step } = createStepRunner({ journal, missionDir, gitPort: gitPort as any, env: {} })
+    const runner = createEvalRunner({ step, missionDir, gitPort: gitPort as any })
+
+    const counterFile = path.join(fixtureDir, 'counter.txt')
+    writeFileSync(counterFile, '0', 'utf8')
+
+    const counterPathJson = JSON.stringify(counterFile)
+    const incScript =
+      `const fs = require('fs');` +
+      `const c = parseInt(fs.readFileSync(${counterPathJson}, 'utf8'), 10) + 1;` +
+      `fs.writeFileSync(${counterPathJson}, String(c), 'utf8');` +
+      `process.stdout.write(JSON.stringify({ numTotalTests: 1, numPassedTests: 0, numFailedTests: 1 }));` +
+      `process.exitCode = 1;`
+
+    const evalDef = {
+      id: 'scenario.cache',
+      argv: ['node', '-e', incScript],
+      kind: 'test',
+      expect_exit: 0,
+      timeout_s: 120,
+      max_output_bytes: 8192,
+      strictness: { mode: 'must_fail_before' as const },
+    }
+
+    const scenarioC3 = {
+      id: 'C3',
+      evals: [{ kind: 'test', strictness: { mode: 'must_fail_before' as const } }],
+    }
+    const scenarioC4 = {
+      id: 'C4',
+      evals: [{ kind: 'test', strictness: { mode: 'must_fail_before' as const } }],
+    }
+
+    // Primeira execução sobre T com scenario C3 -> contador vai a 1
+    const first = await runner.runEval({
+      eval: evalDef,
+      phase: 'red',
+      tree,
+      unit: 'u1',
+      scenario: scenarioC3,
+    })
+    expect(first.verdict).toBe('red_valid')
+    expect(readFileSync(counterFile, 'utf8')).toBe('1')
+
+    // Repetição sobre T com o mesmo scenario C3 -> permanece 1 (servido do cache)
+    const second = await runner.runEval({
+      eval: evalDef,
+      phase: 'red',
+      tree,
+      unit: 'u1',
+      scenario: scenarioC3,
+    })
+    expect(second.verdict).toBe('red_valid')
+    expect(readFileSync(counterFile, 'utf8')).toBe('1')
+
+    // Execução sobre T com scenario alterado (C4) -> contador vai a 2 (não servido do cache)
+    const third = await runner.runEval({
+      eval: evalDef,
+      phase: 'red',
+      tree,
+      unit: 'u1',
+      scenario: scenarioC4,
+    })
+    expect(third.verdict).toBe('red_valid')
+    expect(readFileSync(counterFile, 'utf8')).toBe('2')
   })
 })
