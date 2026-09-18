@@ -144,3 +144,32 @@ export function classifyRed({ exitCode, expectExit, timedOut, stdout, stderr, re
     num_total_tests,
   }
 }
+
+/**
+ * @typedef {Object} ClassifyGreenParams
+ * @property {'assertion' | 'missing_target' | 'compile_error' | 'environment' | null} red_reason
+ */
+
+/**
+ * @typedef {Object} ClassifyGreenResult
+ * @property {'green' | 'green_failed' | 'refused'} verdict
+ * @property {string[]} warnings
+ */
+
+/**
+ * Classifica o resultado da fase verde a partir do red_reason produzido por classifyRed:
+ * sem motivo é verde; alvo ausente (zero teste executado) é recusado, nunca verde (E58);
+ * qualquer outro motivo é falha verde.
+ *
+ * @param {ClassifyGreenParams} params
+ * @returns {ClassifyGreenResult}
+ */
+export function classifyGreen({ red_reason }) {
+  if (red_reason === null) {
+    return { verdict: 'green', warnings: [] }
+  }
+  if (red_reason === 'missing_target') {
+    return { verdict: 'refused', warnings: ['green_missing_target'] }
+  }
+  return { verdict: 'green_failed', warnings: [`red_reason=${red_reason}`] }
+}
