@@ -23,6 +23,7 @@ const ROOT_ALLOWLIST = new Set([
   'package-lock.json',
   'proto',
   'schemas',
+  'scripts',
   'src',
   'tests',
   'tsconfig.json',
