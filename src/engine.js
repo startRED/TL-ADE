@@ -5,7 +5,7 @@ import { AdeError } from './journal/errors.js'
 import { readJournal } from './journal/journal.js'
 import { assertCallBudget, checkUsdCap, observedUsd, reserveCalls } from './engine/budget.js'
 import { maybeEngineFault } from './engine/faults.js'
-import { findStoryStarted } from './engine/resume.js'
+import { findStoryCommitted, findStoryStarted } from './engine/resume.js'
 
 /**
  * Famílias de modelos com canário aprovado no Slice 1.
@@ -74,6 +74,25 @@ export async function runStory(deps, input) {
 
   // Anexa batch_open se ausente
   const initialEvents = readEvents()
+  const committed = findStoryCommitted(initialEvents, storyId)
+  if (committed !== null) {
+    await deps.journal.append({
+      kind: 'story_skipped',
+      unit: storyId,
+      data: {
+        unit: storyId,
+        reason: 'already_committed',
+        commit: committed.commit,
+      },
+    })
+    return {
+      status: 'committed',
+      exitCode: 0,
+      reason: 'already_committed',
+      commit: committed.commit,
+    }
+  }
+
   const hasBatchOpen = initialEvents.some((e) => e.kind === 'batch_open')
   if (!hasBatchOpen) {
     await deps.journal.append({
