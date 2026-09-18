@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { runContained } from '../gates/command.js'
 import { EXTRACT_CAPS, safeId, writeRawArtifact } from '../gates/output.js'
-import { classifyRed, parseReporterJson } from './classify.js'
+import { classifyGreen, classifyRed, parseReporterJson } from './classify.js'
 import { validateScenarioStrictness } from './strictness.js'
 
 /**
@@ -269,6 +269,43 @@ export function createEvalRunner({ step, missionDir, gitPort }) {
   }
 
   /**
+   * Executa o processo contido do eval, grava o artefato bruto e classifica a fase vermelha;
+   * compartilhado entre as fases vermelha e verde, que só divergem na classificação final.
+   *
+   * @param {EvalDef} evalDef
+   * @param {'red' | 'green'} phase
+   * @param {string} safeEvalId
+   * @returns {Promise<{ contained: any, raw_ref: string, red_reason: 'assertion' | 'missing_target' | 'compile_error' | 'environment' | null, num_total_tests: number | null }>}
+   */
+  async function executeEval(evalDef, phase, safeEvalId) {
+    const contained = await runContained({
+      argv: evalDef.argv,
+      cwd: gitPort.worktreeDir,
+      timeoutS: evalDef.timeout_s,
+    })
+
+    const artRef = `evals/${safeEvalId}/${phase}`
+    writeRawArtifact({
+      missionDir,
+      ref: artRef,
+      text: contained.stdout + '\n' + contained.stderr,
+    })
+    const raw_ref = `art:${artRef}`
+
+    const report = parseReporterJson(contained.stdout)
+    const { red_reason, num_total_tests } = classifyRed({
+      exitCode: contained.exitCode,
+      expectExit: evalDef.expect_exit,
+      timedOut: contained.timedOut,
+      stdout: contained.stdout,
+      stderr: contained.stderr,
+      report,
+    })
+
+    return { contained, raw_ref, red_reason, num_total_tests }
+  }
+
+  /**
    * Executa a avaliação do eval.
    *
    * @param {RunEvalOptions} options
@@ -293,11 +330,7 @@ export function createEvalRunner({ step, missionDir, gitPort }) {
         warnings: [warning],
       })
 
-    // Fase green não existe nesta fatia; mutate exige o Checker que comenta a guarda, que também
-    // não existe: recusa registrada, sem processo
-    if (phase === 'green') {
-      return refuse('phase_green_not_supported')
-    }
+    // Mutate exige o Checker que comenta a guarda, que ainda não existe: recusado nas duas fases
     if (strictnessMode === 'mutate') {
       return refuse('strictness_mutate_not_supported')
     }
@@ -309,6 +342,49 @@ export function createEvalRunner({ step, missionDir, gitPort }) {
 
     const safeEvalId = safeId(evalDef.id)
     const stepId = `eval:${safeEvalId}:${phase}:${tree}`
+
+    // A fase verde roda pelo mesmo step eval_run mas não valida cenário nem tem atalho additive:
+    // strictness é regra da fase vermelha, a prova verde vale para todo eval
+    if (phase === 'green') {
+      const stepOutput = await step(
+        {
+          unit,
+          id: stepId,
+          effect_class: 'eval_run',
+          input: buildStepInput({ eval: evalDef, phase, tree, scenario }),
+          worktree: gitPort.worktreeDir,
+        },
+        async () => {
+          const { contained, raw_ref, red_reason, num_total_tests } = await executeEval(
+            evalDef,
+            phase,
+            safeEvalId
+          )
+          const { verdict, warnings } = classifyGreen({ red_reason })
+          const cap = EXTRACT_CAPS[evalDef.kind] ?? 8192
+
+          return buildEvalRecord({
+            eval_id: evalDef.id,
+            phase,
+            tree,
+            argv: evalDef.argv,
+            exit_code: contained.exitCode,
+            expect_exit: evalDef.expect_exit,
+            num_total_tests,
+            red_reason,
+            strictness_mode: strictnessMode,
+            verdict,
+            warnings,
+            stdout_excerpt: capExcerpt(contained.stdout, cap, raw_ref),
+            stderr_excerpt: capExcerpt(contained.stderr, cap, raw_ref),
+            raw_ref,
+            duration_ms: contained.durationMs,
+          })
+        }
+      )
+
+      return buildEvalRecord(stepOutput.result)
+    }
 
     if (strictnessMode === 'additive') {
       let verdict = 'additive_warning'
@@ -367,29 +443,11 @@ export function createEvalRunner({ step, missionDir, gitPort }) {
         worktree: gitPort.worktreeDir,
       },
       async () => {
-        const contained = await runContained({
-          argv: evalDef.argv,
-          cwd: gitPort.worktreeDir,
-          timeoutS: evalDef.timeout_s,
-        })
-
-        const artRef = `evals/${safeEvalId}/${phase}`
-        writeRawArtifact({
-          missionDir,
-          ref: artRef,
-          text: contained.stdout + '\n' + contained.stderr,
-        })
-        const raw_ref = `art:${artRef}`
-
-        const report = parseReporterJson(contained.stdout)
-        const { red_reason, num_total_tests } = classifyRed({
-          exitCode: contained.exitCode,
-          expectExit: evalDef.expect_exit,
-          timedOut: contained.timedOut,
-          stdout: contained.stdout,
-          stderr: contained.stderr,
-          report,
-        })
+        const { contained, raw_ref, red_reason, num_total_tests } = await executeEval(
+          evalDef,
+          phase,
+          safeEvalId
+        )
 
         /** @type {string} */
         let verdict

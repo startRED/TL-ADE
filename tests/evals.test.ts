@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { classifyRed, parseReporterJson } from '../src/evals/classify.js'
+import { classifyGreen, classifyRed, parseReporterJson } from '../src/evals/classify.js'
 import { createEvalRunner } from '../src/evals/eval-runner.js'
 import { validateScenarioStrictness } from '../src/evals/strictness.js'
 import { openJournal, readJournal } from '../src/journal/journal.js'
@@ -683,8 +683,10 @@ describe('eval runner phase red execution and strictness', () => {
     ).rejects.toThrow(TypeError)
   })
 
-  // Fora desta story (fase green é da s8): recusa registrada, sem processo
-  test('green_phase_is_refused_without_running', async () => {
+  // CA4: Dado um eval sem reporter Vitest (argv roda 'node -e' puro), quando runEval({phase:'green'})
+  // roda, então o EvalRecord traz verdict:'green_failed', red_reason:'environment', exit_code:0 e
+  // raw_ref:'art:evals/sum.scope/green', e o journal tem exatamente 1 step_intent.
+  test('green_phase_without_reporter_is_green_failed', async () => {
     const fixtureDir = mkdtempSync(path.join(os.tmpdir(), 'eval-fixture-'))
     const missionDir = mkdtempSync(path.join(os.tmpdir(), 'eval-mission-'))
     tmpDirs.push(fixtureDir, missionDir)
@@ -710,13 +712,13 @@ describe('eval runner phase red execution and strictness', () => {
     }
 
     const green = await runner.runEval({ eval: evalDef, phase: 'green', tree, unit: 'u1' })
-    expect(green.verdict).toBe('refused')
-    expect(green.warnings).toEqual(['phase_green_not_supported'])
-    expect(green.exit_code).toBeNull()
-    expect(green.raw_ref).toBeNull()
+    expect(green.verdict).toBe('green_failed')
+    expect(green.red_reason).toBe('environment')
+    expect(green.exit_code).toBe(0)
+    expect(green.raw_ref).toBe('art:evals/sum.scope/green')
 
     const { events } = readJournal(path.join(missionDir, 'journal.jsonl'))
-    expect(events.filter((e) => e.kind === 'step_intent')).toHaveLength(0)
+    expect(events.filter((e) => e.kind === 'step_intent')).toHaveLength(1)
   })
 
   // Teto do extrato por kind: o EvalRecord leva stdout/stderr cortados (com marca), o bruto vai inteiro ao artefato
@@ -1212,4 +1214,221 @@ describe('skipped tests are not executed tests', () => {
     },
     60_000
   )
+})
+
+describe('eval runner phase green', () => {
+  const vitestBin = path.resolve(process.cwd(), 'node_modules/vitest/vitest.mjs')
+
+  // CA1: Dado o mini-projeto Vitest com soma correta, quando runEval({phase:'green'}) roda com
+  // '-t','sums two numbers', então o EvalRecord traz verdict 'green', red_reason null,
+  // num_total_tests 1 e raw_ref 'art:evals/sum.green/green', e o journal tem um step_result
+  // com effect_class 'eval_run'.
+  test(
+    'green_phase_passes_real_test',
+    async () => {
+      const fixtureDir = mkdtempSync(path.join(os.tmpdir(), 'eval-fixture-'))
+      const missionDir = mkdtempSync(path.join(os.tmpdir(), 'eval-mission-'))
+      tmpDirs.push(fixtureDir, missionDir)
+
+      createMiniProject(fixtureDir, 'export function sum(a, b) { return a + b }\n')
+
+      const tree = 'tree-green-pass'
+      const gitPort = {
+        worktreeDir: fixtureDir,
+        worktreeTree: async () => tree,
+      }
+
+      const journal = openJournal({ missionDir, runtimeStamp: '1:aaaaaaaa:bbbbbbbb' })
+      const { step } = createStepRunner({ journal, missionDir, gitPort: gitPort as any, env: {} })
+      const runner = createEvalRunner({ step, missionDir, gitPort: gitPort as any })
+
+      const evalDef = {
+        id: 'sum.green',
+        argv: [
+          'node',
+          vitestBin,
+          'run',
+          '--root',
+          fixtureDir,
+          '--config',
+          path.join(fixtureDir, 'vitest.config.mjs'),
+          '--reporter=json',
+          '-t',
+          'sums two numbers',
+        ],
+        kind: 'test',
+        expect_exit: 0,
+        timeout_s: 120,
+        max_output_bytes: 8192,
+        strictness: { mode: 'must_fail_before' as const },
+      }
+
+      const record = await runner.runEval({
+        eval: evalDef,
+        phase: 'green',
+        tree,
+        unit: 'u1',
+      })
+
+      expect(record.verdict).toBe('green')
+      expect(record.red_reason).toBeNull()
+      expect(record.num_total_tests).toBe(1)
+      expect(record.raw_ref).toBe('art:evals/sum.green/green')
+
+      const { events } = readJournal(path.join(missionDir, 'journal.jsonl'))
+      const stepResult = events.find((e) => e.kind === 'step_result' && e.effect_class === 'eval_run')
+      expect(stepResult).toBeDefined()
+      expect(stepResult?.status).toBe('ok')
+    },
+    60_000
+  )
+
+  // CA2: Dado o mesmo mini-projeto, quando runEval({phase:'green'}) roda com
+  // '-t','nome que não existe', então o EvalRecord traz verdict 'refused',
+  // red_reason 'missing_target', num_total_tests 0 e warnings ['green_missing_target'].
+  test(
+    'green_phase_refuses_missing_target',
+    async () => {
+      const fixtureDir = mkdtempSync(path.join(os.tmpdir(), 'eval-fixture-'))
+      const missionDir = mkdtempSync(path.join(os.tmpdir(), 'eval-mission-'))
+      tmpDirs.push(fixtureDir, missionDir)
+
+      createMiniProject(fixtureDir, 'export function sum(a, b) { return a + b }\n')
+
+      const tree = 'tree-green-missing'
+      const gitPort = {
+        worktreeDir: fixtureDir,
+        worktreeTree: async () => tree,
+      }
+
+      const journal = openJournal({ missionDir, runtimeStamp: '1:aaaaaaaa:bbbbbbbb' })
+      const { step } = createStepRunner({ journal, missionDir, gitPort: gitPort as any, env: {} })
+      const runner = createEvalRunner({ step, missionDir, gitPort: gitPort as any })
+
+      const evalDef = {
+        id: 'sum.green.missing',
+        argv: [
+          'node',
+          vitestBin,
+          'run',
+          '--root',
+          fixtureDir,
+          '--config',
+          path.join(fixtureDir, 'vitest.config.mjs'),
+          '--reporter=json',
+          '-t',
+          'nome que não existe',
+        ],
+        kind: 'test',
+        expect_exit: 0,
+        timeout_s: 120,
+        max_output_bytes: 8192,
+        strictness: { mode: 'must_fail_before' as const },
+      }
+
+      const record = await runner.runEval({
+        eval: evalDef,
+        phase: 'green',
+        tree,
+        unit: 'u1',
+      })
+
+      expect(record.verdict).toBe('refused')
+      expect(record.red_reason).toBe('missing_target')
+      expect(record.num_total_tests).toBe(0)
+      expect(record.warnings).toEqual(['green_missing_target'])
+    },
+    60_000
+  )
+
+  // CA3: classifyGreen mapeia red_reason -> verdict/warnings sem rodar processo nenhum.
+  test('classify_green_maps_red_reasons', () => {
+    expect(classifyGreen({ red_reason: null })).toEqual({ verdict: 'green', warnings: [] })
+    expect(classifyGreen({ red_reason: 'missing_target' })).toEqual({
+      verdict: 'refused',
+      warnings: ['green_missing_target'],
+    })
+    expect(classifyGreen({ red_reason: 'assertion' })).toEqual({
+      verdict: 'green_failed',
+      warnings: ['red_reason=assertion'],
+    })
+    expect(classifyGreen({ red_reason: 'compile_error' })).toEqual({
+      verdict: 'green_failed',
+      warnings: ['red_reason=compile_error'],
+    })
+  })
+
+  // Decisão do plano: a fase verde roda em todos os modos de strictness exceto mutate e não tem
+  // o atalho additive (que é regra da fase vermelha) — um additive sem cenário roda de verdade.
+  test('green_phase_additive_runs_without_shortcut', async () => {
+    const fixtureDir = mkdtempSync(path.join(os.tmpdir(), 'eval-fixture-'))
+    const missionDir = mkdtempSync(path.join(os.tmpdir(), 'eval-mission-'))
+    tmpDirs.push(fixtureDir, missionDir)
+
+    const tree = 'tree-green-additive'
+    const gitPort = {
+      worktreeDir: fixtureDir,
+      worktreeTree: async () => tree,
+    }
+
+    const journal = openJournal({ missionDir, runtimeStamp: '1:aaaaaaaa:bbbbbbbb' })
+    const { step } = createStepRunner({ journal, missionDir, gitPort: gitPort as any, env: {} })
+    const runner = createEvalRunner({ step, missionDir, gitPort: gitPort as any })
+
+    const greenReporter =
+      'process.stdout.write(JSON.stringify({ numTotalTests: 1, numPassedTests: 1, numFailedTests: 0 }));' +
+      'process.exitCode = 0'
+
+    const evalDef = {
+      id: 'sum.green.additive',
+      argv: ['node', '-e', greenReporter],
+      kind: 'test',
+      expect_exit: 0,
+      timeout_s: 120,
+      max_output_bytes: 8192,
+      strictness: { mode: 'additive' as const },
+    }
+
+    const record = await runner.runEval({ eval: evalDef, phase: 'green', tree, unit: 'u1' })
+
+    expect(record.verdict).toBe('green')
+    expect(record.red_reason).toBeNull()
+    expect(record.raw_ref).toBe('art:evals/sum.green.additive/green')
+  })
+
+  // Decisão do plano: mutate continua a única recusa nas duas fases, sem tocar no processo.
+  test('green_phase_refuses_mutate_without_running', async () => {
+    const fixtureDir = mkdtempSync(path.join(os.tmpdir(), 'eval-fixture-'))
+    const missionDir = mkdtempSync(path.join(os.tmpdir(), 'eval-mission-'))
+    tmpDirs.push(fixtureDir, missionDir)
+
+    const tree = 'tree-green-mutate'
+    const gitPort = {
+      worktreeDir: fixtureDir,
+      worktreeTree: async () => tree,
+    }
+
+    const journal = openJournal({ missionDir, runtimeStamp: '1:aaaaaaaa:bbbbbbbb' })
+    const { step } = createStepRunner({ journal, missionDir, gitPort: gitPort as any, env: {} })
+    const runner = createEvalRunner({ step, missionDir, gitPort: gitPort as any })
+
+    const evalDef = {
+      id: 'sum.green.mutate',
+      argv: ['node', '-e', 'process.exitCode = 0'],
+      kind: 'test',
+      expect_exit: 0,
+      timeout_s: 120,
+      max_output_bytes: 8192,
+      strictness: { mode: 'mutate' as const },
+    }
+
+    const record = await runner.runEval({ eval: evalDef, phase: 'green', tree, unit: 'u1' })
+
+    expect(record.verdict).toBe('refused')
+    expect(record.warnings).toEqual(['strictness_mutate_not_supported'])
+    expect(record.raw_ref).toBeNull()
+
+    const { events } = readJournal(path.join(missionDir, 'journal.jsonl'))
+    expect(events.filter((e) => e.kind === 'step_intent')).toHaveLength(0)
+  })
 })
