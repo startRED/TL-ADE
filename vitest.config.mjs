@@ -1,7 +1,27 @@
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
+
+/**
+ * Seleciona os testes a serem incluídos e excluídos com base nas variáveis de ambiente.
+ * Quando ADE_PROBES for '1', inclui apenas os testes de probes.
+ * Caso contrário, executa a suíte padrão excluindo os testes de probes.
+ *
+ * @param {Record<string, string | undefined>} env - Variáveis de ambiente
+ * @returns {{ include: string[], exclude: string[] }} Padrões de include e exclude
+ */
+export function selectTests(env) {
+  if (env && env.ADE_PROBES === '1') {
+    return {
+      include: ['tests/probes/**/*.test.ts'],
+      exclude: [...configDefaults.exclude],
+    }
+  }
+
+  return {
+    include: ['tests/**/*.test.ts'],
+    exclude: [...configDefaults.exclude, 'tests/probes/**'],
+  }
+}
 
 export default defineConfig({
-  test: {
-    include: ['tests/**/*.test.ts'],
-  },
+  test: selectTests(process.env),
 })
