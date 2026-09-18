@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { digest16 } from '../journal/canonical.js'
 import { readJournal } from '../journal/journal.js'
-import { StateIntegrityError } from '../journal/errors.js'
+import { AdeError, StateIntegrityError } from '../journal/errors.js'
 import { maybeFault } from './fault.js'
 
 /** Classes de efeito fechadas desta fatia do motor. */
@@ -54,6 +54,7 @@ export function priorStepResult(events, stepId) {
  *   intent_context?: Record<string, string | null>,
  *   worktree?: string,
  *   receiptPath?: string,
+ *   session_ref?: string | null,
  * }, effectFn: () => Promise<unknown>) => Promise<{
  *   step_id: string,
  *   status: 'ok' | 'ambiguous',
@@ -76,11 +77,21 @@ export function createStepRunner({ journal, missionDir, gitPort = null, env = pr
    *   intent_context?: Record<string, string | null>,
    *   worktree?: string,
    *   receiptPath?: string,
+   *   session_ref?: string | null,
    * }} spec
    * @param {() => Promise<unknown>} effectFn
    */
   async function runStep(spec, effectFn) {
-    const { unit, id, effect_class, input, intent_context = {}, worktree = '', receiptPath = '' } = spec ?? {}
+    const {
+      unit,
+      id,
+      effect_class,
+      input,
+      intent_context = {},
+      worktree = '',
+      receiptPath = '',
+      session_ref = null,
+    } = spec ?? {}
 
     if (typeof unit !== 'string' || !UNIT_OR_ID_REGEX.test(unit)) {
       throw new TypeError('unit inválida')
@@ -111,6 +122,9 @@ export function createStepRunner({ journal, missionDir, gitPort = null, env = pr
     }
     if (typeof receiptPath !== 'string') {
       throw new TypeError('receiptPath inválido')
+    }
+    if (session_ref !== null && (typeof session_ref !== 'string' || !session_ref)) {
+      throw new AdeError('invalid_session_ref', 'session_ref inválido', 2)
     }
 
     const digest = digest16(input)
@@ -163,6 +177,7 @@ export function createStepRunner({ journal, missionDir, gitPort = null, env = pr
       worktree,
       receipt_path: receiptPath,
       unit,
+      session_ref,
     })
     maybeFault('after_intent', env)
 
@@ -228,6 +243,7 @@ export function createStepRunner({ journal, missionDir, gitPort = null, env = pr
    *   intent_context?: Record<string, string | null>,
    *   worktree?: string,
    *   receiptPath?: string,
+   *   session_ref?: string | null,
    * }} spec
    * @param {() => Promise<unknown>} effectFn
    */

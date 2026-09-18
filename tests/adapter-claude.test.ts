@@ -1,14 +1,24 @@
-import { readFileSync } from 'node:fs'
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test } from 'vitest'
 import { AdeError } from '../src/journal/errors.js'
+import { openJournal, readJournal } from '../src/journal/journal.js'
+import { createStepRunner } from '../src/step/step.js'
 import { validate } from '../src/schema/index.js'
 import { buildClaudeArgs, CLAUDE_PROMPT } from '../src/adapters/claude/argv.js'
 import { parseClaudeOutput, parseUnitResult, parseUsage, stripAnsi } from '../src/adapters/claude/parse.js'
+import { dispatchClaude } from '../src/adapters/claude/index.js'
+import { runWorker } from '../src/runner/spawn.js'
+import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
 
+const ROOT = fileURLToPath(new URL('../', import.meta.url))
+const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.js')
 const SCHEMA_PATH = fileURLToPath(new URL('../schemas/unit-result.schema.json', import.meta.url))
 const TRANSCRIPTS_DIR = fileURLToPath(new URL('../fixtures/transcripts/claude/', import.meta.url))
+
+const RUNTIME_STAMP = '1:aaaaaaaa:bbbbbbbb'
+const FIXED_UUID = '11111111-2222-4333-8444-555555555555'
 
 function readTranscriptStdout(name: string): string {
   return readFileSync(path.join(TRANSCRIPTS_DIR, name, 'stdout.json'), 'utf8')
@@ -193,5 +203,137 @@ describe('claude parse', () => {
       errors: ['structured_output ausente'],
       cited: false,
     })
+  })
+})
+
+describe('claude adapter dispatch', () => {
+  let tmpDirs: string[] = []
+
+  afterEach(() => {
+    for (const dir of tmpDirs) {
+      removeTmpDir(dir)
+    }
+    tmpDirs = []
+  })
+
+  function makeMissionDir(): string {
+    const dir = makeTmpDir('ade-adapter-claude-')
+    tmpDirs.push(dir)
+    return dir
+  }
+
+  function readEvents(missionDir: string): Array<Record<string, any>> {
+    return readJournal(path.join(missionDir, 'journal.jsonl')).events
+  }
+
+  // Prepara um cenário 'claude-ok' que devolve o transcript gravado ok_with_structured_output,
+  // reproduzindo a convenção da CLI falsa (stdout_from resolvido dois níveis acima do cenário).
+  function setupClaudeOkScenario(missionDir: string): { scenarioDir: string; packPath: string; resultFile: string } {
+    const scenarioDir = path.join(missionDir, 'scenarios', 'claude-ok')
+    mkdirSync(scenarioDir, { recursive: true })
+    writeFileSync(
+      path.join(scenarioDir, 'maker.json'),
+      JSON.stringify([{ stdout_from: 'transcripts/claude/ok_with_structured_output', no_result: true }]),
+    )
+    const transcriptDest = path.join(missionDir, 'transcripts', 'claude', 'ok_with_structured_output')
+    cpSync(path.join(TRANSCRIPTS_DIR, 'ok_with_structured_output'), transcriptDest, { recursive: true })
+
+    const packPath = path.join(missionDir, 'pack.md')
+    writeFileSync(packPath, '# pack\n')
+    const resultFile = path.join(missionDir, 'result.json')
+
+    return { scenarioDir, packPath, resultFile }
+  }
+
+  function makeRunner(missionDir: string) {
+    const journal = openJournal({ missionDir, runtimeStamp: RUNTIME_STAMP })
+    const { step } = createStepRunner({ journal, missionDir, gitPort: null, env: {} })
+    return { journal, step }
+  }
+
+  // CA1: o UUID cunhado por dispatchClaude já está gravado no step_intent do journal no instante em
+  // que runWorkerImpl (e por trás dele, o spawn real) é chamado, e o argv capturado pela CLI falsa
+  // traz --session-id seguido do mesmo UUID.
+  test('session_id_is_preminted_and_journaled_before_spawn', async () => {
+    const missionDir = makeMissionDir()
+    const { step } = makeRunner(missionDir)
+    const { scenarioDir, packPath, resultFile } = setupClaudeOkScenario(missionDir)
+
+    let intentSnapshotAtSpawn: Array<Record<string, any>> | undefined
+    const spyingRunWorkerImpl = async (opts: Parameters<typeof runWorker>[0]) => {
+      intentSnapshotAtSpawn = readEvents(missionDir)
+      return runWorker(opts)
+    }
+
+    const result = await dispatchClaude({
+      step,
+      unit: 'S13',
+      stepId: 'S13:r1:maker',
+      packPath,
+      missionDir,
+      missionId: 'm1',
+      cwd: missionDir,
+      resultFile,
+      maxBudgetUsd: 0.25,
+      resolved: { exe: process.execPath, prefixArgs: [CLI_PATH] },
+      env: { ADE_FAKE_SCENARIO: scenarioDir, ADE_FAKE_ROLE: 'maker' },
+      runWorkerImpl: spyingRunWorkerImpl,
+      randomUUID: () => FIXED_UUID,
+    })
+
+    expect(intentSnapshotAtSpawn).toBeDefined()
+    const intentAtSpawn = intentSnapshotAtSpawn!.find(
+      (ev) => ev.kind === 'step_intent' && ev.step_id === 'S13:r1:maker',
+    )
+    expect(intentAtSpawn).toBeTruthy()
+    expect(intentAtSpawn!.session_ref).toBe(FIXED_UUID)
+
+    const capturedArgv: string[] = JSON.parse(readFileSync(path.join(scenarioDir, 'maker-0.argv.json'), 'utf8'))
+    const sessionFlagIndex = capturedArgv.indexOf('--session-id')
+    expect(sessionFlagIndex).toBeGreaterThan(-1)
+    expect(capturedArgv[sessionFlagIndex + 1]).toBe(FIXED_UUID)
+
+    expect(result.session_ref).toBe(FIXED_UUID)
+  })
+
+  // CA2: caso feliz completo com o transcript ok_with_structured_output -> status 'ok', unit_result
+  // válido pelo schema e custo reportado (nunca inventado).
+  test('dispatchClaude_resolves_ok_with_valid_unit_result_and_reported_usage', async () => {
+    const missionDir = makeMissionDir()
+    const { step } = makeRunner(missionDir)
+    const { scenarioDir, packPath, resultFile } = setupClaudeOkScenario(missionDir)
+
+    const result = await dispatchClaude({
+      step,
+      unit: 'S13',
+      stepId: 'S13:r1:maker',
+      packPath,
+      missionDir,
+      missionId: 'm1',
+      cwd: missionDir,
+      resultFile,
+      maxBudgetUsd: 0.25,
+      resolved: { exe: process.execPath, prefixArgs: [CLI_PATH] },
+      env: { ADE_FAKE_SCENARIO: scenarioDir, ADE_FAKE_ROLE: 'maker' },
+      randomUUID: () => FIXED_UUID,
+    })
+
+    expect(result.status).toBe('ok')
+    expect(result.step_id).toBe('S13:r1:maker')
+    expect(result.session_ref).toBe(FIXED_UUID)
+    expect(result.exit_code).toBe(0)
+    expect(result.envelope_error).toBeNull()
+    expect(result.valid).toBe(true)
+    expect(result.cited).toBe(false)
+    expect((result.unit_result as Record<string, unknown>).story_id).toBe('rec-ok')
+    expect(validate('unit-result', result.unit_result as object).valid).toBe(true)
+    expect(result.usage.cost_source).toBe('reported')
+    expect(result.usage.cost_usd).toBe(0.058924000000000004)
+
+    const events = readEvents(missionDir)
+    const intent = events.find((ev) => ev.kind === 'step_intent' && ev.step_id === 'S13:r1:maker')
+    expect(intent!.session_ref).toBe(FIXED_UUID)
+    const stepResult = events.find((ev) => ev.kind === 'step_result' && ev.step_id === 'S13:r1:maker')
+    expect(stepResult!.status).toBe('ok')
   })
 })
