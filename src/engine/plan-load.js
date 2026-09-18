@@ -5,6 +5,7 @@ import { matchesGlob } from '../contain/contain.js'
 import { digest16 } from '../journal/canonical.js'
 import { AdeError } from '../journal/errors.js'
 import { validate } from '../schema/index.js'
+import { assertCallBudget } from './budget.js'
 
 export const EXTERNAL_EFFECTS = ['push', 'open_pr', 'merge']
 
@@ -87,6 +88,8 @@ export function loadPlan(planPath) {
       errors: planValidation.errors,
     })
   }
+
+  assertCallBudget(doc.budget, 'plan')
 
   const permitted = doc.authorization?.permitted_effects
   if (Array.isArray(permitted)) {
@@ -217,6 +220,8 @@ export function loadPlan(planPath) {
             { storyId, errors: contractValidation.errors },
           )
         }
+
+        assertCallBudget(contract.budget, 'contract')
 
         if (contract.id !== storyId) {
           throw new AdeError(
