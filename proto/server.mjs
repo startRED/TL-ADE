@@ -1542,6 +1542,18 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   else { setStep('fix', 'running', { round }); const rf = await makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 }); remember(st, rf); await refreshProject(); setStep('fix', 'done', { round }) }
   setStep('tests', 'running'); st.tests_after = await runTests(state.project); st.diff = await gitDiff(state.project.dir, st.base)
   { const head = await gitHead(state.project.dir); if (st.base && head && head !== st.base && !st.maker_committed) { st.maker_committed = true; log('engine', 'quem escreve fez commit por conta própria, contra a instrução; o trabalho continua visível porque o diff da parte é contado desde o começo dela. O commit dele fica; o motor não commita de novo o que já entrou', 'warn') } }
+  // prova ANTIGA (verde antes da parte) que só falha por tempo limite é instabilidade, não defeito de quem escreve: repete a suíte uma vez antes de gastar rodada
+  // (épico 7, parte 6: três rodadas pagas atrás de uma prova da parte 3 que estourava 5 s; quem escreve chegou a mexer no vitest.config fora do escopo para esconder)
+  if (!st.tests_after.ok && !st.flaky_retry && m.tests_before?.tests?.length) {
+    const okBefore = new Set(m.tests_before.tests.filter((t) => t.status === 'passed').map((t) => t.name))
+    const reds = st.tests_after.tests.filter((t) => t.status !== 'passed')
+    if (reds.length && reds.every((t) => okBefore.has(t.name) && /timed out|timeout|tempo limite/i.test(t.message || ''))) {
+      st.flaky_retry = true
+      log('engine', `só prova(s) antiga(s) vermelha(s), por tempo limite (${reds.map((t) => t.name.slice(0, 80)).join(' | ')}); estavam verdes antes desta parte: repito a suíte uma vez antes de abrir rodada`, 'warn')
+      st.tests_after = await runTests(state.project)
+      if (st.tests_after.ok) log('engine', 'a repetição passou: prova instável, não defeito desta parte; sigo', 'warn')
+    }
+  }
   log('engine', `provas depois: ${st.tests_after.total} no total, ${st.tests_after.failed} vermelha(s)`); setStep('tests', st.tests_after.ok ? 'done' : 'failed')
   if (st.tests_after.timeout) { log('engine', 'a suíte de provas estourou o tempo limite (5 min) e foi interrompida: isso não é prova vermelha. Paro a parte sem gastar rodadas; veja se alguma prova ficou pendurada (processo, servidor, espera sem fim)', 'error'); return stop('tests_timeout') }
   if (!st.diff.trim()) { setStep('checker', 'skipped'); return stop('no_changes') }
