@@ -644,3 +644,77 @@ journal; `scripts/record-transcript.ts` é artefato do dia 1.
 - E55: `schemas/ade-config.schema.json` é artefato deste slice e fonte única das chaves de configuração.
 - E58: reporter estruturado no `V(...)` acima; `numTotalTests >= 1` obrigatório.
 - E66: telemetria grava `models[{role, model_id}]` em vez de `model`; E59: `skills_injected[]` com `sha256` e `source`; E67: sem `compaction_events`.
+
+## Emendas de 2026-09-18: achados de leitura estática do `src` (revisão externa do commit `f90536b`)
+
+Uma revisão externa leu o código do slice e apontou cinco divergências entre o que os documentos
+prometem, o que o motor executa e o que a evidência prova. Todas foram confirmadas no código. O README já
+foi corrigido à mão (`b4651e8`); as quatro abaixo são stories do slice, pequenas, para o épico que
+fecha o slice (dogfood) ou para uma missão própria. Elas emendam S12 e S14 onde indicado e valem sobre
+o texto original. Método, invariantes e orçamento seguem §3 e §6.
+
+### S16 — Contrato aparece uma vez no pack
+`ADE-S16` · `bounded` · `depends_on: [ADE-S12, ADE-S14]` · 0,5 dia · budget 6/2/US$ 3
+**task**: `src/engine.js` monta o pack com `contract` (contrato inteiro), `story` (a story inteira, que
+contém o contrato), `evals` (já dentro de `story.evals`/`contract.evals`) e `task` (já dentro do contrato):
+o mesmo texto entra até três vezes na chamada. Passa a valer: o contrato é renderizado **uma vez**, na
+seção `contract`; `story` leva só o que não está no contrato (id, título, `depends_on`, `scope_paths`,
+`class`, orçamento); `evals` e `task` deixam de ser seções repetidas e viram referência por caminho JSON
+dentro de `contract` (`SECTION_ORDER` passa a `contract → policy → story`; ordem fixa continua). O
+manifesto ganha `dedup: {contract_bytes, saved_bytes}` (aditivo). Sem compressão semântica, sem resumo por
+modelo.
+**scope_paths**: `src/engine.js`, `src/pack/pack.js`, `tests/pack*.ts`, `tests/parity/pack*.ts`, `tests/engine*.ts`.
+**requirements**: R1 WHEN o pack de uma story é montado THE SYSTEM SHALL conter o texto do contrato uma única vez (o digest do contrato ocorre uma vez no manifesto). R2 WHEN `story` é renderizada THE SYSTEM SHALL omitir qualquer campo cujo valor já está em `contract`. R3 WHEN o pack é lido de volta THE SYSTEM SHALL permitir reconstruir contrato, evals e task sem perda (nada foi cortado, só desduplicado).
+**scenarios**: C1 given story com contrato de 3 KB, when monta o pack, then o pack tem o contrato uma vez e `saved_bytes ≥ 3000` → E1. C2 given pack montado, when procura o campo `task` do contrato no texto, then aparece uma vez → E1. C3 given pack montado, when compara `story` com o contrato, then nenhum campo repetido → E2.
+**evals**: E1 `V(pack.test.ts, contract_is_rendered_once_in_pack)`; E2 `V(pack.test.ts, story_section_has_no_field_already_in_contract)`; E3 `V(parity/pack.test.ts, pack_sections_are_ordered_and_contain_no_journal)` (existente, ajustado à nova ordem).
+
+### S17 — `policy` não é truncável
+`ADE-S17` · `trivial` · `depends_on: [ADE-S12]` · 0,25 dia · budget 3/1/US$ 1,5
+**task**: hoje `src/pack/pack.js` recusa estouro só em `contract` e `task` e **trunca** `policy`
+(5 550 bytes) com ponteiro. Permissões, proibições e invariantes não podem sair do contexto inicial para
+caber no orçamento. Emenda S12 R2: `policy` entra no grupo que recusa estouro (`invalid_input` com o
+tamanho e o teto, como `contract`); o que é explicação ou exemplo não pertence a `policy` e fica em
+`docs/`, carregado sob demanda. Teto de `policy` sobe para 8 000 bytes `[hipotese]` para o texto
+canônico "Must Always / Must Never" de A11 caber com folga.
+**scope_paths**: `src/pack/pack.js`, `tests/pack*.ts`, `tests/parity/pack*.ts`, `schemas/ade-config.schema.json` (só se o teto for configurável).
+**requirements**: R1 WHEN `policy` passa do teto THE SYSTEM SHALL recusar o pack com erro nomeado em vez de truncar. R2 WHEN `policy` cabe THE SYSTEM SHALL gravá-la inteira, sem ponteiro.
+**scenarios**: C1 given policy de 9 000 bytes, when monta, then `AdeError` com `policy` e os dois tamanhos, nenhum pack gravado → E1. C2 given policy de 7 000 bytes, when monta, then seção íntegra e `truncated: false` no manifesto → E2.
+**evals**: E1 `V(pack.test.ts, policy_overflow_is_refused_not_truncated)`; E2 `V(pack.test.ts, policy_within_limit_is_kept_whole)`.
+
+### S18 — Métrica mede o que o nome diz
+`ADE-S18` · `trivial` · `depends_on: [ADE-S14]` · 0,25 dia · budget 3/1/US$ 1,5
+**task**: `first_source_edit_ms` (`src/engine.js`, telemetria da story) é calculado depois de o Maker
+terminar e a contenção rodar (`agora − início`): mede quando o motor observou a mudança, não a primeira
+edição. Duas saídas válidas, escolher uma e documentar no journal: (a) renomear para `maker_wall_ms`
+(tempo de parede da chamada do Maker) e retirar `first_source_edit_ms` até existir instrumentação real;
+(b) medir de fato: menor `mtime` dos arquivos tocados no worktree (fora de `.git`) menos o instante do
+spawn, gravado como `first_source_edit_ms` com `source: 'mtime'`. A opção (a) é o mínimo aceitável; (b)
+só se couber no orçamento. Nome novo entra no `journal-event` como campo aditivo opcional (o formato
+dos 8 schemas não muda: campo novo opcional é aditivo por definição, ver §7 item 8).
+**scope_paths**: `src/engine.js`, `schemas/journal-event.schema.json` (aditivo), `tests/engine*.ts`, `tests/parity/e2e*.ts`, `docs/specs/**` (onde a métrica é citada).
+**requirements**: R1 WHEN a telemetria da story é gravada THE SYSTEM SHALL não gravar um campo cujo nome prometa medição que o código não faz. R2 WHEN `first_source_edit_ms` existir THE SYSTEM SHALL derivá-lo de evidência de escrita (mtime ou hook), com `source` gravado.
+**scenarios**: C1 given Maker falso que escreve o arquivo aos 200 ms e termina aos 2 000 ms, when a story fecha, then a métrica gravada é ≈200 (opção b) ou o campo não existe e `maker_wall_ms ≈ 2000` (opção a) → E1.
+**evals**: E1 `V(engine.test.ts, telemetry_field_names_match_what_is_measured)`.
+
+### S19 — Tokens reportados pela CLI no journal
+`ADE-S19` · `bounded` · `depends_on: [ADE-S13, ADE-S14]` · 0,5 dia · budget 6/2/US$ 3
+**task**: o pack é medido em bytes (S12, por decisão); o custo real de contexto é em tokens e só a CLI
+sabe. O adapter `claude` já lê o JSON de resultado: passa a extrair `usage` (`input_tokens`,
+`cache_creation_input_tokens`, `cache_read_input_tokens`, `output_tokens`) e `total_cost_usd` e a gravar
+no evento de telemetria da chamada como `tokens: {input, cache_write, cache_read, output, usd, source}`
+com `source ∈ {'reported', 'unavailable'}` — **nunca** `'estimated'` no slice 1 (sem estimativa
+inventada; E61 do roadmap: onde não há custo reportado o teto é `max_model_calls`). O `report.md` da
+story imprime a soma por papel. Campo aditivo no `journal-event` (schema não muda de formato).
+**scope_paths**: `src/adapters/**`, `src/engine.js`, `src/cli/report*.js`, `schemas/journal-event.schema.json` (aditivo), `tests/adapters*.ts`, `tests/parity/e2e*.ts`, `tests/fixtures/**` (transcript com `usage`).
+**requirements**: R1 WHEN a CLI reporta `usage` THE SYSTEM SHALL gravá-lo inteiro com `source: 'reported'`. R2 WHEN a CLI não reporta THE SYSTEM SHALL gravar `source: 'unavailable'` e nenhum número. R3 WHEN `ade report` roda THE SYSTEM SHALL somar tokens e USD por papel a partir do journal, sem recalcular.
+**scenarios**: C1 given transcript gravado com `usage`, when a story fecha, then o evento tem os quatro contadores e `usd` → E1. C2 given transcript sem `usage`, when fecha, then `source: 'unavailable'` e sem contadores → E2. C3 given journal com duas chamadas, when `ade report`, then a soma bate → E3.
+**evals**: E1 `V(adapters/claude.test.ts, reported_usage_is_journaled_verbatim)`; E2 `V(adapters/claude.test.ts, missing_usage_is_marked_unavailable_not_estimated)`; E3 `V(parity/e2e.test.ts, report_sums_tokens_by_role_from_journal)`.
+
+**O que a mesma revisão propôs e fica fora do slice 1** (registrado em `docs/roadmap.md` §2–§3 como
+escopo da v0.2/v0.3, não como dívida do slice): caminhos por **risco** independentes da classe de
+complexidade (leve/normal/crítico como três configurações do mesmo motor); `unit-result`/`review-result`
+com `contract_revision`, `input_revision` e `evidence[]` por critério, e `requested_action` no lugar de
+auto-aprovação; painel que mostra critérios verificados, incógnitas abertas e bloqueio em vez de
+porcentagem; verificadores por domínio (relatório, design, documento) com o mesmo núcleo. O que **não**
+entra em lugar nenhum, por decisão: segundo estado ao lado do journal (Beads), A2A, `status.md` editado
+à mão, mais agentes por padrão.
