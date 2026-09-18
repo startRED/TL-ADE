@@ -1372,7 +1372,7 @@ async function runStories() {
       const st = m.stories[i]
       if (st.state === 'done' || st.state === 'skipped') continue
       // dependência não concluída: não gasta nada
-      const badDeps = (st.depends_on || []).filter((id) => { const d = m.stories.find((x) => x.id === id); return d && d.state !== 'done' })
+      const badDeps = (st.depends_on || []).filter((id) => { const d = m.stories.find((x) => x.id === id); return d && d.state !== 'done' && !m.stories.some((f) => f.fix_of === id && f.state === 'done') })
       if (badDeps.length) { st.state = 'skipped'; st.skipped_reason = `depende de ${badDeps.join(', ')}, que não concluiu`; log('engine', `parte "${st.title}" pulada sem gastar: ${st.skipped_reason}`, 'warn'); broadcast(); continue }
       m.current = i; st.state = 'running'; broadcast()
       let ok = await runStory(st)
@@ -1405,7 +1405,9 @@ async function runStories() {
       if (st.tests_after?.tests?.length) m.tests_before = st.tests_after
       await refreshProject()
       log('engine', `commit feito: ${st.title}`)
-      st.state = 'done'; broadcast(); await persistMission().catch(() => {})
+      st.state = 'done'
+      if (st.fix_of) { const parent = m.stories.find((x) => x.id === st.fix_of); if (parent && parent.state !== 'done') { parent.state = 'done'; parent.skipped_reason = null; parent.fixed_by = st.id; log('engine', `parte "${parent.title}" concluída pela correção ${st.id}`) } }
+      broadcast(); await persistMission().catch(() => {})
     }
     if (m.program && m.epic) { // fim de um épico: quem fecha é a fila
       const ep = m.program.epics.find((x) => x.id === m.epic.id) || m.epic; if (ep.state === 'running') closeEpic(ep, m.stories)
