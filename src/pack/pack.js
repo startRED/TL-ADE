@@ -18,7 +18,7 @@ export const SECTION_ORDER = Object.freeze(['contract', 'policy', 'story'])
  */
 export const SECTION_CAPS = Object.freeze({
   contract: 32000,
-  policy: 5550,
+  policy: 8000,
   story: 24000,
 })
 
@@ -203,7 +203,7 @@ function truncateToByteLimit(body, maxBytes) {
 
 /**
  * Aplica o teto de bytes de uma seção: devolve o corpo intacto se couber, corta com
- * ponteiro quando a seção admite truncagem, ou recusa quando é contract/task.
+ * ponteiro quando a seção admite truncagem, ou recusa quando é contract ou policy.
  *
  * @param {string} name
  * @param {string} body
@@ -216,8 +216,8 @@ function capSection(name, body, cap, ref) {
   if (bytes <= cap) {
     return body
   }
-  if (name === 'contract') {
-    throw new AdeError('pack_budget_exceeded', `seção ${name} tem ${bytes} bytes e excede o teto de ${cap} bytes`, 2)
+  if (name === 'contract' || name === 'policy') {
+    throw new AdeError('pack_budget_exceeded', `seção ${name} tem ${Buffer.byteLength(body)} bytes e excede o teto de ${cap} bytes`, 2)
   }
   const totalChars = body.length
   const pointer = `\n[... truncated, ${totalChars} chars total; full content on demand at ${ref}]`
@@ -255,7 +255,7 @@ function writeFileAtomic(filePath, text) {
  * @typedef {Object} CompilePackResult
  * @property {string} pack_path
  * @property {string} manifest_path
- * @property {{sections: Array<{section: string, ref: string, bytes: number, digest: string}>, bytes: number, digest: string, redactions: Array<{pattern: string, count: number}>, dedup: {contract_bytes: number, saved_bytes: number}}} manifest
+ * @property {{sections: Array<{section: string, ref: string, bytes: number, digest: string, truncated: boolean}>, bytes: number, digest: string, redactions: Array<{pattern: string, count: number}>, dedup: {contract_bytes: number, saved_bytes: number}}} manifest
  */
 
 /**
@@ -297,6 +297,7 @@ export function compilePack(options) {
       ref: `art:packs/${id}/${name}`,
       bytes: Buffer.byteLength(finalBodies[name]),
       digest: digest16(finalBodies[name]),
+      truncated: finalBodies[name] !== redactedBodies[name],
     })),
     bytes: totalBytes,
     digest: digest16(finalPackText),
