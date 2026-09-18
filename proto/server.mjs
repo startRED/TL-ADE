@@ -1435,7 +1435,14 @@ function makerLadder() {
   const pl = plannerChoice('light'); steps.push(pl.family !== 'claude' || pl.model === 'fable' ? { family: 'claude', model: 'opus', effort: 'high' } : { family: 'claude', model: pl.model, effort: pl.effort || 'high' }) // Fable planeja; escrever código no Fable é caro demais
   return steps.filter((x, i, a) => a.findIndex((y) => y.family === x.family && y.model === x.model && y.effort === x.effort) === i)
 }
-function makerStep(st, round, grave) { const l = makerLadder(); const i = st.fix_of ? l.length - 1 : grave ? Math.min(l.length - 1, Math.max(0, round - 2)) : 0; return { ...l[i], step: i } }
+// Custo medido na missão real: Sonnet ~US$ 0,60/rodada, Opus ~US$ 1,10/rodada, e o Opus acabou fazendo 34 rodadas (US$ 37) porque o Sonnet
+// só tinha UMA rodada antes dele e a parte de correção já nascia no Opus. Agora cada degrau pago tem duas rodadas, e a correção nasce
+// um degrau abaixo do último (Sonnet) e só sobe se ainda falhar.
+function makerStep(st, round, grave) {
+  const l = makerLadder(), last = l.length - 1
+  const i = st.fix_of ? Math.min(last, Math.max(0, last - 1) + Math.floor((round - 1) / 2)) : grave ? Math.min(last, Math.floor((round - 1) / 2)) : 0
+  return { ...l[i], step: i }
+}
 async function makerCall(who, opts) { return who.family === 'agy' ? agyMaker({ ...opts, model: who.model, effort: who.effort }) : claudeCall({ ...opts, model: who.model, effort: who.effort }) }
 // Antigravity como maker: o prompt é grande demais para a linha de comando do Windows, então vai num arquivo ignorado pelo git.
 async function agyMaker({ role, prompt, model, effort }) {
