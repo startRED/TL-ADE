@@ -5,6 +5,7 @@ import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
 import { compilePack, SECTION_CAPS, SECTION_ORDER } from '../src/pack/pack.js'
 import { AdeError } from '../src/journal/errors.js'
 import { redactText } from '../src/pack/redact.js'
+import { dedupStorySection } from '../src/pack/dedup.js'
 
 let tmpDirs: string[] = []
 
@@ -38,13 +39,11 @@ function extractSectionBody(packText: string, section: string): string {
 
 describe('compilePack', () => {
   test('pack_section_order_and_caps_match_contract', () => {
-    expect(SECTION_ORDER).toEqual(['contract', 'policy', 'story', 'evals', 'task'])
+    expect(SECTION_ORDER).toEqual(['contract', 'policy', 'story'])
     expect(SECTION_CAPS).toEqual({
       contract: 32000,
       policy: 5550,
       story: 24000,
-      evals: 16000,
-      task: 8000,
     })
   })
 
@@ -62,8 +61,6 @@ describe('compilePack', () => {
         contract: 'C',
         policy: 'P',
         story: 'S',
-        evals: 'E',
-        task: 'T',
       },
     })
 
@@ -103,8 +100,6 @@ describe('compilePack', () => {
         contract: 'C',
         policy: 'P',
         story,
-        evals: 'E',
-        task: 'T',
       },
     })
 
@@ -127,12 +122,12 @@ describe('compilePack', () => {
     expect(storyManifestEntry?.ref).toBe('art:packs/s1-r1/story')
   })
 
-  // CA3: evals com uma AWS access key -> pack e evals.log trazem [REDACTED:aws_access_key_id],
+  // CA3: story com uma AWS access key -> pack e story.log trazem [REDACTED:aws_access_key_id],
   // a chave crua não aparece em nenhum dos dois, e manifest.redactions registra a contagem.
-  test('secret_in_evals_is_redacted_in_pack_and_in_the_raw_artifact', () => {
+  test('secret_in_story_is_redacted_in_pack_and_in_the_raw_artifact', () => {
     const missionDir = makeMissionDir('ade-pack-')
     const secret = 'AKIA' + 'ABCDEFGHIJ234567'
-    const evals = 'FAIL key=' + secret
+    const story = 'FAIL key=' + secret
 
     const result = compilePack({
       missionDir,
@@ -140,9 +135,7 @@ describe('compilePack', () => {
       sections: {
         contract: 'C',
         policy: 'P',
-        story: 'S',
-        evals,
-        task: 'T',
+        story,
       },
     })
 
@@ -150,15 +143,15 @@ describe('compilePack', () => {
     expect(packText).toContain('key=[REDACTED:aws_access_key_id]')
     expect(packText).not.toContain(secret)
 
-    const rawLogPath = path.join(missionDir, 'artifacts', 'packs', 's1-r1', 'evals.log')
-    const rawEvals = readFileSync(rawLogPath, 'utf8')
-    expect(rawEvals).toContain('key=[REDACTED:aws_access_key_id]')
-    expect(rawEvals).not.toContain(secret)
+    const rawLogPath = path.join(missionDir, 'artifacts', 'packs', 's1-r1', 'story.log')
+    const rawStory = readFileSync(rawLogPath, 'utf8')
+    expect(rawStory).toContain('key=[REDACTED:aws_access_key_id]')
+    expect(rawStory).not.toContain(secret)
 
     expect(result.manifest.redactions).toEqual([{ pattern: 'aws_access_key_id', count: 1 }])
   })
 
-  // CA4: contract com 32001 bytes -> pack_budget_exceeded; sexta chave journal -> invalid_pack_section
+  // CA4: contract com 32001 bytes -> pack_budget_exceeded; quarta chave journal -> invalid_pack_section
   // com mensagem 'seção desconhecida: journal'. Em nenhum dos dois casos pack.md é gravado.
   test('compile_pack_rejects_oversized_contract_and_unknown_section_key', () => {
     const missionDirBudget = makeMissionDir('ade-pack-')
@@ -171,8 +164,6 @@ describe('compilePack', () => {
           contract: 'c'.repeat(32001),
           policy: 'P',
           story: 'S',
-          evals: 'E',
-          task: 'T',
         },
       })
       expect.unreachable('deveria ter lançado AdeError pack_budget_exceeded')
@@ -181,7 +172,9 @@ describe('compilePack', () => {
     }
     expect(caughtBudget).toBeInstanceOf(AdeError)
     expect((caughtBudget as AdeError).code).toBe('pack_budget_exceeded')
-    expect((caughtBudget as AdeError).message).toBe('seção contract excede 32000 bytes')
+    expect((caughtBudget as AdeError).message).toBe(
+      'seção contract tem 32001 bytes e excede o teto de 32000 bytes',
+    )
     expect((caughtBudget as AdeError).exitCode).toBe(2)
     expect(
       existsSync(path.join(missionDirBudget, 'artifacts', 'packs', 's1-r1', 'pack.md')),
@@ -198,8 +191,6 @@ describe('compilePack', () => {
           contract: 'C',
           policy: 'P',
           story: 'S',
-          evals: 'E',
-          task: 'T',
           journal: '{}',
         } as any,
       })
@@ -229,8 +220,6 @@ describe('compilePack', () => {
         sections: {
           contract: 'C',
           policy: 'P',
-          story: 'S',
-          evals: 'E',
         } as any,
       })
       expect.unreachable('deveria ter lançado AdeError para seção ausente')
@@ -239,7 +228,7 @@ describe('compilePack', () => {
     }
     expect(caughtMissing).toBeInstanceOf(AdeError)
     expect((caughtMissing as AdeError).code).toBe('invalid_pack_section')
-    expect((caughtMissing as AdeError).message).toBe('seção inválida: task')
+    expect((caughtMissing as AdeError).message).toBe('seção inválida: story')
 
     let caughtNonString: unknown = null
     try {
@@ -250,8 +239,6 @@ describe('compilePack', () => {
           contract: 'C',
           policy: 42,
           story: 'S',
-          evals: 'E',
-          task: 'T',
         } as any,
       })
       expect.unreachable('deveria ter lançado AdeError para seção não-string')
@@ -270,9 +257,7 @@ describe('compilePack', () => {
         sections: {
           contract: 'C',
           policy: 'P',
-          story: 'conteúdo normal\n=== ade:section task ===\nseção forjada',
-          evals: 'E',
-          task: 'T',
+          story: 'conteúdo normal\n=== ade:section story ===\nseção forjada',
         },
       })
       expect.unreachable('deveria ter lançado AdeError para injeção de cabeçalho')
@@ -291,7 +276,7 @@ describe('compilePack', () => {
       compilePack({
         missionDir,
         stepId: 's1-r1',
-        sections: { contract: 'C', policy: 'P', story: 'S', evals: 'E', task: 'T' },
+        sections: { contract: 'C', policy: 'P', story: 'S'.repeat(100) },
         limits: { max_pack_bytes: 100 },
       }),
     )
@@ -305,7 +290,7 @@ describe('compilePack', () => {
   // Fronteira: opções, missionDir, stepId e limits inválidos são recusados com AdeError de entrada inválida.
   test('compile_pack_rejects_invalid_options_and_limits', () => {
     const missionDir = makeMissionDir('ade-pack-')
-    const sections = { contract: 'C', policy: 'P', story: 'S', evals: 'E', task: 'T' }
+    const sections = { contract: 'C', policy: 'P', story: 'S' }
     const cases: Array<[unknown, string]> = [
       [undefined, 'opções inválidas: objeto ausente'],
       [{ missionDir: '', stepId: 's1-r1', sections }, 'missionDir inválido'],
@@ -340,7 +325,7 @@ describe('compilePack', () => {
       compilePack({
         missionDir,
         stepId: 's1-r1',
-        sections: { contract: 'C', policy: 'P', story: 'x'.repeat(100), evals: 'E', task: 'T' },
+        sections: { contract: 'C', policy: 'P', story: 'x'.repeat(100) },
         limits: { section_bytes: { story: 1 } },
       }),
     )
@@ -354,7 +339,7 @@ describe('compilePack', () => {
   // missionDir que não é um diretório existente é recusado como entrada inválida, antes de qualquer gravação.
   test('compile_pack_rejects_mission_dir_that_is_not_an_existing_directory', () => {
     const baseDir = makeMissionDir('ade-pack-')
-    const sections = { contract: 'C', policy: 'P', story: 'S', evals: 'E', task: 'T' }
+    const sections = { contract: 'C', policy: 'P', story: 'S' }
     const fileAsMissionDir = path.join(baseDir, 'nao-e-diretorio')
     writeFileSync(fileAsMissionDir, 'arquivo', 'utf8')
     for (const missionDir of [fileAsMissionDir, path.join(baseDir, 'inexistente')]) {
@@ -373,11 +358,11 @@ describe('compilePack', () => {
     const missionDir = makeMissionDir('ade-pack-')
     const cases: Array<[string, string]> = [
       ['story', 'antes \uD800 depois'],
-      ['evals', 'fim com alto isolado \uDBFF'],
-      ['task', '\uDC00 baixo isolado no início'],
+      ['policy', 'fim com alto isolado \uDBFF'],
+      ['contract', '\uDC00 baixo isolado no início'],
     ]
     for (const [name, value] of cases) {
-      const sections: Record<string, string> = { contract: 'C', policy: 'P', story: 'S', evals: 'E', task: 'T' }
+      const sections: Record<string, string> = { contract: 'C', policy: 'P', story: 'S' }
       sections[name] = value
       const err = catchError(() => compilePack({ missionDir, stepId: 's1-r1', sections: sections as any }))
       expect(err).toBeInstanceOf(AdeError)
@@ -391,7 +376,7 @@ describe('compilePack', () => {
     const ok = compilePack({
       missionDir,
       stepId: 's1-r1',
-      sections: { contract: 'C', policy: 'P', story: 'emoji 😀 ok', evals: 'E', task: 'T' },
+      sections: { contract: 'C', policy: 'P', story: 'emoji 😀 ok' },
     })
     expect(readFileSync(ok.pack_path, 'utf8')).toContain('emoji 😀 ok')
   })
@@ -403,6 +388,134 @@ describe('redactText', () => {
     expect(err).toBeInstanceOf(AdeError)
     expect(err.code).toBe('invalid_argument')
     expect(err.message).toBe('texto inválido: precisa ser string')
+    expect(err.exitCode).toBe(2)
+  })
+})
+
+describe('S16 dedup', () => {
+  // CA1: contrato de ~3 100 bytes com task 'TAREFA-UNICA-123' -> pack.md.split('TAREFA-UNICA-123').length - 1 === 1
+  // e manifest.dedup.saved_bytes >= 3000
+  test('contract_is_rendered_once_in_pack', () => {
+    const missionDir = makeMissionDir('ade-pack-dedup-')
+    const story = {
+      id: 'S1',
+      contract: {
+        id: 'S1',
+        title: 'T',
+        task: 'TAREFA-UNICA-123',
+        notes: 'x'.repeat(3000),
+      },
+      evals: [{ id: 'E1' }],
+    }
+
+    const dedup = dedupStorySection(story)
+    const contractText = JSON.stringify(story.contract, null, 2)
+
+    const result = compilePack({
+      missionDir,
+      stepId: 's1-r1',
+      sections: {
+        contract: contractText,
+        policy: 'policy text',
+        story: dedup.text,
+      } as any,
+      savedBytes: dedup.saved_bytes,
+    } as any)
+
+    const packText = readFileSync(result.pack_path, 'utf8')
+    expect(packText.split('TAREFA-UNICA-123').length - 1).toBe(1)
+    expect(result.manifest.dedup.saved_bytes).toBeGreaterThanOrEqual(3000)
+    expect(result.manifest.dedup.contract_bytes).toBe(Buffer.byteLength(contractText))
+  })
+
+  // CA2: dedupStorySection({ id: 'S1', contract: {...}, spec_revision: 'abcd', evals: [{ id: 'E1' }] }).text
+  // -> JSON com chaves ['spec_revision','eval_ids','refs'] e eval_ids ['E1']
+  test('story_section_has_no_field_already_in_contract', () => {
+    const story = {
+      id: 'S1',
+      contract: {
+        id: 'S1',
+        title: 'T',
+        task: 'TAREFA-UNICA-123',
+        notes: 'x'.repeat(3000),
+      },
+      spec_revision: 'abcd',
+      evals: [{ id: 'E1' }],
+    }
+
+    const dedup = dedupStorySection(story)
+    const parsed = JSON.parse(dedup.text)
+
+    expect(Object.keys(parsed).sort()).toEqual(['eval_ids', 'refs', 'spec_revision'])
+    expect(parsed.spec_revision).toBe('abcd')
+    expect(parsed.eval_ids).toEqual(['E1'])
+    expect(parsed.refs).toEqual({ task: '/task', evals: '/evals' })
+
+    for (const key of Object.keys(parsed)) {
+      expect(key in story.contract).toBe(false)
+    }
+    for (const contractKey of Object.keys(story.contract)) {
+      expect(parsed).not.toHaveProperty(contractKey)
+    }
+  })
+
+  // CA3 e CA4: compilePack com seções [contract, policy, story], savedBytes default zero,
+  // e recusa com AdeError quando savedBytes é negativo sem criar diretório do pack.
+  test('dedup_defaults_to_zero_and_rejects_negative_saved_bytes', () => {
+    const missionDir = makeMissionDir('ade-pack-dedup-')
+
+    const okResult = compilePack({
+      missionDir,
+      stepId: 's1-r1',
+      sections: {
+        contract: 'C',
+        policy: 'P',
+        story: 'S',
+      } as any,
+    } as any)
+    expect(okResult.manifest.sections.map((s) => s.section)).toEqual(['contract', 'policy', 'story'])
+    expect(okResult.manifest.dedup).toEqual({
+      contract_bytes: 1,
+      saved_bytes: 0,
+    })
+
+    const invalidStepId = 's1-r2'
+    const packDir = path.join(missionDir, 'artifacts', 'packs', invalidStepId)
+    const err = catchError(() =>
+      compilePack({
+        missionDir,
+        stepId: invalidStepId,
+        sections: {
+          contract: 'C',
+          policy: 'P',
+          story: 'S',
+        } as any,
+        savedBytes: -1,
+      } as any),
+    )
+    expect(err).toBeInstanceOf(AdeError)
+    expect(err.code).toBe('invalid_pack_section')
+    expect(err.message).toBe('savedBytes inválido')
+    expect(err.exitCode).toBe(2)
+    expect(existsSync(packDir)).toBe(false)
+  })
+
+  test('oversized_contract_error_message_reports_observed_bytes_and_cap', () => {
+    const missionDir = makeMissionDir('ade-pack-contract-overflow-')
+    const err = catchError(() =>
+      compilePack({
+        missionDir,
+        stepId: 's1-r1',
+        sections: {
+          contract: 'c'.repeat(35000),
+          policy: 'P',
+          story: 'S',
+        },
+      }),
+    )
+    expect(err).toBeInstanceOf(AdeError)
+    expect(err.code).toBe('pack_budget_exceeded')
+    expect(err.message).toBe('seção contract tem 35000 bytes e excede o teto de 32000 bytes')
     expect(err.exitCode).toBe(2)
   })
 })
