@@ -1952,6 +1952,7 @@ http.createServer(async (req, res) => {
 }).listen(PORT, '127.0.0.1', async () => {
   state.recent = await loadJson('projects.json', [])
   state.history = await loadJson('history.json', [])
+  readQuota().then(broadcastSoon); setInterval(() => readQuota().then(broadcastSoon), 5 * 60 * 1000) // a reserva de cota do withChain precisa de leitura fresca
   const saved = await loadJson('settings.json', null)
   if (saved) state.settings = { ...DEFAULT_SETTINGS, ...saved, roles: { ...DEFAULT_SETTINGS.roles, ...(saved.roles || {}) }, chains: { ...DEFAULT_SETTINGS.chains, ...(saved.chains || {}) }, skills: { ...DEFAULT_SETTINGS.skills, ...(saved.skills || {}) } }
   if (!state.settings.roles.intent) state.settings.roles.intent = DEFAULT_SETTINGS.roles.intent
