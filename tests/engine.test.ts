@@ -1,0 +1,444 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { afterEach, describe, expect, test } from 'vitest'
+import { dispatchClaude } from '../src/adapters/claude/index.js'
+import { readCounter } from '../src/adapters/fake/cli.js'
+import { checkCanary, plantCanary } from '../src/contain/canary.js'
+import { contain } from '../src/contain/contain.js'
+import { CANARY_FAMILIES, runStory } from '../src/engine.js'
+import { ENGINE_FAULT_POINTS, maybeEngineFault } from '../src/engine/faults.js'
+import { loadPlan } from '../src/engine/plan-load.js'
+import { prepareStory } from '../src/engine/prepare.js'
+import { createEvalRunner } from '../src/evals/eval-runner.js'
+import { createGateRunner } from '../src/gates/gates.js'
+import { createGitPort } from '../src/git/gitport.js'
+import { AdeError } from '../src/journal/errors.js'
+import { openJournal, readJournal } from '../src/journal/journal.js'
+import { compilePack } from '../src/pack/pack.js'
+import { reconcileAll } from '../src/step/reconcile.js'
+import { createStepRunner } from '../src/step/step.js'
+import { makeRepo, removeRepo } from './helpers/git-repo.js'
+import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
+
+const ROOT = fileURLToPath(new URL('../', import.meta.url))
+const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.js')
+// O schema do task-contract exige o campo `then` no cenário; ele vem como texto JSON (o contrato
+// é gravado em stories/<id>.json) para não virar um objeto literal thenable no código.
+const SCENARIO_C1_JSON =
+  '{"id":"C1","given":"initial state without hello.txt","when":"maker creates hello.txt with ok",' +
+  '"then":"eval check passes","evals":["E1"]}'
+
+let repoDirs: string[] = []
+let tmpDirs: string[] = []
+let openJournals: Array<{ close: () => Promise<void> }> = []
+
+afterEach(async () => {
+  for (const j of openJournals) {
+    try {
+      await j.close()
+    } catch {
+      // Ignora falhas de encerramento do journal no teardown
+    }
+  }
+  openJournals = []
+
+  for (const dir of repoDirs) {
+    try {
+      removeRepo(dir)
+    } catch {
+      // Ignora falhas de limpeza no teardown
+    }
+  }
+  repoDirs = []
+
+  for (const dir of tmpDirs) {
+    try {
+      removeTmpDir(dir)
+    } catch {
+      // Ignora falhas de limpeza no teardown
+    }
+  }
+  tmpDirs = []
+})
+
+interface SetupFixtureOptions {
+  makerFamily?: string
+  probeOk?: boolean | null
+  env?: NodeJS.ProcessEnv
+}
+
+function setupStoryFixture(options: SetupFixtureOptions = {}) {
+  const repo = makeRepo()
+  repoDirs.push(repo.dir)
+
+  // Commit inicial contendo tests/check.mjs, que sai 0 só se src/hello.txt contém 'ok'.
+  // Inclui JSON reporter para compatibilidade com o analisador de evals.
+  const checkCode = [
+    "import fs from 'node:fs'",
+    'let ok = false',
+    'try {',
+    "  const content = fs.readFileSync('src/hello.txt', 'utf8')",
+    "  ok = content.includes('ok')",
+    '} catch {}',
+    'if (ok) {',
+    '  process.stdout.write(JSON.stringify({ numTotalTests: 1, numPassedTests: 1, numFailedTests: 0 }) + "\\n")',
+    '  process.exit(0)',
+    '} else {',
+    '  process.stdout.write(JSON.stringify({ numTotalTests: 1, numPassedTests: 0, numFailedTests: 1 }) + "\\n")',
+    '  process.exit(1)',
+    '}',
+  ].join('\n')
+
+  fs.mkdirSync(path.join(repo.dir, 'tests'), { recursive: true })
+  fs.writeFileSync(path.join(repo.dir, 'tests/check.mjs'), checkCode, 'utf8')
+  repo.git(['add', '-A'])
+  repo.git(['commit', '-m', 'commit inicial'])
+
+  const planDir = makeTmpDir('ade-engine-plan-')
+  tmpDirs.push(planDir)
+
+  const planObj = {
+    format_version: 1,
+    id: 'plan-1',
+    mission_id: 'mission-1',
+    immutable_digest: '0123456789abcdef',
+    authorization: {
+      autonomy: 'safe',
+      permitted_effects: [],
+      eligible_skills: [],
+    },
+    phases: [
+      {
+        epics: [
+          {
+            stories: ['ADE-T1'],
+          },
+        ],
+      },
+    ],
+    mission_budget: {
+      max_usd: 10,
+      max_wall_clock_seconds: 28800,
+      max_parked_units: 3,
+    },
+    budget: {
+      max_model_calls: 6,
+      max_rework_rounds: 2,
+    },
+  }
+  fs.writeFileSync(path.join(planDir, 'plan.json'), JSON.stringify(planObj, null, 2), 'utf8')
+
+  const storiesDir = path.join(planDir, 'stories')
+  fs.mkdirSync(storiesDir, { recursive: true })
+
+  const contractObj = {
+    format_version: 1,
+    id: 'ADE-T1',
+    title: 'Trivial Story',
+    complexity: 'bounded',
+    task: 'Create src/hello.txt with ok',
+    guardrails: {
+      scope_paths: ['src/**', 'tests/**'],
+      do_not_touch: ['.ade/**'],
+      autonomy: 'safe',
+    },
+    requirements: [
+      {
+        id: 'R1',
+        ears: 'WHEN check runs THE SYSTEM SHALL pass.',
+      },
+    ],
+    scenarios: [JSON.parse(SCENARIO_C1_JSON)],
+    evals: [
+      {
+        format_version: 1,
+        kind: 'test',
+        cmd: ['node', 'tests/check.mjs'],
+        expect_exit: 0,
+        timeout_s: 120,
+        max_output_bytes: 65536,
+        evidence: ['tests/check.mjs'],
+        strictness: {
+          mode: 'must_fail_before',
+        },
+        author: 'operator',
+      },
+    ],
+    skills: [],
+    roles: {
+      maker: {
+        family: options.makerFamily ?? 'claude',
+        model_id: 'claude-sonnet-5',
+      },
+      checker_round: {
+        family: 'codex',
+        model_id: 'codex-1',
+      },
+    },
+    budget: {
+      max_model_calls: 6,
+      max_rework_rounds: 2,
+    },
+  }
+  fs.writeFileSync(
+    path.join(storiesDir, 'ADE-T1.json'),
+    JSON.stringify(contractObj, null, 2),
+    'utf8',
+  )
+
+  const loaded = loadPlan(path.join(planDir, 'plan.json'))
+  const story = loaded.stories[0]
+
+  const scenarioDir = makeTmpDir('ade-engine-fake-')
+  tmpDirs.push(scenarioDir)
+
+  const fakeStdout = JSON.stringify({
+    total_cost_usd: 0.01,
+    structured_output: {
+      format_version: 1,
+      story_id: 'ADE-T1',
+      state: 'done',
+      phase: 'green',
+      round: 1,
+      tree_before: '0123456789abcdef',
+      tree_after: 'fedcba9876543210',
+      eval_records: [],
+      gate_records: [],
+      passes: true,
+      reason: 'ok',
+      sources: ['contract'],
+    },
+  })
+
+  const makerActions = [
+    {
+      files: {
+        'src/hello.txt': 'ok\n',
+      },
+      result: {
+        format_version: 1,
+        story_id: 'ADE-T1',
+        state: 'done',
+        phase: 'green',
+        round: 1,
+        tree_before: '0123456789abcdef',
+        tree_after: 'fedcba9876543210',
+        eval_records: [],
+        gate_records: [],
+        passes: true,
+        reason: 'ok',
+        sources: ['contract'],
+      },
+      stdout: fakeStdout,
+    },
+  ]
+  fs.writeFileSync(
+    path.join(scenarioDir, 'maker.json'),
+    JSON.stringify(makerActions, null, 2),
+    'utf8',
+  )
+
+  const missionDir = path.join(repo.dir, '.ade', 'missions', loaded.plan.mission_id)
+  fs.mkdirSync(missionDir, { recursive: true })
+
+  const journal = openJournal({ missionDir, runtimeStamp: '1:aaaaaaaa:bbbbbbbb' })
+  openJournals.push(journal)
+
+  const { step } = createStepRunner({ journal, missionDir })
+
+  const deps = {
+    journal,
+    step,
+    gitPortFor: (dir: string) => createGitPort({ worktreeDir: dir }),
+    prepareStory,
+    createEvalRunner,
+    createGateRunner,
+    compilePack,
+    contain,
+    plantCanary,
+    checkCanary,
+    dispatchClaude,
+    reconcileAll,
+    resolved: {
+      exe: process.execPath,
+      prefixArgs: [CLI_PATH],
+    },
+    workerEnv: {
+      ADE_FAKE_SCENARIO: scenarioDir,
+      ADE_FAKE_ROLE: 'maker',
+    },
+    capabilities: {
+      probe_ok: options.probeOk !== undefined ? options.probeOk : true,
+    },
+    env: options.env ?? process.env,
+    now: () => Date.now(),
+  }
+
+  const input = {
+    loaded,
+    story,
+    repoDir: repo.dir,
+    missionDir,
+  }
+
+  return {
+    repo,
+    missionDir,
+    scenarioDir,
+    deps,
+    input,
+  }
+}
+
+describe('engine', () => {
+  // CA1: Dada uma story trivial com a CLI falsa escrevendo o arquivo que o eval exige,
+  // quando runStory roda, então devolve { status: 'committed', exitCode: 0 }, a branch
+  // ade/<missão>/<story> ganha exatamente 1 commit e o journal tem step_results de eval
+  // ':red:' e ':green:', além de contain_result, gates_done, pack_manifest e story_done.
+  // CA4: Dada a execução feliz, quando se lê o evento telemetry, então
+  // data.first_source_edit_ms é um inteiro >= 0.
+  test('run_story_commits_trivial_story', async () => {
+    const fixture = setupStoryFixture()
+
+    const result = await runStory(fixture.deps, fixture.input)
+
+    expect(result.status).toBe('committed')
+    expect(result.exitCode).toBe(0)
+    expect(result.commit).toBeTruthy()
+    expect(result.reason).toBeNull()
+
+    // git rev-list --count HEAD..ade/mission-1/ADE-T1 = 1
+    const count = fixture.repo.git(['rev-list', '--count', 'HEAD..ade/mission-1/ADE-T1']).trim()
+    expect(count).toBe('1')
+
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+
+    const evalRed = events.find(
+      (e) => e.kind === 'step_result' && typeof e.step_id === 'string' && e.step_id.includes(':red:'),
+    )
+    expect(evalRed).toBeDefined()
+
+    const evalGreen = events.find(
+      (e) => e.kind === 'step_result' && typeof e.step_id === 'string' && e.step_id.includes(':green:'),
+    )
+    expect(evalGreen).toBeDefined()
+
+    const containResult = events.find((e) => e.kind === 'contain_result')
+    expect(containResult).toBeDefined()
+
+    const gatesDone = events.find((e) => e.kind === 'gates_done')
+    expect(gatesDone).toBeDefined()
+
+    const packManifest = events.find((e) => e.kind === 'pack_manifest')
+    expect(packManifest).toBeDefined()
+
+    const storyDone = events.find((e) => e.kind === 'story_done')
+    expect(storyDone).toBeDefined()
+    expect((storyDone?.data as any)?.status).toBe('committed')
+
+    // CA4: telemetry.data.first_source_edit_ms >= 0
+    const telemetry = events.find((e) => e.kind === 'telemetry')
+    expect(telemetry).toBeDefined()
+    const editMs = (telemetry?.data as any)?.first_source_edit_ms
+    expect(Number.isInteger(editMs)).toBe(true)
+    expect(editMs).toBeGreaterThanOrEqual(0)
+  }, 60_000)
+
+  // CA2: Dado um contrato com roles.maker.family 'codex', quando runStory roda, então
+  // lança AdeError com code 'family_without_canary' e exit 4, e o journal não tem nenhum
+  // step_intent com step_id terminando em ':maker'.
+  test('family_without_canary_is_refused_before_dispatch', async () => {
+    expect(CANARY_FAMILIES).toEqual(['claude'])
+
+    const fixture = setupStoryFixture({
+      makerFamily: 'codex',
+    })
+
+    let error: any
+    try {
+      await runStory(fixture.deps, fixture.input)
+    } catch (err) {
+      error = err
+    }
+
+    expect(error).toBeInstanceOf(AdeError)
+    expect(error?.code).toBe('family_without_canary')
+    expect(error?.exitCode).toBe(4)
+
+    // readCounter(scenarioDir, 'maker') = 0
+    expect(readCounter(fixture.scenarioDir, 'maker')).toBe(0)
+
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    const makerIntents = events.filter(
+      (e) => e.kind === 'step_intent' && typeof e.step_id === 'string' && e.step_id.endsWith(':maker'),
+    )
+    expect(makerIntents).toHaveLength(0)
+  }, 60_000)
+
+  // CA3: Dadas capacidades com probe_ok null e env sem CI, quando runStory roda, então
+  // lança AdeError com code 'probe_unverified' e exit 4; com env.CI === 'true', a mesma
+  // entrada segue até committed.
+  test('probe_ok_null_is_refused_outside_ci', async () => {
+    // Variante 1: fora do CI (env sem CI)
+    const fixtureWithoutCi = setupStoryFixture({
+      probeOk: null,
+      env: { ...process.env, CI: undefined },
+    })
+
+    let error: any
+    try {
+      await runStory(fixtureWithoutCi.deps, fixtureWithoutCi.input)
+    } catch (err) {
+      error = err
+    }
+
+    expect(error).toBeInstanceOf(AdeError)
+    expect(error?.code).toBe('probe_unverified')
+    expect(error?.exitCode).toBe(4)
+
+    // Variante 2: com CI === 'true'
+    const fixtureWithCi = setupStoryFixture({
+      probeOk: null,
+      env: { ...process.env, CI: 'true' },
+    })
+
+    const result = await runStory(fixtureWithCi.deps, fixtureWithCi.input)
+    expect(result.status).toBe('committed')
+    expect(result.exitCode).toBe(0)
+  }, 60_000)
+})
+
+describe('faults', () => {
+  test('engine_fault_points_are_normative', () => {
+    expect(ENGINE_FAULT_POINTS).toEqual([
+      'before_spawn',
+      'after_maker_effect',
+      'before_contain',
+      'after_contain',
+      'before_commit',
+      'after_commit',
+    ])
+  })
+
+  test('maybe_engine_fault_validates_points_and_aborts_on_match', () => {
+    expect(() => maybeEngineFault('invalid_point')).toThrow(TypeError)
+    expect(() => maybeEngineFault('invalid_point')).toThrow('ponto de falha inválido: invalid_point')
+
+    expect(() => maybeEngineFault('before_spawn', {})).not.toThrow()
+    expect(() => maybeEngineFault('before_spawn', { ADE_FAULT: 'after_maker_effect' })).not.toThrow()
+
+    let aborted = false
+    const origAbort = process.abort
+    try {
+      process.abort = (() => {
+        aborted = true
+      }) as any
+      maybeEngineFault('before_spawn', { ADE_FAULT: 'before_spawn' })
+      expect(aborted).toBe(true)
+    } finally {
+      process.abort = origAbort
+    }
+  })
+})
+

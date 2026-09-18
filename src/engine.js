@@ -1,0 +1,471 @@
+// @ts-check
+import path from 'node:path'
+import { AdeError } from './journal/errors.js'
+import { readJournal } from './journal/journal.js'
+import { assertCallBudget, checkUsdCap, observedUsd, reserveCalls } from './engine/budget.js'
+import { maybeEngineFault } from './engine/faults.js'
+
+/**
+ * Famílias de modelos com canário aprovado no Slice 1.
+ *
+ * @type {readonly string[]}
+ */
+export const CANARY_FAMILIES = ['claude']
+
+/**
+ * Orquestra o ciclo durável de execução de uma story.
+ *
+ * @param {Object} deps Dependências injetáveis do motor.
+ * @param {{ append: (event: Record<string, unknown>) => Promise<Record<string, unknown>> }} deps.journal Instância do journal aberto.
+ * @param {(spec: { unit: string, id: string, effect_class: string, input: unknown }, effectFn: () => Promise<unknown>) => Promise<{ step_id: string, status: string, result: unknown, reused: boolean }>} deps.step Executor de steps com journaling.
+ * @param {(dir: string) => import('./git/gitport.js').GitPort} deps.gitPortFor Fábrica de porta git para o diretório de worktree.
+ * @param {(opts: { repoDir: string, missionId: string, storyId: string }) => Promise<any>} deps.prepareStory Prepara a worktree e branch.
+ * @param {(opts: { step: any, missionDir: string, gitPort: any }) => { runEval: (opts: any) => Promise<any> }} deps.createEvalRunner Fábrica de executor de evals.
+ * @param {(opts: { step: any, missionDir: string, gitPort: any, packageJson?: any }) => { runGates: (opts: any) => Promise<any> }} deps.createGateRunner Fábrica de executor de gates.
+ * @param {(opts: any) => { pack_path: string, manifest_path: string, manifest: any }} deps.compilePack Compilador do Context Pack.
+ * @param {(opts: any) => Promise<any>} deps.contain Executor de contenção de diff e árvore.
+ * @param {(opts: { worktreeDir: string, outsideDir: string, unitId: string }) => Promise<any> | any} deps.plantCanary Planta canário fora do worktree.
+ * @param {(canary: any) => Promise<any> | any} deps.checkCanary Verifica se o canário foi violado.
+ * @param {(opts: any) => Promise<any>} deps.dispatchClaude Despacha execução do modelo para o Maker.
+ * @param {any} [deps.reconcileAll] Reconciliador de intenções abertas.
+ * @param {{ exe: string, prefixArgs: string[] }} deps.resolved Binário resolvido e prefixos.
+ * @param {Record<string, string>} deps.workerEnv Variáveis de ambiente para o worker.
+ * @param {{ probe_ok: boolean | null }} deps.capabilities Estado da sonda de capacidades do doctor.
+ * @param {NodeJS.ProcessEnv} [deps.env] Variáveis de ambiente da execução.
+ * @param {() => number} [deps.now] Provedor de timestamp atual em ms.
+ *
+ * @param {Object} input Parâmetros de entrada da story e do plano.
+ * @param {import('./engine/plan-load.js').LoadedPlan} input.loaded Plano e contratos carregados.
+ * @param {import('./engine/plan-load.js').LoadedStory} input.story Story a ser executada.
+ * @param {string} input.repoDir Diretório raiz do repositório alvo.
+ * @param {string} input.missionDir Diretório de trabalho da missão em .ade/missions/<mission_id>.
+ *
+ * @returns {Promise<{ status: 'committed' | 'awaiting_operator', exitCode: 0 | 3, reason: string | null, commit: string | null }>}
+ */
+export async function runStory(deps, input) {
+  const { loaded, story, repoDir, missionDir } = input
+  const missionId = loaded.plan.mission_id
+  const storyId = story.id
+  const contract = story.contract
+  const env = deps.env ?? process.env
+  const startedAt = typeof deps.now === 'function' ? deps.now() : Date.now()
+
+  // Guardas iniciais antes de qualquer step
+  const makerFamily = contract.roles?.maker?.family
+  if (!makerFamily || !CANARY_FAMILIES.includes(makerFamily)) {
+    throw new AdeError('family_without_canary', `família sem canário aprovado: ${makerFamily}`, 4)
+  }
+
+  const probeOk = deps.capabilities?.probe_ok
+  if (probeOk === false) {
+    throw new AdeError('probe_failed', 'sonda do doctor falhou', 4)
+  }
+  if (probeOk === null && env.CI !== 'true') {
+    throw new AdeError('probe_unverified', 'rode ade doctor com sonda real', 4)
+  }
+
+  const journalPath = path.join(missionDir, 'journal.jsonl')
+  const readEvents = () => {
+    const res = readJournal(journalPath)
+    return res.events || []
+  }
+
+  // Anexa batch_open se ausente
+  const initialEvents = readEvents()
+  const hasBatchOpen = initialEvents.some((e) => e.kind === 'batch_open')
+  if (!hasBatchOpen) {
+    await deps.journal.append({
+      kind: 'batch_open',
+      data: {
+        plan_id: loaded.plan.id,
+        mission_budget: loaded.missionBudget,
+        spec_revision: story.spec_revision,
+      },
+    })
+  }
+
+  // Reserva de chamadas de modelo
+  assertCallBudget(loaded.plan.budget, 'plan')
+  assertCallBudget(contract.budget, 'contract')
+  const maxModelCalls = Math.min(
+    loaded.plan.budget.max_model_calls,
+    contract.budget.max_model_calls,
+  )
+  const reservation = reserveCalls({
+    events: readEvents(),
+    storyId,
+    maxModelCalls,
+  })
+
+  if (reservation.reason === 'exhausted') {
+    await deps.journal.append({
+      kind: 'story_done',
+      unit: storyId,
+      data: {
+        status: 'awaiting_operator',
+        reason: 'budget_calls_exhausted',
+        unit: storyId,
+        commit: null,
+      },
+    })
+    return {
+      status: 'awaiting_operator',
+      exitCode: 3,
+      reason: 'budget_calls_exhausted',
+      commit: null,
+    }
+  }
+
+  if (reservation.reason === 'reserved') {
+    await deps.journal.append({
+      kind: 'budget_reserved',
+      unit: storyId,
+      data: {
+        calls: 1,
+        unit: storyId,
+      },
+    })
+  }
+
+  // Step prepare
+  const prepareStepResult = await deps.step(
+    {
+      unit: storyId,
+      id: `${storyId}:prepare`,
+      effect_class: 'prepare',
+      input: { storyId, missionId },
+    },
+    () => deps.prepareStory({ repoDir, missionId, storyId }),
+  )
+
+  const prepResult = /** @type {any} */ (prepareStepResult.result)
+  if (prepResult.status !== 'ready') {
+    await deps.journal.append({
+      kind: 'story_done',
+      unit: storyId,
+      data: {
+        status: 'awaiting_operator',
+        reason: prepResult.reason ?? null,
+        unit: storyId,
+        commit: null,
+      },
+    })
+    return {
+      status: 'awaiting_operator',
+      exitCode: 3,
+      reason: prepResult.reason ?? null,
+      commit: null,
+    }
+  }
+
+  const worktreeDir = prepResult.worktreeDir
+  const wtPort = deps.gitPortFor(worktreeDir)
+  const treeBefore = await wtPort.worktreeTree()
+
+  const { runEval } = deps.createEvalRunner({
+    step: deps.step,
+    missionDir,
+    gitPort: wtPort,
+  })
+
+  // Eval vermelho
+  for (const evalDef of story.evals) {
+    const evalRecord = await runEval({
+      eval: evalDef,
+      phase: 'red',
+      tree: treeBefore,
+      unit: storyId,
+    })
+    if (evalRecord.verdict !== 'red' && evalRecord.verdict !== 'red_valid') {
+      await deps.journal.append({
+        kind: 'story_done',
+        unit: storyId,
+        data: {
+          status: 'awaiting_operator',
+          reason: 'eval_red_not_red',
+          unit: storyId,
+          commit: null,
+        },
+      })
+      return {
+        status: 'awaiting_operator',
+        exitCode: 3,
+        reason: 'eval_red_not_red',
+        commit: null,
+      }
+    }
+  }
+
+  // Compila pack e anexa pack_manifest
+  const packResult = deps.compilePack({
+    missionDir,
+    stepId: `${storyId}:r1:maker`,
+    sections: {
+      contract: typeof contract === 'string' ? contract : JSON.stringify(contract, null, 2),
+      policy: JSON.stringify(loaded.plan.authorization ?? {}, null, 2),
+      story: JSON.stringify(story, null, 2),
+      evals: JSON.stringify(story.evals ?? contract.evals ?? [], null, 2),
+      task: String(contract.task ?? ''),
+    },
+  })
+
+  await deps.journal.append({
+    kind: 'pack_manifest',
+    unit: storyId,
+    data: packResult.manifest,
+  })
+
+  // Canário fora da worktree
+  const canary = await deps.plantCanary({
+    worktreeDir,
+    outsideDir: path.join(missionDir, 'canary'),
+    unitId: storyId,
+  })
+
+  maybeEngineFault('before_spawn', env)
+
+  const resultFile = path.join(missionDir, 'maker-result.json')
+  const workerEnv = {
+    ...deps.workerEnv,
+    ...(deps.workerEnv && !deps.workerEnv.ADE_FAKE_RESULT_FILE
+      ? { ADE_FAKE_RESULT_FILE: resultFile }
+      : {}),
+  }
+
+  await deps.dispatchClaude({
+    step: deps.step,
+    unit: storyId,
+    stepId: `${storyId}:r1:maker`,
+    packPath: packResult.pack_path,
+    missionDir,
+    missionId,
+    cwd: worktreeDir,
+    resultFile,
+    maxBudgetUsd: loaded.missionBudget.max_usd,
+    resolved: deps.resolved,
+    env: workerEnv,
+  })
+
+  maybeEngineFault('after_maker_effect', env)
+
+  maybeEngineFault('before_contain', env)
+
+  const tree = await wtPort.worktreeTree()
+  const scopePaths = contract.guardrails?.scope_paths ?? []
+  const doNotTouch = contract.guardrails?.do_not_touch ?? []
+  const sensitivePaths = contract.guardrails?.sensitive_paths ?? []
+
+  const containStepResult = await deps.step(
+    {
+      unit: storyId,
+      id: `${storyId}:contain`,
+      effect_class: 'none',
+      input: { tree },
+    },
+    () =>
+      deps.contain({
+        git: wtPort,
+        unitId: storyId,
+        treeBefore,
+        scopePaths,
+        doNotTouch,
+        sensitivePaths,
+      }),
+  )
+
+  const containResult = /** @type {any} */ (containStepResult.result)
+  await deps.journal.append({
+    kind: 'contain_result',
+    unit: storyId,
+    data: containResult,
+  })
+
+  // Canário sempre é checado após o Maker, mesmo que a contenção também recuse:
+  // um escape para fora da worktree não pode ficar mascarado por uma violação de escopo.
+  const canaryResult = await deps.checkCanary(canary)
+  if (canaryResult.escaped) {
+    await deps.journal.append({
+      kind: 'story_done',
+      unit: storyId,
+      data: {
+        status: 'awaiting_operator',
+        reason: 'canary_escaped',
+        unit: storyId,
+        commit: null,
+      },
+    })
+    return {
+      status: 'awaiting_operator',
+      exitCode: 3,
+      reason: 'canary_escaped',
+      commit: null,
+    }
+  }
+
+  if (!containResult.ok) {
+    await deps.journal.append({
+      kind: 'story_done',
+      unit: storyId,
+      data: {
+        status: 'awaiting_operator',
+        reason: containResult.reason,
+        unit: storyId,
+        commit: null,
+      },
+    })
+    return {
+      status: 'awaiting_operator',
+      exitCode: 3,
+      reason: containResult.reason,
+      commit: null,
+    }
+  }
+
+  const changedPaths = containResult.changedPaths ?? []
+  if (changedPaths.length > 0) {
+    const editMs = Math.max(0, (deps.now?.() ?? Date.now()) - startedAt)
+    await deps.journal.append({
+      kind: 'telemetry',
+      unit: storyId,
+      data: {
+        first_source_edit_ms: editMs,
+      },
+    })
+  }
+
+  const usdCap = checkUsdCap({
+    observed_usd: observedUsd(readEvents()).observed_usd,
+    max_usd: loaded.missionBudget.max_usd,
+  })
+  if (!usdCap.ok) {
+    await deps.journal.append({
+      kind: 'story_done',
+      unit: storyId,
+      data: {
+        status: 'awaiting_operator',
+        reason: 'budget_usd_exceeded',
+        unit: storyId,
+        commit: null,
+      },
+    })
+    return {
+      status: 'awaiting_operator',
+      exitCode: 3,
+      reason: 'budget_usd_exceeded',
+      commit: null,
+    }
+  }
+
+  maybeEngineFault('after_contain', env)
+
+  // Gates
+  const { runGates } = deps.createGateRunner({
+    step: deps.step,
+    missionDir,
+    gitPort: wtPort,
+  })
+
+  const treeAfterContain = await wtPort.worktreeTree()
+
+  const gateRes = await runGates({
+    gates: loaded.gates ?? [],
+    flags: [],
+    tree: treeAfterContain,
+    unit: storyId,
+    changedFiles: changedPaths,
+  })
+
+  await deps.journal.append({
+    kind: 'gates_done',
+    unit: storyId,
+    data: {
+      results: gateRes.results,
+    },
+  })
+
+  const gateFailed =
+    !gateRes.ok ||
+    gateRes.results.some(
+      (/** @type {any} */ r) => r.status !== 'passed' && r.status !== 'ok',
+    )
+  if (gateFailed) {
+    await deps.journal.append({
+      kind: 'story_done',
+      unit: storyId,
+      data: {
+        status: 'awaiting_operator',
+        reason: 'gate_failed',
+        unit: storyId,
+        commit: null,
+      },
+    })
+    return {
+      status: 'awaiting_operator',
+      exitCode: 3,
+      reason: 'gate_failed',
+      commit: null,
+    }
+  }
+
+  // Eval verde
+  for (const evalDef of story.evals) {
+    const evalRecord = await runEval({
+      eval: evalDef,
+      phase: 'green',
+      tree: treeAfterContain,
+      unit: storyId,
+    })
+    if (evalRecord.verdict !== 'green') {
+      await deps.journal.append({
+        kind: 'story_done',
+        unit: storyId,
+        data: {
+          status: 'awaiting_operator',
+          reason: 'eval_green_failed',
+          unit: storyId,
+          commit: null,
+        },
+      })
+      return {
+        status: 'awaiting_operator',
+        exitCode: 3,
+        reason: 'eval_green_failed',
+        commit: null,
+      }
+    }
+  }
+
+  maybeEngineFault('before_commit', env)
+
+  const commitStepResult = await deps.step(
+    {
+      unit: storyId,
+      id: `${storyId}:commit`,
+      effect_class: 'local_commit',
+      input: { tree: treeAfterContain },
+    },
+    () => wtPort.commit({ message: `ade(${storyId}): ${contract.title}` }),
+  )
+
+  maybeEngineFault('after_commit', env)
+
+  const commitSha = /** @type {any} */ (commitStepResult.result)?.commit
+
+  await deps.journal.append({
+    kind: 'story_done',
+    unit: storyId,
+    data: {
+      status: 'committed',
+      commit: commitSha,
+      spec_revision: story.spec_revision,
+      unit: storyId,
+    },
+  })
+
+  return {
+    status: 'committed',
+    exitCode: 0,
+    reason: null,
+    commit: commitSha,
+  }
+}
