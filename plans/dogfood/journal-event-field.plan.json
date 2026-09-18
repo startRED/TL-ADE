@@ -1,0 +1,29 @@
+{
+  "format_version": 1,
+  "id": "dogfood-d1",
+  "mission_id": "ade-dogfood-d1",
+  "immutable_digest": "0123456789abcdef",
+  "authorization": {
+    "autonomy": "safe",
+    "permitted_effects": [],
+    "eligible_skills": []
+  },
+  "phases": [
+    {
+      "epics": [
+        {
+          "stories": ["ADE-D1"]
+        }
+      ]
+    }
+  ],
+  "mission_budget": {
+    "max_usd": 3,
+    "max_wall_clock_seconds": 3600,
+    "max_parked_units": 1
+  },
+  "budget": {
+    "max_model_calls": 3,
+    "max_rework_rounds": 1
+  }
+}

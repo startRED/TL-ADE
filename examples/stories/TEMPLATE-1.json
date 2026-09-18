@@ -1,0 +1,62 @@
+{
+  "format_version": 1,
+  "id": "TEMPLATE-1",
+  "title": "Template Story",
+  "complexity": "bounded",
+  "task": "Crie o arquivo src/hello.txt contendo a palavra ok",
+  "guardrails": {
+    "scope_paths": [
+      "src/**",
+      "tests/**"
+    ],
+    "do_not_touch": [
+      ".ade/**"
+    ],
+    "autonomy": "safe"
+  },
+  "requirements": [
+    {
+      "id": "R1",
+      "ears": "WHEN check runs THE SYSTEM SHALL pass."
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "C1",
+      "given": "initial state without hello.txt",
+      "when": "maker creates hello.txt with ok",
+      "then": "eval check passes",
+      "evals": ["E1"]
+    }
+  ],
+  "evals": [
+    {
+      "format_version": 1,
+      "kind": "test",
+      "cmd": ["node", "tests/check.mjs"],
+      "expect_exit": 0,
+      "timeout_s": 120,
+      "max_output_bytes": 65536,
+      "evidence": ["tests/check.mjs"],
+      "strictness": {
+        "mode": "must_fail_before"
+      },
+      "author": "operator"
+    }
+  ],
+  "skills": [],
+  "roles": {
+    "maker": {
+      "family": "claude",
+      "model_id": "claude-sonnet-5"
+    },
+    "checker_round": {
+      "family": "codex",
+      "model_id": "codex-1"
+    }
+  },
+  "budget": {
+    "max_model_calls": 3,
+    "max_rework_rounds": 1
+  }
+}
