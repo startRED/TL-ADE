@@ -32,15 +32,19 @@ import { buildWorkerEnv } from '../runner/spawn.js'
  */
 
 /**
- * Valida se o comando inicial é permitido (apenas 'node' ou caminho absoluto .exe).
+ * Valida se o comando inicial é permitido (`node`, caminho absoluto `.exe` ou o binário node).
  *
  * @param {unknown} cmd0
  * @returns {void}
  */
 function validateCmd0(cmd0) {
+  // 'node' literal, caminho absoluto `.exe`, ou o próprio binário (`process.execPath`), que no
+  // Linux/macOS é `/…/bin/node` sem extensão — o CI Linux recusava esse caso.
   const isValid =
     cmd0 === 'node' ||
-    (typeof cmd0 === 'string' && path.isAbsolute(cmd0) && cmd0.toLowerCase().endsWith('.exe'))
+    (typeof cmd0 === 'string' &&
+      path.isAbsolute(cmd0) &&
+      (cmd0.toLowerCase().endsWith('.exe') || path.basename(cmd0) === 'node'))
 
   if (!isValid) {
     throw new TypeError('argv inválido: cmd[0] precisa ser node')
