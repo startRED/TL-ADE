@@ -1089,3 +1089,127 @@ describe('eval runner applies scenario strictness validation', () => {
     expect(readFileSync(counterFile, 'utf8')).toBe('2')
   })
 })
+
+describe('skipped tests are not executed tests', () => {
+  const vitestBin = path.resolve(process.cwd(), 'node_modules/vitest/vitest.mjs')
+
+  // CA1: um relatório onde o único teste é pulado (numPendingTests:1) não tem nenhum teste
+  // executado, então classifyRed devolve missing_target com num_total_tests:0.
+  // CA4: um relatório com dois testes onde um é pulado ainda tem um teste executado,
+  // então classifyRed não rebaixa para missing_target e num_total_tests desconta o pulado.
+  test('skipped_tests_are_not_executed_tests', () => {
+    const allSkippedResult = classifyRed({
+      exitCode: 0,
+      expectExit: 0,
+      timedOut: false,
+      stdout: '',
+      stderr: '',
+      report: {
+        numTotalTests: 1,
+        numPassedTests: 0,
+        numFailedTests: 0,
+        numPendingTests: 1,
+      },
+    })
+    expect(allSkippedResult).toEqual({
+      red_reason: 'missing_target',
+      num_total_tests: 0,
+    })
+
+    const partiallySkippedResult = classifyRed({
+      exitCode: 0,
+      expectExit: 0,
+      timedOut: false,
+      stdout: '',
+      stderr: '',
+      report: {
+        numTotalTests: 2,
+        numPassedTests: 1,
+        numFailedTests: 0,
+        numPendingTests: 1,
+      },
+    })
+    expect(partiallySkippedResult).toEqual({
+      red_reason: null,
+      num_total_tests: 1,
+    })
+  })
+
+  // CA2: parseReporterJson copia numPendingTests e numTodoTests quando presentes e numéricos;
+  // quando um desses campos está presente mas não é número, o relatório inteiro é inválido (null).
+  test('reporter_keeps_pending_and_todo_counts', () => {
+    const withCounts = parseReporterJson(
+      '{"numTotalTests":1,"numPassedTests":0,"numFailedTests":0,"numPendingTests":1,"numTodoTests":0}'
+    )
+    expect(withCounts).toEqual({
+      numTotalTests: 1,
+      numPassedTests: 0,
+      numFailedTests: 0,
+      numPendingTests: 1,
+      numTodoTests: 0,
+    })
+
+    const withInvalidPending = parseReporterJson(
+      '{"numTotalTests":1,"numPassedTests":1,"numFailedTests":0,"numPendingTests":"x"}'
+    )
+    expect(withInvalidPending).toBeNull()
+  })
+
+  // CA3: um filtro -t sem correspondência faz o Vitest aninhado reportar o único teste como
+  // pendente; o eval não pode nascer verde nem valer como red_valid com zero testes executados,
+  // então é rebaixado para additive com o mesmo aviso já usado para outros red_reason.
+  test(
+    'missing_target_downgrades_instead_of_passing',
+    async () => {
+      const fixtureDir = mkdtempSync(path.join(os.tmpdir(), 'eval-fixture-'))
+      const missionDir = mkdtempSync(path.join(os.tmpdir(), 'eval-mission-'))
+      tmpDirs.push(fixtureDir, missionDir)
+
+      createMiniProject(fixtureDir, 'export function sum(a, b) { return a + b }\n')
+
+      const tree = 'tree-missing-target'
+      const gitPort = {
+        worktreeDir: fixtureDir,
+        worktreeTree: async () => tree,
+      }
+
+      const journal = openJournal({ missionDir, runtimeStamp: '1:aaaaaaaa:bbbbbbbb' })
+      const { step } = createStepRunner({ journal, missionDir, gitPort: gitPort as any, env: {} })
+      const runner = createEvalRunner({ step, missionDir, gitPort: gitPort as any })
+
+      const evalDef = {
+        id: 'sum.missing',
+        argv: [
+          'node',
+          vitestBin,
+          'run',
+          '--root',
+          fixtureDir,
+          '--config',
+          path.join(fixtureDir, 'vitest.config.mjs'),
+          '--reporter=json',
+          '-t',
+          'nome que não existe',
+        ],
+        kind: 'test',
+        expect_exit: 0,
+        timeout_s: 120,
+        max_output_bytes: 8192,
+        strictness: { mode: 'must_fail_before' as const },
+      }
+
+      const record = await runner.runEval({
+        eval: evalDef,
+        phase: 'red',
+        tree,
+        unit: 'u1',
+      })
+
+      expect(record.red_reason).toBe('missing_target')
+      expect(record.num_total_tests).toBe(0)
+      expect(record.verdict).toBe('downgraded_additive')
+      expect(record.warnings).toEqual(['red_reason=missing_target rebaixado para additive'])
+    },
+    60_000
+  )
+})

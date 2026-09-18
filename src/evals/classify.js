@@ -3,6 +3,8 @@
  * @property {number} numTotalTests
  * @property {number} numPassedTests
  * @property {number} numFailedTests
+ * @property {number} [numPendingTests] contados pelo Vitest dentro de numTotalTests, mas não executados
+ * @property {number} [numTodoTests] contados pelo Vitest dentro de numTotalTests, mas não executados
  */
 
 /**
@@ -44,11 +46,34 @@ export function parseReporterJson(stdout) {
     return null
   }
 
-  return {
+  if (
+    'numPendingTests' in parsed &&
+    (typeof parsed.numPendingTests !== 'number' || Number.isNaN(parsed.numPendingTests))
+  ) {
+    return null
+  }
+  if (
+    'numTodoTests' in parsed &&
+    (typeof parsed.numTodoTests !== 'number' || Number.isNaN(parsed.numTodoTests))
+  ) {
+    return null
+  }
+
+  /** @type {ReporterReport} */
+  const result = {
     numTotalTests: parsed.numTotalTests,
     numPassedTests: parsed.numPassedTests,
     numFailedTests: parsed.numFailedTests,
   }
+
+  if ('numPendingTests' in parsed) {
+    result.numPendingTests = parsed.numPendingTests
+  }
+  if ('numTodoTests' in parsed) {
+    result.numTodoTests = parsed.numTodoTests
+  }
+
+  return result
 }
 
 /**
@@ -90,7 +115,9 @@ export function classifyRed({ exitCode, expectExit, timedOut, stdout, stderr, re
     typeof report.numFailedTests === 'number' &&
     !Number.isNaN(report.numFailedTests)
 
-  const num_total_tests = isReportValid ? report.numTotalTests : null
+  const skipped = isReportValid ? (report.numPendingTests ?? 0) + (report.numTodoTests ?? 0) : 0
+  const executed = isReportValid ? Math.max(0, report.numTotalTests - skipped) : null
+  const num_total_tests = executed
 
   const combinedOutput = (stderr ?? '') + '\n' + (stdout ?? '')
 
@@ -100,7 +127,7 @@ export function classifyRed({ exitCode, expectExit, timedOut, stdout, stderr, re
     red_reason = 'environment'
   } else if (!isReportValid) {
     red_reason = 'environment'
-  } else if (report.numTotalTests === 0) {
+  } else if (executed === 0) {
     red_reason = 'missing_target'
   } else if (COMPILE_ERROR_REGEX.test(combinedOutput)) {
     red_reason = 'compile_error'
