@@ -408,6 +408,30 @@ describe('receipt', () => {
     expect(() => requestDigest(noUnit)).toThrow('request inválido')
   })
 
+  test('receipt_fingerprint_accepts_real_platform_start_times_and_rejects_malformed_linux', () => {
+    const base = { pid: 4242, host: 'maquina' }
+    // Windows: CreationDate.ToUniversalTime().ToString('o') do PowerShell (fração de 7 dígitos)
+    expect(isValidFingerprint({ ...base, start_time: '2026-09-17T12:34:56.1234567Z' })).toBe(true)
+    // Linux: <boot_id de /proc/sys/kernel/random/boot_id>:<ticks de /proc/pid/stat>
+    expect(
+      isValidFingerprint({ ...base, start_time: '3f1c2b4a-9d8e-4f70-a1b2-c3d4e5f60718:123456' }),
+    ).toBe(true)
+
+    // Linux malformado: boot_id que não é UUID canônico ou ticks ausentes
+    for (const bad of [
+      '-:0',
+      'deadbeef:7',
+      '3f1c2b4a9d8e4f70a1b2c3d4e5f60718:1',
+      '3F1C2B4A-9D8E-4F70-A1B2-C3D4E5F60718:1',
+      '3f1c2b4a-9d8e-4f70-a1b2-c3d4e5f6071:1',
+      '3f1c2b4a-9d8e-4f70-a1b2-c3d4e5f60718:',
+      '3f1c2b4a-9d8e-4f70-a1b2-c3d4e5f60718:12a',
+      ':123',
+    ]) {
+      expect(isValidFingerprint({ ...base, start_time: bad }), bad).toBe(false)
+    }
+  })
+
   test('receipt_rejects_invalid_fingerprint_structure_and_types', () => {
     const validFp = { pid: 4242, start_time: '2026-09-17T00:00:01.000Z', host: 'maquina' }
     expect(isValidFingerprint(validFp)).toBe(true)
@@ -819,5 +843,16 @@ describe('receipt', () => {
     // O default de produção continua produzindo um instante canônico
     const comDefault = startingReceipt({ missionId: 'm1', stepId: 's1', request })
     expect(new Date(comDefault.started_at).toISOString()).toBe(comDefault.started_at)
+
+    // Regressão: '0000-02-29' é 29 de fevereiro do ano 0000 (bissexto no calendário
+    // gregoriano) e é compatível com o contrato documentado de `Date#toISOString()`. Não
+    // pode ser recusado por interpretação de ano de dois dígitos (Date.UTC trataria como 1900).
+    const anoZeroBissexto = startingReceipt({
+      missionId: 'm1',
+      stepId: 's1',
+      request,
+      now: () => '0000-02-29T00:00:00.000Z',
+    })
+    expect(anoZeroBissexto.started_at).toBe('0000-02-29T00:00:00.000Z')
   })
 })
