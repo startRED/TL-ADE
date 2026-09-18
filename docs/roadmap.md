@@ -570,7 +570,19 @@ o motor sobe e derruba o servidor por chamada e grava `mcp_manifest` no journal 
 digest), exatamente como `pack_manifest`. É o "skills automáticas + MCPs automáticos" pedido pelo operador;
 entra depois da skill fabric porque depende dela para o roteamento. **Não copiar**: os 21 temas e as
 macroestruturas nomeadas do hallmark (curadoria de gosto de uma marca), a regra "nunca Inter/Roboto" como
-universal (colide com marcas que as exigem), e a galeria/worker/Blob do inspo.
+universal (colide com marcas que as exigem), e a galeria/worker/Blob do inspo. (14) **Registro de skills de
+UI como fonte da skill fabric** (ibelick `ui-skills`, MIT: registro curado de skills de *design engineering*
+em 19 categorias — `accessibility`, `motion`, `typography`, `color`, `performance`, `testing`… — com CLI
+`npx ui-skills get <skill>` e MCP `https://www.ui-skills.com/mcp` expondo só `list_skills` e `get_skill`; a
+`ui-skills-root` roteia "pelo tópico, stack e intenção ao menor conjunto útil de skills"): a skill fabric
+ganha um **catálogo externo versionado** de onde puxa skills por tipo de tarefa (`fixing-accessibility`,
+`fixing-motion-performance`, `fixing-metadata`, `baseline-ui`, `create-design-md`, `animation-systems`,
+`web-design-guidelines`, `frontend-ui-engineering`, `agent-browser`), **vendorizadas** no cache do item (6)
+com digest e licença — nunca buscadas em tempo de missão (o MCP remoto é fonte de importação do operador,
+não ferramenta do Maker; a cadeia de suprimento continua controlada). `create-design-md` é o mesmo contrato
+`DESIGN.md` do item (12) e `baseline-ui` (deslop de espaçamento, hierarquia, tipografia) é o primeiro
+`Verifier` barato do item (10). A regra de roteamento do `ui-skills-root` é o que a skill fabric implementa
+por dentro — a partir do Task Contract, não de pergunta ao usuário.
 
 **Não faz.** Lint anti-slop (voltou para o gate runner na v0.2), PTY embutido, steering intraturno,
 pesquisa em time, telemetria completa.
