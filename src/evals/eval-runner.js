@@ -69,6 +69,17 @@ function capExcerpt(text, cap, rawRef) {
 }
 
 /**
+ * Teto de bytes do extrato do eval: o menor entre o teto do kind (8192 por padrão) e o
+ * `max_output_bytes` do próprio eval.
+ *
+ * @param {EvalDef} evalDef
+ * @returns {number}
+ */
+function excerptCap(evalDef) {
+  return Math.min(EXTRACT_CAPS[evalDef.kind] ?? 8192, evalDef.max_output_bytes)
+}
+
+/**
  * Valida se o comando inicial de eval é permitido (apenas 'node' ou caminho absoluto .exe).
  *
  * @param {unknown} cmd0
@@ -130,8 +141,8 @@ function validateRunEvalOptions(options) {
   if (typeof evalDef.timeout_s !== 'number' || evalDef.timeout_s <= 0) {
     throw new TypeError('eval.timeout_s é obrigatório e precisa ser número positivo')
   }
-  if (typeof evalDef.max_output_bytes !== 'number' || evalDef.max_output_bytes <= 0) {
-    throw new TypeError('eval.max_output_bytes é obrigatório e precisa ser número positivo')
+  if (!Number.isInteger(evalDef.max_output_bytes) || evalDef.max_output_bytes < 256) {
+    throw new TypeError('eval.max_output_bytes precisa ser inteiro >= 256')
   }
   if (!evalDef.strictness || typeof evalDef.strictness !== 'object') {
     throw new TypeError('eval.strictness é obrigatório e precisa ser um objeto')
@@ -361,7 +372,7 @@ export function createEvalRunner({ step, missionDir, gitPort }) {
             safeEvalId
           )
           const { verdict, warnings } = classifyGreen({ red_reason })
-          const cap = EXTRACT_CAPS[evalDef.kind] ?? 8192
+          const cap = excerptCap(evalDef)
 
           return buildEvalRecord({
             eval_id: evalDef.id,
@@ -463,7 +474,7 @@ export function createEvalRunner({ step, missionDir, gitPort }) {
           warnings.push(`red_reason=${red_reason} rebaixado para additive`)
         }
 
-        const cap = EXTRACT_CAPS[evalDef.kind] ?? 8192
+        const cap = excerptCap(evalDef)
 
         return buildEvalRecord({
           eval_id: evalDef.id,

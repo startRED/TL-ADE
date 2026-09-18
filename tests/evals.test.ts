@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
@@ -1430,5 +1430,146 @@ describe('eval runner phase green', () => {
 
     const { events } = readJournal(path.join(missionDir, 'journal.jsonl'))
     expect(events.filter((e) => e.kind === 'step_intent')).toHaveLength(0)
+  })
+})
+
+describe('eval output cap by max_output_bytes', () => {
+  // CA1+CA2: max_output_bytes 2048 aperta o teto abaixo do teto por kind (8192), nas duas
+  // fases; o bruto no artefato continua com o stdout/stderr inteiros, sem corte.
+  test('eval_excerpt_respects_max_output_bytes', async () => {
+    const fixtureDir = mkdtempSync(path.join(os.tmpdir(), 'eval-fixture-'))
+    const missionDir = mkdtempSync(path.join(os.tmpdir(), 'eval-mission-'))
+    tmpDirs.push(fixtureDir, missionDir)
+
+    const tree = 'tree-cap-small'
+    const gitPort = {
+      worktreeDir: fixtureDir,
+      worktreeTree: async () => tree,
+    }
+
+    const journal = openJournal({ missionDir, runtimeStamp: '1:aaaaaaaa:bbbbbbbb' })
+    const { step } = createStepRunner({ journal, missionDir, gitPort: gitPort as any, env: {} })
+    const runner = createEvalRunner({ step, missionDir, gitPort: gitPort as any })
+
+    const noisy =
+      'process.stdout.write("é".repeat(10000));' +
+      'process.stderr.write("x".repeat(9000));' +
+      'process.exitCode = 1'
+
+    const record = await runner.runEval({
+      eval: {
+        id: 'cap.small',
+        argv: ['node', '-e', noisy],
+        kind: 'test',
+        expect_exit: 0,
+        timeout_s: 120,
+        max_output_bytes: 2048,
+        strictness: { mode: 'must_fail_before' as const },
+      },
+      phase: 'red',
+      tree,
+      unit: 'u1',
+    })
+
+    expect(Buffer.byteLength(record.stdout_excerpt, 'utf8')).toBeLessThanOrEqual(2048)
+    expect(Buffer.byteLength(record.stderr_excerpt, 'utf8')).toBeLessThanOrEqual(2048)
+    expect(record.stdout_excerpt).toContain('[...cortado:')
+    expect(record.stderr_excerpt).toContain('[...cortado:')
+
+    const raw = readFileSync(
+      path.join(missionDir, 'artifacts', 'evals', 'cap.small', 'red.log'),
+      'utf8'
+    )
+    expect(raw).toContain('é'.repeat(10000))
+    expect(raw).toContain('x'.repeat(9000))
+  })
+
+  // CA3: max_output_bytes abaixo de 256 é rejeitado antes de qualquer step; 256 é o piso aceito.
+  test('max_output_bytes_below_minimum_is_rejected', async () => {
+    const fixtureDir = mkdtempSync(path.join(os.tmpdir(), 'eval-fixture-'))
+    const missionDir = mkdtempSync(path.join(os.tmpdir(), 'eval-mission-'))
+    tmpDirs.push(fixtureDir, missionDir)
+
+    const tree = 'tree-cap-min'
+    const gitPort = {
+      worktreeDir: fixtureDir,
+      worktreeTree: async () => tree,
+    }
+
+    const journal = openJournal({ missionDir, runtimeStamp: '1:aaaaaaaa:bbbbbbbb' })
+    const { step } = createStepRunner({ journal, missionDir, gitPort: gitPort as any, env: {} })
+    const runner = createEvalRunner({ step, missionDir, gitPort: gitPort as any })
+
+    const belowMinimumEval = {
+      id: 'cap.min.invalid',
+      argv: ['node', '-e', 'process.exitCode = 0'],
+      kind: 'test',
+      expect_exit: 0,
+      timeout_s: 120,
+      max_output_bytes: 100,
+      strictness: { mode: 'must_fail_before' as const },
+    }
+
+    await expect(
+      runner.runEval({ eval: belowMinimumEval, phase: 'red', tree, unit: 'u1' })
+    ).rejects.toThrow('eval.max_output_bytes precisa ser inteiro >= 256')
+
+    const journalPath = path.join(missionDir, 'journal.jsonl')
+    const stepIntentsAfterRejection = existsSync(journalPath)
+      ? readJournal(journalPath).events.filter((e) => e.kind === 'step_intent')
+      : []
+    expect(stepIntentsAfterRejection).toHaveLength(0)
+
+    const atMinimumEval = {
+      id: 'cap.min.boundary',
+      argv: ['node', '-e', 'process.exitCode = 0'],
+      kind: 'test',
+      expect_exit: 0,
+      timeout_s: 120,
+      max_output_bytes: 256,
+      strictness: { mode: 'must_fail_before' as const },
+    }
+
+    const boundaryRecord = await runner.runEval({
+      eval: atMinimumEval,
+      phase: 'red',
+      tree,
+      unit: 'u1',
+    })
+    expect(boundaryRecord.eval_id).toBe('cap.min.boundary')
+  })
+
+  // CA4: max_output_bytes maior que o teto por kind não afrouxa o teto por kind.
+  test('kind_cap_still_applies_when_max_output_bytes_is_larger', async () => {
+    const fixtureDir = mkdtempSync(path.join(os.tmpdir(), 'eval-fixture-'))
+    const missionDir = mkdtempSync(path.join(os.tmpdir(), 'eval-mission-'))
+    tmpDirs.push(fixtureDir, missionDir)
+
+    const tree = 'tree-cap-large'
+    const gitPort = {
+      worktreeDir: fixtureDir,
+      worktreeTree: async () => tree,
+    }
+
+    const journal = openJournal({ missionDir, runtimeStamp: '1:aaaaaaaa:bbbbbbbb' })
+    const { step } = createStepRunner({ journal, missionDir, gitPort: gitPort as any, env: {} })
+    const runner = createEvalRunner({ step, missionDir, gitPort: gitPort as any })
+
+    const record = await runner.runEval({
+      eval: {
+        id: 'cap.large',
+        argv: ['node', '-e', 'process.stdout.write("x".repeat(20000)); process.exitCode = 1'],
+        kind: 'test',
+        expect_exit: 0,
+        timeout_s: 120,
+        max_output_bytes: 65536,
+        strictness: { mode: 'must_fail_before' as const },
+      },
+      phase: 'red',
+      tree,
+      unit: 'u1',
+    })
+
+    expect(Buffer.byteLength(record.stdout_excerpt, 'utf8')).toBeLessThanOrEqual(8192)
   })
 })
