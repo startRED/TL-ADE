@@ -83,7 +83,16 @@ export async function runCommand(options, deps = {}) {
       assertStampCurrent(existingEvents)
     }
 
-    lease = await acquireLease({ missionDir })
+    lease = await acquireLease({ missionDir, adoptDeadOwnerWithinTtl: true })
+    if (lease.adopted) {
+      await journal.append({
+        kind: 'lease_adopted',
+        data: {
+          previous_owner: lease.previousOwner,
+          reason: 'owner_dead',
+        },
+      })
+    }
 
     let resolved
     /** @type {Record<string, string>} */

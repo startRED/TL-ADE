@@ -1,9 +1,11 @@
 // @ts-check
+import fs from 'node:fs'
 import path from 'node:path'
 import { AdeError } from './journal/errors.js'
 import { readJournal } from './journal/journal.js'
 import { assertCallBudget, checkUsdCap, observedUsd, reserveCalls } from './engine/budget.js'
 import { maybeEngineFault } from './engine/faults.js'
+import { findStoryStarted } from './engine/resume.js'
 
 /**
  * Famílias de modelos com canário aprovado no Slice 1.
@@ -127,50 +129,91 @@ export async function runStory(deps, input) {
     })
   }
 
-  // Step prepare
-  const prepareStepResult = await deps.step(
-    {
-      unit: storyId,
-      id: `${storyId}:prepare`,
-      effect_class: 'prepare',
-      input: { storyId, missionId },
-    },
-    () => deps.prepareStory({ repoDir, missionId, storyId }),
-  )
+  /** @type {string} */
+  let worktreeDir
+  /** @type {import('./git/gitport.js').GitPort} */
+  let wtPort
+  /** @type {string} */
+  let treeBefore
 
-  const prepResult = /** @type {any} */ (prepareStepResult.result)
-  if (prepResult.status !== 'ready') {
+  const started = findStoryStarted(readEvents(), storyId)
+  if (started && fs.existsSync(started.worktree_dir)) {
+    worktreeDir = started.worktree_dir
+    treeBefore = started.tree_before
+    wtPort = deps.gitPortFor(worktreeDir)
     await deps.journal.append({
-      kind: 'story_done',
+      kind: 'story_resumed',
       unit: storyId,
       data: {
-        status: 'awaiting_operator',
-        reason: prepResult.reason ?? null,
         unit: storyId,
-        commit: null,
+        reason: 'story_started_in_journal',
+        worktree_dir: worktreeDir,
+        tree_before: treeBefore,
       },
     })
-    return {
-      status: 'awaiting_operator',
-      exitCode: 3,
-      reason: prepResult.reason ?? null,
-      commit: null,
+  } else {
+    // Step prepare
+    const prepareStepResult = await deps.step(
+      {
+        unit: storyId,
+        id: `${storyId}:prepare`,
+        effect_class: 'prepare',
+        input: { storyId, missionId },
+      },
+      () => deps.prepareStory({ repoDir, missionId, storyId }),
+    )
+
+    const prepResult = /** @type {any} */ (prepareStepResult.result)
+    if (prepResult.status !== 'ready') {
+      await deps.journal.append({
+        kind: 'story_done',
+        unit: storyId,
+        data: {
+          status: 'awaiting_operator',
+          reason: prepResult.reason ?? null,
+          unit: storyId,
+          commit: null,
+        },
+      })
+      return {
+        status: 'awaiting_operator',
+        exitCode: 3,
+        reason: prepResult.reason ?? null,
+        commit: null,
+      }
     }
+
+    worktreeDir = prepResult.worktreeDir
+    wtPort = deps.gitPortFor(worktreeDir)
+    treeBefore = await wtPort.worktreeTree()
+
+    await deps.journal.append({
+      kind: 'story_started',
+      unit: storyId,
+      data: {
+        unit: storyId,
+        worktree_dir: worktreeDir,
+        tree_before: treeBefore,
+      },
+    })
   }
 
-  const worktreeDir = prepResult.worktreeDir
-  const wtPort = deps.gitPortFor(worktreeDir)
-  const treeBefore = await wtPort.worktreeTree()
+  const redGitPort = started
+    ? {
+        ...wtPort,
+        worktreeTree: async () => treeBefore,
+      }
+    : wtPort
 
-  const { runEval } = deps.createEvalRunner({
+  const { runEval: runRedEval } = deps.createEvalRunner({
     step: deps.step,
     missionDir,
-    gitPort: wtPort,
+    gitPort: redGitPort,
   })
 
   // Eval vermelho
   for (const evalDef of story.evals) {
-    const evalRecord = await runEval({
+    const evalRecord = await runRedEval({
       eval: evalDef,
       phase: 'red',
       tree: treeBefore,
@@ -408,8 +451,14 @@ export async function runStory(deps, input) {
   }
 
   // Eval verde
+  const { runEval: runGreenEval } = deps.createEvalRunner({
+    step: deps.step,
+    missionDir,
+    gitPort: wtPort,
+  })
+
   for (const evalDef of story.evals) {
-    const evalRecord = await runEval({
+    const evalRecord = await runGreenEval({
       eval: evalDef,
       phase: 'green',
       tree: treeAfterContain,
