@@ -177,6 +177,64 @@ falho degrada com evidência gravada e segue (hoje isso existe caso a caso — v
 `quality-report.md`) é gerado por `ade docs sync` a partir de journal, evals e schemas, nunca editado à mão;
 o README aponta para lá. Junto com o item (8), impede a classe de erro "lembrar de atualizar 14 lugares".
 
+**Emenda 2026-09-18 (cota, medida na missão real).** O limite que trava o operador não é dólar: é a cota de
+cada assinatura (Claude 20×, Codex 5×, Google AI Pro), e nela **cache não desconta** em Codex e Gemini. Na
+missão de 9 épicos: Flash 284M tokens de cota em 148 chamadas (1,9M por rodada de implementação e 2M por
+fase de prova — o agente relê o contexto a cada turno), Sonnet 120M, Terra 26M em 159 revisões (150k por
+revisão, o revisor explora o repositório); 91 % do prompt repete entre rodadas; 58 % das revisões pedem
+mudança (3,3 revisões por story); prova e implementação do mesmo modelo custam o mesmo. Entram na v0.2:
+(15) **Cota é orçamento de primeira classe**: o journal grava por chamada `quota_tokens = tokens_in +
+cache_read + tokens_out` por família, `ade report --quota` soma por família/papel/dia e por janela (5 h e
+semana), e `mission_budget` aceita teto de cota por família além do teto em dólar; o scheduler pausa por
+`quota` (já existe na demo) e, com outra família habilitada para o papel, **troca de família em vez de
+esperar** (Sonnet ↔ Flash para escrever, Terra ↔ Opus para revisar). (16) **Turnos são o multiplicador**:
+cada fase declara teto de turnos (prova ≤14, implementação ≤30, correção ≤20, revisão ≤10 leituras) e o
+prompt diz o que a fase NÃO faz (prova não implementa nem roda a suíte; revisor julga pelo diff e não explora;
+ninguém roda prova lenta de integração — o harness roda) — turno gasto relendo contexto é a maior fatia da
+cota do Flash. (17) **Uma chamada quando o modelo faz as duas fases**: se a família do Maker já entrega
+prova e implementação juntas (Flash faz isso em >50 % das partes), a fase de prova vira **validação pelo
+harness** (o vermelho é conferido revertendo só a implementação no worktree, `git stash` seletivo por
+arquivo de prova), não segunda chamada — poupa uma chamada inteira por story sem abrir mão do vermelho.
+(18) **Convergência em ≤2 rodadas é meta medida**: `review_rounds_per_story` no relatório, com alvo ≤2 e
+alarme em ≥4; achado `low` nunca gera rodada (o Checker registra e aprova — regra já escrita, agora eval:
+`low_only_review_is_an_approve`); achado repetido com a mesma citação de contrato pelo Maker é retirado na
+rodada seguinte ou o Checker é trocado de família. (19) **Prefixo estável para cache** em todas as famílias
+que o oferecem: seções fixas do pack (`contract`, `policy`, skills) antes das variáveis (`story`, diff,
+achados), byte a byte iguais entre rodadas — a demo já mede `cache_read` de 383k por rodada no Flash e quase
+zero `tokens_in` novo no Sonnet; a regra vira `SECTION_ORDER` do slice 1 (S16) e teste de igualdade de
+prefixo entre rodadas. (20) **Saída curta é contrato** (Ponytail/Caveman como regra de motor, não estilo):
+Maker termina com ≤3 linhas, Checker com `problem` ≤220 chars e `summary` ≤400, plano sem prosa fora dos
+campos; tokens de saída são a menor fatia, mas diff menor = revisão menor = menos rodadas.
+(21) **Custo de abertura por chamada** é medido, não suposto: sessão nova de CLI custa 8k–62k tokens antes
+do primeiro input (metadados de ferramentas, skills embutidas, memória, `CLAUDE.md`); o motor abre centenas
+de sessões por missão, então `ade doctor` mede os tokens do turno 0 por família e a **receita de chamada
+curta** vale para as três CLIs, não só para o Codex: Claude com settings efêmeros por chamada (sem memória
+automática, sem tarefas de fundo, sem skills embutidas, saída de bash limitada, thinking só onde o papel
+pede — chaves `disableBundledSkills`, `bashMaxOutputLength`, `auto_memory`, `disable_background_tasks`
+[verificar nomes na versão pinada]), Gemini com `--print-timeout` e sem extensões, Codex com
+`--ignore-user-config --ignore-rules skills.max_context_tokens=0`; meta ≤3k tokens de abertura [hipotese].
+(22) **Contexto longo degrada qualidade, não só custo** (medido pelos criadores: recuperação 92 % em 256k →
+78 % em 1M; profundidade de raciocínio −67 % e edição-sem-leitura de 6 % → 34 % em sessão longa): além do
+teto de turnos (item 16), cada chamada tem **teto de contexto** (120k tokens [hipotese]) — acima dele a
+chamada é encerrada, o resultado parcial vira handoff e a rodada reabre em sessão nova. Invariante escrito:
+**rodada nova = sessão nova**; histórico sujo (tentativa falha, resposta truncada por limite, erro de
+ferramenta) nunca é reenviado — só o handoff estruturado (diff, achados, resposta do Maker) atravessa
+rodadas. É o `rewind` dos criadores como regra de motor. (23) **Saída de prova filtrada dentro da sessão de
+quem escreve**: o Maker que roda a suíte recebe a saída inteira no próprio contexto (a matriz de queda
+custou uma chamada inteira do Flash); `ade test --brief` (reporter só-falhas + tail) é o único comando de
+prova que o pack ensina, e onde a CLI tem hook pós-ferramenta o motor instala o filtro (só falhas, nunca
+os verdes). (24) **Modo conselheiro antes de escalar**: quando o executor barato falha duas rodadas, em vez
+de passar a escrita inteira ao modelo forte (escada: Sonnet → Opus, US$ 0,60–1,10 por rodada), o modelo
+forte recebe diff + provas vermelhas + achados e devolve **só o diagnóstico e o plano de correção** (≤400
+tokens de saída, sem editar); o executor barato aplica. Medido contra a escada em 10 partes de correção
+(custo, rodadas até verde, defeitos escapados) — é o `/advisor` dos criadores e o item 4d do backlog em
+forma testável; vira default só se vencer. (25) **Esforço é dial por papel, medido por modelo novo**: os
+criadores mediram Fable `low` empatando com Opus 4.8 `max` a 1/6 do custo, Astra `high` ≈ `max` a metade,
+`light` −80 %; então `effort` nunca é default herdado: cada (papel, modelo) tem esforço escolhido por
+ablação de 5 stories (plano: achados da crítica e convergência das stories; escrita: rodadas até verde;
+revisão: achados válidos/inválidos) e registrado em `roles.<papel>.effort` com a data e o número. Primeiro
+experimento: plano de épico em Opus `high` × Fable `medium` × Astra `medium`.
+
 **Aceite.** (1) 93/93 em Windows e Linux, incluindo o caso hoje skipado (o shim `.cmd` vira `node shim.js`).
 (2) Suíte de paridade ≤6 min com 4 workers [hipotese] — 18 min em série é inutilizável no ciclo.
 (3) Dois alvos normativos e separados: `parity` (zero credencial, CI Windows + Linux, `ade doctor --offline`)
@@ -304,10 +362,14 @@ head/tail + anomalias; diff grande → interfaces + hotspots + arquivos de risco
 relevantes; CI → falhas + vizinhança causal; histórico → decisões e deltas; vídeo/imagem → quadros ou
 regiões representativas (OpenShorts decide layout com 12 quadros a 1024 px, não com o vídeo). Regra: não
 mandar o objeto inteiro quando uma representação menor preserva a informação daquela decisão, e medir
-isso com `cited`. (9) **Roteador de revisão por risco**, determinístico, a partir do diff: auth/segredos/
+isso com `cited`. Todo insumo externo é convertido a Markdown/texto por ferramenta determinística antes do
+pack (criadores mediram: HTML → Markdown −90 % de tokens, PDF → Markdown −65–70 %), com `raw_ref` para o
+original. (9) **Roteador de revisão por risco**, determinístico, a partir do diff: auth/segredos/
 rede → segurança; migração/schema/persistência → integridade de dados; cobrança/provedor pago →
 econômico; UI → FQE/a11y; motor/concorrência → durabilidade; plano de controle → item (12) da v0.2; nada
-disso → só o Checker geral. Story comum custa um Checker; mudança crítica roda os eixos em paralelo.
+disso → só o Checker geral. Story comum custa um Checker; mudança crítica roda os eixos em paralelo, e os achados dos eixos passam
+por deduplicação determinística (`findings_digest` por arquivo+linha+classe) antes de virar rodada — um
+caso medido pelos criadores: 4 revisores paralelos, 45 achados brutos, 24 depois da deduplicação.
 Contraditório (outro agente verifica o achado: `apply | apply_modified | reject`) só para achados P0/P1 ou
 contestados pelo Maker, nunca para todo comentário. (10) **Dono por escopo** (Dify: `AGENTS.md`
 hierárquico, sem copiar a hierarquia): tabela `scope → docs/reference/<dono>.md` (`src/journal/**` →
@@ -648,7 +710,7 @@ E37 **não** são recalculados agora: a medição da semana 1 do slice 1 replane
 | 4 | **Ablação automática do harness (Caliper)** | harness doctor com ≥20 itens medidos e ≥2 itens com efeito negativo confirmado na coleta manual |
 | 4b | **Controle de pressão por provedor** (`ProviderRateController` determinístico: obedece `Retry-After`, reduz concorrência e recupera gradualmente; nunca decisão de modelo) | só quando N>1 entrar |
 | 4c | **Mapa semântico de domínio** sobre o IR (Understand-Anything: camada opcional `estrutura técnica → domínio de negócio`, fingerprint incremental — mudou 3 arquivos, reanalisa 3 — como artefato certificado, nunca 5–7 agentes relendo o projeto por missão) | repositório alvo com >200k linhas **ou** plano por épico citando <60 % dos módulos tocados |
-| 4d | **Arquiteto/editor em dois passos** (Aider `architect_coder`: reasoner forte esboça, editor barato aplica) | só como A/B contra Maker forte direto em `feature`/`subsystem` — tokens, tempo, rework, defeitos escapados, CI de primeira; vira default só se vencer |
+| 4d | **Arquiteto/editor em dois passos** (Aider `architect_coder`: reasoner forte esboça, editor barato aplica) — o **modo conselheiro** do item (24) da v0.2 é a forma mínima disto (forte só diagnostica na correção) e roda primeiro | só como A/B contra Maker forte direto em `feature`/`subsystem` — tokens, tempo, rework, defeitos escapados, CI de primeira; vira default só se vencer |
 | 5 | **4º provider (OpenCode)** | necessidade de modelo fora das 3 famílias **e** aceitação explícita de chave de API (hoje é princípio) |
 | 6 | **OTel export** | `gen_ai.*` sair de status Development com tipo de token de cache **ou** Erick querer dashboard fora do painel |
 | 7 | **Memória por usuário** | `ade report` mostrando a mesma preferência re-perguntada ≥3× em missões diferentes |
