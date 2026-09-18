@@ -1,5 +1,8 @@
+import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
+import { main as indexMain } from '../../src/cli/index.js'
+import { main as journalMain } from '../../src/cli/journal.js'
 import { projectUnits } from '../../src/cli/project.js'
 import { main } from '../../src/cli/status.js'
 import { digest16 } from '../../src/journal/canonical.js'
@@ -185,6 +188,155 @@ describe('ade status', () => {
         commit: null,
       },
     ])
+  })
+})
+
+describe('ade journal', () => {
+  // CA1: Dado um journal com os eventos seq 1 story_started ADE-T1 e seq 2 story_done ADE-T1,
+  // quando main(['--mission',dir]) de src/cli/journal.js roda, então sai com 0 e o stdout é
+  // '1 story_started ADE-T1\n2 story_done ADE-T1\n'
+  test('journal_lists_events_in_order', async () => {
+    const dir = await makeJournal(
+      [
+        { kind: 'story_started', data: { unit: 'ADE-T1' } },
+        { kind: 'story_done', data: { unit: 'ADE-T1' } },
+      ],
+      'm1',
+    )
+
+    const stdout = makeSink()
+    const stderr = makeSink()
+    const exitCode = await journalMain(['--mission', dir], { env: {}, stdout, stderr })
+
+    expect(exitCode).toBe(0)
+    expect(stdout.text).toBe('1 story_started ADE-T1\n2 story_done ADE-T1\n')
+    expect(stderr.text).toBe('')
+
+    // Exemplo: evento com step_id -> '3 step_result ADE-T1 ADE-T1:commit'
+    const dirWithStep = await makeJournal(
+      [
+        { kind: 'story_started', data: { unit: 'ADE-T1' } },
+        { kind: 'story_done', data: { unit: 'ADE-T1' } },
+        { kind: 'step_result', unit: 'ADE-T1', step_id: 'ADE-T1:commit' },
+      ],
+      'm1-step',
+    )
+    const stdoutStep = makeSink()
+    const stderrStep = makeSink()
+    const exitCodeStep = await journalMain(['--mission', dirWithStep], {
+      env: {},
+      stdout: stdoutStep,
+      stderr: stderrStep,
+    })
+    expect(exitCodeStep).toBe(0)
+    expect(stdoutStep.text).toBe(
+      '1 story_started ADE-T1\n2 story_done ADE-T1\n3 step_result ADE-T1 ADE-T1:commit\n',
+    )
+    expect(stderrStep.text).toBe('')
+  })
+
+  // CA2: Dado o mesmo journal, quando main(['--mission',dir,'--unit','ADE-X9']) roda,
+  // então sai com 0 e o stdout é 'nenhum evento\n'
+  test('journal_unit_filter_without_match_prints_nothing_found', async () => {
+    const dir = await makeJournal(
+      [
+        { kind: 'story_started', data: { unit: 'ADE-T1' } },
+        { kind: 'story_done', data: { unit: 'ADE-T1' } },
+      ],
+      'm1',
+    )
+
+    const stdout = makeSink()
+    const stderr = makeSink()
+    const exitCode = await journalMain(
+      ['--mission', dir, '--unit', 'ADE-X9'],
+      { env: {}, stdout, stderr },
+    )
+
+    expect(exitCode).toBe(0)
+    expect(stdout.text).toBe('nenhum evento\n')
+    expect(stderr.text).toBe('')
+  })
+
+  // CA3: Dado o journal com um caractere trocado na linha 2,
+  // quando o main de src/cli/index.js recebe ['journal','--mission',dir], então devolve 2
+  test('tampered_journal_command_exits_2', async () => {
+    const dir = await makeJournal(
+      [
+        { kind: 'story_started', data: { unit: 'ADE-T1' } },
+        { kind: 'story_done', data: { unit: 'ADE-T1' } },
+        { kind: 'step_result', unit: 'ADE-T1' },
+      ],
+      'm1',
+    )
+
+    const journalPath = path.join(dir, 'journal.jsonl')
+    const content = readFileSync(journalPath, 'utf8')
+    const lines = content.split('\n')
+    // Adulterar trocando um caractere da linha 2
+    lines[1] = lines[1].replace('ADE-T1', 'ADE-TX')
+    writeFileSync(journalPath, lines.join('\n'), 'utf8')
+
+    const stdout = makeSink()
+    const stderr = makeSink()
+    const exitCode = await indexMain(['journal', '--mission', dir], {
+      env: {},
+      stdout,
+      stderr,
+    })
+
+    expect(exitCode).toBe(2)
+  })
+
+  // CA4: Dado env {ADE_MISSION_DIR: dir} e nenhum --mission,
+  // quando main([], {env}) de src/cli/journal.js roda, então sai com 0 e lista os mesmos 2 eventos de CA1
+  test('journal_uses_ade_mission_dir_env', async () => {
+    const dir = await makeJournal(
+      [
+        { kind: 'story_started', data: { unit: 'ADE-T1' } },
+        { kind: 'story_done', data: { unit: 'ADE-T1' } },
+      ],
+      'm1',
+    )
+
+    const stdout = makeSink()
+    const stderr = makeSink()
+    const exitCode = await journalMain([], {
+      env: { ADE_MISSION_DIR: dir },
+      stdout,
+      stderr,
+    })
+
+    expect(exitCode).toBe(0)
+    expect(stdout.text).toBe('1 story_started ADE-T1\n2 story_done ADE-T1\n')
+    expect(stderr.text).toBe('')
+
+    // Sem missão: sai com 4 e mensagem de uso no stderr
+    const stdoutMissing = makeSink()
+    const stderrMissing = makeSink()
+    const exitCodeMissing = await journalMain([], {
+      env: {},
+      stdout: stdoutMissing,
+      stderr: stderrMissing,
+    })
+
+    expect(exitCodeMissing).toBe(4)
+    expect(stderrMissing.text).toContain('uso: ade journal --mission <pasta> [--unit <id>]')
+
+    // Journal inexistente: sai com 4 e 'journal ausente: ...' no stderr
+    const missingDir = path.join(makeTmpDir('ade-cli-test-'), 'missing')
+    tmpDirs.push(missingDir)
+    const stdoutMissingJournal = makeSink()
+    const stderrMissingJournal = makeSink()
+    const exitCodeMissingJournal = await journalMain(['--mission', missingDir], {
+      env: {},
+      stdout: stdoutMissingJournal,
+      stderr: stderrMissingJournal,
+    })
+    expect(exitCodeMissingJournal).toBe(4)
+    expect(stderrMissingJournal.text).toContain(
+      `journal ausente: ${path.join(missingDir, 'journal.jsonl')}`,
+    )
   })
 })
 
