@@ -51,7 +51,6 @@ export async function runStory(deps, input) {
   const storyId = story.id
   const contract = story.contract
   const env = deps.env ?? process.env
-  const startedAt = typeof deps.now === 'function' ? deps.now() : Date.now()
 
   // Guardas iniciais antes de qualquer step
   const makerFamily = contract.roles?.maker?.family
@@ -295,7 +294,8 @@ export async function runStory(deps, input) {
       : {}),
   }
 
-  await deps.dispatchClaude({
+  const makerStartedAt = deps.now?.() ?? Date.now()
+  const dispatch = await deps.dispatchClaude({
     step: deps.step,
     unit: storyId,
     stepId: `${storyId}:r1:maker`,
@@ -308,6 +308,8 @@ export async function runStory(deps, input) {
     resolved: deps.resolved,
     env: workerEnv,
   })
+  const makerWallMs = Math.max(0, (deps.now?.() ?? Date.now()) - makerStartedAt)
+  void dispatch
 
   maybeEngineFault('after_maker_effect', env)
 
@@ -385,16 +387,15 @@ export async function runStory(deps, input) {
   }
 
   const changedPaths = containResult.changedPaths ?? []
-  if (changedPaths.length > 0) {
-    const editMs = Math.max(0, (deps.now?.() ?? Date.now()) - startedAt)
-    await deps.journal.append({
-      kind: 'telemetry',
-      unit: storyId,
-      data: {
-        first_source_edit_ms: editMs,
-      },
-    })
-  }
+  await deps.journal.append({
+    kind: 'telemetry',
+    unit: storyId,
+    data: {
+      role: 'maker',
+      step_id: `${storyId}:r1:maker`,
+      maker_wall_ms: makerWallMs,
+    },
+  })
 
   const usdCap = checkUsdCap({
     observed_usd: observedUsd(readEvents()).observed_usd,
