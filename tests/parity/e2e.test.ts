@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { acquireLease } from '../../src/lease/lease.js'
+import * as reportModule from '../../src/cli/report.js'
 import { BIN_ADE, cleanupTmpDirs, readCounter, setupE2E } from './fixtures/e2e-fixture.js'
 
 afterEach(() => {
@@ -128,5 +129,161 @@ describe('e2e parity', () => {
     expect(fs.existsSync(fixture.repo.dir)).toBe(false)
     expect(() => cleanupTmpDirs()).not.toThrow()
   })
+
+  // CA4: Dado dois eventos telemetry de role maker com tokens reported (100/20/500/40/0.0123 e 200/0/0/60/0.02)
+  // e um terceiro com source unavailable, quando sumTokensByRole e renderReport rodam,
+  // então maker tem calls 3, unavailable_calls 1, input 300, output 100
+  // e o relatório contém a linha começando com '| maker | 3 | 1 | 300 | 20 | 500 | 100 | 0.0323 |'
+  test('report_sums_tokens_by_role_from_journal', () => {
+    const sumTokensByRole = (reportModule as any).sumTokensByRole
+    const renderReport = reportModule.renderReport
+
+    const events = [
+      {
+        kind: 'telemetry',
+        unit: 's1',
+        data: {
+          role: 'maker',
+          step_id: 's1:r1:maker',
+          tokens: {
+            input: 100,
+            cache_write: 20,
+            cache_read: 500,
+            output: 40,
+            usd: 0.0123,
+            source: 'reported',
+          },
+        },
+      },
+      {
+        kind: 'telemetry',
+        unit: 's2',
+        data: {
+          role: 'maker',
+          step_id: 's2:r1:maker',
+          tokens: {
+            input: 200,
+            cache_write: 0,
+            cache_read: 0,
+            output: 60,
+            usd: 0.02,
+            source: 'reported',
+          },
+        },
+      },
+      {
+        kind: 'telemetry',
+        unit: 's3',
+        data: {
+          role: 'maker',
+          step_id: 's3:r1:maker',
+          tokens: { source: 'unavailable' },
+        },
+      },
+    ]
+
+    const sums = sumTokensByRole(events)
+    expect(sums).toEqual([
+      {
+        role: 'maker',
+        calls: 3,
+        unavailable_calls: 1,
+        input: 300,
+        cache_write: 20,
+        cache_read: 500,
+        output: 100,
+        usd: expect.closeTo(0.0323, 4),
+      },
+    ])
+
+    const report = renderReport('m1', [{ unit: 's1', status: 'committed' }], sums)
+    expect(report).toContain('## Custo por papel')
+    expect(report).toContain('| maker | 3 | 1 | 300 | 20 | 500 | 100 | 0.0323 |')
+  })
+
+  test('run_plan_persists_reported_tokens_in_journal_telemetry', async () => {
+    const fixture = setupE2E()
+    const fakeStdout = JSON.stringify({
+      usage: {
+        input_tokens: 100,
+        cache_creation_input_tokens: 20,
+        cache_read_input_tokens: 500,
+        output_tokens: 40,
+      },
+      total_cost_usd: 0.0123,
+      structured_output: {
+        format_version: 1,
+        story_id: 'ADE-T1',
+        state: 'done',
+        phase: 'green',
+        round: 1,
+        tree_before: '0123456789abcdef',
+        tree_after: 'fedcba9876543210',
+        eval_records: [],
+        gate_records: [],
+        passes: true,
+        reason: 'ok',
+        sources: ['contract'],
+      },
+    })
+    const makerActions = [
+      {
+        files: {
+          'src/hello.txt': 'ok\n',
+        },
+        result: {
+          format_version: 1,
+          story_id: 'ADE-T1',
+          state: 'done',
+          phase: 'green',
+          round: 1,
+          tree_before: '0123456789abcdef',
+          tree_after: 'fedcba9876543210',
+          eval_records: [],
+          gate_records: [],
+          passes: true,
+          reason: 'ok',
+          sources: ['contract'],
+        },
+        stdout: fakeStdout,
+      },
+    ]
+    fs.writeFileSync(
+      path.join(fixture.scenarioDir, 'maker.json'),
+      JSON.stringify(makerActions, null, 2),
+      'utf8',
+    )
+
+    const res = spawnSync(
+      process.execPath,
+      [BIN_ADE, 'run', '--plan', fixture.planPath, '--repo', fixture.repo.dir],
+      { env: fixture.env, encoding: 'utf8', maxBuffer: 1_048_576 },
+    )
+    expect(res.status).toBe(0)
+
+    const journalPath = path.join(fixture.missionDir, 'journal.jsonl')
+    expect(fs.existsSync(journalPath)).toBe(true)
+    const lines = fs.readFileSync(journalPath, 'utf8').trim().split('\n').filter(Boolean)
+    const events = lines.map((l) => JSON.parse(l))
+
+    const telemetryEvents = events.filter((e) => e.kind === 'telemetry')
+    expect(telemetryEvents).toHaveLength(1)
+    const telemetry = telemetryEvents[0]
+    expect(telemetry.data.unit).toBe('ADE-T1')
+    expect(telemetry.data).toMatchObject({
+      role: 'maker',
+      step_id: 'ADE-T1:r1:maker',
+      tokens: {
+        input: 100,
+        cache_write: 20,
+        cache_read: 500,
+        output: 40,
+        usd: 0.0123,
+        source: 'reported',
+      },
+    })
+    expect(typeof telemetry.data.maker_wall_ms).toBe('number')
+    expect(telemetry.data.maker_wall_ms).toBeGreaterThanOrEqual(0)
+  }, 60_000)
 })
 

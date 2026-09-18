@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import { buildClaudeArgs } from './argv.js'
-import { parseClaudeOutput, parseUnitResult, parseUsage } from './parse.js'
+import { parseClaudeOutput, parseTokens, parseUnitResult, parseUsage } from './parse.js'
 import { runWorker } from '../../runner/spawn.js'
 import { safeId } from '../../gates/output.js'
 
@@ -35,6 +35,7 @@ import { safeId } from '../../gates/output.js'
  *   cited: boolean,
  *   usage: ReturnType<typeof parseUsage>,
  *   envelope_error: null | 'empty' | 'not_json' | 'truncated_json',
+ *   tokens: ReturnType<typeof parseTokens>,
  * }>}
  */
 export async function dispatchClaude(opts) {
@@ -83,6 +84,7 @@ export async function dispatchClaude(opts) {
     const { envelope, error } = parseClaudeOutput(result.stdout)
     const pu = parseUnitResult(envelope)
     const usage = parseUsage(envelope, 'maker')
+    const tokens = parseTokens(envelope)
 
     return {
       session_ref: sessionId,
@@ -92,6 +94,7 @@ export async function dispatchClaude(opts) {
       cited: pu.cited,
       usage,
       envelope_error: error,
+      tokens,
     }
   })
 
@@ -103,6 +106,7 @@ export async function dispatchClaude(opts) {
    *   cited: boolean,
    *   usage: ReturnType<typeof parseUsage>,
    *   envelope_error: null | 'empty' | 'not_json' | 'truncated_json',
+   *   tokens?: ReturnType<typeof parseTokens>,
    * }} */ (r.result)
 
   return {
@@ -115,5 +119,6 @@ export async function dispatchClaude(opts) {
     cited: effectResult.cited,
     usage: effectResult.usage,
     envelope_error: effectResult.envelope_error,
+    tokens: effectResult.tokens ?? { source: 'unavailable' },
   }
 }
