@@ -30,6 +30,7 @@ type AcquireLeaseFn = (options: {
   getStartTime?: (pid: number) => Promise<string | null>
   isAlive?: (pid: number) => boolean
   now?: () => Date
+  adoptDeadOwnerWithinTtl?: boolean
 }) => Promise<Lease>
 
 const acquire = acquireLease as unknown as AcquireLeaseFn
@@ -646,3 +647,189 @@ describe('lease heartbeat', () => {
     expect(staleDirs).toEqual([])
   })
 })
+
+describe('lease adopts dead owner within ttl', () => {
+  test('dead_owner_within_ttl_is_adopted_when_opted_in', async () => {
+    // CA1: owner {pid:424242,start_time:'OLD',host:hostname()}, heartbeat agora, opt-in, isAlive->false
+    // -> lease.adopted === true, lease.previousOwner.pid === 424242, lease.owner.pid === process.pid
+    const missionDir = createMissionDir()
+    const leaseDir = path.join(missionDir, 'lease')
+    mkdirSync(leaseDir, { recursive: true })
+    const oldOwner: LeaseOwner = {
+      pid: 424242,
+      start_time: 'OLD',
+      host: os.hostname(),
+      engine_version: '0.1.0',
+      acquired_at: '2026-09-17T12:00:00Z',
+    }
+    writeFileSync(path.join(leaseDir, 'owner.json'), JSON.stringify(oldOwner))
+    writeFileSync(path.join(leaseDir, 'heartbeat'), new Date().toISOString())
+
+    const lease = await acquire({
+      missionDir,
+      ttlMs: 15000,
+      heartbeatMs: 50,
+      adoptDeadOwnerWithinTtl: true,
+      isAlive: () => false,
+      getStartTime: async () => 'SELF',
+    })
+
+    try {
+      expect(lease.adopted).toBe(true)
+      expect(lease.previousOwner?.pid).toBe(424242)
+      expect(lease.owner.pid).toBe(process.pid)
+    } finally {
+      await lease.release()
+    }
+  })
+
+  test('recycled_pid_within_ttl_is_adopted_when_opted_in', async () => {
+    // CA2: mesmo owner, isAlive->true, getStartTime(424242)->'OTHER' -> adopted === true
+    const missionDir = createMissionDir()
+    const leaseDir = path.join(missionDir, 'lease')
+    mkdirSync(leaseDir, { recursive: true })
+    const oldOwner: LeaseOwner = {
+      pid: 424242,
+      start_time: 'OLD',
+      host: os.hostname(),
+      engine_version: '0.1.0',
+      acquired_at: '2026-09-17T12:00:00Z',
+    }
+    writeFileSync(path.join(leaseDir, 'owner.json'), JSON.stringify(oldOwner))
+    writeFileSync(path.join(leaseDir, 'heartbeat'), new Date().toISOString())
+
+    const lease = await acquire({
+      missionDir,
+      ttlMs: 15000,
+      heartbeatMs: 50,
+      adoptDeadOwnerWithinTtl: true,
+      isAlive: (pid) => pid === 424242,
+      getStartTime: async (pid) => (pid === 424242 ? 'OTHER' : 'SELF'),
+    })
+
+    try {
+      expect(lease.adopted).toBe(true)
+      expect(lease.previousOwner?.pid).toBe(424242)
+      expect(lease.owner.pid).toBe(process.pid)
+    } finally {
+      await lease.release()
+    }
+  })
+
+  test('dead_owner_within_ttl_conflicts_without_opt_in', async () => {
+    // CA3: mesmo owner, isAlive->false, sem opt-in -> CoordinatorConflictError exitCode 5, owner.json intacto
+    const missionDir = createMissionDir()
+    const leaseDir = path.join(missionDir, 'lease')
+    mkdirSync(leaseDir, { recursive: true })
+    const oldOwner: LeaseOwner = {
+      pid: 424242,
+      start_time: 'OLD',
+      host: os.hostname(),
+      engine_version: '0.1.0',
+      acquired_at: '2026-09-17T12:00:00Z',
+    }
+    writeFileSync(path.join(leaseDir, 'owner.json'), JSON.stringify(oldOwner))
+    writeFileSync(path.join(leaseDir, 'heartbeat'), new Date().toISOString())
+
+    let conflictErr: CoordinatorConflictError | null = null
+    try {
+      await acquire({
+        missionDir,
+        ttlMs: 15000,
+        isAlive: () => false,
+        getStartTime: async () => 'SELF',
+      })
+    } catch (err) {
+      conflictErr = err as CoordinatorConflictError
+    }
+
+    expect(conflictErr).toBeInstanceOf(CoordinatorConflictError)
+    expect(conflictErr).toBeInstanceOf(AdeError)
+    expect(conflictErr?.code).toBe('coordinator_conflict')
+    expect(conflictErr?.exitCode).toBe(5)
+
+    const ownerOnDisk = JSON.parse(
+      readFileSync(path.join(leaseDir, 'owner.json'), 'utf8'),
+    ) as LeaseOwner
+    expect(ownerOnDisk.pid).toBe(424242)
+
+    // CA3 borda: acquireLease({missionDir, adoptDeadOwnerWithinTtl: 'sim'}) -> TypeError('opções de lease inválidas')
+    await expect(
+      acquire({
+        missionDir,
+        adoptDeadOwnerWithinTtl: 'sim' as unknown as boolean,
+      }),
+    ).rejects.toThrow('opções de lease inválidas')
+  })
+
+  test('foreign_host_owner_within_ttl_conflicts', async () => {
+    // CA4: owner.host 'outra-maquina', opt-in, isAlive->false -> CoordinatorConflictError exitCode 5
+    const missionDir = createMissionDir()
+    const leaseDir = path.join(missionDir, 'lease')
+    mkdirSync(leaseDir, { recursive: true })
+    const foreignOwner: LeaseOwner = {
+      pid: 424242,
+      start_time: 'OLD',
+      host: 'outra-maquina',
+      engine_version: '0.1.0',
+      acquired_at: '2026-09-17T12:00:00Z',
+    }
+    writeFileSync(path.join(leaseDir, 'owner.json'), JSON.stringify(foreignOwner))
+    writeFileSync(path.join(leaseDir, 'heartbeat'), new Date().toISOString())
+
+    let conflictErr: CoordinatorConflictError | null = null
+    try {
+      await acquire({
+        missionDir,
+        ttlMs: 15000,
+        adoptDeadOwnerWithinTtl: true,
+        isAlive: () => false,
+        getStartTime: async () => 'SELF',
+      })
+    } catch (err) {
+      conflictErr = err as CoordinatorConflictError
+    }
+
+    expect(conflictErr).toBeInstanceOf(CoordinatorConflictError)
+    expect(conflictErr).toBeInstanceOf(AdeError)
+    expect(conflictErr?.code).toBe('coordinator_conflict')
+    expect(conflictErr?.exitCode).toBe(5)
+
+    const ownerOnDisk = JSON.parse(
+      readFileSync(path.join(leaseDir, 'owner.json'), 'utf8'),
+    ) as LeaseOwner
+    expect(ownerOnDisk.host).toBe('outra-maquina')
+  })
+
+  test('invalid_owner_within_ttl_conflicts', async () => {
+    // CA4 borda: owner.json {pid:'x'} com heartbeat agora, opt-in -> CoordinatorConflictError exitCode 5 (não LeaseAwaitingOperatorError)
+    const missionDir = createMissionDir()
+    const leaseDir = path.join(missionDir, 'lease')
+    mkdirSync(leaseDir, { recursive: true })
+    writeFileSync(
+      path.join(leaseDir, 'owner.json'),
+      JSON.stringify({ pid: 'x', start_time: 'OLD', host: os.hostname() }),
+    )
+    writeFileSync(path.join(leaseDir, 'heartbeat'), new Date().toISOString())
+
+    let conflictErr: CoordinatorConflictError | null = null
+    try {
+      await acquire({
+        missionDir,
+        ttlMs: 15000,
+        adoptDeadOwnerWithinTtl: true,
+        isAlive: () => false,
+        getStartTime: async () => 'SELF',
+      })
+    } catch (err) {
+      conflictErr = err as CoordinatorConflictError
+    }
+
+    expect(conflictErr).toBeInstanceOf(CoordinatorConflictError)
+    expect(conflictErr).toBeInstanceOf(AdeError)
+    expect(conflictErr?.code).toBe('coordinator_conflict')
+    expect(conflictErr?.exitCode).toBe(5)
+    expect(conflictErr).not.toBeInstanceOf(LeaseAwaitingOperatorError)
+  })
+})
+
