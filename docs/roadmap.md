@@ -317,6 +317,58 @@ externas caras (Scrapling `development_mode`): primeira execução real vira fix
 seguintes reproduzem; o portão final da story, quando o contrato exige integração real, chama de novo — a
 CLI falsa e o gravador de transcript do slice 1 são o caso particular disto para `claude`/`codex`.
 
+**Emenda 2026-09-18 (quarta revisão externa: Aider, Graphify, ast-grep, BMAD TEA, interview-me,
+spec-driven-development, SWE-agent).** Entram na v0.3: (12) **O IR do repositório (item 7) ganha
+ranqueamento sob orçamento** (Aider `repomap.py`: Tree-sitter → definições/referências → grafo → PageRank →
+o maior mapa que cabe em `max_map_tokens`): a fatia entregue ao Planner/Maker/Checker é escolhida por
+`relevância à task × importância estrutural × proximidade do escopo tocado × relevância de risco` até um
+orçamento explícito em tokens (`ade code context <story> --budget 1800` devolve símbolos, relações, testes e
+contratos com `estimated_tokens` e `revision`), nunca "arquivos relevantes" sem teto. Todo registro do IR
+carrega proveniência em três classes que **nunca se misturam** (Graphify `EXTRACTED | INFERRED |
+AMBIGUOUS`): `fact` (fonte determinística), `inference` (modelo, com `confidence` e `evidence_refs[]`) e
+`operator_decision`; a mesma regra vale para o plano de conhecimento da v0.4. O grafo é **roteador, não
+oráculo**: reflexão, import dinâmico, convenção de framework, string, código gerado, SQL montado e wiring de
+runtime não resolvem por AST — quando o IR não resolve, o motor cai para `ast-grep`/`rg`/leitura com
+`raw_ref`, e `rg` nunca é substituído pelo grafo. A interface (`ade code search-symbol | refs | imports |
+structural-search | path`) é da ADE; Tree-sitter, ast-grep, rg e git são backends substituíveis.
+(13) **Perfil de risco objetivo** no Task Contract, complementando `risk ∈ {light, normal, critical}` do
+item (1) e o roteador do item (9): `risk.surfaces[]` ∈ {`auth`, `secrets`, `money`, `billing`,
+`personal_data`, `migration`, `data_loss`, `public_api`, `external_effect`, `concurrency`, `durability`,
+`security_boundary`, `supply_chain`, `agent_control_plane`} com `evidence[]` (`repo:path:…`, `requirement:R3`),
+**sem probabilidade × impacto** (BMAD TEA avisa que o 1–9 é ilustrativo; número subjetivo multiplicado não
+vira objetividade). Cada superfície tem política: `auth` → revisão de segurança + eval negativo de
+autenticação; `billing` → integridade econômica + eval de idempotência; `migration` → prova de rollback +
+portão de compatibilidade. **Runtime só escala risco, nunca reduz em silêncio**: diff que toca superfície não
+prevista grava `risk_escalated{from, to, because}` e o scheduler acrescenta os portões e revisores da nova
+classe — o Checker escolhido no plano é reconsiderado depois do `implement`. O campo `risk` entra no
+`task-contract.schema.json` na **primeira story de schema da v0.3** (é a única emenda de forma que vale
+antecipar: adicioná-lo depois migra todos os consumidores); o slice 1 não toca schema. (14) **Resumo de
+suposições como projeção da aprovação** (addyosmani "assumptions I'm making", sem arquivo novo): derivado de
+`unknowns[]`, `decision{default_assumed}` e `research_refs[]`, o `ade approve` imprime `✓ descoberto no repo
+| ≈ default assumido | ? precisa do operador` por item; e a pergunta ao operador, só para `product_choice`
+que muda o contrato, sai no formato `interview-me` reduzido — **uma por vez**, com `HIPÓTESE ATUAL`, `POR
+QUÊ` (evidência) e `CONSEQUÊNCIA` de cada opção. Não entram: confiança mínima de 95 %, mínimo de perguntas,
+aprovação por fase — o teto de 5 e a recusa por discovery continuam. (15) **Rastreabilidade derivada**, não
+matriz mantida à mão (TEA `AC → test`): `ade report --trace` deriva `R1 → S1 → E1 … R3 → S3 → ausente` do
+contrato e do journal, e requisito de superfície de risco sem eval verde é `parked`, nunca aprovado. (16)
+**Ferramentas limitadas para o modelo** (SWE-agent ACI; o Tool Output Firewall passa a ser o segundo de três
+níveis — PREVENIR: a ferramenta só produz o que cabe; FILTRAR: firewall; DESCER: `raw_ref`): `ade code
+search | read | symbol | refs | path` e `ade artifact show` devolvem sempre `{summary, items[], next_cursor,
+raw_ref}`, e `cat` de arquivo inteiro dentro do contexto deixa de existir como caminho normal. (17) **Fatia
+de contexto por domínio** (BMAD `compile-epic-context`: 800–1500 tokens, sem copiar documento inteiro, sem
+detalhe de story, sem nada que o código já responde): artefato certificado `context/domain-<nome>@<digest>`
+derivado de Task Contract + IR + plano de conhecimento com `objetivo, garantias atuais, interfaces,
+restrições, decisões, riscos`, reaproveitado por todas as stories do domínio via o cache do item (6); nunca
+fonte de verdade, sempre regenerável. (18) **Schema universal de artefato** para tudo que o cache do item (6)
+guarda (IR, pesquisa, fatia de contexto, análise visual, relatório de contrato, saída de teste, screenshot,
+render de documento, sonda de rede): `{ref, kind, digest, producer, producer_version, input_digest,
+created_at, provenance[], confidence ∈ {deterministic, model, operator}}` — é a ponte entre motor e evidência
+e entra como schema publicado só quando houver dois consumidores (mesma regra do `visual-eval`).
+(19) **Matriz de capacidades por papel, em código** (a boa ideia de "modo" do Roo/Cline sem persona): Maker
+lê e escreve no workspace, sem rede; Checker lê, não escreve; Research tem rede e leitura mínima; Judge só
+provedor e evidência; `git commit`, PR, merge e efeito externo são **sempre do motor** — o `contain` do
+slice 1 é a primeira linha dessa tabela.
+
 ## 4. v0.4a e v0.4b — Skill Fabric, Frontend Quality Engine e painel (D4)
 
 A v0.4 é **dois slices** (`architecture.md` §11 E37; ver §9, resolvida 1): **v0.4a** entrega os dois
@@ -393,6 +445,27 @@ nova quando derivável: o que mudou, antes/depois, o código que importa, risco,
 discutíveis, estado das provas e "como provar em 2 minutos" — é a interface final da decisão humana. (5)
 Skill tem exatamente **uma fonte canônica** (`.agents/skills/<nome>`); `.claude/skills`, `.codex/…` são
 projeções efêmeras geradas pela ADE, nunca fontes; sem symlink (Windows e as três CLIs divergem).
+
+**Emenda 2026-09-18 (quarta revisão externa).** Entram na v0.4a: (6) **`DesignBrief` ganha caráter**
+(taste-skill: `DESIGN_VARIANCE`, `MOTION_INTENSITY`, `VISUAL_DENSITY`, 1–10): `character{variance, motion,
+density}` mais `audience`, `references[]`, `preserved_patterns[]`, `avoid_patterns[]` e `direction{name,
+signature, self_critique}`. **Sem baseline fixa** (o `8/6/4` do skill viraria o viés estético da ADE): os
+três valores são inferidos de produto, público, marca, UI existente, referências e `surface_mode`, e o brief
+registra de onde cada um veio. (7) **Recuperação local de design** (UI/UX Pro Max: catálogos de tipo de
+produto, estilo, paleta, tipografia, padrão de landing e regra de UX com BM25 local, zero chamada): entra
+como **candidatos** (`Top-K` de tokens, padrões e tipografia) para o Maker/juiz decidirem no contexto, nunca
+como gerador ("fintech → paleta #1234 → pronto" é outro template de slop). É experimento com A/B obrigatório
+antes de virar default: 20–30 tasks de UI em três braços (FQE atual · FQE + retrieval · FQE + retrieval +
+caráter), medindo nota do juiz, rodadas de rework, preferência humana, tokens, wall-time e regressão de
+acessibilidade; "BM25 altamente preciso" é afirmação do README do projeto, não prova para o nosso caso.
+(8) **Verificador de contrato de API** como classe de `Verifier` opcional (`kind: api_contract`; backend
+Specmatic ou a ferramenta que o projeto já usa, nunca `npx specmatic-mcp` automático — cadeia de suprimento
+controlada): habilitado só quando o discovery acha `openapi.yaml`/AsyncAPI/GraphQL/gRPC; requisito
+`"consumidores antigos continuam compatíveis"` ganha `proof: backward_compatibility` que o portão executa;
+projeto sem API pública paga zero. Generaliza a família: `Verifier ∈ {script, test, schema, api_contract,
+static_analysis, browser, visual_judge, model_judge, human_decision}`, o mesmo motor para documento
+(`schema + render + human`), frontend (`browser + visual_judge`), API (`api_contract + test`) e rede (`probe +
+config_check + human_cutover`).
 
 **Não faz.** Lint anti-slop (voltou para o gate runner na v0.2), PTY embutido, steering intraturno,
 pesquisa em time, telemetria completa.
@@ -574,6 +647,8 @@ E37 **não** são recalculados agora: a medição da semana 1 do slice 1 replane
 | 3 | **Rotinas autônomas agendadas** (sem ADR na v1: `routine_budget`, `scope_paths` de rotina e política de PR só entram quando o item subir para o roadmap, E52) | ≥3 pedidos repetidos idênticos em 30 dias no journal (dead code, cobertura, regressão visual) |
 | 4 | **Ablação automática do harness (Caliper)** | harness doctor com ≥20 itens medidos e ≥2 itens com efeito negativo confirmado na coleta manual |
 | 4b | **Controle de pressão por provedor** (`ProviderRateController` determinístico: obedece `Retry-After`, reduz concorrência e recupera gradualmente; nunca decisão de modelo) | só quando N>1 entrar |
+| 4c | **Mapa semântico de domínio** sobre o IR (Understand-Anything: camada opcional `estrutura técnica → domínio de negócio`, fingerprint incremental — mudou 3 arquivos, reanalisa 3 — como artefato certificado, nunca 5–7 agentes relendo o projeto por missão) | repositório alvo com >200k linhas **ou** plano por épico citando <60 % dos módulos tocados |
+| 4d | **Arquiteto/editor em dois passos** (Aider `architect_coder`: reasoner forte esboça, editor barato aplica) | só como A/B contra Maker forte direto em `feature`/`subsystem` — tokens, tempo, rework, defeitos escapados, CI de primeira; vira default só se vencer |
 | 5 | **4º provider (OpenCode)** | necessidade de modelo fora das 3 famílias **e** aceitação explícita de chave de API (hoje é princípio) |
 | 6 | **OTel export** | `gen_ai.*` sair de status Development com tipo de token de cache **ou** Erick querer dashboard fora do painel |
 | 7 | **Memória por usuário** | `ade report` mostrando a mesma preferência re-perguntada ≥3× em missões diferentes |
@@ -622,3 +697,13 @@ cara, alarme falso de commit, prova verde sem código) o que nenhuma emenda prev
 a primeira story de documentação consolida `architecture.md`: as emendas E1–E69 aceitas viram texto corrido
 ("como o sistema funciona agora"), o debate vai para `docs/research/` e para o histórico do git, e o
 arquivo perde a arqueologia — a IA lê o estado, não a história de como se chegou nele.
+
+**Fontes canônicas (quarta revisão, 2026-09-18).** Depois de quatro revisões o desenho converge em cinco
+primitivas — Task Contract, journal durável, IR do repositório, cache de artefatos certificados e plano de
+conhecimento — e **todo o resto é projeção ou consumidor** (pack, painel, revisão, relatório, skills,
+pesquisa, design, handoff entre IAs). Ficam fora, verificado contra os repositórios atuais: BMAD e GSD como
+método e `.planning/{STATE,ROADMAP,REQUIREMENTS,CONTEXT}.md` (estado duplicado do journal/plano); Memory
+Bank do Cline (Markdown livre sem proveniência — o plano de conhecimento é a resposta); reabrir hooks/memória
+do ECC (já decidido em `architecture.md`, sem dado novo); SWE-agent como dependência (o próprio projeto
+aponta para o mini-swe-agent; fica a lição da ACI, item (16) da v0.3); substituir `rg` por grafo. Poucas
+fontes canônicas, muita informação derivada, IAs descartáveis.
