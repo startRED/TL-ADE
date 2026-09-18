@@ -22,6 +22,21 @@ import { resolveBinary } from '../runner/resolve-binary.js'
 import { reconcileAll } from '../step/reconcile.js'
 import { createStepRunner } from '../step/step.js'
 
+const LEASE_TTL_MS = 15_000
+
+/**
+ * @param {string} missionDir
+ * @returns {number | null}
+ */
+export function heartbeatAgeMs(missionDir) {
+  try {
+    return Date.now() - fs.statSync(path.join(missionDir, 'lease', 'heartbeat')).mtimeMs
+  } catch (err) {
+    if (err && /** @type {NodeJS.ErrnoException} */ (err).code === 'ENOENT') return null
+    throw err
+  }
+}
+
 /**
  * @param {{
  *   plan: string,
@@ -83,13 +98,15 @@ export async function runCommand(options, deps = {}) {
       assertStampCurrent(existingEvents)
     }
 
-    lease = await acquireLease({ missionDir, adoptDeadOwnerWithinTtl: true })
+    const priorHeartbeatAge = heartbeatAgeMs(missionDir)
+    lease = await acquireLease({ missionDir, adoptDeadOwnerWithinTtl: true, ttlMs: LEASE_TTL_MS })
     if (lease.adopted) {
       await journal.append({
         kind: 'lease_adopted',
         data: {
           previous_owner: lease.previousOwner,
-          reason: 'owner_dead',
+          reason: priorHeartbeatAge !== null && priorHeartbeatAge > LEASE_TTL_MS ? 'heartbeat_expired' : 'owner_dead',
+          heartbeat_age_ms: priorHeartbeatAge === null ? null : Math.round(priorHeartbeatAge),
         },
       })
     }
