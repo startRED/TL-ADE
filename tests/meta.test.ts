@@ -8,7 +8,7 @@ const ROOT = fileURLToPath(new URL('../', import.meta.url))
 const CI_WORKFLOW_PATH = path.join(ROOT, '.github/workflows/ci.yml')
 
 const ROOT_ALLOWLIST = new Set([
-  // Versionados (18)
+  // Versionados (20)
   '.github',
   '.gitignore',
   '.oxlintrc.json',
@@ -19,9 +19,11 @@ const ROOT_ALLOWLIST = new Set([
   'PROMPT.md',
   'README.md',
   'docs',
+  'examples',
   'fixtures',
   'package.json',
   'package-lock.json',
+  'plans',
   'proto',
   'schemas',
   'scripts',

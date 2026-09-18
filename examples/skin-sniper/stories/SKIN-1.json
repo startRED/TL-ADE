@@ -1,0 +1,63 @@
+{
+  "format_version": 1,
+  "id": "SKIN-1",
+  "title": "TROQUE: Titulo da story do Skin Sniper",
+  "complexity": "bounded",
+  "task": "TROQUE: descreva em uma frase a mudança pequena que o Skin Sniper deve receber",
+  "guardrails": {
+    "scope_paths": [
+      "TROQUE-pasta-do-codigo/**",
+      "TROQUE-caminho-do-script-de-prova.mjs"
+    ],
+    "do_not_touch": [
+      ".ade/**",
+      "TROQUE-pasta-que-nao-deve-mexer/**"
+    ],
+    "autonomy": "safe"
+  },
+  "requirements": [
+    {
+      "id": "R1",
+      "ears": "WHEN check runs THE SYSTEM SHALL pass."
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "C1",
+      "given": "initial state",
+      "when": "maker executes change",
+      "then": "eval check passes",
+      "evals": ["E1"]
+    }
+  ],
+  "evals": [
+    {
+      "format_version": 1,
+      "kind": "test",
+      "cmd": ["node", "TROQUE-caminho-do-script-de-prova.mjs"],
+      "expect_exit": 0,
+      "timeout_s": 120,
+      "max_output_bytes": 65536,
+      "evidence": ["TROQUE-caminho-do-script-de-prova.mjs"],
+      "strictness": {
+        "mode": "must_fail_before"
+      },
+      "author": "operator"
+    }
+  ],
+  "skills": [],
+  "roles": {
+    "maker": {
+      "family": "claude",
+      "model_id": "claude-sonnet-5"
+    },
+    "checker_round": {
+      "family": "codex",
+      "model_id": "codex-1"
+    }
+  },
+  "budget": {
+    "max_model_calls": 3,
+    "max_rework_rounds": 1
+  }
+}

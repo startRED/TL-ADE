@@ -1,0 +1,66 @@
+{
+  "format_version": 1,
+  "id": "ADE-D1",
+  "title": "Campo attempt opcional no journal-event",
+  "complexity": "bounded",
+  "task": "Em schemas/journal-event.schema.json acrescente em properties o campo opcional \"attempt\": { \"type\": \"integer\", \"minimum\": 1 }; não altere required nem outros campos.",
+  "guardrails": {
+    "scope_paths": [
+      "schemas/journal-event.schema.json",
+      "plans/dogfood/check-attempt.mjs"
+    ],
+    "do_not_touch": [
+      ".ade/**",
+      "plans/**",
+      "src/**",
+      "tests/**",
+      "proto/**"
+    ],
+    "autonomy": "safe"
+  },
+  "requirements": [
+    {
+      "id": "R1",
+      "ears": "WHEN check runs THE SYSTEM SHALL pass."
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "C1",
+      "given": "initial state without attempt in schema",
+      "when": "maker adds optional attempt field",
+      "then": "eval check passes",
+      "evals": ["E1"]
+    }
+  ],
+  "evals": [
+    {
+      "format_version": 1,
+      "kind": "test",
+      "cmd": ["node", "plans/dogfood/check-attempt.mjs"],
+      "expect_exit": 0,
+      "timeout_s": 120,
+      "max_output_bytes": 65536,
+      "evidence": ["plans/dogfood/check-attempt.mjs"],
+      "strictness": {
+        "mode": "must_fail_before"
+      },
+      "author": "operator"
+    }
+  ],
+  "skills": [],
+  "roles": {
+    "maker": {
+      "family": "claude",
+      "model_id": "claude-sonnet-5"
+    },
+    "checker_round": {
+      "family": "codex",
+      "model_id": "codex-1"
+    }
+  },
+  "budget": {
+    "max_model_calls": 3,
+    "max_rework_rounds": 1
+  }
+}

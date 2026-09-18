@@ -1,0 +1,29 @@
+{
+  "format_version": 1,
+  "id": "template-plan",
+  "mission_id": "meu-projeto-m1",
+  "immutable_digest": "0123456789abcdef",
+  "authorization": {
+    "autonomy": "safe",
+    "permitted_effects": [],
+    "eligible_skills": []
+  },
+  "phases": [
+    {
+      "epics": [
+        {
+          "stories": ["TEMPLATE-1"]
+        }
+      ]
+    }
+  ],
+  "mission_budget": {
+    "max_usd": 2,
+    "max_wall_clock_seconds": 3600,
+    "max_parked_units": 1
+  },
+  "budget": {
+    "max_model_calls": 3,
+    "max_rework_rounds": 1
+  }
+}
