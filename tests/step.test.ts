@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { digest16 } from '../src/journal/canonical.js'
+import { AdeError } from '../src/journal/errors.js'
 import { openJournal, readJournal } from '../src/journal/journal.js'
 import { createStepRunner } from '../src/step/step.js'
 import { maybeFault } from '../src/step/fault.js'
@@ -397,5 +398,83 @@ describe('step queue by unit', () => {
 describe('fault points', () => {
   test('maybeFault_rejects_unknown_fault_points', () => {
     expect(() => maybeFault('depois', {})).toThrow(TypeError)
+  })
+})
+
+describe('step session_ref', () => {
+  // CA3: session_ref que não é string não vazia nem null lança AdeError('invalid_session_ref', ...)
+  // antes de qualquer append, e o journal continua vazio.
+  test('step_rejects_a_non_string_non_null_session_ref_before_writing_and_the_journal_stays_empty', async () => {
+    const missionDir = makeMissionDir()
+    const { step } = makeRunner(missionDir)
+
+    try {
+      await step(
+        { unit: 'u1', id: 'x1', effect_class: 'none', input: {}, session_ref: 42 as any },
+        async () => ({}),
+      )
+      expect.unreachable('deveria ter lançado AdeError para session_ref inválido')
+    } catch (err) {
+      expect(err).toBeInstanceOf(AdeError)
+      const adeErr = err as AdeError
+      expect(adeErr.code).toBe('invalid_session_ref')
+      expect(adeErr.message).toBe('session_ref inválido')
+      expect(adeErr.exitCode).toBe(2)
+    }
+
+    const events = readEvents(missionDir)
+    expect(events).toEqual([])
+  })
+
+  // Borda: string vazia segue a mesma regra ('string não vazia ou null'), então também é rejeitada
+  // sem gravar nada no journal.
+  test('step_rejects_an_empty_string_session_ref_before_writing', async () => {
+    const missionDir = makeMissionDir()
+    const { step } = makeRunner(missionDir)
+
+    try {
+      await step({ unit: 'u1', id: 'x2', effect_class: 'none', input: {}, session_ref: '' }, async () => ({}))
+      expect.unreachable('deveria ter lançado AdeError para session_ref vazio')
+    } catch (err) {
+      expect(err).toBeInstanceOf(AdeError)
+      expect((err as AdeError).code).toBe('invalid_session_ref')
+    }
+
+    const events = readEvents(missionDir)
+    expect(events).toEqual([])
+  })
+
+  // CA3: step() sem session_ref grava session_ref null no step_intent.
+  test('step_intent_records_session_ref_null_when_not_provided', async () => {
+    const missionDir = makeMissionDir()
+    const { step } = makeRunner(missionDir)
+
+    await step({ unit: 'u1', id: 'x3', effect_class: 'none', input: {} }, async () => ({}))
+
+    const events = readEvents(missionDir)
+    const intent = events.find((ev) => ev.kind === 'step_intent')
+    expect(intent).toBeTruthy()
+    expect(intent!.session_ref).toBeNull()
+  })
+
+  // AC3: session_ref string válida é gravada tal como recebida no step_intent.
+  test('step_intent_records_the_provided_session_ref_string', async () => {
+    const missionDir = makeMissionDir()
+    const { step } = makeRunner(missionDir)
+
+    await step(
+      {
+        unit: 'u1',
+        id: 'x4',
+        effect_class: 'model_call',
+        input: {},
+        session_ref: '11111111-2222-4333-8444-555555555555',
+      },
+      async () => ({ ok: true }),
+    )
+
+    const events = readEvents(missionDir)
+    const intent = events.find((ev) => ev.kind === 'step_intent')
+    expect(intent!.session_ref).toBe('11111111-2222-4333-8444-555555555555')
   })
 })
