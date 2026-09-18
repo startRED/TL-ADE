@@ -124,6 +124,16 @@ rework é automático até o teto, e o PR chega com evidência. É o primeiro lo
 | **Should** | Checker de portão (`claude --permission-mode plan`), gates canônicos no CLOSE, `ade decide <unit> --option retry\|skip\|discard\|pick\|accept_unproven --value <id>` (sem `operator_cancel`: na v1 Ctrl-C para o lote — lease + reconciliação — e `ade discard` trata a story depois, E62), `ade discard`, `ade show <ref> --open` |
 | **Experimental** | `claude ultrareview` como portão opcional pré-merge |
 
+**Emenda 2026-09-18 (revisão externa do slice, ver `docs/plans/slice-1.md` §"Emendas de 2026-09-18").**
+Entram no **Must** da v0.2: (1) `unit-result` e `review-result` ganham `contract_revision`, `input_revision`
+(commit/versão dos insumos), `evidence[{criterion, result_ref, input_digest}]` e `requested_action`
+(`verify|rework|decide`); o motor recusa ou revalida resultado produzido para revisão de contrato ou insumo
+obsoleto; o executor reporta `ready_for_verification`, nunca se aprova. (2) Custo por **entrega aceita**
+(tentativas + revisão + rework + intervenção) como métrica do `report.md`, a partir dos tokens reportados
+(S19), não preço teórico. (3) Toda regra cara do harness (segundo planejador, crítica de plano, rodadas de
+revisão) tem no `ade-config` a justificativa e a condição de revisão; regra que não encontra defeito em N
+missões é candidata a sair (Managed Agents: proteção de um modelo vira peso morto no seguinte).
+
 **Aceite.** (1) 93/93 em Windows e Linux, incluindo o caso hoje skipado (o shim `.cmd` vira `node shim.js`).
 (2) Suíte de paridade ≤6 min com 4 workers [hipotese] — 18 min em série é inutilizável no ciclo.
 (3) Dois alvos normativos e separados: `parity` (zero credencial, CI Windows + Linux, `ade doctor --offline`)
@@ -212,6 +222,21 @@ dela mesma a partir de uma frase.
 aprovação 180 · CLI 100 ≈ **1.900 TS** + ~1.200 de teste. **11 dias-dev · ~85 h-agente.** Escada: **D3**.
 
 ---
+
+**Emenda 2026-09-18 (revisão externa do slice).** Entram no escopo da v0.3, junto com o Intent Compiler:
+(1) **caminhos por risco**, independentes da classe de complexidade: `risk ∈ {light, normal, critical}` no
+Task Contract, com três configurações do mesmo motor (light: contrato mínimo, execução, portões pertinentes,
+revisão por amostragem; normal: plano curto, testes, revisão focada; critical: análise de risco, evidência
+independente, teste de falha e recuperação, autorização para efeito sensível) — uma linha em autorização é
+`critical` mesmo sendo `trivial`. (2) **Planejamento progressivo** em três níveis: direção (objetivos e
+limites), próxima entrega (recorte funcional com critério de sucesso) e trabalho disponível (contratos
+executáveis); o resto fica como intenção, não como stories prematuras. (3) O briefing inicial separa o que o
+sistema descobre no projeto, o que pesquisa fora (com fonte e data) e o que é decisão de produto (hipótese
+reversível ou pergunta ao operador). (4) Painel/`ade status` mostra critérios verificados de N, incógnitas
+críticas abertas, bloqueio e próxima ação, nunca porcentagem de tempo. (5) Verificadores por domínio com o
+mesmo núcleo (relatório: rastreabilidade das afirmações; documento: inspeção da renderização; design:
+briefing e acessibilidade), e dependência humana explícita quando a etapa é fabricação, inspeção ou decisão
+profissional.
 
 ## 4. v0.4a e v0.4b — Skill Fabric, Frontend Quality Engine e painel (D4)
 
