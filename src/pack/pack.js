@@ -10,7 +10,7 @@ import { redactText } from './redact.js'
  * Ordem fixa das seções do Context Pack.
  * @type {readonly string[]}
  */
-export const SECTION_ORDER = Object.freeze(['contract', 'policy', 'story', 'evals', 'task'])
+export const SECTION_ORDER = Object.freeze(['contract', 'policy', 'story'])
 
 /**
  * Tetos por seção, em bytes UTF-8.
@@ -20,8 +20,6 @@ export const SECTION_CAPS = Object.freeze({
   contract: 32000,
   policy: 5550,
   story: 24000,
-  evals: 16000,
-  task: 8000,
 })
 
 const DEFAULT_MAX_PACK_BYTES = 120000
@@ -72,13 +70,16 @@ function validateOptions(options) {
   if (!isPlainObject(options)) {
     throw invalidInput('opções inválidas: objeto ausente')
   }
-  const { missionDir, stepId, limits } = options
+  const { missionDir, stepId, limits, savedBytes } = options
   if (typeof missionDir !== 'string' || missionDir === '' || !isExistingDirectory(missionDir)) {
     throw invalidInput('missionDir inválido')
   }
   // safeId preserva '.', então um stepId como '..' viraria segmento de caminho proibido.
   if (typeof stepId !== 'string' || stepId === '' || safeId(stepId).endsWith('.')) {
     throw invalidInput('stepId inválido')
+  }
+  if (savedBytes !== undefined && (typeof savedBytes !== 'number' || !Number.isSafeInteger(savedBytes) || savedBytes < 0)) {
+    throw invalidInput('savedBytes inválido')
   }
   if (limits === undefined) {
     return
@@ -211,11 +212,12 @@ function truncateToByteLimit(body, maxBytes) {
  * @returns {string}
  */
 function capSection(name, body, cap, ref) {
-  if (Buffer.byteLength(body) <= cap) {
+  const bytes = Buffer.byteLength(body)
+  if (bytes <= cap) {
     return body
   }
-  if (name === 'contract' || name === 'task') {
-    throw new AdeError('pack_budget_exceeded', `seção ${name} excede ${cap} bytes`, 2)
+  if (name === 'contract') {
+    throw new AdeError('pack_budget_exceeded', `seção ${name} tem ${bytes} bytes e excede o teto de ${cap} bytes`, 2)
   }
   const totalChars = body.length
   const pointer = `\n[... truncated, ${totalChars} chars total; full content on demand at ${ref}]`
@@ -244,19 +246,20 @@ function writeFileAtomic(filePath, text) {
  * @typedef {Object} CompilePackOptions
  * @property {string} missionDir
  * @property {string} stepId
- * @property {{contract: string, policy: string, story: string, evals: string, task: string}} sections
+ * @property {{contract: string, policy: string, story: string}} sections
  * @property {{max_pack_bytes?: number, section_bytes?: Partial<Record<string, number>>}} [limits]
+ * @property {number} [savedBytes]
  */
 
 /**
  * @typedef {Object} CompilePackResult
  * @property {string} pack_path
  * @property {string} manifest_path
- * @property {{sections: Array<{section: string, ref: string, bytes: number, digest: string}>, bytes: number, digest: string, redactions: Array<{pattern: string, count: number}>}} manifest
+ * @property {{sections: Array<{section: string, ref: string, bytes: number, digest: string}>, bytes: number, digest: string, redactions: Array<{pattern: string, count: number}>, dedup: {contract_bytes: number, saved_bytes: number}}} manifest
  */
 
 /**
- * Monta o Context Pack a partir das cinco seções, redige segredos uma única vez,
+ * Monta o Context Pack a partir das três seções, redige segredos uma única vez,
  * aplica os tetos por seção e grava pack.md, manifest.json e os corpos íntegros como artefatos.
  *
  * @param {CompilePackOptions} options
@@ -264,7 +267,7 @@ function writeFileAtomic(filePath, text) {
  */
 export function compilePack(options) {
   validateOptions(options)
-  const { missionDir, stepId, sections, limits } = options
+  const { missionDir, stepId, sections, limits, savedBytes } = options
   validateSections(sections)
 
   const id = safeId(stepId)
@@ -298,6 +301,10 @@ export function compilePack(options) {
     bytes: totalBytes,
     digest: digest16(finalPackText),
     redactions,
+    dedup: {
+      contract_bytes: Buffer.byteLength(finalBodies.contract),
+      saved_bytes: savedBytes ?? 0,
+    },
   }
 
   const packDir = path.join(missionDir, 'artifacts', 'packs', id)

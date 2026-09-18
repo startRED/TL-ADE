@@ -38,8 +38,8 @@ describe('pack truncation and redaction parity', () => {
   // nunca produzir bytes UTF-8 inválidos, e o total final nunca passa do teto da seção.
   test('excerpt_is_bounded', () => {
     const missionDir = makeMissionDir('ade-pack-parity-')
-    // 'é' ocupa 2 bytes em UTF-8; 9000 caracteres = 18000 bytes, acima do teto de evals (16000).
-    const evals = 'é'.repeat(9000)
+    // 'é' ocupa 2 bytes em UTF-8; 15000 caracteres = 30000 bytes, acima do teto de story (24000).
+    const story = 'é'.repeat(15000)
 
     const result = compilePack({
       missionDir,
@@ -47,29 +47,27 @@ describe('pack truncation and redaction parity', () => {
       sections: {
         contract: 'C',
         policy: 'P',
-        story: 'S',
-        evals,
-        task: 'T',
+        story,
       },
     })
 
     const packText = readFileSync(result.pack_path, 'utf8')
-    const evalsBody = extractSectionBody(packText, 'evals')
+    const storyBody = extractSectionBody(packText, 'story')
 
-    expect(Buffer.byteLength(evalsBody)).toBeLessThanOrEqual(SECTION_CAPS.evals)
+    expect(Buffer.byteLength(storyBody)).toBeLessThanOrEqual(SECTION_CAPS.story)
 
     // O ponteiro começa com quebra de linha (literal das decisões), separando-o do prefixo cortado.
-    const pointer = '\n[... truncated, 9000 chars total; full content on demand at art:packs/s1-r1/evals]'
-    expect(evalsBody.endsWith(pointer)).toBe(true)
+    const pointer = '\n[... truncated, 15000 chars total; full content on demand at art:packs/s1-r1/story]'
+    expect(storyBody.endsWith(pointer)).toBe(true)
 
-    const prefix = evalsBody.slice(0, evalsBody.length - pointer.length)
+    const prefix = storyBody.slice(0, storyBody.length - pointer.length)
     // O prefixo cortado só pode conter caracteres 'é' inteiros: nenhum byte solto de um
     // caractere multibyte partido ao meio, e nenhum caractere de substituição (U+FFFD).
     expect(prefix).toMatch(/^é*$/)
     expect(Buffer.from(prefix, 'utf8').toString('utf8')).toBe(prefix)
 
-    const evalsManifestEntry = result.manifest.sections.find((s) => s.section === 'evals')
-    expect(evalsManifestEntry?.bytes).toBeLessThanOrEqual(SECTION_CAPS.evals)
+    const storyManifestEntry = result.manifest.sections.find((s) => s.section === 'story')
+    expect(storyManifestEntry?.bytes).toBeLessThanOrEqual(SECTION_CAPS.story)
   })
 
   // O pack reusa exatamente os mesmos SECRET_PATTERNS do containment (src/contain/secrets.js):
@@ -87,9 +85,7 @@ describe('pack truncation and redaction parity', () => {
       sections: {
         contract: 'C',
         policy: 'P',
-        story: 'S',
-        evals: gateOutput,
-        task: 'T',
+        story: gateOutput,
       },
     })
 
@@ -97,10 +93,10 @@ describe('pack truncation and redaction parity', () => {
     expect(packText).toContain('[REDACTED:github_token]')
     expect(packText).not.toContain(token)
 
-    const rawLogPath = path.join(missionDir, 'artifacts', 'packs', 's1-r1', 'evals.log')
-    const rawEvals = readFileSync(rawLogPath, 'utf8')
-    expect(rawEvals).toContain('[REDACTED:github_token]')
-    expect(rawEvals).not.toContain(token)
+    const rawLogPath = path.join(missionDir, 'artifacts', 'packs', 's1-r1', 'story.log')
+    const rawStory = readFileSync(rawLogPath, 'utf8')
+    expect(rawStory).toContain('[REDACTED:github_token]')
+    expect(rawStory).not.toContain(token)
 
     expect(result.manifest.redactions).toEqual([{ pattern: 'github_token', count: 1 }])
   })

@@ -6,6 +6,7 @@ import { readJournal } from './journal/journal.js'
 import { assertCallBudget, checkUsdCap, observedUsd, reserveCalls } from './engine/budget.js'
 import { maybeEngineFault } from './engine/faults.js'
 import { findStoryCommitted, findStoryStarted } from './engine/resume.js'
+import { dedupStorySection } from './pack/dedup.js'
 
 /**
  * Famílias de modelos com canário aprovado no Slice 1.
@@ -259,16 +260,16 @@ export async function runStory(deps, input) {
   }
 
   // Compila pack e anexa pack_manifest
+  const dedup = dedupStorySection(story)
   const packResult = deps.compilePack({
     missionDir,
     stepId: `${storyId}:r1:maker`,
     sections: {
       contract: typeof contract === 'string' ? contract : JSON.stringify(contract, null, 2),
       policy: JSON.stringify(loaded.plan.authorization ?? {}, null, 2),
-      story: JSON.stringify(story, null, 2),
-      evals: JSON.stringify(story.evals ?? contract.evals ?? [], null, 2),
-      task: String(contract.task ?? ''),
+      story: dedup.text,
     },
+    savedBytes: dedup.saved_bytes,
   })
 
   await deps.journal.append({
