@@ -6,6 +6,9 @@
   "engines": {
     "node": ">=22"
   },
+  "bin": {
+    "ade": "bin/ade.js"
+  },
   "scripts": {
     "lint": "node node_modules/oxlint/bin/oxlint src tests",
     "test": "node node_modules/vitest/vitest.mjs run",
