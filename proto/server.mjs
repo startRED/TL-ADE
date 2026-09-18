@@ -551,6 +551,13 @@ async function makerCommitted(dir, base) {
   const r = await run('git', ['diff', '--name-only', base, 'HEAD', '--', '.', ...own], { cwd: dir })
   return r.code === 0 && r.out.trim().length > 0
 }
+// diff da parte: árvore contra o HEAD; só quando quem escreve commitou por conta própria o diff volta ao commit-base da parte
+// (um commit do operador no meio da parte, fora da pasta do motor — docs, por exemplo — não pode aparecer como trabalho de quem escreve)
+async function storyDiff(st) {
+  const dir = state.project.dir
+  if (st.base && !st.maker_committed && (await makerCommitted(dir, st.base))) { st.maker_committed = true; log('engine', 'quem escreve fez commit por conta própria, contra a instrução; o trabalho continua visível porque o diff da parte é contado desde o começo dela. O commit dele fica; o motor não commita de novo o que já entrou', 'warn') }
+  return gitDiff(dir, st.maker_committed ? st.base : null)
+}
 async function gitDiff(dir, base = null) {
   const a = await run('git', ['add', '-N', '--', '.'], { cwd: dir }) // ignorados pelo .gitignore ficam fora sozinhos; pathspec de exclusão aqui faz o git reclamar
   // a pasta do próprio motor nunca faz parte do diff de uma missão (dogfood: a demo vive dentro do repositório que ela desenvolve)
@@ -1490,7 +1497,7 @@ const IS_TEST_FILE = (f, st) => f === st.test_file || /(^|\/)(tests?|__tests__|s
 // devolve 'red' (provas novas falham sem o código novo), 'green' (passam sem ele: não provam nada) ou 'skip' (não deu para conferir)
 async function redWithoutCode(st, diff, fresh) {
   const dir = state.project.dir
-  if (st.base && (await gitHead(dir)) !== st.base) return 'skip' // quem escreve commitou: não há o que guardar de lado
+  if (st.maker_committed) return 'skip' // quem escreve commitou: não há o que guardar de lado
   const code = [...new Set([...diff.matchAll(/^diff --git a\/(\S+)/gm)].map((x) => x[1]))].filter((f) => !IS_TEST_FILE(f, st))
   if (!code.length) return 'skip'
   await run('git', ['reset', '-q'], { cwd: dir }) // tira a "intenção de adicionar" do índice (vem do gitDiff); com ela o stash recusa ("not uptodate")
@@ -1541,7 +1548,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
       // Sem prova vermelha. (a) quem escreve já implementou junto com a prova (comum no Gemini): provas novas verdes + código alterado → segue para verificação e revisão;
       // (b) não escreveu prova que falha: repete a fase de prova uma vez com o motivo; (c) parte sem comportamento testável (config, docs): implementa sem prova vermelha e o revisor julga.
       const fresh = generic ? [] : after.tests.filter((t) => !before.has(t.name))
-      const changed = (await gitDiff(state.project.dir, st.base)).trim()
+      const changed = (await storyDiff(st)).trim()
       if (fresh.length && after.ok && changed) {
         const red = await redWithoutCode(st, changed, fresh)
         if (red === 'green' && !st.red_retry) { st.red_retry = true; setStep('red', 'failed'); log('engine', 'quem escreve implementou junto com a prova, e as provas novas passam MESMO sem o código novo (guardei o código de lado e rodei a suíte): não provam o comportamento. Repetindo a fase de prova uma vez', 'warn'); return runStory(st, 1, null, null) }
@@ -1558,8 +1565,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   if (escalate) log('engine', `rodada ${round}: ${st.fix_of ? 'parte de correção' : 'problema grave persiste'}; maker sobe para ${who.model} (esforço ${who.effort}, degrau ${who.step + 1} de ${makerLadder().length})`)
   if (st.early_impl && round === 1) setStep('fix', 'skipped', { round })
   else { setStep('fix', 'running', { round }); const rf = await makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 }); remember(st, rf); await refreshProject(); setStep('fix', 'done', { round }) }
-  setStep('tests', 'running'); st.tests_after = await runTests(state.project); st.diff = await gitDiff(state.project.dir, st.base)
-  { if (st.base && !st.maker_committed && (await makerCommitted(state.project.dir, st.base))) { st.maker_committed = true; log('engine', 'quem escreve fez commit por conta própria, contra a instrução; o trabalho continua visível porque o diff da parte é contado desde o começo dela. O commit dele fica; o motor não commita de novo o que já entrou', 'warn') } }
+  setStep('tests', 'running'); st.tests_after = await runTests(state.project); st.diff = await storyDiff(st)
   // prova ANTIGA (verde antes da parte) que só falha por tempo limite é instabilidade, não defeito de quem escreve: repete a suíte uma vez antes de gastar rodada
   // (épico 7, parte 6: três rodadas pagas atrás de uma prova da parte 3 que estourava 5 s; quem escreve chegou a mexer no vitest.config fora do escopo para esconder)
   if (!st.tests_after.ok && !st.flaky_retry && m.tests_before?.tests?.length) {
