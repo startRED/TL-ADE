@@ -204,6 +204,33 @@ export function buildEvalRecord(base) {
 }
 
 /**
+ * Constrói o input durável de step para runEval.
+ *
+ * @param {{ eval: EvalDef, phase: string, tree: string, scenario?: { id: string, evals: Array<{ kind?: string, strictness?: { mode?: string } }> } | null }} options
+ * @returns {Record<string, any>}
+ */
+export function buildStepInput({ eval: evalDef, phase, tree, scenario }) {
+  return {
+    argv: evalDef.argv,
+    phase,
+    tree,
+    expect_exit: evalDef.expect_exit,
+    timeout_s: evalDef.timeout_s,
+    max_output_bytes: evalDef.max_output_bytes,
+    strictness_mode: evalDef.strictness.mode,
+    scenario: scenario
+      ? {
+          id: scenario.id,
+          evals: scenario.evals.map(({ kind, strictness }) => ({
+            kind,
+            mode: strictness?.mode,
+          })),
+        }
+      : null,
+  }
+}
+
+/**
  * @typedef {Object} CreateEvalRunnerOptions
  * @property {(spec: any, effectFn: () => Promise<any>) => Promise<any>} step
  * @property {string} missionDir
@@ -266,12 +293,6 @@ export function createEvalRunner({ step, missionDir, gitPort }) {
         warnings: [warning],
       })
 
-    // A regra de companheiro vale para o cenário inteiro e vem antes de decidir ou executar
-    const scenarioCheck = validateScenarioStrictness(effectiveScenario(evalDef, scenario))
-    if (!scenarioCheck.ok) {
-      return refuse(/** @type {string} */ (scenarioCheck.code))
-    }
-
     // Fase green não existe nesta fatia; mutate exige o Checker que comenta a guarda, que também
     // não existe: recusa registrada, sem processo
     if (phase === 'green') {
@@ -289,22 +310,60 @@ export function createEvalRunner({ step, missionDir, gitPort }) {
     const safeEvalId = safeId(evalDef.id)
     const stepId = `eval:${safeEvalId}:${phase}:${tree}`
 
+    if (strictnessMode === 'additive') {
+      let verdict = 'additive_warning'
+      let warnings = ['additive: mudança puramente aditiva, sem prova vermelha']
+
+      const scenarioToCheck = effectiveScenario(evalDef, scenario)
+      if (validateScenarioStrictness(scenarioToCheck).ok === false) {
+        verdict = 'refused'
+        warnings = ['additive sem eval negative ou mutate no mesmo cenário']
+      }
+
+      const record = buildEvalRecord({
+        eval_id: evalDef.id,
+        phase,
+        tree,
+        argv: evalDef.argv,
+        expect_exit: evalDef.expect_exit,
+        strictness_mode: strictnessMode,
+        verdict,
+        red_reason: null,
+        warnings,
+        exit_code: null,
+        num_total_tests: null,
+        raw_ref: null,
+        duration_ms: 0,
+      })
+
+      const stepOutput = await step(
+        {
+          unit,
+          id: stepId,
+          effect_class: 'eval_run',
+          input: buildStepInput({ eval: evalDef, phase, tree, scenario }),
+          worktree: gitPort.worktreeDir,
+        },
+        async () => record
+      )
+
+      return buildEvalRecord(stepOutput.result)
+    }
+
+    // Para outros modos (ex: must_fail_before), um cenário com additive sem companheiro recusa antes de executar
+    if (scenario) {
+      const scenarioCheck = validateScenarioStrictness(effectiveScenario(evalDef, scenario))
+      if (!scenarioCheck.ok) {
+        return refuse(/** @type {string} */ (scenarioCheck.code))
+      }
+    }
+
     const stepOutput = await step(
       {
         unit,
         id: stepId,
         effect_class: 'eval_run',
-        input: {
-          argv: evalDef.argv,
-          // kind fixa o teto do extrato: mudar kind não pode servir extrato com o teto antigo
-          kind: evalDef.kind,
-          phase,
-          tree,
-          expect_exit: evalDef.expect_exit,
-          timeout_s: evalDef.timeout_s,
-          max_output_bytes: evalDef.max_output_bytes,
-          strictness_mode: strictnessMode,
-        },
+        input: buildStepInput({ eval: evalDef, phase, tree, scenario }),
         worktree: gitPort.worktreeDir,
       },
       async () => {
@@ -337,11 +396,7 @@ export function createEvalRunner({ step, missionDir, gitPort }) {
         /** @type {string[]} */
         const warnings = []
 
-        if (strictnessMode === 'additive') {
-          // additive com companheiro no cenário: o vermelho é tentado e registrado, mas não exigido
-          verdict = 'additive_warning'
-          warnings.push('additive_red_not_required')
-        } else if (red_reason === null && contained.exitCode === evalDef.expect_exit) {
+        if (red_reason === null && contained.exitCode === evalDef.expect_exit) {
           verdict = 'eval_born_green'
         } else if (red_reason === 'assertion') {
           verdict = 'red_valid'
