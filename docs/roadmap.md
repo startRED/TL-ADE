@@ -154,6 +154,29 @@ cada doc de `docs/` ganha front-matter `verified: <commit>`, e `ade doctor --doc
 cujo `verified` é anterior à última mudança dos caminhos que ele cita). É a resposta ao README que dizia
 "Nenhum código ainda" com o motor já escrito.
 
+**Emenda 2026-09-18 (terceira revisão externa: Scrapling, Dify, OpenSEO, OpenShorts, Presenton).** Entram na
+v0.2: (9) **Preflight por story**, determinístico e sem modelo, antes da primeira chamada paga: teste-alvo
+existe, gerenciador de pacotes e dependências presentes, build relevante passa, worktree limpo, insumo
+válido, credencial necessária declarada, disco e dependência externa alcançável; falha para a story em
+`awaiting_operator{reason:'preflight'}` com a lista e o número de chamadas caras evitadas no journal. É
+diferente do `ade doctor` (a máquina funciona?) — pergunta se **esta** story está pronta. (10) `evidence`
+em `review-result.action_items[]` deixa de ser texto livre e vira `evidence_refs[]` tipado
+(`eval:`, `gate:`, `artifact:`, `source:`, `file:<caminho>#L<a>-L<b>`, `trace:`); prosa só em `notes`
+(≤500 bytes). Junto com `claims[] → evidence_refs[]` do item (6), fecha o princípio: prosa explica, nunca
+prova. (11) **Verification Plan** derivado (o "sprint contract" de `architecture.md` A14 vira isto e não
+ganha outro nome): a partir do Task Contract e do estado do repositório, o Checker assina *como* cada
+critério será provado (`AC1 → teste X`, `AC2 → cenário de browser Y`, `AC3 → validação de schema`) antes do
+`implement`; muda o como, nunca o que significa sucesso — o contrato continua a única verdade, o plano de
+verificação é artefato do journal. (12) **Mudança de plano de controle é classe própria**: diff que toca
+`AGENTS*`, skills, `schemas/`, gates, framework de evals, configuração de adapter, roteamento de modelo,
+CI, `contain` ou journal muda como todas as mudanças futuras serão julgadas → sem merge automático, revisão
+reforçada obrigatória, gravado como `control_plane_change` no journal. (13) **Criticidade por passo**:
+todo passo declara `required | enhancement`; `required` falho para ou estaciona a story, `enhancement`
+falho degrada com evidência gravada e segue (hoje isso existe caso a caso — vira regra do motor). (14)
+**Projeção documental**: `docs/generated/` (`current-status.md`, `capabilities.md`, `architecture-map.md`,
+`quality-report.md`) é gerado por `ade docs sync` a partir de journal, evals e schemas, nunca editado à mão;
+o README aponta para lá. Junto com o item (8), impede a classe de erro "lembrar de atualizar 14 lugares".
+
 **Aceite.** (1) 93/93 em Windows e Linux, incluindo o caso hoje skipado (o shim `.cmd` vira `node shim.js`).
 (2) Suíte de paridade ≤6 min com 4 workers [hipotese] — 18 min em série é inutilizável no ciclo.
 (3) Dois alvos normativos e separados: `parity` (zero credencial, CI Windows + Linux, `ade doctor --offline`)
@@ -260,7 +283,39 @@ profissional. Para isso o Task Contract troca duas abstrações, sem mudar o mot
 `workspace` (git para código; pasta versionada com snapshot por rodada para docs, design e mídia) e `eval`
 vira uma de três classes — `script` (determinístico, exit code), `judge` (rubrica com limiar duro, few-shot,
 outra família, multimodal quando preciso; é o que o FQE já faz) ou `decide` (humano, com opções fechadas e
-prazo) — de modo que um roteiro, uma thumbnail e um módulo passam pela mesma máquina.
+prazo) — de modo que um roteiro, uma thumbnail e um módulo passam pela mesma máquina. Nome das abstrações
+quando isso for código: `GitPort` vira uma implementação de `WorkspacePort` (git, sistema de arquivos,
+documento, design, remoto) e `eval` vira `Verifier` com classes `script | schema | judge | human | external`.
+
+**Emenda 2026-09-18 (terceira revisão externa).** Entram na v0.3: (6) **Cache de artefatos certificados,
+endereçado por conteúdo** (Presenton/Scrapling/OpenShorts: pague para entender uma vez, consuma a
+representação depois): chave = `producer + producer_version + input_digest + config_digest + schema_version
+(+ model_id quando o produtor é modelo)`, guardado em `.ade/cache/artifacts/<producer>/<chave>.json`, com
+`raw_ref` para o bruto; pesquisa, análise visual, classificação de diff grande e mapa de dependências são os
+primeiros produtores; entrada com mesma chave = zero chamada nova, e o journal grava `cache_hit` com a chave.
+Não é cache de prompt: é trabalho cognitivo concluído. (7) **IR do repositório** como primeiro artefato
+certificado por commit (`repo-ir-<digest>.json`: módulos, símbolos, donos, dependências, contratos,
+testes por módulo, pontos de entrada), produzido por análise determinística sempre que der e por modelo
+barato só no que não é dedutível; Planner, Maker e Checker recebem a **fatia** relevante do IR, não os
+arquivos, e `ade show repo:symbol:<nome>` faz o drill-down. O batedor + `codeMap` da demo (`proto/`) é o
+protótipo disso e já reduziu o custo do plano por épico. (8) **Amostradores de contexto** no compilador do
+pack, um por tipo de insumo, sempre com `raw_ref` (nunca destruir a evidência): log → clusters de erro +
+head/tail + anomalias; diff grande → interfaces + hotspots + arquivos de risco; documentação → seções
+relevantes; CI → falhas + vizinhança causal; histórico → decisões e deltas; vídeo/imagem → quadros ou
+regiões representativas (OpenShorts decide layout com 12 quadros a 1024 px, não com o vídeo). Regra: não
+mandar o objeto inteiro quando uma representação menor preserva a informação daquela decisão, e medir
+isso com `cited`. (9) **Roteador de revisão por risco**, determinístico, a partir do diff: auth/segredos/
+rede → segurança; migração/schema/persistência → integridade de dados; cobrança/provedor pago →
+econômico; UI → FQE/a11y; motor/concorrência → durabilidade; plano de controle → item (12) da v0.2; nada
+disso → só o Checker geral. Story comum custa um Checker; mudança crítica roda os eixos em paralelo.
+Contraditório (outro agente verifica o achado: `apply | apply_modified | reject`) só para achados P0/P1 ou
+contestados pelo Maker, nunca para todo comentário. (10) **Dono por escopo** (Dify: `AGENTS.md`
+hierárquico, sem copiar a hierarquia): tabela `scope → docs/reference/<dono>.md` (`src/journal/**` →
+`journal.md`, `src/adapters/**` → `adapters.md`…) que o compilador do pack usa para injetar só as regras
+dos caminhos tocados; o `AGENTS.md` raiz continua ≤8 KB e vira índice. (11) **Gravar e reproduzir** chamadas
+externas caras (Scrapling `development_mode`): primeira execução real vira fixture certificada; as rodadas
+seguintes reproduzem; o portão final da story, quando o contrato exige integração real, chama de novo — a
+CLI falsa e o gravador de transcript do slice 1 são o caso particular disto para `claude`/`codex`.
 
 ## 4. v0.4a e v0.4b — Skill Fabric, Frontend Quality Engine e painel (D4)
 
@@ -315,6 +370,30 @@ Juiz caro dominando o orçamento → o teto vale para o rework, não para o juiz
 **Pronto.** Jornadas 2 e 3 executadas (v0.4a); o painel da própria ADE construído pela ADE sob o FQE
 (v0.4b).
 
+**Emenda 2026-09-18 (terceira revisão externa).** Entram na v0.4a/b: (1) **Plano de conhecimento do
+projeto** (OpenSEO Project Memory, sem ser "memória automática do modelo"): `docs/knowledge/{project,
+domains,known-noise}/` com itens explícitos, verificáveis e com proveniência — `id`, `scope`, `kind`
+(`product_constraint | decision | preference | external_fact | invariant | learning`), `claim`, `source`
+(`operator:decision:<id>` | `research:artifact:<ref>` | `mission:<id>`), `verified_at`, `expires_at`,
+`confidence`; fato externo sempre com validade. **Não** guarda o que o repositório já responde (conteúdo de
+arquivo, exports atuais, versão do `package.json`, estado da branch): isso é do IR do repositório; o plano
+guarda intenção, decisões, restrições, preferências, aprendizados, fatos externos e invariantes não
+dedutíveis. A IA seguinte recebe `K0192 + claim + proveniência + validade`, não "o Planner disse que…".
+(2) **Roteador de aprendizado**: depois de cada missão, cada falha/achado/fricção é classificado
+mecanicamente e o modelo só sugere; o mecanismo de promoção decide (OpenSEO: achado de revisão é evidência,
+não regra) — bug único → correção + teste de regressão; regra determinística recorrente → gate/lint/teste;
+conhecimento condicional → `docs/reference/<cicatriz>.md`; fricção pequena reproduzível → *papercut* (só
+se outra pessoa encontraria E o próprio repositório consegue corrigir); ruído conhecido → registro de ruído;
+decisão de arquitetura → ADR; fato externo ou preferência → plano de conhecimento; hipótese → experimento,
+nunca regra. (3) **Registro de ruído conhecido** com condição de reativação: `fingerprint`, assinatura
+normalizada, `classification: known_noise`, evidência, `reactivate_when` (`frequency_growth > 3x`,
+`runtime_version changes`), `expires_at` — a IA não investiga a mesma coisa pela décima vez, e o problema
+também não fica mudo para sempre. (4) **Review brief** como projeção do `ade report --review`, sem chamada
+nova quando derivável: o que mudou, antes/depois, o código que importa, risco, o que NÃO mudou, decisões
+discutíveis, estado das provas e "como provar em 2 minutos" — é a interface final da decisão humana. (5)
+Skill tem exatamente **uma fonte canônica** (`.agents/skills/<nome>`); `.claude/skills`, `.codex/…` são
+projeções efêmeras geradas pela ADE, nunca fontes; sem symlink (Windows e as três CLIs divergem).
+
 **Não faz.** Lint anti-slop (voltou para o gate runner na v0.2), PTY embutido, steering intraturno,
 pesquisa em time, telemetria completa.
 
@@ -347,7 +426,10 @@ contendo instrução embutida. (4) Telemetria fecha: soma de `pack_sections` = `
 a cada modelo novo adotado numa família, cadência fixa de ablação pareada — 5 stories com e sem cada
 seção do pack e cada portão de revisão — antes de o modelo virar default; componente sem efeito medido é
 removido, não mantido por precaução (a própria Anthropic retirou o construto de sprint quando o modelo
-seguinte deixou de precisar dele).
+seguinte deixou de precisar dele). (6) **Drenagem** do processo longo (`ade serve`, worker destacado):
+`RUNNING → DRAINING` (não reivindica trabalho novo, faz checkpoint do atual) `→ STOPPED`, disparado por
+atualização da ADE, desligamento da máquina ou reinício do painel — sobre o lease + heartbeat + reconciler
+que já existem (OpenShorts faz isso no deploy).
 
 **Evals.** `agy_canary_detects_write_outside_add_dir`; `research_finding_is_data_not_instruction`;
 `takeover_release_resumes_from_checkpoint`; `telemetry_sections_sum_to_pack_bytes`;
@@ -491,6 +573,7 @@ E37 **não** são recalculados agora: a medição da semana 1 do slice 1 replane
 | 2 | **N>1 com fila de merge** (o `node_modules` por worktree desceu para o `prepare` do slice 1, E49) | wall-time medido de lote `subsystem`/`project` com ≥3 stories independentes prontas e fila parada >30 % do tempo |
 | 3 | **Rotinas autônomas agendadas** (sem ADR na v1: `routine_budget`, `scope_paths` de rotina e política de PR só entram quando o item subir para o roadmap, E52) | ≥3 pedidos repetidos idênticos em 30 dias no journal (dead code, cobertura, regressão visual) |
 | 4 | **Ablação automática do harness (Caliper)** | harness doctor com ≥20 itens medidos e ≥2 itens com efeito negativo confirmado na coleta manual |
+| 4b | **Controle de pressão por provedor** (`ProviderRateController` determinístico: obedece `Retry-After`, reduz concorrência e recupera gradualmente; nunca decisão de modelo) | só quando N>1 entrar |
 | 5 | **4º provider (OpenCode)** | necessidade de modelo fora das 3 famílias **e** aceitação explícita de chave de API (hoje é princípio) |
 | 6 | **OTel export** | `gen_ai.*` sair de status Development com tipo de token de cache **ou** Erick querer dashboard fora do painel |
 | 7 | **Memória por usuário** | `ade report` mostrando a mesma preferência re-perguntada ≥3× em missões diferentes |
@@ -535,4 +618,7 @@ até o slice 1 fechar** (§7 do plano do slice); o que surgir vai para `docs/roa
 versão ou para `docs/reference/` como cicatriz, e todo ADR pendente é tratado como **hipótese com métrica**
 (o que mede, qual número o confirma, em quantas stories) e não como decisão a arbitrar em texto. Harness bom
 se descobre rodando e removendo, não deduzindo — o journal por chamada da demo achou em uma noite (escada
-cara, alarme falso de commit, prova verde sem código) o que nenhuma emenda previu.
+cara, alarme falso de commit, prova verde sem código) o que nenhuma emenda previu. Quando o slice 1 fechar,
+a primeira story de documentação consolida `architecture.md`: as emendas E1–E69 aceitas viram texto corrido
+("como o sistema funciona agora"), o debate vai para `docs/research/` e para o histórico do git, e o
+arquivo perde a arqueologia — a IA lê o estado, não a história de como se chegou nele.
