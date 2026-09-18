@@ -229,7 +229,7 @@ describe('lease heartbeat', () => {
     } finally {
       await adoptedRecycledNull.release()
     }
-  })
+  }, 20000) // I/O no runner Windows: 3,6–5 s
 
   test('expired_lease_with_live_same_process_waits_for_operator', async () => {
     // Aceite 4: Dono vivo com o mesmo start_time após TTL -> awaiting_operator (exit 3)
@@ -567,7 +567,7 @@ describe('lease heartbeat', () => {
     } finally {
       await adoptedLease.release()
     }
-  })
+  }, 20000) // I/O no runner Windows: 3,6–5 s
 
   test('stale_dir_is_cleaned_up_when_mkdir_loses_race_after_rename', async () => {
     // Rodada de revisão: se outro processo recriar lease/ entre o renameSync do

@@ -39,7 +39,7 @@ import { buildWorkerEnv } from '../runner/spawn.js'
  */
 function validateCmd0(cmd0) {
   // 'node' literal, caminho absoluto `.exe`, ou o próprio binário (`process.execPath`), que no
-  // Linux/macOS é `/…/bin/node` sem extensão. `win32.isAbsolute` aceita `C:…` e `/…` em qualquer SO:
+  // Linux/macOS é `/…/bin/node` sem extensão. `win32.isAbsolute` aceita `C:\…` e `/…` em qualquer SO:
   // a regra de paridade vale igual nos dois (o CI Linux recusava os dois casos).
   const isValid =
     cmd0 === 'node' ||
