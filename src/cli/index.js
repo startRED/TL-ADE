@@ -5,6 +5,7 @@ import { main as doctorMain } from './doctor.js'
 import { exitCodeOf } from './exit-codes.js'
 import { runCommand } from './run.js'
 import { main as journalMain } from './journal.js'
+import { main as reportMain } from './report.js'
 import { main as showMain } from './show.js'
 import { main as statusMain } from './status.js'
 
@@ -80,8 +81,7 @@ export async function main(argv, deps = {}) {
     }
 
     if (command === 'report') {
-      stderr.write(`não implementado: ${command}\n`)
-      return 1
+      return await reportMain(commandArgv, delegatedDeps)
     }
 
     if (command === 'show') {

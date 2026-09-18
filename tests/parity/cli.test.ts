@@ -4,6 +4,7 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { main as indexMain } from '../../src/cli/index.js'
 import { main as journalMain } from '../../src/cli/journal.js'
 import { projectUnits } from '../../src/cli/project.js'
+import { main as reportMain, renderReport } from '../../src/cli/report.js'
 import { main } from '../../src/cli/status.js'
 import { digest16 } from '../../src/journal/canonical.js'
 import { openJournal } from '../../src/journal/journal.js'
@@ -340,3 +341,158 @@ describe('ade journal', () => {
   })
 })
 
+describe('ade report', () => {
+  // CA1: Dado um journal na missão 'm1' com ADE-T1 committed (commit 'abc123def4567890'),
+  // quando main(['--mission',dir]) de src/cli/report.js roda, então sai com 0 e <dir>/report.md
+  // contém a linha '| ADE-T1 | committed | - | abc123def456 |' e a linha '- ADE-T1: git merge --ff-only ade/m1/ADE-T1'
+  test('report_lists_units_and_merge_command', async () => {
+    const dir = await makeJournal(
+      [
+        { kind: 'story_started', data: { unit: 'ADE-T1' } },
+        {
+          kind: 'story_done',
+          data: {
+            unit: 'ADE-T1',
+            status: 'committed',
+            commit: 'abc123def4567890',
+          },
+        },
+      ],
+      'm1',
+    )
+
+    const stdout = makeSink()
+    const stderr = makeSink()
+    const exitCode = await reportMain(['--mission', dir], { env: {}, stdout, stderr })
+
+    expect(exitCode).toBe(0)
+    const reportPath = path.join(dir, 'report.md')
+    const content = readFileSync(reportPath, 'utf8')
+    expect(content).toContain('| ADE-T1 | committed | - | abc123def456 |')
+    expect(content).toContain('- ADE-T1: git merge --ff-only ade/m1/ADE-T1')
+    expect(stdout.text).toBe(`relatório: ${reportPath}\n`)
+    expect(stderr.text).toBe('')
+  })
+
+  // CA2: Dado ADE-T2 em awaiting_operator com reason 'gate_failed',
+  // quando o report roda, então o arquivo contém '| ADE-T2 | awaiting_operator | gate_failed | - |'
+  // e '- ADE-T2: resolver awaiting_operator (gate_failed)'
+  test('report_explains_awaiting_operator', async () => {
+    const dir = await makeJournal(
+      [
+        { kind: 'story_started', data: { unit: 'ADE-T2' } },
+        {
+          kind: 'story_done',
+          data: {
+            unit: 'ADE-T2',
+            status: 'awaiting_operator',
+            reason: 'gate_failed',
+          },
+        },
+      ],
+      'm1',
+    )
+
+    const stdout = makeSink()
+    const stderr = makeSink()
+    const exitCode = await reportMain(['--mission', dir], { env: {}, stdout, stderr })
+
+    expect(exitCode).toBe(0)
+    const reportPath = path.join(dir, 'report.md')
+    const content = readFileSync(reportPath, 'utf8')
+    expect(content).toContain('| ADE-T2 | awaiting_operator | gate_failed | - |')
+    expect(content).toContain('- ADE-T2: resolver awaiting_operator (gate_failed)')
+    expect(stderr.text).toBe('')
+  })
+
+  // CA3: Dado env {ADE_MISSION_DIR: dir} sem --mission e `--out <tmp>/saida.md`,
+  // quando main(['--out', saida], {env}) roda, então o arquivo é gravado nesse caminho
+  // e o stdout é 'relatório: <caminho absoluto de saida.md>\n'
+  test('report_uses_ade_mission_dir_env_and_out_path', async () => {
+    const dir = await makeJournal(
+      [
+        { kind: 'story_started', data: { unit: 'ADE-T1' } },
+        {
+          kind: 'story_done',
+          data: {
+            unit: 'ADE-T1',
+            status: 'committed',
+            commit: 'abc123def4567890',
+          },
+        },
+      ],
+      'm1',
+    )
+
+    const outDir = makeTmpDir('ade-cli-report-')
+    tmpDirs.push(outDir)
+    const outPath = path.join(outDir, 'saida.md')
+
+    const stdout = makeSink()
+    const stderr = makeSink()
+    const exitCode = await reportMain(['--out', outPath], {
+      env: { ADE_MISSION_DIR: dir },
+      stdout,
+      stderr,
+    })
+
+    expect(exitCode).toBe(0)
+    expect(stdout.text).toBe(`relatório: ${path.resolve(outPath)}\n`)
+    expect(readFileSync(outPath, 'utf8')).toContain('| ADE-T1 | committed | - | abc123def456 |')
+    expect(stderr.text).toBe('')
+
+    // Borda: sem missão sai com 4 e stderr 'uso: ade report --mission <pasta> [--out <arquivo>]'
+    const stdoutMissing = makeSink()
+    const stderrMissing = makeSink()
+    const exitMissing = await reportMain([], {
+      env: {},
+      stdout: stdoutMissing,
+      stderr: stderrMissing,
+    })
+    expect(exitMissing).toBe(4)
+    expect(stderrMissing.text).toContain('uso: ade report --mission <pasta> [--out <arquivo>]')
+
+    // Borda: journal inexistente sai com 4 e stderr 'journal ausente: <caminho>'
+    const missingDir = path.join(makeTmpDir('ade-cli-report-'), 'missing')
+    tmpDirs.push(missingDir)
+    const stdoutNoJournal = makeSink()
+    const stderrNoJournal = makeSink()
+    const exitNoJournal = await reportMain(['--mission', missingDir], {
+      env: {},
+      stdout: stdoutNoJournal,
+      stderr: stderrNoJournal,
+    })
+    expect(exitNoJournal).toBe(4)
+    expect(stderrNoJournal.text).toContain(
+      `journal ausente: ${path.join(missingDir, 'journal.jsonl')}`,
+    )
+  })
+
+  // CA4: Dado um journal sem nenhuma unidade (só eventos sem unit),
+  // quando o report roda, então o arquivo contém 'Nenhuma unidade registrada.'
+  // e não contém '## Próximos passos'
+  test('report_without_units_says_so', async () => {
+    expect(renderReport('m1', [])).toBe(
+      '# Relatório da missão m1\n\nNenhuma unidade registrada.\n',
+    )
+
+    const dir = await makeJournal(
+      [
+        { kind: 'random_event', data: { foo: 'bar' } },
+      ],
+      'm1',
+    )
+
+    const stdout = makeSink()
+    const stderr = makeSink()
+    const exitCode = await reportMain(['--mission', dir], { env: {}, stdout, stderr })
+
+    expect(exitCode).toBe(0)
+    const reportPath = path.join(dir, 'report.md')
+    const content = readFileSync(reportPath, 'utf8')
+    expect(content).toContain('Nenhuma unidade registrada.')
+    expect(content).not.toContain('## Próximos passos')
+    expect(stdout.text).toBe(`relatório: ${reportPath}\n`)
+    expect(stderr.text).toBe('')
+  })
+})
