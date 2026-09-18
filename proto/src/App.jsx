@@ -1167,8 +1167,24 @@ function ModelsPage({ state, save }) {
           </Card>
         ))}
       </div>
+      <Card title="Cadeias por papel" note="Quem escreve e quem revisa, por fase e tamanho da parte, com os substitutos em ordem. Cota esgotada ou chamada que falhou passa ao próximo; a missão só pausa se a cadeia inteira estiver sem cota.">
+        <ChainsEditor chains={s.chains} save={save} />
+      </Card>
       <p className="page-foot">Esforço é quanto o modelo pensa antes de responder: alto custa e demora mais. Fable é o mais forte e o mais caro, cerca de US$ 0,60 só de abertura por chamada; o entendedor recomenda Fable para planejar só pedidos pesados. Gemini entra pelo Antigravity (Pro só tem esforço alto ou baixo).</p>
     </Page>
+  )
+}
+
+function ChainsEditor({ chains, save }) {
+  const [text, setText] = useState(() => JSON.stringify(chains || {}, null, 1))
+  const [err, setErr] = useState(null)
+  useEffect(() => { setText(JSON.stringify(chains || {}, null, 1)) }, [chains])
+  const apply = () => { try { const v = JSON.parse(text); setErr(null); save({ chains: v }) } catch (e) { setErr(String(e.message)) } }
+  return (
+    <div className="chains">
+      <textarea className="chains-text mono" rows={18} value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} />
+      <div className="chains-foot">{err ? <span className="err">{err}</span> : <span>família: claude · codex · agy (Gemini); efforts: low · medium · high</span>}<button className="btn" onClick={apply}>Salvar cadeias</button></div>
+    </div>
   )
 }
 

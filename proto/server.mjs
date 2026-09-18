@@ -53,9 +53,14 @@ function effortOf(role) { return state.settings.roles[role]?.effort || DEFAULT_S
 function agyModel(id, effort) { const mm = /^(gemini-[\d.]+-(flash|pro))(?:-(high|medium|low))?$/.exec(id || ''); if (!mm) return id; const e = mm[2] === 'pro' && effort === 'medium' ? 'high' : (effort || 'medium'); return `${mm[1]}-${e}` }
 // Recomendação de quem planeja, pela dificuldade que o entendedor mediu (Erick, 17/09): leve → Sonnet; normal → Opus médio; pesado → Fable alto.
 const PLANNER_BY_DIFFICULTY = { easy: { family: 'claude', model: 'sonnet', effort: 'medium' }, normal: { family: 'claude', model: 'opus', effort: 'medium' }, hard: { family: 'claude', model: 'fable', effort: 'high' } }
-function plannerChoice(kind = 'complex') { const r = state.settings.roles; const x = kind === 'light' ? (r.planner_light || r.planner) : r.planner; return { family: x.family || 'claude', model: x.model, effort: x.effort || 'high' } }
+function plannerChoice(kind = 'complex') { const r = state.settings.roles; const x = kind === 'light' ? (r.planner_light || r.planner) : r.planner; return { family: x.family || 'claude', model: x.model, effort: x.effort || 'high', key: kind === 'light' ? 'plan' : 'epics' } }
 // Planejador por família: Claude (saída estruturada do Claude Code) ou Codex (--output-schema, só leitura). Devolve { structured_output }.
-async function plannerCall(who, { role, prompt, schema, maxTurns }) {
+async function plannerCall(who, opts) {
+  if (!who.key) return plannerOnce(who, opts)
+  const rest = chainOf(who.key).filter((w) => !(w.family === who.family && w.model === who.model))
+  return withChain(who.key, { list: [who, ...rest] }, (w) => plannerOnce(w, opts))
+}
+async function plannerOnce(who, { role, prompt, schema, maxTurns }) {
   if (who.family === 'codex') {
     const m = state.mission, dir = state.project.dir
     const file = path.join(ADE_DIR, 'schemas', createHash('sha1').update(JSON.stringify(schema)).digest('hex').slice(0, 12) + '.json')
@@ -92,6 +97,18 @@ const DEFAULT_SETTINGS = {
     research: { family: 'agy', model: 'gemini-3.1-pro', effort: 'high' },
     scout: { family: 'agy', model: 'gemini-3.8-flash', effort: 'medium' }, // batedor: lê muito (projeto, web, GitHub) e devolve um recibo curto
   },
+  // Cadeias por papel (Erick, 18/09: Claude 5x, Codex 20x, Gemini Pro). O motor usa o primeiro da cadeia cuja família tem cota;
+  // cota esgotada ou chamada que falhou pula para o próximo em vez de pausar. Quem escreve nunca é da empresa de quem revisa (filtrado por chamada).
+  chains: {
+    epics: [{ family: 'claude', model: 'fable', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'high' }],
+    plan: [{ family: 'claude', model: 'opus', effort: 'high' }, { family: 'claude', model: 'fable', effort: 'medium' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }],
+    prova: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }],
+    impl_light: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }], // configuração e documentação
+    impl: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'medium' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }], // parte comum
+    impl_hard: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'high' }], // interface larga, risco alto
+    fix: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'high' }], // escada: 2 rodadas por degrau
+    checker: [{ family: 'claude', model: 'sonnet', effort: 'medium' }, { family: 'claude', model: 'opus', effort: 'medium' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }],
+  },
   planner_recommend: true, // o entendedor mede a dificuldade e recomenda quem planeja; você escolhe (modo noturno segue a recomendação)
   epic_plans_cheaper: true, // com Fable como planejador, ele só divide o pedido em épicos; o plano de cada épico sai no Opus alto (medido: US$ 5,60 e 13 min por épico no Fable, 74k tokens de saída)
   plan_critic: true, // outra IA (o revisor) lê o plano antes de qualquer código e aponta o que obrigaria quem escreve a decidir; o planejador corrige uma vez
@@ -113,7 +130,7 @@ const DEFAULT_SETTINGS = {
 // Vários projetos ao mesmo tempo: cada pasta tem um "engine" (projeto, missão, log, anexos). O que é global fica em G.
 // `state` é um proxy: dentro de uma cadeia assíncrona iniciada por withEngine(e, fn), state.mission/project/log/... apontam
 // para aquele engine; fora dela, para o engine ativo (o que o painel está mostrando). Assim o motor não precisou mudar.
-const G = { history: [], recent: [], settings: DEFAULT_SETTINGS, catalog: [], registry: REGISTRY, quota: { claude: null, codex: null } }
+const G = { history: [], recent: [], settings: DEFAULT_SETTINGS, catalog: [], registry: REGISTRY, quota: { claude: null, codex: null, exhausted: {} } }
 const engines = new Map() // dir → engine
 let activeDir = null
 const als = new AsyncLocalStorage()
@@ -293,10 +310,49 @@ async function guard(fn) {
     m.state = 'awaiting_operator'; m.reason = 'engine_error'; log('engine', `erro do engine: ${err.message}`, 'error'); await persistMission().catch(() => {}); return finish()
   }
 }
+// Cota esgotada de uma família: marca até quando e lança QuotaExhausted; withChain pega o próximo modelo da cadeia. Só pausa a missão
+// quando a cadeia inteira do papel está sem cota (pauseAllExhausted), e aí retoma sozinha na renovação mais próxima.
+class QuotaExhausted extends Error { constructor(family, until) { super(`cota do ${family} esgotada`); this.family = family; this.until = until } }
+const FAMILY_LABEL = { claude: 'Claude', codex: 'Codex', agy: 'Gemini' }
+const fmtWhen = (iso) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 function quotaPause(who, until) {
-  const m = state.mission; m.quota_until = until
-  log('engine', `cota do ${who} esgotada: a missão pausa sem gastar rodadas e retoma sozinha ${new Date(until).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}. Para não esperar, troque o modelo desse papel em Modelos e continue.`, 'warn')
+  const family = Object.keys(FAMILY_LABEL).find((k) => FAMILY_LABEL[k] === who) || who
+  state.quota.exhausted = state.quota.exhausted || {}; state.quota.exhausted[family] = until; broadcastSoon()
+  log('engine', `cota do ${who} esgotada até ${fmtWhen(until)}; tento o próximo modelo da cadeia`, 'warn')
+  throw new QuotaExhausted(family, until)
+}
+function quotaAvailable(family) { const u = state.quota.exhausted?.[family]; if (!u) return true; if (new Date(u) <= new Date()) { delete state.quota.exhausted[family]; return true } return false }
+function pauseAllExhausted(key) {
+  const m = state.mission, untils = Object.values(state.quota.exhausted || {}).map((u) => +new Date(u)).filter((t) => t > Date.now())
+  m.quota_until = new Date(untils.length ? Math.min(...untils) + 60 * 1000 : Date.now() + 30 * 60 * 1000).toISOString()
+  log('engine', `nenhum modelo da cadeia "${key}" tem cota: a missão pausa e retoma sozinha ${fmtWhen(m.quota_until)}. Para não esperar, acrescente um modelo à cadeia em Modelos e continue.`, 'warn')
   scheduleQuotaResume(currentEngine()); throw PAUSE
+}
+function chainOf(key) { return state.settings.chains?.[key] || DEFAULT_SETTINGS.chains[key] || [] }
+// Tamanho da parte para escolher a cadeia de implementação. ponytail: heurística pelo contrato; o plano ainda não declara tamanho por story.
+function storyTier(st) {
+  const paths = st.scope_paths || []
+  if (paths.length && paths.every((g) => /^(docs?|\.github|README|CHANGELOG|.*\.(md|json|ya?ml|toml|txt))/i.test(g))) return 'light'
+  if (st.risk === 'high' || (st.acceptance || []).length >= 5 || (st.interfaces || []).length >= 3) return 'hard'
+  return 'normal'
+}
+// Roda fn(who) com o primeiro modelo disponível da cadeia; cota esgotada ou resultado nulo passa ao próximo. avoidVendor tira da cadeia a
+// empresa de quem escreveu (revisão). start pula os primeiros degraus (escada de correção). list substitui a cadeia (planejador).
+async function withChain(key, { avoidVendor = null, start = 0, list = null } = {}, fn) {
+  const chain = (list || chainOf(key)).filter((w) => !avoidVendor || vendorOf(w.family, w.model) !== avoidVendor)
+  let tried = 0
+  for (let i = Math.min(start, Math.max(0, chain.length - 1)); i < chain.length; i++) {
+    const who = chain[i]
+    if (!quotaAvailable(who.family)) { log('engine', `${key}: ${who.model} sem cota até ${fmtWhen(state.quota.exhausted[who.family])}; pulo`, 'warn'); continue }
+    tried++
+    journal({ type: 'model_chosen', role: key, family: who.family, model: who.model, effort: who.effort, story: state.mission?.current ?? null, step: i, reason: tried === 1 ? 'principal' : 'fallback' }).catch(() => {})
+    try {
+      const r = await fn({ ...who, step: i }); if (r != null) return r
+      log('engine', `${key}: ${who.model} não devolveu resultado; próximo da cadeia`, 'warn')
+    } catch (err) { if (err instanceof QuotaExhausted) continue; throw err }
+  }
+  if (!tried && chain.length) pauseAllExhausted(key)
+  return null
 }
 function scheduleQuotaResume(e) {
   const m = e.mission; if (!m?.quota_until) return
@@ -803,8 +859,10 @@ async function codeMap(dir, files, { maxFiles = 60, maxChars = 7000 } = {}) {
 
 // ---------- crítica do plano: o revisor (outra empresa) lê o plano como quem vai implementar ----------
 async function planCritic(plan) {
-  const m = state.mission, dir = state.project.dir, model = state.settings.roles.checker.model
-  if (state.settings.roles.checker.family !== 'codex') return null
+  const m = state.mission, dir = state.project.dir
+  const who = [...chainOf('checker'), ...chainOf('plan')].find((w) => w.family === 'codex' && quotaAvailable('codex'))
+  if (!who) return null
+  const model = who.model
   const prompt = [
     'Você vai criticar um PLANO, não código. Quem vai implementar cada story é um modelo rápido e barato, que segue instruções muito bem e decide mal, numa sessão nova que só vê a story, as decisions e os arquivos citados.',
     'Leia cada story como se fosse implementá-la agora. Aponte SÓ o que obrigaria esse modelo a decidir ou adivinhar: passo de recipe vago, arquivo ou símbolo citado que não existe no projeto (confira), interface sem assinatura, formato de dado sem exemplo, caso de borda sem resposta, examples que não cobrem um critério de aceite, dependência entre stories não declarada, duas stories mexendo no mesmo trecho, story que muda um formato ou contrato já coberto por provas de outra story enquanto proíbe tocar nessas provas (contrato impossível), story grande demais para ~300 linhas de diff.',
@@ -828,9 +886,11 @@ async function planCritic(plan) {
 }
 
 // ---------- revisão: Codex ----------
+let REVIEW_JSON = null
 async function checker(diff, tests, st) {
   const m = state.mission, dir = state.project.dir
-  const { model } = state.settings.roles.checker
+  REVIEW_JSON = REVIEW_JSON || JSON.parse(await readFile(REVIEW_SCHEMA, 'utf8'))
+  const avoid = st.last_maker ? vendorOf(st.last_maker.family, st.last_maker.model) : null
   const prompt = [
     'Você é o revisor. Outra IA, de outro fornecedor, fez a alteração abaixo no projeto. Não escreva código; só avalie.',
     'Regras: toda mudança de comportamento vem com uma prova (teste) que falha antes e passa depois; sem mudanças fora do escopo; sem quebrar acessibilidade; sem segredos em código; interface sem cara de template (cores saturadas, gradiente roxo, três cards iguais).',
@@ -869,8 +929,21 @@ async function checker(diff, tests, st) {
   ].join('\n') + skillsBlock(m.skills.checker || [])
   // Receita de chamada curta (architecture.md E16): sem config, regras e skills do usuário; sessão efêmera.
   // skills.max_context_tokens=0 é rejeitado ("expected a nonzero usize"); 1 remove todas as skills do usuário. Sem --ephemeral: a sessão gravada em ~/.codex/sessions é de onde a cota é lida.
-  const args = ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${effortOf('checker')}`, '-C', dir, '-m', model, '--output-schema', REVIEW_SCHEMA, '-']
-  log('engine', `codex (revisão, ${model}, esforço ${effortOf('checker')})`)
+  return withChain('checker', { avoidVendor: avoid }, async (who) => {
+    if (who.family === 'claude') {
+      const r = await claudeCall({ role: 'revisão', prompt, model: who.model, effort: who.effort, tools: ['Read', 'Glob', 'Grep'], schema: REVIEW_JSON, maxTurns: 12 })
+      const review = r?.structured_output || null
+      if (review) log('claude', `${review.verdict === 'approve' ? 'aprovou' : 'pediu mudanças'}: ${review.summary}`, 'text')
+      return review
+    }
+    if (who.family !== 'codex') { log('engine', `revisão em ${who.family} ainda não é suportada; próximo da cadeia`, 'warn'); return null }
+    return checkerCodex(prompt, who.model, who.effort)
+  })
+}
+async function checkerCodex(prompt, model, effort) {
+  const m = state.mission, dir = state.project.dir
+  const args = ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${effort}`, '-C', dir, '-m', model, '--output-schema', REVIEW_SCHEMA, '-']
+  log('engine', `codex (revisão, ${model}, esforço ${effort})`)
   let lastMessage = null, usage = null
   const r = await run('codex', args, {
     cwd: dir, stdin: prompt,
@@ -909,7 +982,7 @@ async function makeAssets() {
   const m = state.mission, dir = state.project.dir
   const wanted = (m.plan.assets || []).filter((a) => /^assets\/img\/[\w.-]+\.(png|jpg|jpeg|webp)$/i.test(a.file))
   if (m.assets_done || !state.settings.assets_enabled || !wanted.length) return
-  const { model } = state.settings.roles.checker
+  const model = [...chainOf('checker'), ...chainOf('fix')].find((w) => w.family === 'codex')?.model || 'gpt-5.6-terra'
   setStep('assets', 'running'); m.assets_done = []
   for (const a of wanted) {
     const full = path.join(dir, a.file)
@@ -1443,22 +1516,59 @@ const MAX_ROUNDS = 6 // rodadas de correção por parte antes de parar e pedir d
 // Degraus: maker configurado → (Gemini) mesmo modelo em esforço alto → Sonnet alto → modelo do planejador. Sobe um degrau por rodada
 // com problema grave a partir da 3ª; parte de correção já nasce no último degrau.
 // ponytail: a escada pode cair na mesma empresa do revisor se o revisor for Claude; hoje o revisor é Codex. Validar se isso mudar.
-function makerLadder() {
-  const mk = { family: state.settings.roles.maker.family || 'claude', model: state.settings.roles.maker.model, effort: effortOf('maker') }, steps = [mk]
-  if (mk.family === 'agy' && /^gemini/.test(mk.model) && mk.effort !== 'high') steps.push({ ...mk, effort: 'high' })
-  if (mk.family !== 'claude') steps.push({ family: 'claude', model: 'sonnet', effort: 'high' })
-  const pl = plannerChoice('light'); steps.push(pl.family !== 'claude' || pl.model === 'fable' ? { family: 'claude', model: 'opus', effort: 'high' } : { family: 'claude', model: pl.model, effort: pl.effort || 'high' }) // Fable planeja; escrever código no Fable é caro demais
-  return steps.filter((x, i, a) => a.findIndex((y) => y.family === x.family && y.model === x.model && y.effort === x.effort) === i)
-}
+// 18/09: escada e escolha por tarefa viraram cadeias em settings.chains (prova, impl_light/impl/impl_hard por tamanho da parte, fix).
+function makerLadder() { return chainOf('fix') }
 // Custo medido na missão real: Sonnet ~US$ 0,60/rodada, Opus ~US$ 1,10/rodada, e o Opus acabou fazendo 34 rodadas (US$ 37) porque o Sonnet
 // só tinha UMA rodada antes dele e a parte de correção já nascia no Opus. Agora cada degrau pago tem duas rodadas, e a correção nasce
 // um degrau abaixo do último (Sonnet) e só sobe se ainda falhar.
+// Devolve { key, start }: rodada 1 usa a cadeia de implementação do tamanho da parte; a partir da 3ª rodada com problema grave (ou parte de
+// correção) entra na cadeia fix, subindo um degrau a cada duas rodadas.
 function makerStep(st, round, grave) {
-  const l = makerLadder(), last = l.length - 1
-  const i = st.fix_of ? Math.min(last, Math.max(0, last - 1) + Math.floor((round - 1) / 2)) : grave ? Math.min(last, Math.floor((round - 1) / 2)) : 0
-  return { ...l[i], step: i }
+  if (round <= 2 && !grave && !st.fix_of) return { key: { light: 'impl_light', normal: 'impl', hard: 'impl_hard' }[storyTier(st)], start: 0 }
+  const last = Math.max(0, chainOf('fix').length - 1)
+  return { key: 'fix', start: Math.min(last, Math.floor((round - 1) / 2)) }
 }
-async function makerCall(who, opts) { return who.family === 'agy' ? agyMaker({ ...opts, model: who.model, effort: who.effort }) : claudeCall({ ...opts, model: who.model, effort: who.effort }) }
+async function makerCall(who, opts) {
+  const st = state.mission?.stories?.[state.mission.current]; if (st) st.last_maker = { family: who.family, model: who.model }
+  return who.family === 'agy' ? agyMaker({ ...opts, model: who.model, effort: who.effort }) : who.family === 'codex' ? codexMaker({ ...opts, model: who.model, effort: who.effort }) : claudeCall({ ...opts, model: who.model, effort: who.effort })
+}
+// Codex como maker: prompt por stdin, sandbox de escrita na pasta do projeto, receita de chamada curta (sem config nem skills do usuário).
+async function codexMaker({ role, prompt, model, effort }) {
+  const m = state.mission, dir = state.project.dir
+  const status = async () => new Set((await run('git', ['status', '--porcelain'], { cwd: dir })).out.split('\n').map((l) => l.slice(3).trim()).filter(Boolean))
+  const before = await status(), t0 = Date.now()
+  log('engine', `codex (${role}, ${model}, esforço ${effort})`); setLive({ source: 'codex', kind: 'thinking', text: `${role}: Codex trabalhando…` })
+  let last = null, usage = null, r
+  try {
+    r = await run('codex', ['exec', '--json', '--sandbox', 'workspace-write', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${effort}`, '-C', dir, '-m', model, '-'], {
+      cwd: dir, stdin: prompt, timeoutMs: 22 * 60 * 1000,
+      onLine: (line) => {
+        let ev; try { ev = JSON.parse(line) } catch { return }
+        if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') last = ev.item.text
+        if (ev.type === 'item.started' && ev.item?.type === 'command_execution') setLive({ source: 'codex', kind: 'tool', text: ev.item.command || '' })
+        if (ev.type === 'item.completed' && ev.item?.type === 'command_execution') { setLive(null); log('codex', `$ ${ev.item.command}`.slice(0, 200), 'tool') }
+        if (ev.type === 'item.completed' && ev.item?.type === 'reasoning' && ev.item.text) log('codex', ev.item.text.slice(0, 600), 'thinking')
+        if (ev.type === 'turn.completed') usage = ev.usage
+      },
+    })
+  } finally { setLive(null) }
+  m.cost.calls += 1
+  if (usage) { m.cost.tokens_in += usage.input_tokens || 0; m.cost.tokens_out += usage.output_tokens || 0; m.cost.cache_read += usage.cached_input_tokens || 0 }
+  m.cost.by_model[model] = m.cost.by_model[model] || 0
+  const touched = [...(await status())].filter((f) => !before.has(f))
+  journal({ type: 'model_call', family: 'codex', role, model, effort, story: m.current, usd: 0, tokens_in: usage?.input_tokens || 0, cache_read: usage?.cached_input_tokens || 0, tokens_out: usage?.output_tokens || 0, prompt_chars: prompt.length, touched: touched.length, duration_ms: Date.now() - t0 }).catch(() => {})
+  readQuota().then(broadcastSoon)
+  const msg = (last || r.err || r.out || '').trim()
+  if (r.code !== 0 && /usage limit|quota|rate limit/i.test(msg)) {
+    await readQuota().catch(() => {})
+    const resets = [state.quota.codex?.five_hour, state.quota.codex?.seven_day].filter((w) => w && w.used >= 99 && new Date(w.resets_at) > new Date()).map((w) => +new Date(w.resets_at))
+    quotaPause('Codex', new Date(resets.length ? Math.max(...resets) + 60 * 1000 : Date.now() + 60 * 60 * 1000).toISOString())
+  }
+  if (r.code !== 0 && !touched.length) { log('engine', `codex falhou (código ${r.code}): ${msg.slice(0, 300)}`, 'error'); return null }
+  log('codex', (last || '').slice(0, 600), 'text')
+  log('engine', `codex terminou · ${Math.round((Date.now() - t0) / 1000)} s · ${Math.round((usage?.input_tokens || 0) / 1000)}k tokens de entrada · ${touched.length} arquivo(s)`)
+  return { result: last || '', touched, num_turns: 0, total_cost_usd: 0 }
+}
 // Antigravity como maker: o prompt é grande demais para a linha de comando do Windows, então vai num arquivo ignorado pelo git.
 async function agyMaker({ role, prompt, model, effort }) {
   const m = state.mission, dir = state.project.dir, id = agyModel(model, effort)
@@ -1536,7 +1646,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     if (m.plan.needs_ui && state.settings.visual_gate) st.visual_before = await visualGate()
     if (!st.red_retry || !st.base) st.base = await gitHead(state.project.dir)
     st.usd_start = m.cost.usd
-    setStep('test', 'running'); const rt = await makerCall(makerStep(st, 1, false), { role: 'prova', prompt: testPrompt(st, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: 14 }); remember(st, rt); await refreshProject(); setStep('test', 'done')
+    setStep('test', 'running'); const rt = await withChain('prova', { story: st }, async (who) => makerCall(who, { role: 'prova', prompt: testPrompt(st, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: 14 })); remember(st, rt); await refreshProject(); setStep('test', 'done')
     setStep('red', 'running')
     const after = await runTests(state.project)
     const before = new Set(m.tests_before.tests.map((t) => t.name))
@@ -1563,10 +1673,10 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   }
   // Escalada: só na 3ª rodada em diante E quando sobrou problema grave (achado high do revisor ou prova vermelha). Pedido de cobertura/estilo continua no maker barato.
   const grave = (previousReview?.findings || []).some((f) => f.severity === 'high') || (st.tests_after && !st.tests_after.ok)
-  const who = makerStep(st, round, grave), escalate = who.step > 0
-  if (escalate) log('engine', `rodada ${round}: ${st.fix_of ? 'parte de correção' : 'problema grave persiste'}; maker sobe para ${who.model} (esforço ${who.effort}, degrau ${who.step + 1} de ${makerLadder().length})`)
+  const pick = makerStep(st, round, grave), escalate = pick.key === 'fix'
+  if (escalate) log('engine', `rodada ${round}: ${st.fix_of ? 'parte de correção' : 'problema grave persiste'}; maker vai para a cadeia de correção, degrau ${pick.start + 1} de ${chainOf('fix').length}`)
   if (st.early_impl && round === 1) setStep('fix', 'skipped', { round })
-  else { setStep('fix', 'running', { round }); const rf = await makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 }); remember(st, rf); await refreshProject(); setStep('fix', 'done', { round }) }
+  else { setStep('fix', 'running', { round }); const rf = await withChain(pick.key, { start: pick.start }, async (who) => makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 })); remember(st, rf); await refreshProject(); setStep('fix', 'done', { round }) }
   setStep('tests', 'running'); st.tests_after = await runTests(state.project); st.diff = await storyDiff(st)
   // prova ANTIGA (verde antes da parte) que só falha por tempo limite é instabilidade, não defeito de quem escreve: repete a suíte uma vez antes de gastar rodada
   // (épico 7, parte 6: três rodadas pagas atrás de uma prova da parte 3 que estourava 5 s; quem escreve chegou a mexer no vitest.config fora do escopo para esconder)
@@ -1655,7 +1765,7 @@ async function startMission(request, { commitFirst = false } = {}) {
   if (fresh.dirty && commitFirst) { const err = await commitPending(fresh.dir); if (err) return `Não deu para commitar: ${err}`; fresh = await discover(fresh.dir); log('operador', 'commitou as alterações pendentes antes de começar') }
   if (fresh.dirty) return { error: 'A pasta tem alterações suas ainda não commitadas. A ADE precisa de um ponto de partida limpo para poder desfazer só o que ela mesma fizer.', code: 'dirty' }
   const s = state.settings
-  if (vendorOf(s.roles.maker.family, s.roles.maker.model) === vendorOf(s.roles.checker.family, s.roles.checker.model)) return 'Quem escreve e quem revisa precisam ser de empresas diferentes. Ajuste em Modelos.'
+  for (const k of ['impl_light', 'impl', 'impl_hard', 'fix']) { const w = (s.chains?.[k] || DEFAULT_SETTINGS.chains[k])[0]; if (w && !(s.chains?.checker || DEFAULT_SETTINGS.chains.checker).some((c) => vendorOf(c.family, c.model) !== vendorOf(w.family, w.model))) return `A cadeia de revisão precisa de um modelo de empresa diferente do primeiro da cadeia "${k}" (${w.model}). Ajuste em Modelos.` }
   await ensureIgnore(fresh.dir); state.project = await discover(fresh.dir); state.log = []; state.phase = 'intent'
   if (state.mission?.id) rm(path.join(MISSIONS_DIR, `${state.mission.id}.json`), { force: true }).catch(() => {}) // a conversa anterior desta pasta fica só no histórico
   state.mission = {
@@ -1728,7 +1838,7 @@ http.createServer(async (req, res) => {
     if (url.pathname === '/api/state') return json(res, 200, pub())
     if (url.pathname === '/api/settings' && req.method === 'POST') {
       const patch = await body(req)
-      state.settings = { ...state.settings, ...patch, roles: { ...state.settings.roles, ...(patch.roles || {}) }, skills: { ...state.settings.skills, ...(patch.skills || {}) } }
+      state.settings = { ...state.settings, ...patch, roles: { ...state.settings.roles, ...(patch.roles || {}) }, chains: { ...state.settings.chains, ...(patch.chains || {}) }, skills: { ...state.settings.skills, ...(patch.skills || {}) } }
       await saveJson('settings.json', state.settings); broadcast(); return json(res, 200, state.settings)
     }
     if (url.pathname === '/api/project' && req.method === 'POST') {
@@ -1819,7 +1929,7 @@ http.createServer(async (req, res) => {
   state.recent = await loadJson('projects.json', [])
   state.history = await loadJson('history.json', [])
   const saved = await loadJson('settings.json', null)
-  if (saved) state.settings = { ...DEFAULT_SETTINGS, ...saved, roles: { ...DEFAULT_SETTINGS.roles, ...(saved.roles || {}) }, skills: { ...DEFAULT_SETTINGS.skills, ...(saved.skills || {}) } }
+  if (saved) state.settings = { ...DEFAULT_SETTINGS, ...saved, roles: { ...DEFAULT_SETTINGS.roles, ...(saved.roles || {}) }, chains: { ...DEFAULT_SETTINGS.chains, ...(saved.chains || {}) }, skills: { ...DEFAULT_SETTINGS.skills, ...(saved.skills || {}) } }
   if (!state.settings.roles.intent) state.settings.roles.intent = DEFAULT_SETTINGS.roles.intent
   for (const [k, d] of Object.entries(DEFAULT_SETTINGS.roles)) {
     const r = state.settings.roles[k]; if (!r) { state.settings.roles[k] = d; continue }
