@@ -286,7 +286,7 @@ async function guard(fn) {
     if (err === PAUSE || (m.reason === 'budget' && state.settings.unattended)) {
       const byQuota = !m.pause_requested && !!m.quota_until
       m.pause_requested = false; m.state = 'paused'; m.reason = byQuota ? 'quota' : null
-      if (m.current != null && m.stories[m.current] && m.stories[m.current].state !== 'done') { const st = m.stories[m.current]; Object.assign(st, { state: 'queued', round: 0, steps: [], red_tests: [], tests_after: null, diff: '', review: null, visual: null, base: null, maker_committed: false }); if (state.project) await gitDiscard(state.project.dir).catch(() => {}); await refreshProject().catch(() => {}) }
+      if (m.current != null && m.stories[m.current] && m.stories[m.current].state !== 'done') { const st = m.stories[m.current]; Object.assign(st, { state: 'queued', round: 0, steps: [], red_tests: [], tests_after: null, diff: '', review: null, visual: null, base: null, maker_committed: false }); if (state.project && !st.fix_of) await gitDiscard(state.project.dir).catch(() => {}); else if (st.fix_of) log('engine', 'parte de correção pausada: os arquivos da parte anterior ficam na árvore para a correção continuar', 'warn'); await refreshProject().catch(() => {}) }
       state.live = null; log('operador', 'pausou; a parte em andamento volta do começo quando continuar')
       await persistMission().catch(() => {}); return finish()
     }
@@ -312,7 +312,10 @@ async function pauseMission() {
 async function resumeMission() {
   const m = state.mission
   if (!m || m.state !== 'paused') return 'Esta missão não está pausada.'
-  const fresh = await discover(state.project.dir); if (fresh.dirty) { await gitDiscard(fresh.dir); }
+  const fresh = await discover(state.project.dir)
+  const nextFix = (m.stories || []).find((x) => x.state === 'queued')?.fix_of
+  if (fresh.dirty && nextFix) log('engine', `árvore com alterações mantida: a próxima parte é a correção de "${nextFix}" e trabalha sobre elas`, 'warn')
+  else if (fresh.dirty) { await gitDiscard(fresh.dir) }
   state.project = await discover(fresh.dir); m.finished_at = null; const auto = m.reason === 'quota'; m.reason = null; m.quota_until = null; log(auto ? 'engine' : 'operador', 'continuou a missão')
   if (m.program) {
     let reopened = 0
