@@ -1,10 +1,18 @@
 import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'vitest'
 import { AdeError } from '../src/journal/errors.js'
+import { validate } from '../src/schema/index.js'
 import { buildClaudeArgs, CLAUDE_PROMPT } from '../src/adapters/claude/argv.js'
+import { parseClaudeOutput, parseUnitResult, parseUsage, stripAnsi } from '../src/adapters/claude/parse.js'
 
 const SCHEMA_PATH = fileURLToPath(new URL('../schemas/unit-result.schema.json', import.meta.url))
+const TRANSCRIPTS_DIR = fileURLToPath(new URL('../fixtures/transcripts/claude/', import.meta.url))
+
+function readTranscriptStdout(name: string): string {
+  return readFileSync(path.join(TRANSCRIPTS_DIR, name, 'stdout.json'), 'utf8')
+}
 
 describe('claude argv', () => {
   // AC1: sessionId UUID, packPath e maxBudgetUsd 0.25 -> array na ordem fixa das flags,
@@ -104,5 +112,86 @@ describe('claude argv', () => {
         expect(adeErr.exitCode).toBe(2)
       }
     }
+  })
+})
+
+describe('claude parse', () => {
+  // CA1: transcript gravado com structured_output -> parseUnitResult valid, unit_result aceito pelo
+  // schema unit-result e igual ao gravado; parseUsage reporta o custo gravado (cost_source 'reported').
+  // CA3: variantes com campos desconhecidos e ruído ANSI carregam o mesmo unit_result do original,
+  // com error:null. CA4: JSON truncado e stdout vazio nunca lançam; devolvem envelope nulo com o
+  // motivo certo.
+  test('claude_adapter_parses_recorded_transcript_into_unit_result', () => {
+    const okParsed = parseClaudeOutput(readTranscriptStdout('ok_with_structured_output'))
+    expect(okParsed.error).toBeNull()
+
+    const okResult = parseUnitResult(okParsed.envelope)
+    expect(okResult.valid).toBe(true)
+    expect(okResult.errors).toEqual([])
+    const okUnitResult = okResult.unit_result as Record<string, unknown>
+    expect(okUnitResult.story_id).toBe('rec-ok')
+    expect(validate('unit-result', okUnitResult).valid).toBe(true)
+    // sources:[] no transcript gravado -> cited nunca é true sem fontes, mesmo com resultado válido.
+    expect(okResult.cited).toBe(false)
+
+    const okUsage = parseUsage(okParsed.envelope as Record<string, unknown>)
+    expect(okUsage.cost_source).toBe('reported')
+    expect(okUsage.cost_usd).toBe(0.058924000000000004)
+    expect(okUsage.cost_basis).toBe('list')
+    expect(okUsage.models).toEqual([{ role: 'maker', model_id: 'claude-haiku-4-5-20251001' }])
+
+    for (const variant of ['unknown_fields', 'ansi_noise']) {
+      const variantParsed = parseClaudeOutput(readTranscriptStdout(variant))
+      expect(variantParsed.error).toBeNull()
+      const variantResult = parseUnitResult(variantParsed.envelope)
+      expect(variantResult.valid).toBe(true)
+      expect(variantResult.unit_result).toEqual(okUnitResult)
+    }
+
+    // ANSI cru sintético (CSI erase-line, SGR reset) some antes do parse; stripAnsi cobre a fronteira
+    // usada por parseClaudeOutput.
+    expect(stripAnsi('[2Khello[0m')).toBe('hello')
+    expect(parseClaudeOutput('[2K{"a":1}[0m')).toEqual({ envelope: { a: 1 }, error: null })
+
+    const truncatedParsed = parseClaudeOutput(readTranscriptStdout('truncated_json'))
+    expect(truncatedParsed.envelope).toBeNull()
+    expect(truncatedParsed.error).toBe('truncated_json')
+
+    const emptyParsed = parseClaudeOutput('')
+    expect(emptyParsed.envelope).toBeNull()
+    expect(emptyParsed.error).toBe('empty')
+
+    const notJsonParsed = parseClaudeOutput('no braces here')
+    expect(notJsonParsed.envelope).toBeNull()
+    expect(notJsonParsed.error).toBe('not_json')
+
+    // borda: sem envelope, ou envelope sem structured_output -> nunca inventa unit_result nem cita.
+    expect(parseUnitResult(null)).toEqual({
+      unit_result: null,
+      valid: false,
+      errors: ['structured_output ausente'],
+      cited: false,
+    })
+    expect(parseUnitResult({})).toEqual({
+      unit_result: null,
+      valid: false,
+      errors: ['structured_output ausente'],
+      cited: false,
+    })
+
+    // borda: structured_output null ou primitivo -> resultado inválido, sem lançar (nunca devolve
+    // um unit_result que não seja object | null).
+    expect(parseUnitResult({ structured_output: null })).toEqual({
+      unit_result: null,
+      valid: false,
+      errors: ['structured_output ausente'],
+      cited: false,
+    })
+    expect(parseUnitResult({ structured_output: 'texto' })).toEqual({
+      unit_result: null,
+      valid: false,
+      errors: ['structured_output ausente'],
+      cited: false,
+    })
   })
 })
