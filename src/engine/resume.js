@@ -30,3 +30,32 @@ export function findStoryStarted(events, unit) {
   }
   return null
 }
+
+/**
+ * Encontra o último evento story_done com status 'committed' para a unidade especificada.
+ *
+ * @param {Array<Record<string, any>>} events Lista de eventos do journal.
+ * @param {string} unit Identificador da story/unidade.
+ * @returns {{ commit: string } | null}
+ */
+export function findStoryCommitted(events, unit) {
+  if (!Array.isArray(events)) {
+    return null
+  }
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i]
+    if (ev && ev.kind === 'story_done') {
+      const eventUnit = ev.data?.unit ?? ev.unit
+      if (
+        eventUnit === unit &&
+        ev.data?.status === 'committed' &&
+        typeof ev.data.commit === 'string'
+      ) {
+        return {
+          commit: ev.data.commit,
+        }
+      }
+    }
+  }
+  return null
+}
