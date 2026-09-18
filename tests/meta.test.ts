@@ -13,6 +13,7 @@ const ROOT_ALLOWLIST = new Set([
   '.gitignore',
   '.oxlintrc.json',
   'AGENTS.md',
+  'bin',
   'CLAUDE.md',
   'PROJECT_CHARTER.md',
   'PROMPT.md',
