@@ -283,6 +283,7 @@ describe('runGates with step() and cache parity', () => {
   // processo filho não é executado de novo (contador do script de teste continua em 1).
   // CA2: Dado o mesmo tree e o mesmo id de gate, mas com o argv alterado, quando
   // runGates roda, então o gate é executado de novo (reused:false) e o contador vai a 2.
+  // Tempo limite próprio de 30 s: cria repositório git e dispara processos node; o padrão de 5 s estoura com a suíte inteira em paralelo.
   test('changed_gate_command_is_not_served_from_cache', async () => {
     const { missionDir, gitPort, step } = setupGateEnv()
     const tree = await gitPort.worktreeTree()
@@ -351,7 +352,7 @@ describe('runGates with step() and cache parity', () => {
     expect(r3.results[0].reused).toBe(false)
     expect(r3.results[0].status).toBe('success')
     expect(readFileSync(counterFile, 'utf8')).toBe('2')
-  })
+  }, 30_000)
 
   // CA3: Dado um gate by_flag com flag:'coverage' e flags:[], quando runGates roda,
   // então esse gate não aparece em results e nenhum step_intent dele é gravado no journal.
