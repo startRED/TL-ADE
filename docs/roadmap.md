@@ -529,6 +529,37 @@ static_analysis, browser, visual_judge, model_judge, human_decision}`, o mesmo m
 (`schema + render + human`), frontend (`browser + visual_judge`), API (`api_contract + test`) e rede (`probe +
 config_check + human_cutover`).
 
+**Emenda 2026-09-18 (Nutlope `hallmark` e `inspo`, ambos MIT).** Entram na v0.4a como forma da skill de
+frontend e do retrieval de design — método, não identidade visual: (9) **Skill de frontend no formato
+`SKILL.md` + `references/*.md` sob demanda** (hallmark: `SKILL.md` de 558 linhas com frontmatter
+`description` como gatilho de roteamento; `references/slop-test.md`, `anti-patterns.md`,
+`macrostructures/`, `themes/`, `components/`, `verbs/audit|redesign|study`): a skill fabric carrega o
+`SKILL.md` pelo tipo de tarefa e o Maker puxa referência só quando a decisão pede — é o item (6) do cache
+aplicado a skills. (10) **Camada barata do FQE antes do juiz visual**: o *slop-test* de 58 portas binárias
+(cada resposta tem de ser "não") e a **pré-crítica em 6 eixos** (Philosophy/Hierarchy/Execution/
+Specificity/Restraint/Variety, nota 1–5, carimbada no próprio artefato como `/* pre-emit critique */`) viram
+`Verifier` determinístico + auto-juízo do Maker, com o catálogo `anti-patterns.md` como **vocabulário
+nomeado de motivos de reprovação** do juiz visual (não "reprovado": "qual *tell*"); o `hero cabe em
+1280×800/100svh` e `80–160 px entre seções` do inspo (`heroGuidance`/`spacingGuidance`) entram como portas
+objetivas. (11) **Pre-flight do repositório antes de perguntar** (hallmark `Step 0`: lê `package.json`,
+`tailwind.config`, CSS, fontes, paleta, libs de motion, com cache em JSON) — é a regra do discovery do
+Intent Compiler aplicada a design: o `DesignBrief` infere `preserved_patterns[]` e tokens existentes do
+repo, nunca do operador. (12) **Forma do retrieval local de design = `recommend()`/`compare()` do inspo**:
+uma chamada devolve macroestrutura escolhida, N exemplares, ≤3 componentes de referência, paleta sugerida,
+um `evidence` packet e as duas guidances fixas; a saída por candidato usa o **contrato `DESIGN.md`**
+(paleta semântica, fontes reais, *type ramp*, escala de espaçamento, CSS vars) — é o que alimenta
+`character{variance, motion, density}` do item (6). Servido localmente sobre catálogo próprio; **sem
+crawler de terceiros, sem CDN externa, sem MCP público hospedado** (o inspo tem 832 sites capturados por
+Playwright e embeddings Together AI — infraestrutura de produto deles, não da ADE). (13) **MCPs automáticos
+por tipo de tarefa**, simétricos às skills automáticas: a capability matrix do item (19) da v0.3 ganha a
+coluna `mcp[]` por papel (Maker de frontend recebe o servidor de design local no perfil `lite` — 9
+ferramentas, `images: thumbs`, `maxTokens` sob o orçamento do Task Contract; Checker não recebe nenhum),
+o motor sobe e derruba o servidor por chamada e grava `mcp_manifest` no journal (ferramentas expostas +
+digest), exatamente como `pack_manifest`. É o "skills automáticas + MCPs automáticos" pedido pelo operador;
+entra depois da skill fabric porque depende dela para o roteamento. **Não copiar**: os 21 temas e as
+macroestruturas nomeadas do hallmark (curadoria de gosto de uma marca), a regra "nunca Inter/Roboto" como
+universal (colide com marcas que as exigem), e a galeria/worker/Blob do inspo.
+
 **Não faz.** Lint anti-slop (voltou para o gate runner na v0.2), PTY embutido, steering intraturno,
 pesquisa em time, telemetria completa.
 
