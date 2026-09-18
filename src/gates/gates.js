@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { resolveGateArgv, runContained } from './command.js'
 import { buildExtract, safeId, writeRawArtifact } from './output.js'
 
@@ -23,6 +25,7 @@ import { buildExtract, safeId, writeRawArtifact } from './output.js'
  * @typedef {Object} GitPort
  * @property {string} worktreeDir
  * @property {() => Promise<string>} worktreeTree
+ * @property {(tree: string, options: { label: string }) => Promise<any>} restoreTree
  */
 
 /**
@@ -35,6 +38,77 @@ import { buildExtract, safeId, writeRawArtifact } from './output.js'
  * @property {string} raw_ref
  * @property {boolean} reused
  */
+
+/**
+ * @typedef {Object} RestorePendingGateResult
+ * @property {boolean} restored
+ * @property {string|null} tree
+ * @property {boolean} [blocked]
+ */
+
+/**
+ * Grava atomicamente o marcador durável de restauração de gate.
+ *
+ * @param {string} missionDir
+ * @param {{ gate_id: string, tree_before: string, worktree: string }} data
+ * @returns {void}
+ */
+export function writeMarkerSync(missionDir, data) {
+  const file = path.join(missionDir, 'gate-restore.json')
+  const tmp = path.join(missionDir, 'gate-restore.json.tmp')
+  fs.writeFileSync(tmp, JSON.stringify(data), 'utf8')
+  fs.renameSync(tmp, file)
+}
+
+/**
+ * Remove o marcador durável de restauração de gate se existir.
+ *
+ * @param {string} missionDir
+ * @returns {void}
+ */
+export function clearMarkerSync(missionDir) {
+  const file = path.join(missionDir, 'gate-restore.json')
+  fs.rmSync(file, { force: true })
+  fs.rmSync(path.join(missionDir, 'gate-restore.json.tmp'), { force: true })
+}
+
+/**
+ * Restaura o worktree para a árvore anterior se houver marcador pendente de crash.
+ * Marcador inválido, ilegível ou de outro worktree bloqueia a rodada.
+ *
+ * @param {{ missionDir: string, gitPort: GitPort }} options
+ * @returns {Promise<RestorePendingGateResult>}
+ */
+export async function restorePendingGate({ missionDir, gitPort }) {
+  const markerPath = path.join(missionDir, 'gate-restore.json')
+  if (!fs.existsSync(markerPath)) {
+    return { restored: false, tree: null }
+  }
+
+  let marker
+  try {
+    const raw = fs.readFileSync(markerPath, 'utf8')
+    marker = JSON.parse(raw)
+  } catch {
+    return { restored: false, tree: null, blocked: true }
+  }
+
+  if (
+    !marker ||
+    typeof marker !== 'object' ||
+    typeof marker.tree_before !== 'string' ||
+    !marker.tree_before ||
+    marker.worktree !== gitPort.worktreeDir
+  ) {
+    return { restored: false, tree: null, blocked: true }
+  }
+
+  const label = 'gate-' + (marker.gate_id ? safeId(String(marker.gate_id)) : 'pending')
+  await gitPort.restoreTree(marker.tree_before, { label })
+  clearMarkerSync(missionDir)
+
+  return { restored: true, tree: marker.tree_before }
+}
 
 /**
  * @typedef {Object} CreateGateRunnerOptions
@@ -58,6 +132,7 @@ import { buildExtract, safeId, writeRawArtifact } from './output.js'
  * @property {boolean} ok
  * @property {GateResult[]} results
  * @property {string} [verdict]
+ * @property {string} [error]
  */
 
 /**
@@ -138,9 +213,14 @@ export function createGateRunner({ step, missionDir, gitPort, packageJson = {} }
       throw new TypeError('unit precisa ser string')
     }
 
+    const pending = await restorePendingGate({ missionDir, gitPort })
+    if (pending.blocked) {
+      return { ok: false, results: [], error: 'gate_restore_marker_invalid' }
+    }
+
     const currentTree = await gitPort.worktreeTree()
     if (currentTree !== tree) {
-      return { ok: false, results: [], verdict: 'refused' }
+      return { ok: false, results: [], error: 'gate_tree_mismatch', verdict: 'refused' }
     }
 
     const selected = selectGates(gates, flags)
@@ -183,34 +263,46 @@ export function createGateRunner({ step, missionDir, gitPort, packageJson = {} }
           worktree: gitPort.worktreeDir,
         },
         async () => {
-          const contained = await runContained({
-            argv,
-            cwd: gitPort.worktreeDir,
-            timeoutS: timeout_s,
+          const treeBefore = tree
+          writeMarkerSync(missionDir, {
+            gate_id: gate.id,
+            tree_before: treeBefore,
+            worktree: gitPort.worktreeDir,
           })
 
-          const text = contained.stdout + '\n' + contained.stderr
+          try {
+            const contained = await runContained({
+              argv,
+              cwd: gitPort.worktreeDir,
+              timeoutS: timeout_s,
+            })
 
-          const rawArtifact = writeRawArtifact({
-            missionDir,
-            ref: artRef,
-            text,
-          })
+            const text = contained.stdout + '\n' + contained.stderr
 
-          const extract = buildExtract({
-            kind,
-            exitCode: contained.exitCode,
-            expectExit: expect_exit,
-            stdout: contained.stdout,
-            stderr: contained.stderr,
-            rawRef,
-            bytesRaw: rawArtifact.bytes,
-          })
+            const rawArtifact = writeRawArtifact({
+              missionDir,
+              ref: artRef,
+              text,
+            })
 
-          return {
-            exit_code: contained.exitCode,
-            extract,
-            raw_ref: rawRef,
+            const extract = buildExtract({
+              kind,
+              exitCode: contained.exitCode,
+              expectExit: expect_exit,
+              stdout: contained.stdout,
+              stderr: contained.stderr,
+              rawRef,
+              bytesRaw: rawArtifact.bytes,
+            })
+
+            return {
+              exit_code: contained.exitCode,
+              extract,
+              raw_ref: rawRef,
+            }
+          } finally {
+            await gitPort.restoreTree(treeBefore, { label: 'gate-' + safeId(gate.id) })
+            clearMarkerSync(missionDir)
           }
         }
       )
