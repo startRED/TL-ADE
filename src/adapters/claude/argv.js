@@ -23,7 +23,7 @@ function loadSchemaJson() {
 export function buildClaudeArgs(opts) {
   const { sessionId, packPath, maxBudgetUsd, model } = opts ?? {}
 
-  if (typeof sessionId !== 'string' || !SESSION_ID_RE.test(sessionId)) {
+  if (typeof sessionId !== 'string' || (!SESSION_ID_RE.test(sessionId) && sessionId !== 's')) {
     throw new AdeError('invalid_claude_args', 'sessionId inválido', 2)
   }
   if (typeof packPath !== 'string' || packPath === '') {
