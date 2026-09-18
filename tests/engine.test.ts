@@ -337,12 +337,13 @@ describe('engine', () => {
     expect(storyDone).toBeDefined()
     expect((storyDone?.data as any)?.status).toBe('committed')
 
-    // CA4: telemetry.data.first_source_edit_ms >= 0
+    // CA4: telemetry.data.maker_wall_ms >= 0
     const telemetry = events.find((e) => e.kind === 'telemetry')
     expect(telemetry).toBeDefined()
-    const editMs = (telemetry?.data as any)?.first_source_edit_ms
-    expect(Number.isInteger(editMs)).toBe(true)
-    expect(editMs).toBeGreaterThanOrEqual(0)
+    const wallMs = (telemetry?.data as any)?.maker_wall_ms
+    expect(Number.isInteger(wallMs)).toBe(true)
+    expect(wallMs).toBeGreaterThanOrEqual(0)
+    expect(telemetry?.data).not.toHaveProperty('first_source_edit_ms')
   }, 60_000)
 
   // CA2: Dado um contrato com roles.maker.family 'codex', quando runStory roda, então
@@ -440,5 +441,80 @@ describe('faults', () => {
       process.abort = origAbort
     }
   })
+})
+
+describe('S18 telemetria honesta', () => {
+  // CA1: Dado um relógio falso que começa em 1000 e um dispatchClaude falso que o avança 2000,
+  // quando a story fecha, então o evento telemetry da story tem data.maker_wall_ms === 2000,
+  // data.role === 'maker' e data.step_id === '<storyId>:r1:maker'.
+  // CA2: Dado o mesmo cenário, quando se varre o journal inteiro, então nenhum evento tem a chave
+  // first_source_edit_ms em data.
+  // Borda [CA1]: relógio que volta para trás (depois < antes) -> maker_wall_ms 0.
+  test('telemetry_field_names_match_what_is_measured', async () => {
+    let clock = 1000
+    const fixture = setupStoryFixture()
+    fixture.deps.now = () => clock
+    const origDispatch = fixture.deps.dispatchClaude
+    fixture.deps.dispatchClaude = async (args: any) => {
+      clock += 2000
+      return origDispatch(args)
+    }
+
+    const result = await runStory(fixture.deps, fixture.input)
+    expect(result.status).toBe('committed')
+    expect(result.exitCode).toBe(0)
+
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    const telemetry = events.find((e) => e.kind === 'telemetry')
+    expect(telemetry).toBeDefined()
+    expect((telemetry?.data as any)?.maker_wall_ms).toBe(2000)
+    expect((telemetry?.data as any)?.role).toBe('maker')
+    expect((telemetry?.data as any)?.step_id).toBe(`${fixture.input.story.id}:r1:maker`)
+    expect(telemetry?.data).not.toHaveProperty('first_source_edit_ms')
+
+    const firstSourceEvents = events.filter(
+      (e) => e.data && 'first_source_edit_ms' in (e.data as Record<string, unknown>),
+    )
+    expect(firstSourceEvents.length).toBe(0)
+
+    // Borda: relógio que volta para trás (depois < antes) -> maker_wall_ms 0
+    let clockBackward = 1000
+    const fixtureBackward = setupStoryFixture()
+    fixtureBackward.deps.now = () => clockBackward
+    const origDispatchBackward = fixtureBackward.deps.dispatchClaude
+    fixtureBackward.deps.dispatchClaude = async (args: any) => {
+      clockBackward = 500
+      return origDispatchBackward(args)
+    }
+
+    const resultBackward = await runStory(fixtureBackward.deps, fixtureBackward.input)
+    expect(resultBackward.status).toBe('committed')
+
+    const { events: eventsBackward } = readJournal(path.join(fixtureBackward.missionDir, 'journal.jsonl'))
+    const telemetryBackward = eventsBackward.find((e) => e.kind === 'telemetry')
+    expect(telemetryBackward).toBeDefined()
+    expect((telemetryBackward?.data as any)?.maker_wall_ms).toBe(0)
+  }, 60_000)
+
+  // CA3: Dado um contain falso que devolve ok: false por escopo, quando a story para em
+  // awaiting_operator, então o journal não tem nenhum evento telemetry.
+  test('telemetry_is_not_written_when_contain_refuses', async () => {
+    const fixture = setupStoryFixture()
+    fixture.deps.contain = async () =>
+      ({
+        ok: false,
+        reason: 'scope',
+        changedPaths: ['src/hello.txt'],
+      }) as any
+
+    const result = await runStory(fixture.deps, fixture.input)
+    expect(result.status).toBe('awaiting_operator')
+    expect(result.exitCode).toBe(3)
+    expect(result.reason).toBe('scope')
+
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    const telemetryEvents = events.filter((e) => e.kind === 'telemetry')
+    expect(telemetryEvents.length).toBe(0)
+  }, 60_000)
 })
 
