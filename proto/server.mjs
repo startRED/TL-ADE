@@ -1253,7 +1253,7 @@ function closeEpic(ep, stories) {
   ep.already = [...(ep.already || []), ...done.map((x) => x.title)]
   ep.summary = `${ep.already.length} parte(s) pronta(s): ${ep.already.join('; ')}`
   const pg = state.mission.program, dec = (state.mission.plan?.decisions || []).map((d) => String(d).slice(0, 400))
-  if (pg && dec.length) pg.decisions_log = [...(pg.decisions_log || []).filter((e) => e.epic !== ep.id), { epic: ep.id, title: ep.title, decisions: dec }]
+  if (pg && dec.length) { const old = (pg.decisions_log || []).find((e) => e.epic === ep.id); pg.decisions_log = [...(pg.decisions_log || []).filter((e) => e.epic !== ep.id), { epic: ep.id, title: ep.title, decisions: [...new Set([...(old?.decisions || []), ...dec])].slice(0, 30) }] }
   if (!missing.length) { ep.state = 'done'; ep.missing = []; return }
   ep.missing = missing.map((x) => `${x.title} (${x.skipped_reason || x.state})`)
   if ((ep.attempts || 0) < 1) { ep.attempts = (ep.attempts || 0) + 1; ep.state = 'queued'; ep.stories_prev = ep.stories.filter((x) => x.state === 'done'); log('engine', `épico "${ep.title}" incompleto (${missing.length} parte(s) sem concluir); volta para a fila e o planejador replaneja só o que falta`, 'warn') }
