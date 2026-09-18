@@ -545,6 +545,12 @@ async function ensureIgnore(dir) {
   await run('git', ['add', '.gitignore'], { cwd: dir }); await run('git', ['-c', 'user.name=TL-ADE', '-c', 'user.email=ade@local', 'commit', '-q', '-m', 'ade: .gitignore', '--', '.gitignore'], { cwd: dir })
 }
 async function gitHead(dir) { const r = await run('git', ['rev-parse', '--verify', '-q', 'HEAD'], { cwd: dir }); return r.code === 0 ? r.out.trim() : null }
+// commit feito por quem escreve = commit desde o começo da parte que toca arquivos FORA da pasta do motor (o operador commita a demo no meio de uma parte)
+async function makerCommitted(dir, base) {
+  const self = path.relative(dir, ROOT).split(path.sep).join('/'), own = self && !self.startsWith('..') && !path.isAbsolute(self) ? [`:(exclude)${self}`] : []
+  const r = await run('git', ['diff', '--name-only', base, 'HEAD', '--', '.', ...own], { cwd: dir })
+  return r.code === 0 && r.out.trim().length > 0
+}
 async function gitDiff(dir, base = null) {
   const a = await run('git', ['add', '-N', '--', '.'], { cwd: dir }) // ignorados pelo .gitignore ficam fora sozinhos; pathspec de exclusão aqui faz o git reclamar
   // a pasta do próprio motor nunca faz parte do diff de uma missão (dogfood: a demo vive dentro do repositório que ela desenvolve)
@@ -1553,7 +1559,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   if (st.early_impl && round === 1) setStep('fix', 'skipped', { round })
   else { setStep('fix', 'running', { round }); const rf = await makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 }); remember(st, rf); await refreshProject(); setStep('fix', 'done', { round }) }
   setStep('tests', 'running'); st.tests_after = await runTests(state.project); st.diff = await gitDiff(state.project.dir, st.base)
-  { const head = await gitHead(state.project.dir); if (st.base && head && head !== st.base && !st.maker_committed) { st.maker_committed = true; log('engine', 'quem escreve fez commit por conta própria, contra a instrução; o trabalho continua visível porque o diff da parte é contado desde o começo dela. O commit dele fica; o motor não commita de novo o que já entrou', 'warn') } }
+  { if (st.base && !st.maker_committed && (await makerCommitted(state.project.dir, st.base))) { st.maker_committed = true; log('engine', 'quem escreve fez commit por conta própria, contra a instrução; o trabalho continua visível porque o diff da parte é contado desde o começo dela. O commit dele fica; o motor não commita de novo o que já entrou', 'warn') } }
   // prova ANTIGA (verde antes da parte) que só falha por tempo limite é instabilidade, não defeito de quem escreve: repete a suíte uma vez antes de gastar rodada
   // (épico 7, parte 6: três rodadas pagas atrás de uma prova da parte 3 que estourava 5 s; quem escreve chegou a mexer no vitest.config fora do escopo para esconder)
   if (!st.tests_after.ok && !st.flaky_retry && m.tests_before?.tests?.length) {
