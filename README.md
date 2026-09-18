@@ -7,7 +7,7 @@ engine durável (journal com cadeia de hash, write-ahead, reconciliação após 
 portões e revisão de outra família, e devolve evidência. O usuário pode ser preguiçoso; a inteligência
 operacional mora no harness.
 
-**Estado (2026-09-18): Slice 1 em construção por missão autônoma na demo (`proto/`): journal, GitPort, runner, lease, gates, pack, engine e `ade run` implementados e testados (épicos 1–9 de 10); validação com o Claude real e dogfood ficam no épico 10.**
+**Estado (2026-09-18): Slice 1 em construção por missão autônoma na demo (`proto/`): journal, GitPort, runner, lease, gates, pack, engine e `ade run` implementados e testados (épicos 1–9 de 10); validação com o Claude real e dogfood D1 rodados em 18/09 (`ADE-D1` em 27 s, US$ 0,28).**
 
 Repositório canônico: [`startRED/TL-ADE`](https://github.com/startRED/TL-ADE) (público). Autor: Erick.
 Trabalho novo entra por branch + PR contra `main`; convenções em [`docs/development-method.md`](docs/development-method.md).
@@ -21,7 +21,7 @@ Trabalho novo entra por branch + PR contra `main`; convenções em [`docs/develo
 5. [`docs/plans/slice-1.md`](docs/plans/slice-1.md) — plano executável do primeiro slice (~3 semanas): stories como Task Contracts, testes nomeados, CLI falsa, método de execução.
 6. [`docs/journeys.md`](docs/journeys.md) — as 6 jornadas obrigatórias validadas contra a arquitetura.
 7. [`docs/adr/README.md`](docs/adr/README.md) — 22 ADRs (decisão, evidência, trade-offs, reversão).
-8. [`docs/evals/README.md`](docs/evals/README.md), [`docs/security/README.md`](docs/security/README.md), [`docs/operations/autonomy-and-permissions.md`](docs/operations/autonomy-and-permissions.md), [`docs/development-method.md`](docs/development-method.md).
+8. [`docs/evals/README.md`](docs/evals/README.md), [`docs/security/README.md`](docs/security/README.md), [`docs/operations/autonomy-and-permissions.md`](docs/operations/autonomy-and-permissions.md), [`docs/operations/usar-em-outro-projeto.md`](docs/operations/usar-em-outro-projeto.md), [`docs/operations/dogfood-d1.md`](docs/operations/dogfood-d1.md), [`docs/development-method.md`](docs/development-method.md).
 9. [`docs/research/README.md`](docs/research/README.md) — índice e digest da pesquisa (40 premissas derrubadas, confirmações, hipóteses a medir); [`docs/catalog-sources.md`](docs/catalog-sources.md) — fontes do catálogo com licença e decisão.
 
 Histórico: [`docs/specs/2026-09-16-ade-design.md`](docs/specs/2026-09-16-ade-design.md) (spec v2, superada) e

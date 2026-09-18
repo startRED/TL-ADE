@@ -108,6 +108,18 @@ aqui, `docs/plans/slice-1.md` S14), detector de loop, scheduler com DAG, segunda
 `config` não entram porque o charter do slice 1 exclui DAG e configuração além do `ade-config`.
 **15 dias-dev · ~90 h-agente.** Escada: **D1**.
 
+**Medido (2026-09-18, D1 rodada).** Missão autônoma na demo de 2026-09-17 04:54Z a 2026-09-18 13:03Z,
+10 épicos, US$ 166,34; dogfood real em 27 s e US$ 0,28 (`docs/operations/dogfood-d1.md`). Velocidade do
+slice, por `git log --shortstat` dos commits `ade:` (inserções + remoções, primeiro commit em 16/09):
+
+- commit_base: 9a37c9832ce92b085f4eb9aabd6ffb64589ef01a
+- linhas_alteradas: 35124
+- dias: 3
+- linhas_por_dia: 11708
+
+O número é a régua para a v0.2 (Checker Codex + entrega remota): os 49 casos de paridade restantes são
+porte mecânico e devem correr acima dessa média.
+
 ---
 
 ## 2. v0.2 — Paridade, entrega remota e Checker (D2)
