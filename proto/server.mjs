@@ -1214,7 +1214,7 @@ const BRIEF_JSON_SCHEMA = {
     title: { type: 'string' }, goal: { type: 'string' }, users: { type: 'string' },
     in_scope: { type: 'array', items: { type: 'string' } }, out_of_scope: { type: 'array', items: { type: 'string' } },
     done_means: { type: 'array', items: { type: 'string' } }, constraints: { type: 'array', items: { type: 'string' } },
-    versions: { type: 'array', minItems: 1, maxItems: 5, items: { type: 'object', additionalProperties: false, properties: { name: { type: 'string' }, goal: { type: 'string' }, includes: { type: 'array', items: { type: 'string' } } }, required: ['name', 'goal', 'includes'] } },
+    versions: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'object', additionalProperties: false, properties: { name: { type: 'string' }, goal: { type: 'string' }, includes: { type: 'array', items: { type: 'string' } } }, required: ['name', 'goal', 'includes'] } },
     questions: BRIEF_QUESTIONS,
   },
   required: ['title', 'goal', 'users', 'in_scope', 'out_of_scope', 'done_means', 'constraints', 'versions', 'questions'],
@@ -1235,19 +1235,20 @@ BRIEFING ANTERIOR: ${JSON.stringify({ ...m.brief_draft, questions: undefined })}
     '- title (≤8 palavras); goal (2 frases leigas: o que o usuário vai conseguir fazer no fim); users (uma frase).',
     '- in_scope (5 a 12 itens curtos e verificáveis); out_of_scope (3 a 6 itens: o que NÃO será feito, com o motivo em 3 a 6 palavras); done_means (3 a 6 critérios que uma pessoa confere abrindo o programa).',
     '- constraints (regras do repositório e do usuário: pastas intocáveis, dependências, formato, custo; aqui pode citar caminhos). Até 10 itens.',
-    '- versions (1 a 4): a PRIMEIRA é a menor versão que já é útil e cabe numa missão de até 10 épicos; as seguintes são incrementos. Cada uma: name (v1, v2…), goal (uma frase de até 15 palavras), includes (itens de in_scope, copiados iguais). Todo item de in_scope aparece em exatamente uma versão.',
+    '- versions (1 a 8): em ordem de construção; cada uma cabe em até 10 épicos. A missão constrói TODAS, uma depois da outra, sem parar entre elas: a PRIMEIRA é a menor versão que já é útil, as seguintes são incrementos até o pedido inteiro. Cada uma: name (v1, v2…), goal (uma frase de até 15 palavras), includes (itens de in_scope, copiados iguais). Todo item de in_scope aparece em exatamente uma versão.',
     secondRound ? '- questions: OBRIGATORIAMENTE lista vazia (a entrevista já aconteceu duas vezes; decida você e registre a decisão em constraints).'
       : '- questions (0 a 10): SÓ o que você não consegue decidir bem sozinho e que mudaria o briefing. Mesmo formato da entrevista: id, question (uma frase simples), why, options (2 a 4, a PRIMEIRA é a recomendada, label curto + hint), allow_other. Se não houver dúvida real, lista vazia.',
   ].filter(Boolean).join('\n') + skillsBlock(m.skills?.planner || [])
 }
 function briefBlock(b) {
   if (!b) return ''
-  const v1 = b.versions?.[0]
+  const k = state.mission?.version_index || 0, v1 = b.versions?.[k], done = (b.versions || []).slice(0, k), later = (b.versions || []).slice(k + 1)
   return [
     `BRIEFING APROVADO PELO USUÁRIO (vale mais que o pedido original):`,
     `Objetivo: ${b.goal}`, `Usuários: ${b.users}`,
-    `Versão a construir NESTA missão: ${v1?.name || 'v1'} — ${v1?.goal || ''}. Entra: ${(v1?.includes || b.in_scope || []).join('; ')}.`,
-    b.versions?.length > 1 ? `Fica para as versões seguintes (NÃO planeje agora): ${b.versions.slice(1).map((v) => `${v.name}: ${v.includes.join('; ')}`).join(' | ')}` : '',
+    `Versão a construir AGORA (${k + 1} de ${b.versions?.length || 1}): ${v1?.name || 'v1'} — ${v1?.goal || ''}. Entra: ${(v1?.includes || b.in_scope || []).join('; ')}.`,
+    done.length ? `Já construídas nesta missão (estão no código; construa em cima, não refaça): ${done.map((v) => `${v.name}: ${v.goal}`).join(' | ')}` : '',
+    later.length ? `Vêm depois nesta mesma missão (NÃO planeje agora, mas não feche o caminho delas): ${later.map((v) => `${v.name}: ${v.includes.join('; ')}`).join(' | ')}` : '',
     `Fora do escopo: ${(b.out_of_scope || []).join('; ')}`,
     `Pronto significa: ${(b.done_means || []).join('; ')}`,
     `Restrições: ${(b.constraints || []).join('; ')}`,
@@ -1269,7 +1270,7 @@ async function makeBrief() {
   }
   if (b.questions?.length && state.settings.unattended) { m.answers = [...(m.answers || []), ...b.questions.map((q) => ({ id: q.id, question: q.question, answer: q.options?.[0]?.label || 'não sei' }))]; log('engine', `modo noturno: perguntas do briefing respondidas com as recomendações (${b.questions.length})`, 'warn') }
   m.brief = { ...b, questions: undefined }; m.brief_draft = null; setStep('brief', 'done')
-  log('engine', `briefing pronto: ${b.in_scope.length} item(ns) no escopo, ${b.versions.length} versão(ões); esta missão faz ${b.versions[0].name}`)
+  log('engine', `briefing pronto: ${b.in_scope.length} item(ns) no escopo, ${b.versions.length} versão(ões), todas nesta missão, em sequência a partir de ${b.versions[0].name}`)
   if (state.settings.unattended) { log('engine', 'modo noturno: briefing aprovado automaticamente', 'warn'); return makeProgram() }
   m.state = 'awaiting_plan'; m.reason = 'brief'; broadcast(); await persistMission().catch(() => {})
 }
@@ -1655,8 +1656,17 @@ async function runProgram() {
     m.epic = null; broadcast(); await persistMission().catch(() => {})
     if (ep.state !== 'done') return runProgram()
   }
-  m.epic = null; m.current = null; m.state = 'complete'; m.reason = null
   const failed = pg.epics.filter((e) => e.state !== 'done').length
+  // versões em sequência (Erick, 19/09: uma missão só até o fim): versão concluída sem falha emenda a próxima do briefing
+  const b = m.brief, k = m.version_index || 0
+  if (!failed && b?.versions?.length > k + 1) {
+    m.versions_done = [...(m.versions_done || []), { name: b.versions[k].name, epics: pg.epics.map((e) => ({ title: e.title, state: e.state, summary: e.summary })) }]
+    m.version_index = k + 1; m.program = null; m.epic = null; m.current = null
+    log('engine', `versão ${b.versions[k].name} concluída (${k + 1} de ${b.versions.length}); sigo nesta missão com ${b.versions[k + 1].name}: ${b.versions[k + 1].goal}`)
+    await persistMission().catch(() => {})
+    return makeProgram()
+  }
+  m.epic = null; m.current = null; m.state = 'complete'; m.reason = null
   log('engine', failed ? `fila de épicos terminou com ${failed} épico(s) não concluído(s) (veja o motivo em cada um)` : 'fila de épicos concluída: tudo provado, revisado e commitado', failed ? 'warn' : 'info')
   return finish()
 }
