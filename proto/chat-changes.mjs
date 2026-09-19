@@ -427,3 +427,13 @@ export async function approveChat({ projectDir, turns, id, busy }) {
   p.decided_ts = new Date().toISOString()
   return { status: 200, body: { ok: true, commit: result.commit } }
 }
+
+export async function rejectChat({ projectDir, turns, id }) {
+  const decidable = findDecidable(turns, id)
+  if (!decidable.p) return decidable
+  const p = decidable.p
+  await removeChatWorktree(projectDir, p.wt).catch(() => {})
+  p.state = 'rejected'
+  p.decided_ts = new Date().toISOString()
+  return { status: 200, body: { ok: true } }
+}

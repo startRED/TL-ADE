@@ -263,6 +263,51 @@ describe('propostas pendentes', () => {
   })
 })
 
+describe('rejectChat', () => {
+  it('CA1: recusa a proposta pendente sem alterar o repositório original', async () => {
+    const repo = await makeRepo()
+    const { proposal, turns } = await makePendingProposal(repo, 'd1b2c3d4e5f6')
+
+    const result = await chatChanges.rejectChat({ projectDir: repo, turns, id: proposal.id })
+
+    assert.deepEqual(result, { status: 200, body: { ok: true } })
+    assert.equal((await gitCmd(['status', '--porcelain', '--', '.'], repo)).stdout, '')
+    await assert.rejects(fs.access(path.join(repo, 'ola.txt')), { code: 'ENOENT' })
+    assert.equal(proposal.state, 'rejected')
+    assert.match(proposal.decided_ts, /^\d{4}-\d{2}-\d{2}T/)
+  })
+
+  it('CA2: remove a cópia isolada ao recusar a proposta', async () => {
+    const repo = await makeRepo()
+    const { proposal, turns } = await makePendingProposal(repo, 'e1b2c3d4e5f6')
+
+    await chatChanges.rejectChat({ projectDir: repo, turns, id: proposal.id })
+
+    await assert.rejects(fs.access(proposal.wt), { code: 'ENOENT' })
+  })
+
+  it('CA3: devolve 404 para proposta inexistente sem decidir a pendente', async () => {
+    const repo = await makeRepo()
+    const { proposal, turns } = await makePendingProposal(repo, 'f1b2c3d4e5f6')
+
+    const result = await chatChanges.rejectChat({ projectDir: repo, turns, id: 'nao-existe' })
+
+    assert.deepEqual(result, { status: 404, body: { error: 'Proposta não encontrada.' } })
+    assert.equal(proposal.state, 'pending')
+  })
+
+  it('CA4: devolve 409 e preserva proposta já aplicada', async () => {
+    const repo = await makeRepo()
+    const { proposal, turns } = await makePendingProposal(repo, 'g1b2c3d4e5f6')
+    proposal.state = 'applied'
+
+    const result = await chatChanges.rejectChat({ projectDir: repo, turns, id: proposal.id })
+
+    assert.deepEqual(result, { status: 409, body: { error: 'Esta proposta já foi decidida.' } })
+    assert.equal(proposal.state, 'applied')
+  })
+})
+
 describe('approveChat', () => {
   it('CA1: aplica a proposta, cria o commit e remove a cópia isolada', async () => {
     const repo = await makeRepo()
