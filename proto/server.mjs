@@ -5,6 +5,7 @@
 
 import { SCOUT_SCHEMA, scoutPrompt } from './scout.mjs'
 import { findSuites, runSuites, TOOLCHAINS } from './runners.mjs'
+import { laneCandidates, laneEngine, createLane, lanePatch, applyPatch, removeLane, LANES_DIR } from './lanes.mjs'
 import http from 'node:http'
 import { spawn } from 'node:child_process'
 import { readFile, writeFile, mkdir, appendFile, rm, stat, access, readdir, realpath , rename } from 'node:fs/promises'
@@ -103,7 +104,7 @@ const DEFAULT_SETTINGS = {
   chains: {
     epics: [{ family: 'claude', model: 'fable', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'high' }],
     plan: [{ family: 'claude', model: 'opus', effort: 'high' }, { family: 'claude', model: 'fable', effort: 'medium' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }],
-    prova: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }],
+    prova: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }], // Terra escreve a prova em ~1 min; o Flash no agy levava 2 a 3
     impl_light: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }], // configuração e documentação
     impl: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'medium' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }], // parte comum
     impl_hard: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'high' }], // interface larga, risco alto
@@ -119,6 +120,7 @@ const DEFAULT_SETTINGS = {
   visual_gate: true,
   fast_lane: true, // faixa rápida (ADR 0008 / E18): pedido curto de correção num projeto existente pula entrevista e plano no Opus
   max_usd_per_story: 5, // orçamento por parte (spec E4): estourou com provas verdes → aceita; sem provas verdes → para
+  parallel_parts: 2, // partes independentes ao mesmo tempo (lanes.mjs): a atual + 1 em cópia isolada; 1 = em fila
   unattended: false, // modo noturno (ADR 0015): responde a entrevista com as recomendações, aprova o plano, e em parada sem saída pula a parte e segue
   max_usd_per_mission: 60, // teto por missão (US$ no Claude): estourou → pausa em vez de continuar gastando
   autonomy: 'auto', // auto: após 6 rodadas com provas verdes e sem achado grave do revisor, aceita e segue; ask: para e pergunta
@@ -284,7 +286,7 @@ function run(cmd, args, { cwd, stdin, onLine, timeoutMs = 20 * 60 * 1000, env = 
     const quoted = IS_WIN ? args.map((a) => /[\s"&|<>^()]/.test(a) ? '"' + a.replace(/(\\*)"/g, '$1$1\\"') + '"' : a) : args
     const eng = als.getStore(); if (eng?.mission?.pause_requested) return reject(PAUSE)
     const child = spawn(cmd, quoted, { cwd, shell: IS_WIN, env: { ...process.env, DISABLE_AUTOUPDATER: '1', DISABLE_TELEMETRY: '1', ...env }, windowsHide: true })
-    if (eng) eng.children.add(child)
+    if (eng) { eng.children.add(child); eng.laneKids?.add(child) }
     let out = '', err = '', buf = ''
     let timedOut = false
     const timer = setTimeout(() => { timedOut = true; killTree(child) }, timeoutMs)
@@ -296,8 +298,8 @@ function run(cmd, args, { cwd, stdin, onLine, timeoutMs = 20 * 60 * 1000, env = 
       for (const l of lines) if (l.trim()) onLine(l)
     })
     child.stderr.on('data', (d) => { err += d })
-    child.on('close', (code) => { clearTimeout(timer); if (eng) eng.children.delete(child); if (onLine && buf.trim()) onLine(buf); if (eng?.mission?.pause_requested) return reject(PAUSE); resolve({ code, out, err, timedOut }) })
-    child.on('error', (e) => { clearTimeout(timer); if (eng) eng.children.delete(child); resolve({ code: -1, out, err: String(e) }) })
+    child.on('close', (code) => { clearTimeout(timer); if (eng) { eng.children.delete(child); eng.laneKids?.delete(child) } if (onLine && buf.trim()) onLine(buf); if (eng?.mission?.pause_requested) return reject(PAUSE); resolve({ code, out, err, timedOut }) })
+    child.on('error', (e) => { clearTimeout(timer); if (eng) { eng.children.delete(child); eng.laneKids?.delete(child) } resolve({ code: -1, out, err: String(e) }) })
     if (stdin != null) { child.stdin.write(stdin); child.stdin.end() } else child.stdin.end()
   })
 }
@@ -308,6 +310,7 @@ function killTree(child) { try { if (IS_WIN) spawn('taskkill', ['/PID', String(c
 // ---------- pausar / continuar / persistir ----------
 const MISSIONS_DIR = path.join(ADE_DIR, 'missions')
 async function persistMission(e = currentEngine()) {
+  e = e?.parent || e // trilho (lanes.mjs): grava a missão com a pasta do projeto, não a da cópia
   const m = e?.mission; if (!m || !e.project) return
   await mkdir(MISSIONS_DIR, { recursive: true })
   const file = path.join(MISSIONS_DIR, `${m.id}.json`), tmp = `${file}.${process.pid}.tmp`
@@ -582,10 +585,12 @@ async function discover(dir) {
 async function refreshProject() { state.project = { ...state.project, ...(await discover(state.project.dir)) } }
 
 // Provas de qualquer ecossistema (runners.mjs). Soma a prova node:test de parte que o vitest/jest do projeto não inclui.
-async function runTests(project) {
-  const res = await runSuites(project.dir, project.suites || findSuites(project.dir), { run, python: ensurePython })
-  if (!res.covered.length) return res
-  const stray = await strayNodeTests(project.dir, new Set(res.covered.map((f) => path.relative(project.dir, f).split(path.sep).join('/'))))
+// only = arquivo de prova da parte: roda só ele; null quando nada o rodou, e quem chamou roda a suíte inteira.
+async function runTests(project, { only = null } = {}) {
+  const res = await runSuites(project.dir, project.suites || findSuites(project.dir), { run, python: ensurePython, only })
+  const covered = new Set((res?.covered || []).map((f) => path.relative(project.dir, f).split(path.sep).join('/')))
+  const stray = res?.covered?.length || only ? await strayNodeTests(project.dir, covered, only ? [only] : null) : []
+  if (!res) { const failed = stray.filter((t) => t.status !== 'passed').length; return stray.length ? { ok: !failed, total: stray.length, failed, tests: stray, runner: 'node-test', named: true, covered: [], only } : null }
   if (!stray.length) return res
   const tests = [...res.tests, ...stray], failed = tests.filter((t) => t.status !== 'passed').length
   return { ...res, tests, total: tests.length, failed, ok: failed === 0 }
@@ -593,9 +598,9 @@ async function runTests(project) {
 // Prova de parte que o runner do projeto não roda (node:test em proto/ enquanto o vitest da raiz só inclui tests/**): roda com
 // node --test, senão o verde da suíte não diz nada sobre a parte (m-mu81n0ms: 6 rodadas sobre uma prova que nunca rodou).
 // ponytail: só node:test ao lado do vitest; prova de outro runner fora do include continua invisível, o planejador é que evita.
-async function strayNodeTests(dir, covered) {
+async function strayNodeTests(dir, covered, files = null) {
   const out = []
-  for (const f of new Set((state.mission?.stories || []).map((s) => String(s.test_file || '').replace(/\\/g, '/').replace(/^\.\//, '')))) {
+  for (const f of new Set((files || (state.mission?.stories || []).map((s) => s.test_file)).map((x) => String(x || '').replace(/\\/g, '/').replace(/^\.\//, '')))) {
     if (!/\.(m?js|cjs)$/.test(f) || covered.has(f)) continue
     let body; try { body = await readFile(path.join(dir, f), 'utf8') } catch { continue }
     if (!/['"]node:test['"]/.test(body)) continue
@@ -738,6 +743,7 @@ async function claudeCall({ role, prompt, model, effort, tools, skipPermissions,
     result.touched = [...touched]
     const c = m.cost
     c.usd += result.total_cost_usd || 0; c.calls += 1; c.turns += result.num_turns || 0
+    const cur = story(); if (cur) cur.usd = (cur.usd || 0) + (result.total_cost_usd || 0) // custo por parte (orçamento de cada uma)
     c.tokens_in += (result.usage?.input_tokens || 0) + (result.usage?.cache_creation_input_tokens || 0)
     c.cache_read += result.usage?.cache_read_input_tokens || 0; c.tokens_out += result.usage?.output_tokens || 0
     c.by_model[model] = (c.by_model[model] || 0) + (result.total_cost_usd || 0)
@@ -1572,6 +1578,7 @@ async function makePlan({ inProgram = false } = {}) {
 async function runStories() {
   const m = state.mission
   m.state = 'running'; broadcast()
+  let stopLanes = async () => {} // trilhos em andamento (definido abaixo); toda saída do laço passa por ele
   try {
     if (!m.tests_before) {
       setStep('prepare', 'running'); m.tests_before = await runTests(state.project)
@@ -1579,6 +1586,64 @@ async function runStories() {
       setStep('prepare', 'done')
     }
     await makeAssets()
+    // Partes em paralelo por antecipação (lanes.mjs): enquanto a parte i roda aqui, as próximas independentes rodam em trilho;
+    // na vez de cada uma, o trabalho do trilho entra na pasta do projeto e o laço segue igual. Commits continuam em ordem.
+    const lanes = new Map(), parent = currentEngine()
+    for (const x of m.stories) if (x.lane) { delete x.lane; if (x.state === 'running') x.state = 'queued' } // trilho de antes de pausa ou reinício
+    const restore = (st, fresh) => { const usd = st.usd; for (const k of Object.keys(st)) delete st[k]; Object.assign(st, structuredClone(fresh), { usd }) }
+    const startLanes = (i) => {
+      const n = Math.max(0, (state.settings.parallel_parts ?? 2) - 1 - lanes.size)
+      if (!n || !m.stories[i]) return
+      for (const c of laneCandidates(m.stories, i, [m.stories[i], ...lanes.keys()], n)) {
+        const fresh = structuredClone(c)
+        c.lane = true; c.state = 'running'
+        const { eng, local } = laneEngine(parent, c)
+        const job = (async () => {
+          let lane = null
+          try {
+            lane = await createLane(run, state.project, c.id)
+            return await withEngine(eng, async () => {
+              state.project = await discover(lane.projectDir)
+              log('engine', `parte "${c.title}" roda em paralelo numa cópia isolada`)
+              const ok = await runStory(c)
+              return { ok, reason: local.reason, patch: await lanePatch(run, lane), lane }
+            })
+          } catch (error) { return { ok: false, error, lane } }
+        })()
+        lanes.set(c, { job, local, fresh })
+      }
+      broadcast()
+    }
+    // Vez da parte que rodou em trilho: true/false como runStory, ou null para refazer a parte aqui (trilho falhou, patch não
+    // aplica, suíte quebrou junto com o que foi commitado enquanto o trilho rodava).
+    const joinLane = async (st) => {
+      const { job, fresh } = lanes.get(st); lanes.delete(st); delete st.lane
+      log('engine', `vez de "${st.title}": junto o trabalho que rodou em paralelo`)
+      const res = await job, root = state.project.root || state.project.dir
+      const redo = (why) => { log('engine', `trilho de "${st.title}": ${why}; refaço a parte aqui`, 'warn'); restore(st, fresh); st.state = 'running'; return null }
+      try {
+        if (res.error === PAUSE) throw PAUSE
+        if (res.error) return redo(`falhou (${String(res.error.message || res.error).slice(0, 200)})`)
+        // parada por qualidade vale como a da parte feita aqui (vira correção ou decisão); o resto pode ser do ambiente da cópia
+        if (!res.ok && !['review_changes', 'review_failed', 'contract_wrong'].includes(res.reason)) return redo(`parou em ${res.reason}`)
+        const ap = await applyPatch(run, root, res.patch)
+        if (!ap.ok) return redo(`o trabalho não aplica na pasta do projeto (${ap.error})`)
+        await refreshProject()
+        if (!res.ok) { m.state = 'awaiting_operator'; m.reason = res.reason; st.state = 'blocked'; log('engine', `parada: ${res.reason}`, 'error'); return false }
+        if (await gitHead(state.project.dir) !== res.lane.base) {
+          setStep('tests', 'running'); const t = await runTests(state.project); setStep('tests', t.ok ? 'done' : 'failed')
+          if (!t.ok) { await applyPatch(run, root, res.patch, { reverse: true }); await refreshProject(); return redo('a suíte quebrou junto com as partes commitadas enquanto o trilho rodava') }
+          st.tests_after = t
+        }
+        log('engine', `"${st.title}" veio pronta do trilho: provada e revisada em paralelo`)
+        return true
+      } finally { if (res.lane) await removeLane(run, res.lane).catch(() => {}) }
+    }
+    stopLanes = async () => {
+      for (const { local } of lanes.values()) { local.aborted = true; for (const k of local.kids) killTree(k) }
+      for (const [st, { job, fresh }] of lanes) { const r = await job; if (r.lane) await removeLane(run, r.lane).catch(() => {}); restore(st, fresh); st.state = 'queued' }
+      lanes.clear()
+    }
     for (let i = 0; i < m.stories.length; i++) {
       const st = m.stories[i]
       if (st.state === 'done' || st.state === 'skipped') continue
@@ -1586,7 +1651,9 @@ async function runStories() {
       const badDeps = (st.depends_on || []).filter((id) => { const d = m.stories.find((x) => x.id === id); return d && d.state !== 'done' && !m.stories.some((f) => f.fix_of === id && f.state === 'done') })
       if (badDeps.length) { st.state = 'skipped'; st.skipped_reason = `depende de ${badDeps.join(', ')}, que não concluiu`; log('engine', `parte "${st.title}" pulada sem gastar: ${st.skipped_reason}`, 'warn'); broadcast(); continue }
       m.current = i; st.state = 'running'; broadcast()
-      let ok = await runStory(st)
+      startLanes(i)
+      let ok = st.lane ? await joinLane(st) : null
+      if (ok == null) ok = await runStory(st)
       // rejeitada pelo revisor com achado grave depois das rodadas: o trabalho fica e vira uma parte de correção só com os achados (uma vez)
       const highs = (st.review?.findings || []).filter((f) => f.severity === 'high')
       const reds = (st.tests_after?.tests || []).filter((t) => t.status !== 'passed').slice(0, 6)
@@ -1609,12 +1676,12 @@ async function runStories() {
           if (st.maker_committed) log('engine', `ATENÇÃO: a parte "${st.title}" foi pulada, mas quem escreve tinha feito commit por conta própria; esse commit ficou no histórico SEM revisão. Confira com git log`, 'error')
           st.state = 'skipped'; st.skipped_reason = st.contract_issue ? `contrato errado: ${st.contract_issue}` : m.reason; await gitDiscard(state.project.dir); await refreshProject(); m.state = 'running'; m.reason = null; broadcast()
           // duas partes puladas em sequência = base que as próximas precisam não existe; continuar só queima dinheiro. Pausa e espera você (ADR 0015).
-          if (m.stories[i - 1]?.state === 'skipped' && !m.stories[i - 1]?.fix_attempted) { m.state = 'paused'; m.reason = 'skips'; log('engine', 'modo noturno: duas partes seguidas puladas; as próximas dependem delas. Missão pausada para você replanejar.', 'error'); await persistMission().catch(() => {}); return finish() }
+          if (m.stories[i - 1]?.state === 'skipped' && !m.stories[i - 1]?.fix_attempted) { m.state = 'paused'; m.reason = 'skips'; log('engine', 'modo noturno: duas partes seguidas puladas; as próximas dependem delas. Missão pausada para você replanejar.', 'error'); await stopLanes(); await persistMission().catch(() => {}); return finish() }
           continue
         }
         m.state = 'running'; m.reason = null; st.state = 'running'
       }
-      if (!ok) { finish(); return 'stopped' }
+      if (!ok) { await stopLanes(); finish(); return 'stopped' }
       await gitCommit(state.project.dir, `ade: ${st.title.slice(0, 72)}`)
       if (st.tests_after?.tests?.length) m.tests_before = st.tests_after
       await refreshProject()
@@ -1632,7 +1699,7 @@ async function runStories() {
     m.state = 'complete'; m.reason = null; m.current = null
     const skipped = m.stories.filter((x) => x.state === 'skipped').length
     log('engine', skipped ? `missão pronta com ${skipped} parte(s) pulada(s) (veja o motivo em cada uma)` : 'missão pronta: todas as stories provadas, revisadas e commitadas', skipped ? 'warn' : 'info')
-  } catch (e) { if (e === PAUSE) throw e; m.state = 'awaiting_operator'; m.reason = 'engine_error'; log('engine', `erro do engine: ${e.message}`, 'error'); finish(); return 'stopped' }
+  } catch (e) { await stopLanes().catch(() => {}); if (e === PAUSE) throw e; m.state = 'awaiting_operator'; m.reason = 'engine_error'; log('engine', `erro do engine: ${e.message}`, 'error'); finish(); return 'stopped' }
   finish(); return 'ok'
 }
 
@@ -1757,7 +1824,7 @@ async function redWithoutCode(st, diff, fresh) {
   const put = await run('git', ['stash', 'push', '-u', '-q', '-m', 'ade-prova-vermelha', '--', ...code], { cwd: dir })
   if (put.code !== 0) { log('engine', `não consegui guardar o código de lado para conferir a prova vermelha (${(put.err || put.out).trim().split('\n')[0]}); sigo sem essa conferência`, 'warn'); return 'skip' }
   let res = null
-  try { res = await runTests(state.project) } finally {
+  try { res = (st.test_file && await runTests(state.project, { only: st.test_file })) || await runTests(state.project) } finally {
     // numa pausa pedida no meio, run() recusa rodar o pop; a parte recomeça do zero de qualquer jeito e a entrada fica em `git stash list`
     const back = await run('git', ['stash', 'pop', '-q'], { cwd: dir }).catch(() => ({ code: -1, err: 'pausa' }))
     if (back.code !== 0 && back.err !== 'pausa') { log('engine', 'NÃO consegui devolver o código guardado de lado; ele está em `git stash list` com o nome ade-prova-vermelha. Rode `git stash pop` na pasta do projeto', 'error'); throw new Error('git stash pop falhou depois da conferência de prova vermelha') }
@@ -1781,17 +1848,18 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   if (m.cost.usd > (state.settings.max_usd_per_mission || 60)) return stop('budget')
   st.round = round
   if (round === 1 && st.no_test_phase) { // correção de provas vermelhas: as provas já existem; direto para a implementação
-    st.usd_start = m.cost.usd; setStep('test', 'skipped'); setStep('red', 'skipped'); st.base = await gitHead(state.project.dir)
+    st.usd_start = st.usd || 0; setStep('test', 'skipped'); setStep('red', 'skipped'); st.base = await gitHead(state.project.dir)
     const now0 = await runTests(state.project); st.red_tests = now0.tests.filter((t) => t.status !== 'passed').map((t) => ({ name: t.name, status: 'failed', message: t.message || '' }))
   } else if (round === 1) {
     if (m.plan.needs_ui && state.settings.visual_gate) st.visual_before = await visualGate()
     if (!st.red_retry || !st.base) st.base = await gitHead(state.project.dir)
-    st.usd_start = m.cost.usd
+    st.usd_start = st.usd || 0
     setStep('test', 'running'); const rt = await withChain('prova', { story: st }, async (who) => makerCall(who, { role: 'prova', prompt: testPrompt(st, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: 14 }))
     if (!rt) { setStep('test', 'failed'); throw new Error('nenhum modelo da cadeia "prova" conseguiu escrever a prova; o motivo de cada um está no log acima') }
     remember(st, rt); await refreshProject(); setStep('test', 'done')
     setStep('red', 'running')
-    const after = await runTests(state.project)
+    // vermelho da prova nova: basta o arquivo dela; a suíte inteira roda depois da implementação
+    const after = (st.test_file && await runTests(state.project, { only: st.test_file })) || await runTests(state.project)
     const before = new Set(m.tests_before.tests.map((t) => t.name))
     const generic = !after.named // sem resultado prova a prova (runner só com código de saída)
     st.red_tests = generic ? after.tests.filter((t) => t.status !== 'passed') : after.tests.filter((t) => !before.has(t.name) && t.status !== 'passed')
@@ -1824,7 +1892,11 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     // nenhum modelo alterou nada (todos falharam ou bloquearam): revisar um diff vazio só gasta rodadas; para e mostra o motivo
     if (!rf) { setStep('fix', 'failed', { round }); throw new Error(`nenhum modelo da cadeia "${pick.key}" conseguiu alterar o código; o motivo de cada um está no log acima`) }
     remember(st, rf); await refreshProject(); setStep('fix', 'done', { round }) }
-  setStep('tests', 'running'); st.tests_after = await runTests(state.project); st.diff = await storyDiff(st)
+  setStep('tests', 'running')
+  // primeiro só a prova da parte: vermelha = próxima rodada sem pagar a suíte inteira; verde = suíte inteira (todo commit passa por ela)
+  const quick = st.test_file ? await runTests(state.project, { only: st.test_file }) : null
+  if (quick && !quick.ok) log('engine', `prova da parte ainda vermelha (${quick.failed} de ${quick.total}); pulo a suíte inteira nesta rodada`)
+  st.tests_after = quick && !quick.ok ? quick : await runTests(state.project); st.diff = await storyDiff(st)
   // prova ANTIGA (verde antes da parte) que só falha por tempo limite é instabilidade, não defeito de quem escreve: repete a suíte uma vez antes de gastar rodada
   // (épico 7, parte 6: três rodadas pagas atrás de uma prova da parte 3 que estourava 5 s; quem escreve chegou a mexer no vitest.config fora do escopo para esconder)
   if (!st.tests_after.ok && !st.flaky_retry && m.tests_before?.tests?.length) {
@@ -1843,7 +1915,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   if (!st.diff.trim() && !st.no_change_retry && round < MAX_ROUNDS) { st.no_change_retry = true; log('engine', 'quem escreve terminou sem alterar arquivo algum; repito a rodada uma vez pedindo para não rodar provas lentas', 'warn'); return runStory(st, round + 1, previousReview, null) }
   if (!st.diff.trim()) { setStep('checker', 'skipped'); return stop('no_changes') }
   if (!st.tests_after.ok) {
-    const spentNow = m.cost.usd - (st.usd_start || 0)
+    const spentNow = (st.usd || 0) - (st.usd_start || 0)
     const redNow = st.tests_after.tests.filter((t) => t.status !== 'passed').map((t) => t.name).sort().join('|')
     if (st.contract_issue && round >= 2) { log('engine', `quem escreve diz que o contrato da parte está errado: ${st.contract_issue}. Paro de gastar rodadas; a parte volta ao planejador com esse motivo`, 'warn'); return stop('contract_wrong') }
     const stuck = round >= 5 && st.last_red === redNow; st.last_red = redNow
@@ -1861,7 +1933,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
       log('engine', `portão visual: ${st.visual.findings.length} achado(s) novo(s)${st.visual.pre_existing ? ` (${st.visual.pre_existing} já existiam antes desta parte)` : ''}`)
       for (const f of st.visual.findings.slice(0, 12)) log('impeccable', `${f.file}${f.line ? ':' + f.line : ''} [${f.rule}] ${f.message}`, 'text')
       // um único retoque visual por story: achado que sobrevive ao retoque vira aviso, não loop
-      if (st.visual.findings.length && !st.visual_reworked && (m.cost.usd - (st.usd_start || 0)) <= (state.settings.max_usd_per_story || 4)) { st.visual_reworked = true; setStep('visual', 'failed'); log('engine', 'rodada de retoque visual'); return runStory(st, round + 1, null, st.visual.findings) }
+      if (st.visual.findings.length && !st.visual_reworked && ((st.usd || 0) - (st.usd_start || 0)) <= (state.settings.max_usd_per_story || 4)) { st.visual_reworked = true; setStep('visual', 'failed'); log('engine', 'rodada de retoque visual'); return runStory(st, round + 1, null, st.visual.findings) }
       setStep('visual', st.visual.findings.length ? 'warn' : 'done')
     }
   }
@@ -1876,7 +1948,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     }
   }
   if (st.review?.verdict === 'approve') return true
-  const spent = m.cost.usd - (st.usd_start || 0), budget = state.settings.max_usd_per_story || 4
+  const spent = (st.usd || 0) - (st.usd_start || 0), budget = state.settings.max_usd_per_story || 4
   if (st.review && round < MAX_ROUNDS && spent > budget) log('engine', `orçamento da parte estourado (US$ ${spent.toFixed(2)} > ${budget}); sem novas rodadas`, 'warn')
   if (st.review && round < MAX_ROUNDS && spent <= budget) { log('engine', `revisor pediu mudanças; rodada ${round + 1} automática`); return runStory(st, round + 1, st.review, null) }
   if (st.review && state.settings.autonomy !== 'ask' && st.tests_after.ok && !(st.review.findings || []).some((f) => f.severity === 'high')) {
@@ -2079,6 +2151,7 @@ http.createServer(async (req, res) => {
   state.recent = await loadJson('projects.json', [])
   state.history = await loadJson('history.json', [])
   { const q = await loadJson('quota.json', null); if (q) state.quota = { claude: q.claude || null, codex: q.codex || null, exhausted: q.exhausted || {} } }
+  rm(LANES_DIR, { recursive: true, force: true }).catch(() => {}) // trilhos de antes do reinício (junction: sai só o link)
   // ferramentas de linguagem instaladas: o planejador não escolhe linguagem que não roda nesta máquina
   Promise.all(TOOLCHAINS.map(async (t) => ((await run(IS_WIN ? 'where' : 'which', [t])).code === 0 ? t : null))).then((r) => { state.toolchains = r.filter(Boolean) })
   readQuota().then(broadcastSoon); setInterval(() => readQuota().then(broadcastSoon), 5 * 60 * 1000) // a reserva de cota do withChain precisa de leitura fresca
