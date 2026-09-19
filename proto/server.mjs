@@ -6,7 +6,7 @@
 import { SCOUT_SCHEMA, scoutPrompt } from './scout.mjs'
 import { findSuites, runSuites, TOOLCHAINS } from './runners.mjs'
 import { laneCandidates, laneEngine, createLane, lanePatch, applyPatch, removeLane, LANES_DIR } from './lanes.mjs'
-import { chatWriteTurn, chatCommand, chatIntro, formatHistory, pendingProposal, PENDING_BLOCK } from './chat-changes.mjs'
+import { chatWriteTurn, chatCommand, chatIntro, formatHistory, pendingProposal, PENDING_BLOCK, handleChatDecision, discardPending, pendingChatIds, pruneChatWorktrees } from './chat-changes.mjs'
 import http from 'node:http'
 import { spawn } from 'node:child_process'
 import { readFile, writeFile, mkdir, appendFile, rm, stat, access, readdir, realpath , rename } from 'node:fs/promises'
@@ -568,12 +568,13 @@ function skillsBlock(selected) {
 
 // ---------- projeto ----------
 async function discover(dir) {
-  const info = { dir, name: path.basename(dir), git: false, dirty: false, branch: null, root: null, nested: false, runner: 'none', test_cmd: null, has_index: false, language: null, files: 0 }
+  const info = { dir, name: path.basename(dir), git: false, dirty: false, branch: null, head: null, root: null, nested: false, runner: 'none', test_cmd: null, has_index: false, language: null, files: 0 }
   const st = await stat(dir).catch(() => null)
   if (!st?.isDirectory()) return { ...info, error: 'A pasta não existe.' }
   const g = await run('git', ['rev-parse', '--is-inside-work-tree'], { cwd: dir })
   info.git = g.code === 0 && g.out.trim() === 'true'
   if (info.git) {
+    info.head = await gitHead(dir)
     info.dirty = (await run('git', ['status', '--porcelain', '--', '.'], { cwd: dir })).out.trim().length > 0
     info.branch = (await run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir })).out.trim() || null
     const root = (await run('git', ['rev-parse', '--show-toplevel'], { cwd: dir })).out.trim()
@@ -2267,7 +2268,21 @@ http.createServer(async (req, res) => {
       withEngine(e, () => chatTurn(e, b.text.trim(), { family, model, effort: EFFORTS.includes(b.effort) ? b.effort : 'medium' })).catch((err) => { e.chat_busy = false; log('engine', `conversa falhou: ${err.message}`, 'error') })
       return json(res, 202, { ok: true })
     }
-    if (url.pathname === '/api/chat/clear' && req.method === 'POST') { const b = await body(req); const e = await targetEngine(req, url, b); if (!e?.project) return json(res, 400, {}); e.chat = []; await saveChat(e.project.dir, []).catch(() => {}); broadcast(); return json(res, 200, { ok: true }) }
+    if ((url.pathname === '/api/chat/approve' || url.pathname === '/api/chat/reject') && req.method === 'POST') {
+      const b = await body(req); const e = await targetEngine(req, url, b); if (!e?.project) return json(res, 400, { error: 'Escolha uma pasta primeiro.' })
+      await e.chat_ready
+      if (typeof b.id !== 'string') return json(res, 400, { error: 'Proposta não informada.' })
+      const action = url.pathname.endsWith('/approve') ? 'approve' : 'reject'
+      const out = await withEngine(e, () => handleChatDecision({ action, projectDir: e.project.dir, turns: e.chat || (e.chat = []), id: b.id, busy: busyOf(e), refresh: () => refreshProject(), save: () => saveChat(e.project.dir, e.chat).catch(() => {}), notify: () => broadcast() }))
+      return json(res, out.status, out.body)
+    }
+    if (url.pathname === '/api/chat/clear' && req.method === 'POST') {
+      const b = await body(req); const e = await targetEngine(req, url, b); if (!e?.project) return json(res, 400, {})
+      await e.chat_ready
+      if (e.chat_busy) return json(res, 409, { error: 'Ainda estou respondendo a anterior.' })
+      await discardPending({ projectDir: e.project.dir, turns: e.chat || [] })
+      e.chat = []; await saveChat(e.project.dir, []).catch(() => {}); broadcast(); return json(res, 200, { ok: true })
+    }
     if (url.pathname === '/api/decide' && req.method === 'POST') { const b = await body(req); const e = await targetEngine(req, url, b); if (!e) return json(res, 400, {}); withEngine(e, () => guard(() => decide(b.option, { text: b.text, answers: b.answers, choice: b.choice, planner: b.planner }))); return json(res, 202, { ok: true }) }
     if (url.pathname === '/api/skill' && url.searchParams.get('id')) { const c = state.catalog.find((x) => x.id === url.searchParams.get('id')); return c ? json(res, 200, { id: c.id, body: c.body }) : json(res, 404, {}) }
     if (url.pathname === '/api/app' || url.pathname.startsWith('/api/app/')) {
@@ -2288,6 +2303,7 @@ http.createServer(async (req, res) => {
   state.history = await loadJson('history.json', [])
   { const q = await loadJson('quota.json', null); if (q) state.quota = { claude: q.claude || null, codex: q.codex || null, exhausted: q.exhausted || {} } }
   rm(LANES_DIR, { recursive: true, force: true }).catch(() => {}) // trilhos de antes do reinício (junction: sai só o link)
+  pendingChatIds(CHATS_DIR).then((ids) => pruneChatWorktrees(ADE_DIR, ids)).catch((err) => console.error('limpeza de cópias do chat falhou:', err.message))
   // ferramentas de linguagem instaladas: o planejador não escolhe linguagem que não roda nesta máquina
   Promise.all(TOOLCHAINS.map(async (t) => ((await run(IS_WIN ? 'where' : 'which', [t])).code === 0 ? t : null))).then((r) => { state.toolchains = r.filter(Boolean) })
   readQuota().then(broadcastSoon); setInterval(() => readQuota().then(broadcastSoon), 5 * 60 * 1000) // a reserva de cota do withChain precisa de leitura fresca

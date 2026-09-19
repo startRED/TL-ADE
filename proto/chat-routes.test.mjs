@@ -299,6 +299,53 @@ describe('server.mjs: chat em modo escrita', () => {
   })
 })
 
+describe('server.mjs: decisão, limpar e subida', () => {
+  const serverUrl = new URL('./server.mjs', import.meta.url)
+
+  async function source() { return fs.readFile(serverUrl, 'utf8') }
+
+  function route(text, start) {
+    const lines = text.split('\n')
+    const first = lines.findIndex((line) => line.includes(start))
+    const last = lines.findIndex((line, index) => index > first && line.includes("url.pathname ==="))
+    return lines.slice(first, last < 0 ? undefined : last).join('\n')
+  }
+
+  it('CA1: decide propostas depois de carregar a conversa', async () => {
+    const decisionRoute = route(await source(), "'/api/chat/approve'")
+    assert.ok(decisionRoute.indexOf('await e.chat_ready') < decisionRoute.indexOf("'Proposta não informada.'"))
+    assert.ok(decisionRoute.indexOf("'Proposta não informada.'") < decisionRoute.indexOf('handleChatDecision('))
+    for (const needle of ['busyOf(e)', 'refreshProject()', 'saveChat(', 'broadcast()', "'/api/chat/reject'"]) assert.ok(decisionRoute.includes(needle))
+  })
+
+  it('CA2: limpa a conversa somente sem resposta em andamento', async () => {
+    const clearRoute = route(await source(), "url.pathname === '/api/chat/clear'")
+    const busy = clearRoute.indexOf('e.chat_busy')
+    assert.ok(clearRoute.indexOf("'Ainda estou respondendo a anterior.'") < clearRoute.indexOf('discardPending('))
+    assert.ok(clearRoute.indexOf('discardPending(') < clearRoute.indexOf('e.chat = []'))
+    assert.ok(clearRoute.indexOf('saveChat(') > busy)
+    assert.ok(clearRoute.indexOf('discardPending(') > busy)
+  })
+
+  it('CA3: descobre o HEAD do repositório', async () => {
+    const text = await source()
+    const discover = text.slice(text.indexOf('async function discover('), text.indexOf('async function refreshProject('))
+    assert.ok(discover.includes('head: null'))
+    assert.ok(discover.includes('info.head = await gitHead(dir)'))
+  })
+
+  it('CA4: remove cópias sem pendência ao subir', async () => {
+    const text = await source()
+    const startup = text.slice(text.indexOf('.listen(PORT'))
+    const pending = startup.indexOf('pendingChatIds(CHATS_DIR)')
+    const prune = startup.indexOf('pruneChatWorktrees(ADE_DIR')
+    const catchAt = startup.indexOf('.catch(', prune)
+    const nextAwait = startup.indexOf('\n  await ', prune)
+    assert.ok(pending < prune)
+    assert.ok(prune < catchAt && catchAt < nextAwait)
+  })
+})
+
 describe('chatWriteTurn', () => {
   it('CA1: cria uma proposta pendente com os arquivos alterados pela IA', async () => {
     const repo = await makeRepo()
