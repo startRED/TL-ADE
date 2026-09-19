@@ -387,3 +387,43 @@ export async function applyProposal(projectDir, proposal, summary) {
     return { commit: committedHead.out.trim(), skipped }
   })
 }
+
+function findDecidable(turns, id) {
+  const p = (turns || []).find((turn) => turn.proposal && turn.proposal.id === id)?.proposal
+  if (!p) return { status: 404, body: { error: 'Proposta não encontrada.' } }
+  if (p.state !== 'pending') return { status: 409, body: { error: 'Esta proposta já foi decidida.' } }
+  return { p }
+}
+
+export async function approveChat({ projectDir, turns, id, busy }) {
+  const decidable = findDecidable(turns, id)
+  if (!decidable.p) return decidable
+  const p = decidable.p
+  const dirty = (await git(['status', '--porcelain', '--', '.'], { cwd: projectDir })).out.trim().length > 0
+  const headResult = await git(['rev-parse', '--verify', '-q', 'HEAD'], { cwd: projectDir })
+  const head = headResult.code === 0 ? headResult.out.trim() : null
+  const approval = canApprove({ busy: !!busy, dirty, head, proposalHead: p.head })
+  if (!approval.ok) return { status: 409, body: { error: approval.reason } }
+
+  let result
+  try {
+    result = await applyProposal(projectDir, p, p.summary)
+  } catch (error) {
+    if (error?.code === 'git' && head) {
+      await git(['reset', '-q', '--hard', head], { cwd: projectDir })
+      for (const file of p.files || []) {
+        if (file.kind === 'created') {
+          await fs.rm(path.join(projectDir, file.path), { force: true }).catch(() => {})
+        }
+      }
+    }
+    return { status: 409, body: { error: error.message } }
+  }
+
+  await removeChatWorktree(projectDir, p.wt).catch(() => {})
+  p.state = 'applied'
+  p.commit = result.commit
+  p.skipped = result.skipped
+  p.decided_ts = new Date().toISOString()
+  return { status: 200, body: { ok: true, commit: result.commit } }
+}

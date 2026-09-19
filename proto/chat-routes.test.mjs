@@ -43,6 +43,28 @@ async function makeRepo() {
   return repo
 }
 
+async function makePendingProposal(repo, id) {
+  const wtRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ade-wt-'))
+  tempDirs.push(wtRoot)
+  const { path: wtPath } = await chatChanges.createChatWorktree(repo, id, { wtRoot })
+  createdWorktrees.push({ repo, wtPath })
+  await fs.writeFile(path.join(wtPath, 'ola.txt'), 'oi')
+  const proposal = await chatChanges.attachProposal({
+    projectDir: repo,
+    id,
+    wtPath,
+    request: 'crie ola.txt',
+    answer: 'Criei ola.txt com o texto oi.'
+  })
+  return {
+    proposal,
+    turns: [
+      { role: 'user', text: 'crie ola.txt' },
+      { role: 'ai', text: 'Criei ola.txt com o texto oi.', proposal }
+    ]
+  }
+}
+
 afterEach(async () => {
   for (const { repo, wtPath } of createdWorktrees) {
     await chatChanges.removeChatWorktree(repo, wtPath).catch(() => {})
@@ -238,5 +260,102 @@ describe('propostas pendentes', () => {
     assert.equal(proposal.id, 'b')
     assert.equal(chatChanges.pendingProposal([{ proposal: { state: 'applied' } }]), null)
     assert.equal(chatChanges.pendingProposal([]), null)
+  })
+})
+
+describe('approveChat', () => {
+  it('CA1: aplica a proposta, cria o commit e remove a cópia isolada', async () => {
+    const repo = await makeRepo()
+    const { proposal, turns } = await makePendingProposal(repo, 'a1b2c3d4e5f6')
+
+    const result = await chatChanges.approveChat({
+      projectDir: repo, turns, id: proposal.id, busy: false
+    })
+
+    assert.equal(result.status, 200)
+    assert.equal(result.body.ok, true)
+    assert.equal(await fs.readFile(path.join(repo, 'ola.txt'), 'utf8'), 'oi')
+    assert.equal((await gitCmd(['log', '-1', '--format=%s'], repo)).stdout.trim(), 'chat: Criei ola.txt com o texto oi.')
+    assert.equal(proposal.state, 'applied')
+    assert.equal(proposal.commit, (await gitCmd(['rev-parse', 'HEAD'], repo)).stdout.trim())
+    await assert.rejects(fs.access(proposal.wt), { code: 'ENOENT' })
+  })
+
+  it('CA2: bloqueia aprovação ocupada, suja ou desatualizada sem decidir a proposta', async () => {
+    const busyRepo = await makeRepo()
+    const busy = await makePendingProposal(busyRepo, 'b1b2c3d4e5f6')
+    const busyResult = await chatChanges.approveChat({
+      projectDir: busyRepo, turns: busy.turns, id: busy.proposal.id, busy: true
+    })
+    assert.deepEqual(busyResult, { status: 409, body: { error: chatChanges.MESSAGES.busy } })
+    assert.equal(busy.proposal.state, 'pending')
+    await assert.rejects(fs.access(path.join(busyRepo, 'ola.txt')), { code: 'ENOENT' })
+
+    const dirtyRepo = await makeRepo()
+    const dirty = await makePendingProposal(dirtyRepo, 'c1b2c3d4e5f6')
+    await fs.writeFile(path.join(dirtyRepo, 'solto.txt'), 'solto')
+    const dirtyResult = await chatChanges.approveChat({
+      projectDir: dirtyRepo, turns: dirty.turns, id: dirty.proposal.id, busy: false
+    })
+    assert.deepEqual(dirtyResult, { status: 409, body: { error: chatChanges.MESSAGES.dirty } })
+    assert.equal(dirty.proposal.state, 'pending')
+    await assert.rejects(fs.access(path.join(dirtyRepo, 'ola.txt')), { code: 'ENOENT' })
+
+    const staleRepo = await makeRepo()
+    const stale = await makePendingProposal(staleRepo, 'd1b2c3d4e5f6')
+    await fs.writeFile(path.join(staleRepo, 'z.txt'), 'z')
+    await gitCmd(['add', 'z.txt'], staleRepo)
+    await gitCmd(['-c', 'user.name=TL-ADE', '-c', 'user.email=ade@local', 'commit', '-q', '-m', 'novo'], staleRepo)
+    const staleResult = await chatChanges.approveChat({
+      projectDir: staleRepo, turns: stale.turns, id: stale.proposal.id, busy: false
+    })
+    assert.deepEqual(staleResult, { status: 409, body: { error: chatChanges.MESSAGES.stale } })
+    assert.equal(stale.proposal.state, 'pending')
+    await assert.rejects(fs.access(path.join(staleRepo, 'ola.txt')), { code: 'ENOENT' })
+  })
+
+  it('CA3: informa proposta ausente ou já decidida', async () => {
+    const repo = await makeRepo()
+    const { proposal, turns } = await makePendingProposal(repo, 'e1b2c3d4e5f6')
+
+    const absent = await chatChanges.approveChat({
+      projectDir: repo, turns, id: 'nao-existe', busy: false
+    })
+    assert.deepEqual(absent, { status: 404, body: { error: 'Proposta não encontrada.' } })
+
+    proposal.state = 'rejected'
+    const decided = await chatChanges.approveChat({
+      projectDir: repo, turns, id: proposal.id, busy: false
+    })
+    assert.deepEqual(decided, { status: 409, body: { error: 'Esta proposta já foi decidida.' } })
+  })
+
+  it('CA4: desfaz aplicação parcial e mantém a cópia quando patch ou gancho falham', async () => {
+    const conflictRepo = await makeRepo()
+    const conflict = await makePendingProposal(conflictRepo, 'f1b2c3d4e5f6')
+    const conflictHead = (await gitCmd(['rev-parse', 'HEAD'], conflictRepo)).stdout.trim()
+    conflict.proposal.patch = 'diff --git a/nao.txt b/nao.txt\n--- a/nao.txt\n+++ b/nao.txt\n@@ -1 +1 @@\n-x\n+y\n'
+    const conflictResult = await chatChanges.approveChat({
+      projectDir: conflictRepo, turns: conflict.turns, id: conflict.proposal.id, busy: false
+    })
+    assert.deepEqual(conflictResult, { status: 409, body: { error: chatChanges.MESSAGES.conflict } })
+    assert.equal((await gitCmd(['rev-parse', 'HEAD'], conflictRepo)).stdout.trim(), conflictHead)
+    assert.equal(conflict.proposal.state, 'pending')
+    await fs.access(conflict.proposal.wt)
+
+    const hookRepo = await makeRepo()
+    const hook = await makePendingProposal(hookRepo, 'g1b2c3d4e5f6')
+    const hookDir = path.join(hookRepo, '.git', 'ade-fail-hooks')
+    await fs.mkdir(hookDir)
+    await fs.writeFile(path.join(hookDir, 'pre-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+    await gitCmd(['config', 'core.hooksPath', hookDir], hookRepo)
+    const hookResult = await chatChanges.approveChat({
+      projectDir: hookRepo, turns: hook.turns, id: hook.proposal.id, busy: false
+    })
+    assert.equal(hookResult.status, 409)
+    assert.equal((await gitCmd(['status', '--porcelain'], hookRepo)).stdout, '')
+    await assert.rejects(fs.access(path.join(hookRepo, 'ola.txt')), { code: 'ENOENT' })
+    assert.equal(hook.proposal.state, 'pending')
+    await fs.access(hook.proposal.wt)
   })
 })
