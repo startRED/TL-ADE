@@ -4,6 +4,7 @@
 // Sem durabilidade de verdade (estado em memória; journal só registra). Esse é o slice 1.
 
 import { SCOUT_SCHEMA, scoutPrompt } from './scout.mjs'
+import { findSuites, runSuites, TOOLCHAINS } from './runners.mjs'
 import http from 'node:http'
 import { spawn } from 'node:child_process'
 import { readFile, writeFile, mkdir, appendFile, rm, stat, access, readdir, realpath , rename } from 'node:fs/promises'
@@ -520,6 +521,8 @@ function catalogListing() {
 }
 // O modelo de entendimento escolhe skills por papel; o motor valida contra o catálogo, aplica as regras
 // fixas de Erick (interface/design => taste + impeccable no maker) e as fixações/exclusões do operador.
+// uma skill de padrões por linguagem (a de provas a IA escolhe se precisar: skill entra inteira e custa tokens)
+const LANG_SKILL = { python: 'python-patterns', go: 'golang-patterns', rust: 'rust-patterns', java: 'java-coding-standards', kotlin: 'kotlin-patterns', csharp: 'dotnet-patterns', cpp: 'cpp-coding-standards', dart: 'dart-flutter-patterns', perl: 'perl-patterns' }
 function selectSkills(intent) {
   const s = state.settings.skills
   const domains = new Set(intent.domains || [])
@@ -532,7 +535,7 @@ function selectSkills(intent) {
       for (const p of (intent.skills?.[role] || [])) add(p.id, p.reason ? `IA: ${p.reason}` : 'escolha da IA')
       if (role === 'maker' && (domains.has('frontend') || domains.has('design') || intent.needs_ui)) { add('design-taste-frontend', 'regra: interface ou design'); add('impeccable', 'regra: interface ou design') }
       if (role === 'maker' && (domains.has('backend') || domains.has('api') || intent.needs_backend)) { add('backend-patterns', 'regra: backend'); add('api-design', 'regra: API') }
-      if (role === 'maker' && domains.has('python')) add('python-patterns', 'regra: Python')
+      if (role === 'maker') for (const lang of new Set([state.project?.language, ...domains])) if (LANG_SKILL[lang]) add(LANG_SKILL[lang], `regra: linguagem ${lang}`)
       if (role === 'checker' && (domains.has('frontend') || intent.needs_ui)) add('impeccable', 'regra: revisor de interface conhece o detector')
       if (role === 'checker') add('code-review-and-quality', 'regra: critérios de revisão')
     }
@@ -568,61 +571,24 @@ async function discover(dir) {
   }
   info.has_index = await exists(path.join(dir, 'index.html'))
   try { info.files = (await readdir(dir)).filter((f) => f !== 'node_modules' && f !== '.git').length } catch {}
-  const pkgPath = path.join(dir, 'package.json')
-  if (await exists(pkgPath)) {
-    info.language = 'js'
-    let pkg = {}; try { pkg = JSON.parse(await readFile(pkgPath, 'utf8')) } catch {}
-    if (await exists(path.join(dir, 'node_modules', 'vitest'))) { info.runner = 'vitest'; info.test_cmd = 'node node_modules/vitest/vitest.mjs run' }
-    else if (pkg.scripts?.test && !/no test specified/.test(pkg.scripts.test)) { info.runner = 'npm'; info.test_cmd = 'npm test' }
-  } else if (await exists(path.join(dir, 'pyproject.toml')) || await exists(path.join(dir, 'pytest.ini')) || await exists(path.join(dir, 'requirements.txt'))) {
-    info.language = 'python'; info.runner = 'pytest'; info.test_cmd = '.venv\\Scripts\\python.exe -m pytest -q'
-  } else if (await exists(path.join(dir, 'go.mod'))) {
-    info.language = 'go'; info.runner = 'go'; info.test_cmd = 'go test ./...'
-  } else if (await exists(path.join(dir, 'Cargo.toml'))) {
-    info.language = 'rust'; info.runner = 'cargo'; info.test_cmd = 'cargo test'
-  }
+  // ecossistemas da raiz e de subpastas (runners.mjs); a principal dá a linguagem e o runner mostrado
+  info.suites = findSuites(dir)
+  const main = info.suites.find((s) => s.test_cmd) || info.suites[0]
+  info.language = main?.language || null
+  info.runner = main?.test_cmd ? info.suites.filter((s) => s.test_cmd).map((s) => s.runner).join('+') : 'none'
+  info.test_cmd = info.suites.filter((s) => s.test_cmd).map((s) => (s.cwd ? `(em ${s.cwd}/) ${s.test_cmd}` : s.test_cmd)).join(' ; ') || null
   return info
 }
 async function refreshProject() { state.project = { ...state.project, ...(await discover(state.project.dir)) } }
 
+// Provas de qualquer ecossistema (runners.mjs). Soma a prova node:test de parte que o vitest/jest do projeto não inclui.
 async function runTests(project) {
-  const dir = project.dir
-  if (project.runner === 'vitest') {
-    const outFile = path.join(dir, '.ade-vitest.json')
-    await rm(outFile, { force: true })
-    const r = await run('node', ['node_modules/vitest/vitest.mjs', 'run', '--reporter=json', `--outputFile=${outFile}`], { cwd: dir, timeoutMs: 5 * 60 * 1000 })
-    try {
-      const j = JSON.parse(await readFile(outFile, 'utf8')); await rm(outFile, { force: true })
-      const tests = j.testResults.flatMap((f) => {
-        if (f.assertionResults.length === 0 && f.status === 'failed') return [{ name: `${path.basename(f.name)} (arquivo ainda não roda)`, status: 'failed', message: (f.message || '').split('\n')[0].slice(0, 200) }]
-        return f.assertionResults.map((a) => ({ name: a.fullName, status: a.status, message: (a.failureMessages || [])[0]?.split('\n')[0] || '' }))
-      })
-      tests.push(...await strayNodeTests(dir, new Set(j.testResults.map((f) => path.relative(dir, f.name).split(path.sep).join('/')))))
-      const failed = tests.filter((t) => t.status !== 'passed').length
-      return { ok: failed === 0 && tests.length > 0, total: tests.length, failed, tests, runner: 'vitest' }
-    } catch { return { ok: false, total: 0, failed: 0, tests: [], runner: 'vitest', timeout: !!r.timedOut, error: (r.err || r.out).slice(-600) } }
-  }
-  if (project.runner === 'pytest') {
-    const py = await ensurePython(dir)
-    const r = await run(py, ['-m', 'pytest', '-v', '-p', 'no:cacheprovider', '--no-header'], { cwd: dir, timeoutMs: 5 * 60 * 1000 })
-    const out = (r.out + '\n' + r.err).trim()
-    const tests = []
-    for (const line of out.split('\n')) {
-      const v = /^(\S+::\S+) (PASSED|FAILED|ERROR)/.exec(line.trim()); if (v && v[2] === 'PASSED') tests.push({ name: v[1], status: 'passed', message: '' })
-      const m1 = /^(FAILED|ERROR) (\S+?)(?: - (.*))?$/.exec(line.trim()); if (m1) tests.push({ name: m1[2], status: 'failed', message: (m1[3] || '').slice(0, 300) })
-    }
-    const nfail = tests.filter((t) => t.status !== 'passed').length
-    const total = tests.length
-    if (!tests.length && r.code !== 0) tests.push({ name: 'pytest', status: 'failed', message: out.split('\n').slice(-6).join(' ').slice(-300) })
-    return { ok: r.code === 0 && total > 0, total: total || tests.length, failed: r.code === 0 ? 0 : Math.max(nfail, 1), tests, runner: 'pytest', output: out.split('\n').slice(-12).join('\n') }
-  }
-  if (['npm', 'go', 'cargo'].includes(project.runner)) {
-    const [cmd, ...args] = project.test_cmd.split(' ')
-    const r = await run(cmd, args, { cwd: dir, timeoutMs: 5 * 60 * 1000 })
-    const tail = (r.out + '\n' + r.err).trim().split('\n').slice(-12).join('\n')
-    return { ok: r.code === 0, total: 1, failed: r.code === 0 ? 0 : 1, tests: [{ name: project.test_cmd, status: r.code === 0 ? 'passed' : 'failed', message: r.code === 0 ? '' : tail.slice(-300) }], runner: project.runner, output: tail }
-  }
-  return { ok: false, total: 0, failed: 0, tests: [], runner: 'none' }
+  const res = await runSuites(project.dir, project.suites || findSuites(project.dir), { run, python: ensurePython })
+  if (!res.covered.length) return res
+  const stray = await strayNodeTests(project.dir, new Set(res.covered.map((f) => path.relative(project.dir, f).split(path.sep).join('/'))))
+  if (!stray.length) return res
+  const tests = [...res.tests, ...stray], failed = tests.filter((t) => t.status !== 'passed').length
+  return { ...res, tests, total: tests.length, failed, ok: failed === 0 }
 }
 // Prova de parte que o runner do projeto não roda (node:test em proto/ enquanto o vitest da raiz só inclui tests/**): roda com
 // node --test, senão o verde da suíte não diz nada sobre a parte (m-mu81n0ms: 6 rodadas sobre uma prova que nunca rodou).
@@ -655,7 +621,8 @@ async function ensurePython(dir) {
   return py
 }
 // forma longa: ':!__pycache__' falha no git ("Unimplemented pathspec magic '_'")
-const DIFF_EXCLUDES = ['node_modules', '**/node_modules/**', 'package-lock.json', '.ade-vitest.json', 'dist', 'build', '__pycache__', '.venv', '.ade-attachments'].map((x) => `:(exclude)${x}`)
+const LOCKFILES = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb', 'go.sum', 'Cargo.lock', 'composer.lock', 'Gemfile.lock', 'poetry.lock', 'uv.lock', 'packages.lock.json', 'pubspec.lock', 'mix.lock']
+const DIFF_EXCLUDES = ['node_modules', '**/node_modules/**', ...LOCKFILES.flatMap((f) => [f, `**/${f}`]), '.ade-vitest.json', 'dist', 'build', 'target', 'obj', '.gradle', '.dart_tool', '__pycache__', '.venv', '.ade-attachments'].map((x) => `:(exclude)${x}`)
 const IGNORE_LINES = ['node_modules/', '.ade-vitest.json', 'dist/', '__pycache__/', '.venv/', '.ade-attachments/']
 async function ensureIgnore(dir) {
   const f = path.join(dir, '.gitignore')
@@ -910,6 +877,8 @@ const MAP_RULES = [
   [/\.py$/i, /^\s*(?:async\s+)?(?:def|class)\s+([A-Za-z_]\w*)/],
   [/\.go$/i, /^(?:func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)|type\s+([A-Za-z_]\w*))/],
   [/\.rs$/i, /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:fn|struct|enum|trait|impl(?:<[^>]*>)?)\s+([A-Za-z_]\w*)/],
+  // demais linguagens (Java, C#, Kotlin, PHP, Ruby, Swift, Dart, C/C++, Elixir, Lua, Scala): declaração com palavra-chave ou método com modificador
+  [/\.(java|kts?|cs|fs|php|rb|swift|dart|c|h|cc|cpp|hpp|ex|exs|lua|scala)$/i, /^\s*(?:(?:public|private|protected|internal|static|final|abstract|sealed|open|override|virtual|async|export|inline|data|suspend)\s+)*(?:class|struct|interface|enum|record|object|trait|module|defmodule|defp?|fun|func|function|fn)\s+([A-Za-z_][\w.]*)|^\s*(?:(?:public|private|protected|internal|static|final|abstract|override|virtual|async)\s+)+[\w<>[\],.?]+\s+([A-Za-z_]\w*)\s*\(/],
   [/\.css$/i, /^\/\*\s*[-=]*\s*([^*]{3,60}?)\s*[-=]*\s*\*\/|^(@media[^{]{0,40})/],
   [/\.html?$/i, /<(?:section|header|main|nav|footer|template|dialog|form|aside)\b[^>]*\bid="([\w-]+)"|<(section|header|main|nav|footer|template|dialog|aside)\b/],
   [/\.md$/i, /^#{1,3}\s+(.{3,60})/],
@@ -981,7 +950,7 @@ async function checker(diff, tests, st) {
     st.contract_issue ? `Quem escreveu alegou CONTRATO ERRADO: ${st.contract_issue}. Diga no summary se a alegação procede.` : '',
     st.scope_paths?.length ? `Contrato da story: só podia alterar ${st.scope_paths.join(', ')}${st.do_not_touch?.length ? `; proibido alterar ${st.do_not_touch.join(', ')}` : ''}${st.interfaces?.length ? `; interfaces: ${st.interfaces.join(' | ')}` : ''}${st.out_of_scope?.length ? `; FORA DO ESCOPO desta story (outra story faz): ${st.out_of_scope.join('; ')} — NÃO cobre isso nem como low, mesmo que uma decisão do plano cite o tema: o contrato da story é o que esta parte deve entregar` : ''}. Alteração fora do contrato ou interface quebrada = achado high. EXCEÇÃO legítima (não é achado): atualizar asserções de provas antigas que afirmavam o formato ou comportamento que esta story manda mudar, mesmo em arquivo da lista proibida, desde que a mudança se limite a essas asserções.` : '',
     `Skills que o autor tinha de seguir: ${(m.skills.maker || []).map((s) => s.id).join(', ') || 'nenhuma'}.`,
-    `O harness JÁ RODOU as provas fora da sandbox: ${tests.failed} falharam de ${tests.total} (runner: ${tests.runner}); a prova nova falhou antes da implementação e passou depois. Não tente rodar provas nem instalar nada (sua sandbox é somente leitura e isso vai falhar); avalie o código e o diff. Julgue pelo DIFF e pelos arquivos que ele toca; leia no máximo 6 arquivos além deles (cada leitura gasta cota do revisor) e não explore o repositório. Arquivos de lock (package-lock.json) e dependências não fazem parte do escopo revisado.`,
+    `O harness JÁ RODOU as provas fora da sandbox: ${tests.failed} falharam de ${tests.total} (runner: ${tests.runner}); a prova nova falhou antes da implementação e passou depois. Não tente rodar provas nem instalar nada (sua sandbox é somente leitura e isso vai falhar); avalie o código e o diff. Julgue pelo DIFF e pelos arquivos que ele toca; leia no máximo 6 arquivos além deles (cada leitura gasta cota do revisor) e não explore o repositório. Arquivos de lock (package-lock.json, go.sum, Cargo.lock e similares) e dependências não fazem parte do escopo revisado.`,
     tests.tests?.length ? `Provas que rodaram e passaram (nomes): ${tests.tests.filter((t) => t.status === 'passed').map((t) => t.name).slice(0, 60).join(' | ')}. Um critério coberto por uma dessas provas está provado; não peça prova extra para ele.` : '',
     'Critérios de aceite sobre detalhe decorativo (borda lateral colorida, gradiente, cor exata) cedem ao portão visual (Impeccable): não peça mudanças para reintroduzir isso; avalie a intenção do critério.',
     'Severidade: high = comportamento errado, critério de aceite não atendido, segurança, acessibilidade quebrada, mudança fora do escopo. Cobertura de prova além do necessário, estilo de código, nomes e refatorações são low e NÃO impedem approve: registre como achado low e aprove.',
@@ -1205,7 +1174,7 @@ function intentPrompt() {
     'Escolha, para cada papel, as skills do catálogo abaixo que elevam a qualidade daquele papel neste pedido (ids exatos; até 4 para o maker, até 3 para os outros; lista vazia é válida). Regras fixas: se há interface ou design, o maker recebe design-taste-frontend e impeccable (pode acrescentar frontend-design e accessibility); backend/API recebe backend-patterns e api-design; banco recebe postgres-patterns; o revisor recebe skills de revisão/segurança, não de estilo; o pesquisador raramente precisa de skill.',
     '- summary: 2 frases do que será entregue e das escolhas feitas por você quando o pedido é vago.',
     '- complexity: trivial (1 arquivo, correção) | bounded (1 a 3 partes pequenas) | feature (4 a 6 partes de UM subsistema) | subsystem (precisaria de mais de 6 partes, ou toca mais de um subsistema: vira uma fila de épicos) | project (vários subsistemas ou fases, ex.: "faça o motor inteiro", "crie o app completo"). Na dúvida entre feature e subsystem, escolha subsystem: partes grandes demais falham na revisão.',
-    '- domains (subconjunto de frontend, design, backend, api, database, testing, python, security, a11y, docs, devops), keywords (5 a 12, pt e en), needs_ui, needs_backend.',
+    '- domains (subconjunto de frontend, design, backend, api, database, testing, security, a11y, docs, devops, mais a linguagem principal em minúsculas (js, ts, python, go, rust, java, kotlin, csharp, cpp, php, ruby, swift, dart, elixir)), keywords (5 a 12, pt e en), needs_ui, needs_backend.',
     '- research_questions: só fatos externos que mudariam a implementação; normalmente vazio.',
     interviewRule(),
     'CATÁLOGO DE SKILLS:', catalogListing(),
@@ -1236,6 +1205,7 @@ function planPrompt(revising = false) {
     `Entendimento prévio (outra IA): ${state.mission.intent?.summary || ''} Domínios: ${(state.mission.intent?.domains || []).join(', ')}.`,
     scoutBlock(m.scout), m.map || '',
     m.answers?.length ? `ESCOLHAS DO USUÁRIO NA ENTREVISTA (obrigatórias): ${m.answers.map((a) => `${a.question} → ${a.answer}`).join(' | ')}` : '',
+    `Ferramentas de linguagem instaladas nesta máquina: ${(state.toolchains || []).join(', ') || 'não verificado'}. Projeto novo: use linguagem cuja ferramenta está instalada; se o pedido exige outra, pergunte em questions.`,
     `Projeto: ${p.name} em ${p.dir}; ${p.files} itens na raiz; linguagem detectada: ${p.language || 'nenhuma'}; runner de provas: ${p.runner === 'none' ? 'nenhum' : p.test_cmd}; index.html na raiz: ${p.has_index ? 'sim' : 'não'}.`,
     'Explore o projeto só o necessário (Glob/Read/Grep). Depois produza:',
     '- title (≤8 palavras), summary (2 frases, o que será entregue), complexity (trivial|bounded|feature|subsystem).',
@@ -1247,7 +1217,7 @@ function planPrompt(revising = false) {
     ].join('\n') : '- assets: lista vazia. assets_style: string vazia.',
     '- Critérios de aceite descrevem comportamento observável pelo usuário ou pela prova, nunca implementação: não fixe nomes de variáveis CSS, valores exatos, estrutura interna de arquivos ou "usar só X". Isso gera reprovações inúteis na revisão.',
     '- Nunca prescreva nos critérios: borda lateral colorida em cards, gradiente roxo/azul, três cards iguais, fundo creme/bege por reflexo, sombras pretas puras. O portão visual (Impeccable) bloqueia isso e a story trava.',
-    '- domains: subconjunto de [frontend, design, backend, api, database, testing, python, security, a11y, docs].',
+    '- domains: subconjunto de [frontend, design, backend, api, database, testing, security, a11y, docs] mais a linguagem principal em minúsculas (js, ts, python, go, rust, java, kotlin, csharp, cpp, php, ruby, swift, dart, elixir).',
     '- keywords: 5 a 12 palavras técnicas do pedido (em inglês e português) para escolher skills.',
     '- needs_ui, needs_backend: booleanos.',
     '- research_questions: só fatos externos que mudariam a implementação (versão de API, regra de negócio pública); normalmente vazio.',
@@ -1270,7 +1240,7 @@ function planPrompt(revising = false) {
     '- Story que MUDA formato de retorno, contrato público ou comportamento já provado: as provas antigas que afirmam o formato anterior entram em scope_paths (nunca em do_not_touch) e a recipe diz quais asserções atualizar. do_not_touch com prova que a própria story invalida é plano impossível.',
     '- CONTRATO de cada story (quem implementa é um modelo mais barato; o contrato é o que evita erro): scope_paths (arquivos que ela pode criar ou alterar; caminhos reais do projeto ou nomes novos), do_not_touch (arquivos que NÃO pode alterar), out_of_scope (o que fica de fora, em 1 linha cada), interfaces (assinaturas que ela expõe ou consome, ex.: "appendEvent(event) → Promise<seq>", "GET /api/items → [{id,name}]"). acceptance no formato "Dado …, quando …, então …", cada um provável por UMA prova automatizada sem chamada real de rede, CLI ou serviço (dublês). test_hint diz o arquivo de prova e como simular dependências.',
     '- stories: 1 a 6 stories PEQUENAS, em ordem de execução. TAMANHO É REGRA: cada story = um comportamento observável, request com no máximo 120 palavras, acceptance com 2 a 4 critérios, diff esperado de até ~300 linhas, provável de passar numa revisão rigorosa em 1 ou 2 rodadas. Nunca junte dois comportamentos com "e também". Se o trabalho não cabe em 6 stories desse tamanho, faça só a primeira fatia coerente e diga em summary o que ficou para o próximo épico. Cada uma: id (s1, s2…), title, request (instrução completa e autossuficiente para a IA que vai implementar, incluindo o estilo visual quando houver interface), acceptance, test_hint (como provar), depends_on (ids das stories anteriores de que esta depende; [] se independente).',
-    p.runner === 'none' ? '- Não há runner de provas: a primeira story deve incluir criar o mínimo para rodar provas (JS: package.json + vitest; Python: pytest).' : '',
+    p.runner === 'none' ? '- Não há runner de provas: a primeira story cria o mínimo para rodar provas com o runner padrão da linguagem, sem dependência extra quando a linguagem já traz um (JS: package.json + vitest; Python: requirements.txt + pytest; Go: go.mod + go test; Rust: cargo; C#: projeto xUnit + dotnet test; Java: Maven ou Gradle + JUnit). o motor lê prova a prova vitest, jest, node --test, pytest, go test, cargo test, Maven/Gradle, dotnet test, PHPUnit, swift test e deno test; outro runner vale só pelo código de saída, sem saber qual prova falhou.' : '',
     '- Se o pedido é visual e não há index.html, uma story deve entregar index.html na raiz funcionando como arquivos estáticos (ES modules, sem build), para abrir no navegador.',
     'Pedidos simples viram 1 ou 2 stories. Não invente escopo além do pedido. questions: normalmente vazio (a entrevista já aconteceu).',
     revising ? `MODO EDIÇÃO: o plano abaixo já está quase pronto. NÃO explore o projeto de novo (no máximo 2 leituras para conferir um caminho ou símbolo). Devolva o MESMO JSON, alterando só o que o último pedido de mudança exige; copie o resto sem reescrever. A correção sugerida em cada pedido é uma ilustração, não uma ordem: se aplicá-la contradiz o pedido do usuário, uma escolha da entrevista ou uma decision, NÃO aplique; resolva o problema apontado de outro jeito e diga no summary qual pedido recusou e por quê. Nunca resolva um pedido entregando menos do que o épico pede.\nPLANO ATUAL:\n${JSON.stringify({ ...m.plan, epics: undefined, explanation: m.plan.epic_explanation || m.plan.explanation })}` : '',
@@ -1297,10 +1267,10 @@ const PLAN_JSON_SCHEMA = {
 // Cada fase abre um processo novo (decisão de Erick: sessões novas, não uma só). Para o maker não gastar turnos relendo,
 // o prompt já traz a árvore do projeto e o conteúdo atual dos arquivos que a story tocou (ou que a story cita).
 const PACK_FILE_MAX = 12000, PACK_TOTAL_MAX = 48000, PACK_FILES_MAX = 10
-const TEXT_EXT = /\.(html?|css|m?js|jsx|tsx?|json|md|py|toml|txt|yml|yaml|go|rs|sql|env\.example|cfg|ini)$/i
+const TEXT_EXT = /\.(html?|css|m?js|cjs|jsx|tsx?|vue|svelte|json|md|py|toml|txt|yml|yaml|go|mod|rs|sql|env\.example|cfg|ini|java|kts?|gradle|xml|properties|cs|csproj|fs|php|rb|swift|dart|c|h|cc|cpp|hpp|ex|exs|lua|scala|sh|ps1)$/i
 async function projectTree(dir) {
   const a = await run('git', ['ls-files', '--', '.'], { cwd: dir }), b = await run('git', ['ls-files', '--others', '--exclude-standard', '--', '.'], { cwd: dir })
-  const all = [...new Set((a.out + '\n' + b.out).split('\n').map((x) => x.trim()).filter((x) => x && !/(^|\/)(node_modules|\.venv|dist|build|__pycache__|\.ade-attachments)(\/|$)/.test(x)))]
+  const all = [...new Set((a.out + '\n' + b.out).split('\n').map((x) => x.trim()).filter((x) => x && !/(^|\/)(node_modules|\.venv|dist|build|target|obj|\.gradle|\.dart_tool|vendor|__pycache__|\.ade-attachments)(\/|$)/.test(x)))]
   return all.length > 200 ? [...all.slice(0, 200), `… e mais ${all.length - 200}`] : all
 }
 function citedFiles(st, tree) { const text = `${st.request} ${(st.acceptance || []).join(' ')} ${st.test_hint || ''}`; return tree.filter((f) => f.length > 3 && text.includes(f)) }
@@ -1383,7 +1353,7 @@ function common(st) {
     'Arquivos grandes: use o MAPA DO CÓDIGO e leia só o trecho (Read com offset e limit); não leia inteiro um arquivo com mais de 300 linhas sem precisar. Código novo vai em módulo novo e pequeno quando o arquivo de destino já passa de 400 linhas; nunca reescreva um arquivo inteiro para mudar um trecho.',
     m.allow_commands && state.settings.scout_enabled !== false ? `Batedor sob demanda (Gemini, barato e rápido): quando precisar de documentação, de um arquivo com mais de 500 linhas, de um fato de biblioteca/API ou de algo na internet/GitHub, NÃO leia você: rode  node "${SCOUT_SCRIPT}" "pergunta objetiva" [arquivos]  (acrescente --web para pesquisar fora) e use o recibo impresso. Uma chamada por dúvida, pergunta curta e específica.` : '',
     m.allow_commands ? 'Você pode rodar comandos (instalar dependências, inicializar projeto). Não rode servidores que fiquem abertos. NUNCA use git para gravar ou desfazer (add, commit, stash, reset, checkout, restore, clean, push): o motor faz o commit depois das provas e da revisão; commit seu esconde o trabalho do revisor e derruba a parte. git status, diff e log, só para ler, pode. PROVAS: rode no máximo o arquivo de prova desta parte, uma vez depois de cada mudança; NUNCA a suíte inteira, modo watch ou comando que fique esperando: o motor roda a suíte completa depois de você. Não fique aguardando processo.' : 'Você só tem ferramentas de leitura e edição; o harness roda as provas.',
-    p.runner === 'none' ? 'Não há runner de provas: crie o mínimo (JS: package.json com vitest e "test": "vitest run"; Python: requirements.txt com pytest e as dependências) antes da prova.' : '',
+    p.runner === 'none' ? 'Não há runner de provas: crie o mínimo com o runner padrão da linguagem antes da prova (JS: package.json com vitest e "test": "vitest run"; Python: requirements.txt com pytest e as dependências; Go: go mod init <módulo> e arquivos _test.go; Rust: cargo init; C#: projeto de teste xUnit; Java: Maven ou Gradle com JUnit 5). o motor lê prova a prova vitest, jest, node --test, pytest, go test, cargo test, Maven/Gradle, dotnet test, PHPUnit, swift test e deno test; outro runner vale só pelo código de saída, sem saber qual prova falhou.' : '',
     p.language === 'python' || /python|fastapi|django|flask|pytest/i.test(m.request) ? 'Python: o harness cria .venv com uv e instala requirements.txt + pytest antes de cada rodada de provas. Liste toda dependência em requirements.txt; para rodar algo você mesmo use .venv\\Scripts\\python.exe (o "python" do PATH é o stub da Microsoft Store, sem pacotes). Não instale nada globalmente.' : '',
     p.has_index ? 'Há um index.html na raiz; o que for visual tem de aparecer nele.' : (m.plan.needs_ui ? 'Se esta story é visual, entregue/atualize index.html na raiz funcionando como arquivos estáticos (ES modules, sem build).' : ''),
     m.research?.findings?.length ? `Pesquisa prévia: ${m.research.findings.map((f) => `${f.question} → ${f.answer}`).join(' | ')}` : '',
@@ -1429,7 +1399,7 @@ function fastLane(request) {
   if (request.length > 220 || /\n/.test(request) || !FIX_VERBS.test(request) || BIG_WORDS.test(request)) return null
   const ui = /\b(bot[ãa]o|cor|cores|css|tela|p[áa]gina|layout|fonte|imagem|menu|link|t[íi]tulo|texto|estilo)\b/i.test(request) || (p.has_index && !/\b(api|rota|endpoint|servidor|banco)\b/i.test(request))
   const be = /\b(api|rota|endpoint|banco|sql|servidor|valida[çc][ãa]o)\b/i.test(request)
-  const domains = new Set(['testing']); if (ui) { domains.add('frontend'); domains.add('design') } if (be) { domains.add('backend'); domains.add('api') } if (p.language === 'python') domains.add('python')
+  const domains = new Set(['testing']); if (ui) { domains.add('frontend'); domains.add('design') } if (be) { domains.add('backend'); domains.add('api') } if (p.language) domains.add(p.language)
   return { complexity: 'trivial', difficulty: 'easy', difficulty_why: 'correção curta', summary: request, domains: [...domains], keywords: [], needs_ui: ui, needs_backend: be, research_questions: [], questions: [], skills: { planner: [], maker: [], checker: [], research: [] } }
 }
 async function planMission() {
@@ -1823,7 +1793,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     setStep('red', 'running')
     const after = await runTests(state.project)
     const before = new Set(m.tests_before.tests.map((t) => t.name))
-    const generic = after.runner !== 'vitest'
+    const generic = !after.named // sem resultado prova a prova (runner só com código de saída)
     st.red_tests = generic ? after.tests.filter((t) => t.status !== 'passed') : after.tests.filter((t) => !before.has(t.name) && t.status !== 'passed')
     const regress = generic ? [] : after.tests.filter((t) => before.has(t.name) && t.status !== 'passed')
     log('engine', `prova vermelha: ${st.red_tests.length} vermelha(s)${generic ? ' (runner genérico)' : `, ${regress.length} antiga(s) quebrada(s)`}`)
@@ -2109,6 +2079,8 @@ http.createServer(async (req, res) => {
   state.recent = await loadJson('projects.json', [])
   state.history = await loadJson('history.json', [])
   { const q = await loadJson('quota.json', null); if (q) state.quota = { claude: q.claude || null, codex: q.codex || null, exhausted: q.exhausted || {} } }
+  // ferramentas de linguagem instaladas: o planejador não escolhe linguagem que não roda nesta máquina
+  Promise.all(TOOLCHAINS.map(async (t) => ((await run(IS_WIN ? 'where' : 'which', [t])).code === 0 ? t : null))).then((r) => { state.toolchains = r.filter(Boolean) })
   readQuota().then(broadcastSoon); setInterval(() => readQuota().then(broadcastSoon), 5 * 60 * 1000) // a reserva de cota do withChain precisa de leitura fresca
   const saved = await loadJson('settings.json', null)
   if (saved) state.settings = { ...DEFAULT_SETTINGS, ...saved, roles: { ...DEFAULT_SETTINGS.roles, ...(saved.roles || {}) }, chains: { ...DEFAULT_SETTINGS.chains, ...(saved.chains || {}) }, skills: { ...DEFAULT_SETTINGS.skills, ...(saved.skills || {}) } }
