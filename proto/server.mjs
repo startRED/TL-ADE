@@ -1565,6 +1565,8 @@ async function planMission() {
     setStep('plan', 'done', { fast: true }); broadcast()
     return runStories()
   }
+  // retomada antes do plano: entendimento e skills já feitos valem; refazer custava ~1 min e ~US$ 0,50 e podia mudar a complexidade
+  if (m.intent && m.skills && !(m.intent.questions?.length && !m.answers?.length)) { setStep('intent', 'done'); return continuePlanning() }
   setStep('intent', 'running')
   const ri = await claudeCall({ role: 'entender', prompt: intentPrompt(), model: state.settings.roles.intent.model, effort: effortOf('intent'), tools: ['Read', 'Glob'], schema: INTENT_JSON_SCHEMA, maxTurns: 4 })
   const intent = ri?.structured_output
