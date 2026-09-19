@@ -991,16 +991,23 @@ function StoryRow({ st, i, m, state }) {
 
 /* ========================= entrevista ========================= */
 function BriefView({ b, compact }) {
-  const L = ({ title, items }) => items?.length ? <div className="brief-sec"><b>{title}</b><ul>{items.map((x, i) => <li key={i}>{x}</li>)}</ul></div> : null
+  const [all, setAll] = useState(false)
+  const L = ({ title, items, max }) => items?.length ? <div className="brief-sec"><b>{title}</b><ul>{(max ? items.slice(0, max) : items).map((x, i) => <li key={i}>{x}</li>)}{max && items.length > max ? <li className="dim">+{items.length - max} em "Ver tudo"</li> : null}</ul></div> : null
+  const v1 = b.versions[0]
   return (
     <div className={`brief${compact ? ' compact' : ''}`}>
       <p className="msg-lead">{b.goal}</p>
-      <p className="msg-p"><b>Para quem:</b> {b.users}</p>
-      <div className="brief-sec"><b>Versões</b><ol className="plan-lines">{b.versions.map((v, i) => <li key={v.name}><span className="pl-n mono">{v.name}</span><span className="pl-t">{v.goal}{i === 0 ? <small className="dim"> · esta missão</small> : null}{!compact && v.includes?.length ? <small className="dim"> · {v.includes.join('; ')}</small> : null}</span></li>)}</ol></div>
-      {!compact && <L title="Entra" items={b.in_scope} />}
-      <L title="Fica de fora" items={b.out_of_scope} />
-      <L title="Pronto significa" items={b.done_means} />
-      {!compact && <L title="Restrições" items={b.constraints} />}
+      <div className="brief-sec"><b>Esta missão faz a {v1.name}</b><p className="msg-p">{v1.goal}</p></div>
+      {b.versions.length > 1 && <div className="brief-sec"><b>Fica para depois</b><ul>{b.versions.slice(1).map((v) => <li key={v.name}><span className="mono dim">{v.name}</span> {v.goal}</li>)}</ul></div>}
+      {!compact && <L title="Não vai fazer" items={b.out_of_scope} max={4} />}
+      {!compact && <button className="chain-add" onClick={() => setAll(!all)}>{all ? 'Esconder detalhes' : 'Ver tudo (o que entra, como sei que está pronto, restrições)'}</button>}
+      {all && <>
+        <p className="msg-p"><b>Para quem:</b> {b.users}</p>
+        <L title={`Entra na ${v1.name}`} items={v1.includes} />
+        <L title="Pronto significa" items={b.done_means} />
+        <L title="Não vai fazer" items={b.out_of_scope} />
+        <L title="Restrições" items={b.constraints} />
+      </>}
     </div>
   )
 }

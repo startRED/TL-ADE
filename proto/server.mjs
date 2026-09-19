@@ -1098,10 +1098,11 @@ function briefPrompt(secondRound) {
 BRIEFING ANTERIOR: ${JSON.stringify({ ...m.brief_draft, questions: undefined })}` : '',
     `Projeto: ${p.name} em ${p.dir}; ${p.files} itens na raiz; linguagem: ${p.language || 'nenhuma'}. Leia (no máximo 8 leituras) README, AGENTS.md, CLAUDE.md, docs/ e o roadmap se existirem: regras do repositório (pastas proibidas, o que está fora do escopo) vão em constraints, e o que JÁ EXISTE não entra em in_scope.`,
     'Responda em português no JSON exigido:',
-    '- title (≤8 palavras); goal (2 a 4 frases leigas: o que o usuário vai conseguir fazer no fim); users (quem usa e em que situação).',
-    '- in_scope (5 a 15 itens concretos, cada um verificável); out_of_scope (o que NÃO será feito, com o motivo em poucas palavras); done_means (3 a 8 critérios objetivos de "pronto", cada um testável por uma pessoa abrindo o programa).',
-    '- constraints (regras do repositório e do usuário: pastas intocáveis, dependências permitidas, formato, custo).',
-    '- versions (1 a 5): a PRIMEIRA é a menor versão que já é útil e cabe numa missão de até 10 épicos; as seguintes são incrementos. Cada uma: name (v1, v2…), goal (uma frase), includes (itens de in_scope que entram nela). Todo item de in_scope aparece em exatamente uma versão.',
+    'O usuário vai LER isto na tela: seja curto. Cada item é UMA frase de até 20 palavras, sem caminhos de arquivo nem nomes de função (isso vai nas restrições, não nos itens).',
+    '- title (≤8 palavras); goal (2 frases leigas: o que o usuário vai conseguir fazer no fim); users (uma frase).',
+    '- in_scope (5 a 12 itens curtos e verificáveis); out_of_scope (3 a 6 itens: o que NÃO será feito, com o motivo em 3 a 6 palavras); done_means (3 a 6 critérios que uma pessoa confere abrindo o programa).',
+    '- constraints (regras do repositório e do usuário: pastas intocáveis, dependências, formato, custo; aqui pode citar caminhos). Até 10 itens.',
+    '- versions (1 a 4): a PRIMEIRA é a menor versão que já é útil e cabe numa missão de até 10 épicos; as seguintes são incrementos. Cada uma: name (v1, v2…), goal (uma frase de até 15 palavras), includes (itens de in_scope, copiados iguais). Todo item de in_scope aparece em exatamente uma versão.',
     secondRound ? '- questions: OBRIGATORIAMENTE lista vazia (a entrevista já aconteceu duas vezes; decida você e registre a decisão em constraints).'
       : '- questions (0 a 10): SÓ o que você não consegue decidir bem sozinho e que mudaria o briefing. Mesmo formato da entrevista: id, question (uma frase simples), why, options (2 a 4, a PRIMEIRA é a recomendada, label curto + hint), allow_other. Se não houver dúvida real, lista vazia.',
   ].filter(Boolean).join('\n') + skillsBlock(m.skills?.planner || [])
