@@ -113,7 +113,7 @@ const DEFAULT_SETTINGS = {
     impl_light: [{ family: 'codex', model: 'gpt-5.6-luna', effort: 'high' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'medium' }], // configuração e documentação: leve e quase de graça no Luna
     impl: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }], // parte comum
     impl_hard: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }], // interface larga, risco alto
-    fix: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'xhigh' }, { family: 'codex', model: 'gpt-6-astra', effort: 'high' }], // escada: 2 rodadas por degrau; o Sol (IOI 91%) cobre o ponto fraco do Flash em algoritmo, o Astra entra na rodada 5
+    fix: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'xhigh' }], // escada: 2 rodadas por degrau; o Sol (IOI 91%) cobre o ponto fraco do Flash em algoritmo. Sem Astra: Erick não o quer pelo preço, e em m-mu8usf5z ele foi chamado 7x (3 sem mudar linha, US$ 2,70 equivalentes jogados fora)
     checker: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'xhigh' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'agy', model: 'claude-opus-4-6-thinking', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'high' }], // Terra revisa o Flash, o Flash revisa o Codex; Opus 4.6 via Google e Opus 5 na escada
   },
   planner_recommend: true, // o entendedor mede a dificuldade e recomenda quem planeja; você escolhe (modo noturno segue a recomendação)
@@ -2130,7 +2130,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   // não defeito da parte (m-mu8usf5z, s1 e s2: 4 chamadas do Astra sem mudar uma linha, US$ 9,90 equivalentes)
   const sameDiff = !!st.diff.trim() && st.diff === st.last_round_diff
   st.last_round_diff = st.diff
-  const oldReds = !st.tests_after.ok && !!m.tests_before?.tests?.length && st.tests_after.tests.filter((t) => t.status !== 'passed').every((t) => m.tests_before.tests.some((b) => b.name === t.name && b.status === 'passed'))
+  const oldReds = () => !!m.tests_before?.tests?.length && st.tests_after.tests.filter((t) => t.status !== 'passed').every((t) => m.tests_before.tests.some((b) => b.name === t.name && b.status === 'passed'))
   if (!st.tests_after.ok && (st.flaky_retry !== round || sameDiff) && m.tests_before?.tests?.length) {
     const okBefore = new Set(m.tests_before.tests.filter((t) => t.status === 'passed').map((t) => t.name))
     const reds = st.tests_after.tests.filter((t) => t.status !== 'passed')
@@ -2157,7 +2157,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     const spentNow = (st.usd || 0) - (st.usd_start || 0)
     const redNow = st.tests_after.tests.filter((t) => t.status !== 'passed').map((t) => t.name).sort().join('|')
     if (st.contract_issue && round >= 2) { log('engine', `quem escreve diz que o contrato da parte está errado: ${st.contract_issue}. Paro de gastar rodadas; a parte volta ao planejador com esse motivo`, 'warn'); return stop('contract_wrong') }
-    if (sameDiff && oldReds) { log('engine', 'a rodada de correção não mudou uma linha e as vermelhas são provas antigas: instabilidade da máquina, não defeito desta parte. Paro de gastar rodadas nesta parte em vez de subir para um modelo mais caro', 'warn'); return stop('tests_red') }
+    if (sameDiff && oldReds()) { log('engine', 'a rodada de correção não mudou uma linha e as vermelhas são provas antigas: instabilidade da máquina, não defeito desta parte. Paro de gastar rodadas nesta parte em vez de subir para um modelo mais caro', 'warn'); return stop('tests_red') }
     const stuck = round >= 5 && st.last_red === redNow; st.last_red = redNow
     if (stuck) log('engine', 'as mesmas provas seguem vermelhas depois de duas rodadas no modelo mais forte: impasse (provável conflito no plano); paro de gastar rodadas nesta parte', 'warn')
     if (!stuck && round < MAX_ROUNDS && spentNow <= (state.settings.max_usd_per_story || 4)) {
