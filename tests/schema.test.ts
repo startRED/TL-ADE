@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, test } from 'vitest'
-import { validate } from '../src/schema/index.js'
+import { validate, validateSupported } from '../src/schema/index.js'
 
 const SCHEMA_NAMES = [
   'journal-event',
@@ -53,4 +53,90 @@ describe('published schemas', () => {
       }
     }
   })
+
+  test('CA1: validateSupported accepts format_version 1 as valid, legacy (current: false)', () => {
+    const validUnitResult = loadFixture('unit-result', 'valid')
+    const unitResult = validateSupported('unit-result', validUnitResult)
+    expect(unitResult.valid).toBe(true)
+    expect(unitResult.errors).toEqual([])
+    expect(unitResult.formatVersion).toBe(1)
+    expect(unitResult.current).toBe(false)
+
+    const validReviewResult = loadFixture('review-result', 'valid')
+    const reviewResult = validateSupported('review-result', validReviewResult)
+    expect(reviewResult.valid).toBe(true)
+    expect(reviewResult.errors).toEqual([])
+    expect(reviewResult.formatVersion).toBe(1)
+    expect(reviewResult.current).toBe(false)
+  })
+
+  test('CA2: validateSupported refuses format_version 3 with code 4 and unsupported_result_format on /format_version', () => {
+    const docWithV3 = { format_version: 3 }
+    const reviewRes = validateSupported('review-result', docWithV3)
+    expect(reviewRes.valid).toBe(false)
+    expect(reviewRes.current).toBe(false)
+    expect(reviewRes.formatVersion).toBe(3)
+    if (reviewRes.valid) return
+    expect(reviewRes.code).toBe(4)
+    expect(reviewRes.errors.length).toBeGreaterThan(0)
+    const reviewErr = reviewRes.errors.find((e) => e.path === '/format_version')
+    expect(reviewErr).toBeDefined()
+    expect(
+      reviewErr?.code === 'unsupported_result_format' ||
+        reviewErr?.message?.includes('unsupported_result_format'),
+    ).toBe(true)
+
+    const unitRes = validateSupported('unit-result', docWithV3)
+    expect(unitRes.valid).toBe(false)
+    expect(unitRes.formatVersion).toBe(3)
+    expect(unitRes.current).toBe(false)
+    if (unitRes.valid) return
+    expect(unitRes.code).toBe(4)
+    const unitErr = unitRes.errors.find((e) => e.path === '/format_version')
+    expect(unitErr).toBeDefined()
+    expect(
+      unitErr?.code === 'unsupported_result_format' ||
+        unitErr?.message?.includes('unsupported_result_format'),
+    ).toBe(true)
+  })
+
+  test('CA3: validate preserves acceptance of valid fixtures for the other six official schemas', () => {
+    const otherSchemas = SCHEMA_NAMES.filter(
+      (name) => name !== 'unit-result' && name !== 'review-result',
+    )
+    expect(otherSchemas.length).toBe(6)
+
+    for (const schemaName of otherSchemas) {
+      const validDoc = loadFixture(schemaName, 'valid')
+      const result = validate(schemaName, validDoc)
+      expect(result.valid, `${schemaName} valid fixture should continue to be accepted`).toBe(true)
+      expect(result.errors).toEqual([])
+    }
+  })
+
+  test('CA4: validateSupported refuses legacy document with __unexpected__ field pointing to /__unexpected__ and code 4', () => {
+    const invalidUnitResult = loadFixture('unit-result', 'invalid')
+    const unitRes = validateSupported('unit-result', invalidUnitResult)
+    expect(unitRes.valid).toBe(false)
+    expect(unitRes.current).toBe(false)
+    expect(unitRes.formatVersion).toBe(1)
+    if (unitRes.valid) return
+    expect(unitRes.code).toBe(4)
+    expect(unitRes.errors.length).toBeGreaterThan(0)
+    const unitUnexpected = unitRes.errors.find((e) => e.path === '/__unexpected__')
+    expect(unitUnexpected).toBeDefined()
+
+    const invalidReviewResult = loadFixture('review-result', 'invalid')
+    const reviewRes = validateSupported('review-result', invalidReviewResult)
+    expect(reviewRes.valid).toBe(false)
+    expect(reviewRes.current).toBe(false)
+    expect(reviewRes.formatVersion).toBe(1)
+    if (reviewRes.valid) return
+    expect(reviewRes.code).toBe(4)
+    expect(reviewRes.errors.length).toBeGreaterThan(0)
+    const reviewUnexpected = reviewRes.errors.find((e) => e.path === '/__unexpected__')
+    expect(reviewUnexpected).toBeDefined()
+  })
+
 })
+
