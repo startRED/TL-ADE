@@ -7,7 +7,12 @@ engine durável (journal com cadeia de hash, write-ahead, reconciliação após 
 portões e revisão de outra família, e devolve evidência. O usuário pode ser preguiçoso; a inteligência
 operacional mora no harness.
 
-**Estado (2026-09-18): Slice 1 em construção por missão autônoma na demo (`proto/`): journal, GitPort, runner, lease, gates, pack, engine e `ade run` implementados e testados (épicos 1–9 de 10); validação com o Claude real e dogfood D1 rodados em 18/09 (`ADE-D1` em 27 s, US$ 0,28).**
+## Estado e autorização
+
+- Slice 1: fechamento pendente ([docs/plans/slice-1-fechamento.md](docs/plans/slice-1-fechamento.md)). O dogfood D1 de 18/09 consta como evidência parcial histórica.
+- Recorte local v0.2: não autorizado ([docs/plans/v02-local-proposta.md](docs/plans/v02-local-proposta.md), [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md)).
+- Restante da v0.2: fora desta rodada.
+Implementação dependente: bloqueada.
 
 Repositório canônico: [`startRED/TL-ADE`](https://github.com/startRED/TL-ADE) (público). Autor: Erick.
 Trabalho novo entra por branch + PR contra `main`; convenções em [`docs/development-method.md`](docs/development-method.md).
@@ -36,4 +41,4 @@ Os 66 invariantes de durabilidade estão catalogados em `docs/research/runtime-p
 
 ## Próximo passo
 
-Decisões de `docs/architecture.md` §9 confirmadas por Erick em 2026-09-17; iniciar o slice 1 conforme `docs/plans/slice-1.md`.
+Decisões de `docs/architecture.md` §9 confirmadas por Erick em 2026-09-17; conferir as lacunas da matriz em [docs/plans/slice-1-fechamento.md](docs/plans/slice-1-fechamento.md) e responder à consulta única existente em [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md). A proposta de metade da cota ainda depende de fonte, janela semanal, consumo externo e tratamento de ausência aprovados; US$ 0,28 do dogfood não medem percentual da assinatura ([docs/operations/dogfood-d1.md](docs/operations/dogfood-d1.md) como fonte do valor e [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md) como consulta única cujas regras proíbem inferir percentual a partir de dólares).

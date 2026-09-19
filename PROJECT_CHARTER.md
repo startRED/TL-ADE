@@ -49,4 +49,12 @@ não é uma IDE, não é um provedor de modelo (nunca chama API HTTP de modelo; 
 
 **Regra de ampliação.** Item da lista "fora" que apareça em `src/` é motivo de rejeição, não de discussão; o caminho é uma linha em `docs/roadmap.md`.
 
+## Estado e autorização
+
+- Slice 1: fechamento pendente ([docs/plans/slice-1-fechamento.md](docs/plans/slice-1-fechamento.md)).
+- Recorte local v0.2: não autorizado ([docs/plans/v02-local-proposta.md](docs/plans/v02-local-proposta.md), [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md)).
+- Restante da v0.2: fora desta rodada.
+Implementação dependente: bloqueada. Esta nota não altera exclusões nem ativa a emenda.
+O registro comum de [docs/plans/v02-local-proposta.md](docs/plans/v02-local-proposta.md) exige saída 0 antes de qualquer commit para node node_modules/vitest/vitest.mjs run, node node_modules/typescript/bin/tsc --noEmit e npm run lint, sem npx nem git push.
+
 **Regra de cerimônia proporcional.** Se o diff cabe numa frase, pula plano e brainstorming.

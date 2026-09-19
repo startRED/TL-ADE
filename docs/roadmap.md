@@ -122,6 +122,16 @@ porte mecânico e devem correr acima dessa média.
 
 ---
 
+## Estado e autorização
+
+- Slice 1: fechamento pendente ([plans/slice-1-fechamento.md](plans/slice-1-fechamento.md)).
+- Recorte local v0.2: não autorizado ([plans/v02-local-proposta.md](plans/v02-local-proposta.md), [plans/v02-local-aprovacao.md](plans/v02-local-aprovacao.md)).
+- Restante da v0.2: fora desta rodada.
+Implementação dependente: bloqueada.
+A revisão integrada, o rework limitado e a integração exclusivamente local constituem proposta pendente documentada em [plans/v02-local-proposta.md](plans/v02-local-proposta.md); a autorização documental é separada de verificações posteriores de CLI, canário, capacidade e fonte de cota. O restante da v0.2 (§2), incluindo entrega remota e paridade completa, permanece preservado conforme planejado, respeitando o teto de planejamento de §11.
+
+---
+
 ## 2. v0.2 — Paridade, entrega remota e Checker (D2)
 
 **Objetivo.** Fechar os 66 invariantes com paridade 93/93 nos dois SOs e levar uma story até PR merged com
