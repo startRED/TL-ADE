@@ -419,12 +419,19 @@ async function pauseMission() {
   for (const c of e.children) killTree(c) // sem processo vivo, a próxima chamada a run() rejeita com PAUSE e o guard fecha a missão
   return null
 }
+// caminho do contrato (glob de scope_paths) → regex; caminho que é pasta cobre o que está dentro
+const scopeRx = (g) => new RegExp('^' + String(g).replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '').replace(/[.+^${}()|[\]]/g, '\\$&').replace(/\*\*\/?/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*') + '(/.*)?$')
 async function resumeMission() {
   const m = state.mission
   if (!m || m.state !== 'paused') return 'Esta missão não está pausada.'
   const fresh = await discover(state.project.dir)
-  const nextFix = (m.stories || []).find((x) => x.state === 'queued')?.fix_of
-  if (fresh.dirty && nextFix) log('engine', `árvore com alterações mantida: a próxima parte é a correção de "${nextFix}" e trabalha sobre elas`, 'warn')
+  const next = (m.stories || []).find((x) => x.state === 'queued'), nextFix = next?.fix_of
+  // alterações só nos arquivos do contrato da parte que recomeça ficam: ela recomeça sobre elas e o vermelho segue conferido
+  // guardando o código de lado. Pausar para reiniciar o motor jogava fora parte já aprovada pelo revisor (épico 2, s1).
+  const allow = next ? [...(next.scope_paths || []), next.test_file].filter(Boolean).map(scopeRx) : []
+  const mine = fresh.dirty && allow.length && (await run('git', ['status', '--porcelain', '-uall'], { cwd: fresh.dir })).out.split('\n').map((l) => l.slice(3).trim()).filter(Boolean).every((f) => allow.some((r) => r.test(f)))
+  if (fresh.dirty && !nextFix && mine) log('engine', `árvore com alterações mantida: são só arquivos do contrato de "${next.title}", que recomeça sobre elas`, 'warn')
+  else if (fresh.dirty && nextFix) log('engine', `árvore com alterações mantida: a próxima parte é a correção de "${nextFix}" e trabalha sobre elas`, 'warn')
   else if (fresh.dirty) { await gitDiscard(fresh.dir) }
   state.project = await discover(fresh.dir); m.finished_at = null; const auto = m.reason === 'quota'; m.reason = null; m.quota_until = null; log(auto ? 'engine' : 'operador', 'continuou a missão')
   if (m.program) {
@@ -975,7 +982,7 @@ async function checker(diff, tests, st) {
     'Responda em português no formato JSON exigido. verdict = "approve" só se não houver achado high.',
     (() => {
       if (!st.scope_paths?.length) return ''
-      const rx = (g) => new RegExp('^' + String(g).replace(/\\/g, '/').replace(/^\.\//, '').replace(/[.+^${}()|[\]]/g, '\\$&').replace(/\*\*\/?/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*') + '(/.*)?$')
+      const rx = scopeRx
       const files = [...new Set([...diff.matchAll(/^diff --git a\/(\S+)/gm)].map((x) => x[1]))]
       const allow = st.scope_paths.map(rx), deny = (st.do_not_touch || []).map(rx)
       const forbidden = files.filter((f) => deny.some((r) => r.test(f))), outside = files.filter((f) => !allow.some((r) => r.test(f)) && !forbidden.includes(f))
