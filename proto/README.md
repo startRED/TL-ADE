@@ -58,11 +58,20 @@ Quem escreve e quem revisa têm de ser de empresas diferentes. Modelos por papel
 - O Gemini CLI (`gemini`) fica de fora enquanto não estiver logado (`oauth_creds.json`); o Gemini entra pelo Antigravity (`agy`).
 - No chat, a IA prepara mudanças numa cópia isolada. Você confere o cartão antes de qualquer alteração chegar à sua pasta.
 
-## Chat que altera arquivos
+## Chat que altera arquivos (roteiro manual)
 
 A IA trabalha primeiro numa cópia isolada e mostra as diferenças no cartão. Ao escolher **Aprovar**, as mudanças entram na sua pasta e a ADE cria um commit como `chat: …`. Ao escolher **Recusar**, a sua pasta não muda.
 
 O botão **Aprovar** fica bloqueado quando há uma missão ativa, alterações locais ainda não commitadas ou uma proposta desatualizada porque a pasta mudou depois que a IA a preparou. Resolva a situação indicada e peça a mudança de novo quando necessário.
+
+Roteiro manual:
+
+1. Abra uma pasta git com pelo menos um commit.
+2. No chat, peça: `crie o arquivo ola.txt com o texto oi`.
+3. Confira que `ola.txt` não existe na pasta e que `proto/.ade/chats/<pasta>.json` tem `proposal.state` igual a `pending` e `files` igual a `[{ path: 'ola.txt', kind: 'created' }]`.
+4. Aprove a proposta com `curl -X POST http://127.0.0.1:<porta>/api/chat/approve -H 'content-type: application/json' -d '{"dir":"<pasta>","id":"<proposal.id>"}'`. Confira `ola.txt` com `oi` e `git log -1` com assunto começando por `chat: `, sem push.
+5. Peça `crie o arquivo tchau.txt com o texto até logo`, pegue o novo `proposal.id`, chame `/api/chat/reject` e confira que `tchau.txt` não existe, que `git status` sai limpo e que `proto/.ade/wt/chat-<id>` sumiu.
+6. Com um arquivo alterado e não commitado na pasta, aprove uma nova proposta e confira `409` com `A pasta tem alterações suas ainda não commitadas. Commite ou descarte antes de aprovar.`
 
 ## Arquivos
 
