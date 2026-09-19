@@ -28,6 +28,7 @@ Nunca use `npx`: `spawn('npx.cmd')` sem shell falha com EINVAL no Windows (ADR 0
 ## Proibições
 
 - Tocar `proto/**`; a demo fica intocada.
+  - Exceção do épico "Servidor: chat escreve na cópia e rotas aprovar/recusar": podem ser alterados somente proto/chat-changes.mjs, proto/server.mjs, proto/chat-routes.test.mjs e proto/README.md.
 - Converter arquivo para `.ts` ou criar passo de build.
 - Criar `workspaces` ou `packages/`.
 - Suprimir regra de tipo ou lint (diretivas ts-ignore, ts-expect-error, ts-nocheck, oxlint-disable) ou afrouxar `strict`.

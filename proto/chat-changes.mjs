@@ -139,6 +139,18 @@ export async function attachProposal({ projectDir, id, wtPath, request, answer }
   }
 }
 
+export async function chatWriteTurn({ projectDir, id, request, exec, wtRoot = WT_ROOT, attachments = [] }) {
+  const { path: wtPath } = await createChatWorktree(projectDir, id, { wtRoot })
+  try {
+    const answer = String((await exec(wtPath)) ?? '')
+    const proposal = await attachProposal({ projectDir, id, wtPath, request, answer })
+    return { answer, proposal }
+  } catch (error) {
+    await removeChatWorktree(projectDir, wtPath).catch(() => {})
+    throw error
+  }
+}
+
 export const PENDING_BLOCK = 'Decida o cartão anterior (Aprovar ou Recusar) antes de perguntar de novo.'
 
 export function pendingProposal(turns = []) {

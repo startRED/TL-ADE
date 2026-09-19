@@ -142,6 +142,86 @@ describe('chatCommand', () => {
   })
 })
 
+describe('chatWriteTurn', () => {
+  it('CA1: cria uma proposta pendente com os arquivos alterados pela IA', async () => {
+    const repo = await makeRepo()
+    const wtRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ade-wt-'))
+    tempDirs.push(wtRoot)
+
+    const result = await chatChanges.chatWriteTurn({
+      projectDir: repo,
+      id: 't1',
+      request: 'crie ola.txt',
+      exec: async (wtPath) => {
+        await fs.writeFile(path.join(wtPath, 'ola.txt'), 'oi')
+        return 'Criei ola.txt.'
+      },
+      wtRoot
+    })
+    createdWorktrees.push({ repo, wtPath: path.join(wtRoot, 'chat-t1') })
+
+    assert.equal(result.answer, 'Criei ola.txt.')
+    assert.deepEqual(result.proposal.files, [{ path: 'ola.txt', kind: 'created' }])
+    assert.equal(result.proposal.state, 'pending')
+  })
+
+  it('CA2: mantém o projeto original sem alterações após criar a proposta', async () => {
+    const repo = await makeRepo()
+    const wtRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ade-wt-'))
+    tempDirs.push(wtRoot)
+
+    await chatChanges.chatWriteTurn({
+      projectDir: repo,
+      id: 't1',
+      request: 'crie ola.txt',
+      exec: async (wtPath) => {
+        await fs.writeFile(path.join(wtPath, 'ola.txt'), 'oi')
+        return 'Criei ola.txt.'
+      },
+      wtRoot
+    })
+    createdWorktrees.push({ repo, wtPath: path.join(wtRoot, 'chat-t1') })
+
+    await assert.rejects(fs.access(path.join(repo, 'ola.txt')), { code: 'ENOENT' })
+    assert.equal((await gitCmd(['status', '--porcelain'], repo)).stdout, '')
+  })
+
+  it('CA3: descarta a cópia quando a IA não altera arquivos', async () => {
+    const repo = await makeRepo()
+    const wtRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ade-wt-'))
+    tempDirs.push(wtRoot)
+
+    const result = await chatChanges.chatWriteTurn({
+      projectDir: repo,
+      id: 't2',
+      request: 'não mude nada',
+      exec: async () => 'Nada a mudar.',
+      wtRoot
+    })
+
+    assert.deepEqual(result, { answer: 'Nada a mudar.', proposal: null })
+    await assert.rejects(fs.access(path.join(wtRoot, 'chat-t2')), { code: 'ENOENT' })
+  })
+
+  it('CA4: descarta a cópia e preserva o erro da IA', async () => {
+    const repo = await makeRepo()
+    const wtRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ade-wt-'))
+    tempDirs.push(wtRoot)
+
+    await assert.rejects(
+      chatChanges.chatWriteTurn({
+        projectDir: repo,
+        id: 't3',
+        request: 'falhe',
+        exec: async () => { throw new Error('falhou') },
+        wtRoot
+      }),
+      { message: 'falhou' }
+    )
+    await assert.rejects(fs.access(path.join(wtRoot, 'chat-t3')), { code: 'ENOENT' })
+  })
+})
+
 describe('chatIntro', () => {
   it('CA1: abre o chat em modo escrita na cópia isolada, sem modo somente leitura', () => {
     const intro = chatChanges.chatIntro({
