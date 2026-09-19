@@ -1745,10 +1745,18 @@ async function makerCall(who, opts) {
   return r
 }
 // Codex como maker: prompt por stdin, sandbox de escrita na pasta do projeto, receita de chamada curta (sem config nem skills do usuário).
+// Arquivo alterado (não commitado) → hash do conteúdo. Tocado = novo na lista ou com conteúdo diferente: na rodada de correção
+// o arquivo já estava alterado, e só comparar a lista do git status dava 0 arquivo(s) e fazia saída com erro parecer nada feito.
+async function dirtyFiles(dir) {
+  const out = new Map()
+  for (const f of (await run('git', ['status', '--porcelain', '-uall'], { cwd: dir })).out.split('\n').map((l) => l.slice(3).trim()).filter(Boolean))
+    out.set(f, createHash('sha1').update(await readFile(path.join(dir, f)).catch(() => '')).digest('hex'))
+  return out
+}
+const changedSince = (before, after) => [...after].filter(([f, h]) => before.get(f) !== h).map(([f]) => f)
 async function codexMaker({ role, prompt, model, effort }) {
   const m = state.mission, dir = state.project.dir
-  const status = async () => new Set((await run('git', ['status', '--porcelain'], { cwd: dir })).out.split('\n').map((l) => l.slice(3).trim()).filter(Boolean))
-  const before = await status(), t0 = Date.now()
+  const before = await dirtyFiles(dir), t0 = Date.now()
   log('engine', `codex (${role}, ${model}, esforço ${effort})`); setLive({ source: 'codex', kind: 'thinking', text: `${role}: Codex trabalhando…` })
   let last = null, usage = null, r
   try {
@@ -1769,7 +1777,7 @@ async function codexMaker({ role, prompt, model, effort }) {
   m.cost.calls += 1
   if (usage) { m.cost.tokens_in += usage.input_tokens || 0; m.cost.tokens_out += usage.output_tokens || 0; m.cost.cache_read += usage.cached_input_tokens || 0 }
   m.cost.by_model[model] = m.cost.by_model[model] || 0
-  const touched = [...(await status())].filter((f) => !before.has(f))
+  const touched = changedSince(before, await dirtyFiles(dir))
   journal({ type: 'model_call', family: 'codex', role, model, effort, story: m.current, usd: 0, tokens_in: usage?.input_tokens || 0, cache_read: usage?.cached_input_tokens || 0, tokens_out: usage?.output_tokens || 0, prompt_chars: prompt.length, touched: touched.length, duration_ms: Date.now() - t0 }).catch(() => {})
   readQuota().then(broadcastSoon)
   const msg = (last || r.err || r.out || '').trim()
@@ -1788,14 +1796,13 @@ async function agyMaker({ role, prompt, model, effort }) {
   const m = state.mission, dir = state.project.dir, id = agyModel(model, effort)
   const rel = `${ATTACH_DIR}/prompt-${Date.now().toString(36)}.md`
   await mkdir(path.join(dir, ATTACH_DIR), { recursive: true }); await ensureIgnore(dir); await writeFile(path.join(dir, rel), prompt)
-  const status = async () => new Set((await run('git', ['status', '--porcelain'], { cwd: dir })).out.split('\n').map((l) => l.slice(3).trim()).filter(Boolean))
-  const before = await status(), t0 = Date.now()
+  const before = await dirtyFiles(dir), t0 = Date.now()
   log('engine', `agy (${role}, ${id})`); setLive({ source: 'agy', kind: 'thinking', text: `${role}: Gemini trabalhando (sem transmissão ao vivo)…` })
   let r; try { r = await run('agy', [`--print=Leia o arquivo ${path.join(dir, rel).split(path.sep).join('/')} e execute exatamente as instruções dele neste projeto. Não altere nem apague esse arquivo. Não use git. Termine com uma frase dizendo o que mudou.`, '--output-format', 'json', '--model', id, '--mode', 'accept-edits', '--dangerously-skip-permissions', '--print-timeout', '20m'], { cwd: dir, timeoutMs: 22 * 60 * 1000 }) }
   finally { setLive(null); await rm(path.join(dir, rel), { force: true }).catch(() => {}) }
   m.cost.calls += 1
   let j = null; try { j = JSON.parse(r.out) } catch {}
-  const touched = [...(await status())].filter((f) => !before.has(f) && !f.startsWith(ATTACH_DIR))
+  const touched = changedSince(before, await dirtyFiles(dir)).filter((f) => !f.startsWith(ATTACH_DIR))
   const u = j?.usage || {}
   m.cost.tokens_in += u.input_tokens || 0; m.cost.tokens_out += u.output_tokens || 0; m.cost.cache_read += u.cache_read_tokens || 0
   m.cost.by_model[id] = m.cost.by_model[id] || 0
