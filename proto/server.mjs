@@ -1031,9 +1031,29 @@ async function checker(diff, tests, st) {
       if (review) log('claude', `${review.verdict === 'approve' ? 'aprovou' : 'pediu mudanças'}: ${review.summary}`, 'text')
       return review
     }
+    if (who.family === 'agy') return checkerAgy(prompt, who.model, who.effort)
     if (who.family !== 'codex') { log('engine', `revisão em ${who.family} ainda não é suportada; próximo da cadeia`, 'warn'); return null }
     return checkerCodex(prompt, who.model, who.effort)
   })
+}
+// Revisão no Antigravity (19/09, plano Google AI Ultra): Gemini Pro ou Claude via Google pela cota do Google, só leitura (--mode plan
+// com --add-dir, sem o qual o agy não enxerga o projeto). Prompt num arquivo ignorado pelo git: o diff não cabe na linha de comando do Windows.
+async function checkerAgy(prompt, model, effort) {
+  const m = state.mission, dir = state.project.dir, id = agyModel(model, effort)
+  const rel = `${ATTACH_DIR}/review-${Date.now().toString(36)}.md`
+  await mkdir(path.join(dir, ATTACH_DIR), { recursive: true }); await ensureIgnore(dir); await writeFile(path.join(dir, rel), prompt)
+  log('engine', `agy (revisão, ${id}) com saída estruturada`); setLive({ source: 'agy', kind: 'thinking', text: 'revisão: Antigravity lendo o diff (sem transmissão ao vivo)…' })
+  const t0 = Date.now()
+  let r; try { r = await run('agy', [`--print=Leia o arquivo ${path.join(dir, rel).split(path.sep).join('/')} e faça a revisão pedida nele, respondendo no JSON exigido. Só leitura: não altere nem crie arquivo algum.`, '--output-format', 'json', '--model', id, '--mode', 'plan', '--add-dir', dir, '--json-schema', REVIEW_SCHEMA, '--dangerously-skip-permissions', '--print-timeout', '8m'], { cwd: dir, timeoutMs: 9 * 60 * 1000 }) }
+  finally { setLive(null); await rm(path.join(dir, rel), { force: true }).catch(() => {}) }
+  m.cost.calls += 1
+  let j = null; try { j = JSON.parse(r.out) } catch {}
+  const u = j?.usage || {}; m.cost.tokens_in += u.input_tokens || 0; m.cost.tokens_out += u.output_tokens || 0
+  journal({ type: 'model_call', family: 'agy', role: 'revisão', model: id, effort, story: m.current, turns: j?.num_turns || 0, usd: 0, tokens_in: u.input_tokens || 0, tokens_out: u.output_tokens || 0, prompt_chars: prompt.length, wall_ms: Date.now() - t0 }).catch(() => {})
+  const review = j?.structured_output
+  if (!review?.verdict) { log('engine', `agy (revisão) sem veredito (código ${r.code}, status ${j?.status ?? 'sem JSON'}): ${String(j?.response || r.err || '').slice(0, 240)}`, 'warn'); return null }
+  log('agy', `${review.verdict === 'approve' ? 'aprovou' : 'pediu mudanças'}: ${review.summary}`, 'text')
+  return review
 }
 async function checkerCodex(prompt, model, effort) {
   const m = state.mission, dir = state.project.dir
