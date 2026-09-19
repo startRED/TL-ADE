@@ -123,7 +123,7 @@ const DEFAULT_SETTINGS = {
   max_usd_per_story: 5, // orçamento por parte (spec E4): estourou com provas verdes → aceita; sem provas verdes → para
   parallel_parts: 2, // partes independentes ao mesmo tempo (lanes.mjs): a atual + 1 em cópia isolada; 1 = em fila
   prova_com_codigo: true, // prova e código numa chamada só; o motor confere o vermelho guardando o código de lado (false = duas chamadas)
-  suite_scope: 'part', // 'part' = suíte inteira em toda parte (todo commit verde); 'epic' = provas afetadas por parte e suíte inteira no fim do épico
+  suite_scope: 'epic', // 'epic' = provas afetadas por parte e suíte inteira no fim do épico; 'part' = suíte inteira em toda parte (todo commit verde). 19/09: suíte inteira por parte custava 6 min e abria rodada por prova sem relação que estourava 5 s
   unattended: false, // modo noturno (ADR 0015): responde a entrevista com as recomendações, aprova o plano, e em parada sem saída pula a parte e segue
   max_usd_per_mission: 60, // teto por missão (US$ no Claude): estourou → pausa em vez de continuar gastando
   autonomy: 'auto', // auto: após 6 rodadas com provas verdes e sem achado grave do revisor, aceita e segue; ask: para e pergunta
@@ -1759,7 +1759,8 @@ async function runStories() {
       // suite_scope 'epic': cada parte rodou só as provas afetadas; depois da última, a suíte inteira. Vermelha vira UMA parte de
       // correção com as provas que quebraram (o código de todas as partes do épico no contrato); vermelha de novo para e mostra.
       if (state.settings.suite_scope === 'epic' && !m.stories.slice(i + 1).some((x) => !['done', 'skipped'].includes(x.state))) {
-        log('engine', 'fim do épico: rodando a suíte inteira'); const full = acceptPreexisting(await runTests(state.project))
+        log('engine', 'fim do épico: rodando a suíte inteira'); let full = acceptPreexisting(await runTests(state.project))
+        if (!full.ok && full.tests?.length && full.tests.filter((t) => t.status !== 'passed').every((t) => /timed out|timeout|tempo limite/i.test(t.message || ''))) { log('engine', 'fim do épico: só provas por tempo limite; repito a suíte uma vez', 'warn'); full = acceptPreexisting(await runTests(state.project)) }
         log('engine', `fim do épico: suíte inteira ${full.ok ? 'verde' : `com ${full.failed} vermelha(s)`} (${full.total} provas)`, full.ok ? 'info' : 'warn')
         if (full.tests?.length) m.tests_before = full
         if (!full.ok && m.stories.some((x) => x.id === 'suite')) { m.state = 'awaiting_operator'; m.reason = 'tests_red'; log('engine', 'a suíte inteira segue vermelha depois da parte de correção; paro para você ver', 'error'); await stopLanes(); finish(); return 'stopped' }
@@ -1972,7 +1973,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     st.red_tests = generic ? after.tests.filter((t) => t.status !== 'passed') : after.tests.filter((t) => !before.has(t.name) && t.status !== 'passed')
     const greenBefore = new Set(m.tests_before.tests.filter((t) => t.status === 'passed').map((t) => t.name)) // vermelha desde o ponto de partida não é quebra desta parte
     const regress = generic ? [] : after.tests.filter((t) => greenBefore.has(t.name) && t.status !== 'passed')
-    log('engine', `prova vermelha: ${st.red_tests.length} vermelha(s)${generic ? ' (runner genérico)' : `, ${regress.length} antiga(s) quebrada(s)`}`)
+    log('engine', `${together ? 'com o código novo' : 'prova vermelha'}: ${st.red_tests.length} vermelha(s)${generic ? ' (runner genérico)' : `, ${regress.length} antiga(s) quebrada(s)`}`)
     if (regress.length > 0) { st.red_regress = regress.map((t) => ({ name: t.name, status: 'failed', message: (t.message || '').slice(0, 400) })); log('engine', `${regress.length} prova(s) antiga(s) quebraram na fase de prova (comum com portão de tipos ou lint: a prova nova cita o que ainda não existe); sigo para a implementação, que tem de deixar tudo verde`, 'warn') }
     if (st.red_tests.length === 0 && regress.length) setStep('red', 'done') // o arquivo de prova nem carrega (import do que não existe): conta como vermelho
     else if (st.red_tests.length === 0) {
@@ -1983,7 +1984,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
       if (fresh.length && after.ok && changed) {
         const red = await redWithoutCode(st, changed, fresh)
         if (red === 'green' && !st.red_retry) { st.red_retry = true; setStep('red', 'failed'); log('engine', 'quem escreve implementou junto com a prova, e as provas novas passam MESMO sem o código novo (guardei o código de lado e rodei a suíte): não provam o comportamento. Repetindo a fase de prova uma vez', 'warn'); return runStory(st, 1, null, null) }
-        st.early_impl = true; st.red_verified = red === 'red'; setStep('red', red === 'red' ? 'done' : 'skipped')
+        st.early_impl = true; st.red_verified = red === 'red'; if (after.ok) st.green_run = { diff: changed, res: after }; setStep('red', red === 'red' ? 'done' : 'skipped')
         log('engine', red === 'red' ? `${together ? 'prova e código na mesma chamada' : 'quem escreve adiantou a implementação junto com a prova'} (${fresh.length} prova(s) nova(s)); conferi que elas ficam vermelhas sem o código novo (código guardado de lado, suíte rodada, código devolvido). Sigo para verificação e revisão` : `quem escreve adiantou a implementação junto com a prova (${fresh.length} prova(s) nova(s) já verdes) e não deu para conferir o vermelho sem o código; sigo para verificação e revisão, e o revisor julga`, 'warn')
       }
       else if (!st.red_retry) { st.red_retry = true; setStep('red', 'failed'); log('engine', 'nenhuma prova nova ficou vermelha; repetindo a fase de prova uma vez com o motivo', 'warn'); return runStory(st, 1, null, null) }
@@ -2002,13 +2003,17 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     remember(st, rf); await refreshProject(); setStep('fix', 'done', { round }) }
   setStep('tests', 'running')
   // primeiro só a prova da parte: vermelha = próxima rodada sem pagar a suíte inteira; verde = suíte inteira (todo commit passa por ela)
-  const quick = st.test_file ? acceptPreexisting(await runTests(state.project, { only: st.test_file })) : null
+  // prova e código juntos: a conferência do vermelho acabou de rodar o arquivo da parte com este mesmo código; não roda de novo
+  const reuse = st.green_run && st.green_run.diff === (await storyDiff(st)).trim() ? st.green_run.res : null; delete st.green_run
+  const quick = st.test_file ? acceptPreexisting(reuse || await runTests(state.project, { only: st.test_file })) : null
   if (quick && !quick.ok) log('engine', `prova da parte ainda vermelha (${quick.failed} de ${quick.total}); pulo a suíte inteira nesta rodada`)
   st.diff = await storyDiff(st)
   // prova da parte verde: a revisão começa já, em paralelo com a suíte (o revisor lê o diff, a suíte roda as provas; são
   // independentes) e a parte só passa com as duas. Suíte vermelha: a revisão entra na próxima rodada junto com as provas.
   let early = null
-  if (quick?.ok && st.diff.trim()) { setStep('checker', 'running'); early = checker(st.diff, quick, st); early.catch(() => {}) }
+  // diff igual ao que o revisor já aprovou (rodada de correção que não mudou nada, só provas instáveis): vale a aprovação
+  if (quick?.ok && st.diff.trim() && st.last_review?.verdict === 'approve' && st.reviewed_diff === st.diff) { log('engine', 'diff igual ao que o revisor já aprovou; não reviso de novo'); early = Promise.resolve(st.last_review) }
+  else if (quick?.ok && st.diff.trim()) { setStep('checker', 'running'); st.reviewed_diff = st.diff; early = checker(st.diff, quick, st); early.catch(() => {}) }
   // suite_scope 'epic': por parte só as provas ligadas aos arquivos mudados (runner que sabe); a suíte inteira fica para o fim do épico
   const byEpic = state.settings.suite_scope === 'epic' && quick?.ok
   const related = byEpic ? await runTests(state.project, { related: diffFiles(st.diff) }) : null // diff tem caminho da raiz do git; runner quer do projeto
@@ -2023,7 +2028,9 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     if (reds.length && reds.every((t) => okBefore.has(t.name) && /timed out|timeout|tempo limite/i.test(t.message || ''))) {
       st.flaky_retry = round
       log('engine', `só prova(s) antiga(s) vermelha(s), por tempo limite (${reds.map((t) => t.name.slice(0, 80)).join(' | ')}); estavam verdes antes desta parte: repito a suíte uma vez antes de abrir rodada`, 'warn')
-      st.tests_after = await runTests(state.project)
+      // repete o mesmo recorte que ficou vermelho (arquivo da parte, provas afetadas ou suíte), não a suíte inteira
+      const again = quick && !quick.ok ? { only: st.test_file } : byEpic && related ? { related: diffFiles(st.diff) } : {}
+      st.tests_after = (await runTests(state.project, again)) || st.tests_after
       if (st.tests_after.ok) log('engine', 'a repetição passou: prova instável, não defeito desta parte; sigo', 'warn')
     }
   }
@@ -2060,7 +2067,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
       setStep('visual', st.visual.findings.length ? 'warn' : 'done')
     }
   }
-  if (!early) setStep('checker', 'running')
+  if (!early) { setStep('checker', 'running'); st.reviewed_diff = st.diff }
   st.review = early ? await early : await checker(st.diff, st.tests_after, st); setStep('checker', st.review ? (st.review.verdict === 'approve' ? 'done' : 'failed') : 'failed')
   st.prev_findings = (st.last_review?.findings || []).map(findingKey); st.last_review = st.review
   if (st.review) {
