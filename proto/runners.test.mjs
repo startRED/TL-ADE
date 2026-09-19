@@ -91,4 +91,7 @@ test('só um arquivo: roda só a prova da parte; runner sem molde ou arquivo for
   assert.equal(all.total, 2); assert.equal(all.failed, 1)
   assert.equal(await runSuites(d, suites, { run, only: '../fora.test.mjs' }), null)
   assert.equal(await runSuites(d, [{ ...suites[0], one: null }], { run, only: 'a.test.mjs' }), null)
+  // vitest com arquivo fora do include sai com código 1 e "No test files found": não é prova vermelha
+  const vitestLike = { cwd: '', runner: 'vitest', test_cmd: 'vitest run', format: null, one: ['node', '-e', "console.log('No test files found, exiting with code 1'); process.exit(1)"] }
+  assert.equal(await runSuites(d, [vitestLike], { run, only: 'a.test.mjs' }), null)
 })

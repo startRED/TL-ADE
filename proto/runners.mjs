@@ -126,6 +126,8 @@ async function readReport(s, { out, outdir, cwd, t0, stdout }) {
 // Roda cada suíte e junta tudo num resultado só. named = todas deram resultado prova a prova (o motor confere prova nova
 // vermelha, regressão e prova que passa sem o código); senão, vale o código de saída da suíte que não deu.
 // Nome de prova de subpasta leva a subpasta na frente; da raiz fica igual ao do runner (missão em andamento não muda de nomes).
+// runner que recebeu um arquivo fora do include (vitest, jest) ou sem prova coletada (pytest)
+const NO_TESTS = /no test files found|no tests found|no tests ran|collected 0 items/i
 export async function runSuites(dir, suites, { run, python, timeoutMs = 5 * 60 * 1000, only = null }) {
   const target = only && path.resolve(dir, only)
   const inSuite = (s) => { const r = path.relative(path.join(dir, s.cwd), target); return !r.startsWith('..') && !path.isAbsolute(r) ? r.split(path.sep).join('/') : null }
@@ -156,8 +158,9 @@ export async function runSuites(dir, suites, { run, python, timeoutMs = 5 * 60 *
         // tudo passou mas o runner saiu com erro (arquivo que não compila, limite de cobertura): a suíte não está verde
         if (r.code !== 0 && !rep.tests.some((t) => t.status !== 'passed')) tests.push({ name: `${pre}${s.test_cmd} (saiu com código ${r.code})`, status: 'failed', message: tail.slice(-300) })
       } else if (only) {
-        // um arquivo: runner que não achou prova nele (fora do include) não conta; quem chamou decide
-        if (rep && r.code === 0) continue
+        // um arquivo: runner que não achou prova nele (fora do include) não conta; quem chamou decide. O vitest sai com código 1
+        // ("No test files found"): contava como prova vermelha e a parte 1 do épico 2 gastou duas rodadas no Sol sem nada a corrigir
+        if ((rep && r.code === 0) || NO_TESTS.test(`${r.out}\n${r.err}`)) continue
         tests.push({ name: `${pre}${file}`, status: 'failed', message: tail.slice(-300) })
       } else {
         named = false
