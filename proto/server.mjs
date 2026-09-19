@@ -16,6 +16,7 @@ import { createHash } from 'node:crypto'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { skillDescription } from './skill-meta.mjs'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
 const ADE_DIR = path.join(ROOT, '.ade')
@@ -572,7 +573,7 @@ async function loadCatalog() {
       const file = path.join(root, d.name, 'SKILL.md')
       let body; try { body = (await readFile(file, 'utf8')).split(String.fromCharCode(13)).join('') } catch { continue }
       const fm = /^---\n([\s\S]*?)\n---/.exec(body)
-      const desc = (fm && /description:\s*(.*)/.exec(fm[1])?.[1] || '').replace(/^["']|["']$/g, '').slice(0, 220)
+      const desc = fm ? skillDescription(fm[1]) : ''
       const text = `${d.name} ${desc}`
       const tags = Object.entries(TAGS).filter(([, re]) => re.test(text)).map(([t]) => t)
       const source = root.includes('plugins') ? (root.includes('impeccable') ? 'impeccable' : root.includes('superpowers') ? 'superpowers' : root.includes('frontend-design') ? 'anthropic' : 'ecc') : 'local'
