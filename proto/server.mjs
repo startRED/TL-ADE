@@ -29,24 +29,24 @@ const IMPECCABLE = path.join(HOME, '.claude/plugins/cache/impeccable/impeccable/
 // ---------- registro de modelos (verificado nas CLIs instaladas em 2026-09-16; papéis por benchmark em docs/research/models-by-role-2026-09.md) ----------
 const REGISTRY = {
   claude: { label: 'Claude Code', models: [
-    { id: 'sonnet', label: 'Sonnet 5', note: 'rápido e barato; padrão para escrever código' },
-    { id: 'opus', label: 'Opus 5', note: 'mais forte; padrão para planejar' },
-    { id: 'fable', label: 'Fable 5.1', note: 'o mais forte; ~US$ 0,60 por chamada só de abertura' },
+    { id: 'sonnet', label: 'Sonnet 5', note: 'caro para o que entrega (AA 38 a US$ 5,09; Terminal-Bench 4.0 8%); só último degrau' },
+    { id: 'opus', label: 'Opus 5', note: 'forte (AA 51, Vals Index 67); entender o pedido e reserva de plano' },
+    { id: 'fable', label: 'Fable 5.1', note: 'topo junto com o Astra (AA 53) pelo dobro do custo; reserva de dividir em épicos' },
     { id: 'haiku', label: 'Haiku 4.5', note: 'muito barato; tarefas mecânicas' },
   ] },
   codex: { label: 'Codex (OpenAI)', models: [
-    { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', note: 'perfil equilibrado da 5.6; padrão para escrever' },
-    { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', note: 'topo da 5.6 (mais profundo e mais caro que o Terra)' },
-    { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', note: 'perfil econômico e rápido; partes leves' },
-    { id: 'gpt-6-astra', label: 'GPT-6 Astra', note: 'o mais forte da OpenAI; correção difícil e plano' },
-    { id: 'gpt-5.5', label: 'GPT-5.5', note: '' },
+    { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', note: 'equilibrado e rápido (84 tokens/s, IOI 88%); padrão para escrever' },
+    { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', note: 'topo da 5.6 (AA 47, IOI 91%); parte difícil e correção' },
+    { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', note: 'econômico (AA 38 a US$ 0,18, 130 tokens/s); partes leves' },
+    { id: 'gpt-6-astra', label: 'GPT-6 Astra', note: 'o mais forte (AA 53, Terminal-Bench 4.0 57%, ARC-AGI-2 95%) pela metade do custo do Fable; épicos, plano, correção difícil' },
+    { id: 'gpt-5.5', label: 'GPT-5.5', note: 'geração anterior; prefira Terra ou Sol' },
   ] },
   agy: { label: 'Antigravity (Google)', models: [
-    { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro', note: 'abaixo do 3.8 Flash em código, mais lento; evite' },
-    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', note: 'rápido (~300 tokens/s); revisar, batedor e fallback de escrever' },
-    { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash', note: '' },
-    { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 via Google', note: 'conta como família Claude' },
-    { id: 'claude-opus-4-6-thinking', label: 'Claude Opus 4.6 via Google', note: 'conta como família Claude' },
+    { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro', note: 'abaixo dos dois Flash (AA 30, Vals Index 42); evite' },
+    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', note: 'o mais rápido (~300 tokens/s, AA 41, Vals Index 62); revisar, batedor e fallback de escrever' },
+    { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash', note: 'geração anterior do Flash' },
+    { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 via Google', note: 'empresa Claude, cota do Google' },
+    { id: 'claude-opus-4-6-thinking', label: 'Claude Opus 4.6 via Google', note: 'empresa Claude, cota do Google (SWE-Bench Pro 52%); revisor de outra empresa sem gastar a cota do Claude' },
     { id: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B', note: 'quarta opinião' },
   ] },
 }
@@ -54,8 +54,6 @@ const REGISTRY = {
 const EFFORTS = ['low', 'medium', 'high']
 function effortOf(role) { return state.settings.roles[role]?.effort || DEFAULT_SETTINGS.roles[role]?.effort || 'medium' }
 function agyModel(id, effort) { const mm = /^(gemini-[\d.]+-(flash|pro))(?:-(high|medium|low))?$/.exec(id || ''); if (!mm) return id; const e = mm[2] === 'pro' && effort === 'medium' ? 'high' : (effort || 'medium'); return `${mm[1]}-${e}` }
-// Recomendação de quem planeja, pela dificuldade que o entendedor mediu (Erick, 17/09): leve → Sonnet; normal → Opus médio; pesado → Fable alto.
-const PLANNER_BY_DIFFICULTY = { easy: { family: 'claude', model: 'sonnet', effort: 'medium' }, normal: { family: 'claude', model: 'opus', effort: 'medium' }, hard: { family: 'claude', model: 'fable', effort: 'high' } }
 function plannerChoice(kind = 'complex') { const key = kind === 'light' ? 'plan' : 'epics', x = chainOf(key)[0] || state.settings.roles.planner; return { family: x.family || 'claude', model: x.model, effort: x.effort || 'high', key } }
 // Planejador por família: Claude (saída estruturada do Claude Code) ou Codex (--output-schema, só leitura). Devolve { structured_output }.
 async function plannerCall(who, opts) {
@@ -92,7 +90,7 @@ const vendorOf = (family, model) => family === 'agy' && /^claude/.test(model) ? 
 
 const DEFAULT_SETTINGS = {
   roles: {
-    intent: { family: 'claude', model: 'sonnet', effort: 'medium' },
+    intent: { family: 'claude', model: 'opus', effort: 'medium' }, // Opus medium: AA 45 por US$ 2,19; Sonnet high faz 32 por US$ 1,79
     planner: { family: 'claude', model: 'fable', effort: 'high' }, // plano complexo: divide pedido grande em épicos; plano único de dificuldade pesada
     planner_light: { family: 'claude', model: 'opus', effort: 'high' }, // plano intermediário/simples: stories de cada épico, planos leves e normais, revisões automáticas
     maker: { family: 'claude', model: 'sonnet', effort: 'high' },
@@ -100,17 +98,18 @@ const DEFAULT_SETTINGS = {
     research: { family: 'agy', model: 'gemini-3.1-pro', effort: 'high' },
     scout: { family: 'agy', model: 'gemini-3.8-flash', effort: 'medium' }, // batedor: lê muito (projeto, web, GitHub) e devolve um recibo curto
   },
-  // Cadeias por papel (Erick, 18/09: Claude 5x, Codex 20x, Gemini Pro). O motor usa o primeiro da cadeia cuja família tem cota;
-  // cota esgotada ou chamada que falhou pula para o próximo em vez de pausar. Quem escreve nunca é da empresa de quem revisa (filtrado por chamada).
+  // Cadeias por papel (19/09: Claude 5x, Codex 20x, Google AI Ultra; benchmarks independentes em docs/research/models-by-role-2026-09.md).
+  // O motor usa o primeiro da cadeia cuja família tem cota; cota esgotada ou chamada que falhou pula para o próximo em vez de pausar.
+  // Quem escreve nunca é da empresa de quem revisa (filtrado por chamada). Claude é a cota mais curta: fica de reserva onde há substituto.
   chains: {
-    epics: [{ family: 'claude', model: 'fable', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'high' }],
-    plan: [{ family: 'claude', model: 'opus', effort: 'high' }, { family: 'claude', model: 'fable', effort: 'medium' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }],
+    epics: [{ family: 'codex', model: 'gpt-6-astra', effort: 'high' }, { family: 'claude', model: 'fable', effort: 'high' }], // Astra empata com o Fable (AA 53) pela metade do custo
+    plan: [{ family: 'codex', model: 'gpt-6-astra', effort: 'medium' }, { family: 'claude', model: 'opus', effort: 'high' }], // Astra medium: AA 50 por US$ 1,54; Opus high 48 por US$ 3,61
     prova: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }], // Terra escreve a prova em ~1 min; o Flash no agy levava 2 a 3
-    impl_light: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }], // configuração e documentação
-    impl: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'medium' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }], // parte comum
-    impl_hard: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'high' }], // interface larga, risco alto
-    fix: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'high' }], // escada: 2 rodadas por degrau
-    checker: [{ family: 'claude', model: 'sonnet', effort: 'medium' }, { family: 'claude', model: 'opus', effort: 'medium' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }],
+    impl_light: [{ family: 'codex', model: 'gpt-5.6-luna', effort: 'high' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }], // configuração e documentação; o Flash cobre o Codex sem cota
+    impl: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'medium' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }], // parte comum
+    impl_hard: [{ family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'codex', model: 'gpt-6-astra', effort: 'high' }, { family: 'agy', model: 'claude-opus-4-6-thinking', effort: 'high' }], // interface larga, risco alto (metade das partes medidas)
+    fix: [{ family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'codex', model: 'gpt-6-astra', effort: 'high' }, { family: 'agy', model: 'claude-opus-4-6-thinking', effort: 'high' }], // escada: 2 rodadas por degrau; o Astra entra na rodada 3
+    checker: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'agy', model: 'claude-opus-4-6-thinking', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'high' }], // Opus 4.6 via Google revisa o Flash sem gastar a cota do Claude
   },
   planner_recommend: true, // o entendedor mede a dificuldade e recomenda quem planeja; você escolhe (modo noturno segue a recomendação)
   epic_plans_cheaper: true, // com Fable como planejador, ele só divide o pedido em épicos; o plano de cada épico sai no Opus alto (medido: US$ 5,60 e 13 min por épico no Fable, 74k tokens de saída)
@@ -952,10 +951,10 @@ async function codeMap(dir, files, { maxFiles = 60, maxChars = 7000 } = {}) {
   return text ? `MAPA DO CÓDIGO (símbolo@linha; leia só o trecho que precisa, com Read offset/limit): \n${text}` : ''
 }
 
-// ---------- crítica do plano: o revisor (outra empresa) lê o plano como quem vai implementar ----------
+// ---------- crítica do plano: quem vai implementar (1º Codex da cadeia de escrever) lê o plano antes do código ----------
 async function planCritic(plan) {
   const m = state.mission, dir = state.project.dir
-  const who = [...chainOf('checker'), ...chainOf('plan')].find((w) => w.family === 'codex' && quotaAvailable('codex'))
+  const who = [...chainOf('impl'), ...chainOf('checker'), ...chainOf('plan')].find((w) => w.family === 'codex' && quotaAvailable('codex'))
   if (!who) return null
   const model = who.model
   const prompt = [
