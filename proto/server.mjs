@@ -1678,7 +1678,7 @@ async function runStories() {
         await refreshProject()
         if (!res.ok) { m.state = 'awaiting_operator'; m.reason = res.reason; st.state = 'blocked'; log('engine', `parada: ${res.reason}`, 'error'); return false }
         if (await gitHead(state.project.dir) !== res.lane.base) {
-          setStep('tests', 'running'); const t = await runTests(state.project); setStep('tests', t.ok ? 'done' : 'failed')
+          setStep('tests', 'running'); const t = acceptPreexisting(await runTests(state.project)); setStep('tests', t.ok ? 'done' : 'failed')
           if (!t.ok) { await applyPatch(run, root, res.patch, { reverse: true }); await refreshProject(); return redo('a suíte quebrou junto com as partes commitadas enquanto o trilho rodava') }
           st.tests_after = t
         }
@@ -1740,7 +1740,7 @@ async function runStories() {
       // suite_scope 'epic': cada parte rodou só as provas afetadas; depois da última, a suíte inteira. Vermelha vira UMA parte de
       // correção com as provas que quebraram (o código de todas as partes do épico no contrato); vermelha de novo para e mostra.
       if (state.settings.suite_scope === 'epic' && !m.stories.slice(i + 1).some((x) => !['done', 'skipped'].includes(x.state))) {
-        log('engine', 'fim do épico: rodando a suíte inteira'); const full = await runTests(state.project)
+        log('engine', 'fim do épico: rodando a suíte inteira'); const full = acceptPreexisting(await runTests(state.project))
         log('engine', `fim do épico: suíte inteira ${full.ok ? 'verde' : `com ${full.failed} vermelha(s)`} (${full.total} provas)`, full.ok ? 'info' : 'warn')
         if (full.tests?.length) m.tests_before = full
         if (!full.ok && m.stories.some((x) => x.id === 'suite')) { m.state = 'awaiting_operator'; m.reason = 'tests_red'; log('engine', 'a suíte inteira segue vermelha depois da parte de correção; paro para você ver', 'error'); await stopLanes(); finish(); return 'stopped' }
@@ -1881,6 +1881,17 @@ async function agyMaker({ role, prompt, model, effort }) {
   return { result: text, touched, num_turns: j.num_turns || 0, total_cost_usd: 0 }
 }
 
+// Prova que JÁ estava vermelha no ponto de partida não é defeito da parte: não trava (fica o aviso). Só prova nova vermelha ou
+// antiga que quebrou agora abrem rodada. Épico 2, s1: uma prova instável que estourou 5 s no ponto de partida mandava toda
+// parte para a rodada 2. Runner sem resultado prova a prova fica de fora (o nome é a suíte inteira).
+function acceptPreexisting(tests, m = state.mission) {
+  if (!tests || tests.ok || tests.named === false || !m?.tests_before?.tests?.length) return tests
+  const redBefore = new Set(m.tests_before.tests.filter((t) => t.status !== 'passed').map((t) => t.name))
+  const reds = tests.tests.filter((t) => t.status !== 'passed')
+  if (!reds.length || !reds.every((t) => redBefore.has(t.name))) return tests
+  log('engine', `só prova(s) que já estava(m) vermelha(s) no ponto de partida (${reds.map((t) => t.name.slice(0, 80)).join(' | ')}); não são desta parte e não a travam`, 'warn')
+  return { ...tests, ok: true, preexisting: reds.map((t) => t.name) }
+}
 // base de provas depois de um resultado parcial (só a prova da parte ou só as afetadas): atualiza por nome sem perder o resto
 const mergeTests = (base, part) => { const tests = [...new Map([...(base?.tests || []), ...part.tests].map((t) => [t.name, t])).values()]; return { ...(base || part), tests, total: tests.length } }
 // arquivos de um diff do git, relativos à pasta do projeto (o git dá o caminho a partir da raiz do repositório)
@@ -1940,7 +1951,8 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     const before = new Set(m.tests_before.tests.map((t) => t.name))
     const generic = !after.named // sem resultado prova a prova (runner só com código de saída)
     st.red_tests = generic ? after.tests.filter((t) => t.status !== 'passed') : after.tests.filter((t) => !before.has(t.name) && t.status !== 'passed')
-    const regress = generic ? [] : after.tests.filter((t) => before.has(t.name) && t.status !== 'passed')
+    const greenBefore = new Set(m.tests_before.tests.filter((t) => t.status === 'passed').map((t) => t.name)) // vermelha desde o ponto de partida não é quebra desta parte
+    const regress = generic ? [] : after.tests.filter((t) => greenBefore.has(t.name) && t.status !== 'passed')
     log('engine', `prova vermelha: ${st.red_tests.length} vermelha(s)${generic ? ' (runner genérico)' : `, ${regress.length} antiga(s) quebrada(s)`}`)
     if (regress.length > 0) { st.red_regress = regress.map((t) => ({ name: t.name, status: 'failed', message: (t.message || '').slice(0, 400) })); log('engine', `${regress.length} prova(s) antiga(s) quebraram na fase de prova (comum com portão de tipos ou lint: a prova nova cita o que ainda não existe); sigo para a implementação, que tem de deixar tudo verde`, 'warn') }
     if (st.red_tests.length === 0 && regress.length) setStep('red', 'done') // o arquivo de prova nem carrega (import do que não existe): conta como vermelho
@@ -1971,7 +1983,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     remember(st, rf); await refreshProject(); setStep('fix', 'done', { round }) }
   setStep('tests', 'running')
   // primeiro só a prova da parte: vermelha = próxima rodada sem pagar a suíte inteira; verde = suíte inteira (todo commit passa por ela)
-  const quick = st.test_file ? await runTests(state.project, { only: st.test_file }) : null
+  const quick = st.test_file ? acceptPreexisting(await runTests(state.project, { only: st.test_file })) : null
   if (quick && !quick.ok) log('engine', `prova da parte ainda vermelha (${quick.failed} de ${quick.total}); pulo a suíte inteira nesta rodada`)
   st.diff = await storyDiff(st)
   // prova da parte verde: a revisão começa já, em paralelo com a suíte (o revisor lê o diff, a suíte roda as provas; são
@@ -1996,6 +2008,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
       if (st.tests_after.ok) log('engine', 'a repetição passou: prova instável, não defeito desta parte; sigo', 'warn')
     }
   }
+  st.tests_after = acceptPreexisting(st.tests_after)
   log('engine', `provas depois: ${st.tests_after.total} no total, ${st.tests_after.failed} vermelha(s)`); setStep('tests', st.tests_after.ok ? 'done' : 'failed')
   if (st.tests_after.timeout) { if (early) await early.catch(() => null); log('engine', 'a suíte de provas estourou o tempo limite (5 min) e foi interrompida: isso não é prova vermelha. Paro a parte sem gastar rodadas; veja se alguma prova ficou pendurada (processo, servidor, espera sem fim)', 'error'); return stop('tests_timeout') }
   // quem escreve terminou sem tocar em nada (épico 9, s3: Flash gastou a chamada inteira esperando a matriz de queda rodar e o agy estourou o tempo): uma repetição grátis com aviso antes de pular
