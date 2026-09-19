@@ -76,6 +76,50 @@ afterEach(async () => {
   tempDirs.length = 0
 })
 
+describe('discardPending e pendingChatIds', () => {
+  it('CA1: rejeita propostas pendentes e descarta suas cópias', async () => {
+    const repo = await makeRepo()
+    const { proposal, turns } = await makePendingProposal(repo, 'd1')
+
+    const discarded = await chatChanges.discardPending({ projectDir: repo, turns })
+
+    assert.equal(discarded, 1)
+    assert.equal(proposal.state, 'rejected')
+    await assert.rejects(fs.access(proposal.wt), { code: 'ENOENT' })
+  })
+
+  it('CA2: mantém propostas já aplicadas', async () => {
+    const turns = [
+      { role: 'user', text: 'oi' },
+      { role: 'ai', text: 'ok', proposal: { id: 'x', state: 'applied', files: [] } }
+    ]
+
+    const discarded = await chatChanges.discardPending({ projectDir: 'irrelevante', turns })
+
+    assert.equal(discarded, 0)
+    assert.equal(turns[1].proposal.state, 'applied')
+  })
+
+  it('CA3: lista somente ids pendentes dos arquivos de conversa válidos', async () => {
+    const chatsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ade-chats-'))
+    tempDirs.push(chatsDir)
+    await fs.writeFile(path.join(chatsDir, 'a.json'), JSON.stringify([
+      { role: 'ai', proposal: { id: 'p1', state: 'pending' } },
+      { role: 'ai', proposal: { id: 'r1', state: 'rejected' } }
+    ]))
+    await fs.writeFile(path.join(chatsDir, 'b.json'), 'não é json')
+
+    assert.deepEqual(await chatChanges.pendingChatIds(chatsDir), ['p1'])
+  })
+
+  it('CA4: devolve lista vazia quando a pasta de conversas não existe', async () => {
+    assert.deepEqual(
+      await chatChanges.pendingChatIds(path.join(os.tmpdir(), 'nao-existe-ade-xyz')),
+      []
+    )
+  })
+})
+
 describe('chatCommand', () => {
   it('CA1: Claude permite somente ferramentas de edição e repassa esforço válido', () => {
     const command = chatChanges.chatCommand('claude', {

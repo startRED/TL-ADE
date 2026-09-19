@@ -464,3 +464,42 @@ export async function rejectChat({ projectDir, turns, id }) {
   p.decided_ts = new Date().toISOString()
   return { status: 200, body: { ok: true } }
 }
+
+export async function discardPending({ projectDir, turns = [] }) {
+  let discarded = 0
+  for (const turn of turns) {
+    const p = turn?.proposal
+    if (p?.state !== 'pending') continue
+    if (p.wt) await removeChatWorktree(projectDir, p.wt).catch(() => {})
+    p.state = 'rejected'
+    p.decided_ts = new Date().toISOString()
+    discarded++
+  }
+  return discarded
+}
+
+export async function pendingChatIds(chatsDir) {
+  let names
+  try {
+    names = await fs.readdir(chatsDir)
+  } catch (err) {
+    if (err?.code === 'ENOENT') return []
+    throw err
+  }
+
+  const ids = []
+  for (const name of names.filter((entry) => entry.endsWith('.json')).sort((a, b) => a.localeCompare(b))) {
+    let turns
+    try {
+      turns = JSON.parse(await fs.readFile(path.join(chatsDir, name), 'utf8'))
+    } catch {
+      continue
+    }
+    if (!Array.isArray(turns)) continue
+    for (const turn of turns) {
+      const p = turn?.proposal
+      if (p?.state === 'pending' && typeof p.id === 'string') ids.push(p.id)
+    }
+  }
+  return ids
+}
