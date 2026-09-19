@@ -232,3 +232,57 @@ export async function collectProposal(projectDir, wtPath) {
   if (headResult.code !== 0) throw proposalGitError(headResult)
   return { head: headResult.out.trim(), patch: patchResult.out, files }
 }
+
+function commitMessage(summary) {
+  let text = String(summary ?? '').replace(/\s*\r?\n\s*/g, ' ').trim()
+  if (!text) text = 'alterações aprovadas'
+  if (text.length > 72) text = `${text.slice(0, 71)}…`
+  return `chat: ${text}`
+}
+
+export async function applyProposal(projectDir, proposal, summary) {
+  if (
+    typeof projectDir !== 'string' || !projectDir ||
+    !proposal || typeof proposal.head !== 'string' || typeof proposal.patch !== 'string'
+  ) {
+    throw codedError('git', 'Proposta ou caminho do projeto inválido.')
+  }
+
+  return locked(path.resolve(projectDir), async () => {
+    const headResult = await git(['rev-parse', '--verify', '-q', 'HEAD'], { cwd: projectDir })
+    if (headResult.code !== 0 || headResult.out.trim() !== proposal.head) {
+      throw codedError('stale', MESSAGES.stale)
+    }
+
+    const statusResult = await git(['status', '--porcelain', '--', '.'], { cwd: projectDir })
+    if (statusResult.code !== 0) throw gitError(statusResult)
+    if (statusResult.out) throw codedError('dirty', MESSAGES.dirty)
+
+    const checkResult = await git(['apply', '--check', '-'], { cwd: projectDir, input: proposal.patch })
+    if (checkResult.code !== 0) throw codedError('conflict', MESSAGES.conflict)
+
+    const applyResult = await git(['apply', '-'], { cwd: projectDir, input: proposal.patch })
+    if (applyResult.code !== 0) throw codedError('conflict', MESSAGES.conflict)
+
+    const addResult = await git(['add', '-A', '--', '.'], { cwd: projectDir })
+    if (addResult.code !== 0) throw gitError(addResult)
+
+    const namesResult = await git(['diff', '--cached', '--name-only', '-z'], { cwd: projectDir })
+    if (namesResult.code !== 0) throw gitError(namesResult)
+    const skipped = namesResult.out.split('\0').filter((filePath) => SECRET_FILE.test(filePath))
+    if (skipped.length) {
+      const resetResult = await git(['reset', '-q', '--', ...skipped], { cwd: projectDir })
+      if (resetResult.code !== 0) throw gitError(resetResult)
+    }
+
+    const commitResult = await git([
+      '-c', 'user.name=TL-ADE', '-c', 'user.email=ade@local',
+      'commit', '-q', '-m', commitMessage(summary)
+    ], { cwd: projectDir })
+    if (commitResult.code !== 0) throw gitError(commitResult)
+
+    const committedHead = await git(['rev-parse', '--verify', '-q', 'HEAD'], { cwd: projectDir })
+    if (committedHead.code !== 0) throw gitError(committedHead)
+    return { commit: committedHead.out.trim(), skipped }
+  })
+}

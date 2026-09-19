@@ -11,8 +11,17 @@ import {
   pruneChatWorktrees,
   collectProposal,
   WT_ROOT,
-  ADE_DIR
+  ADE_DIR,
+  MESSAGES
 } from './chat-changes.mjs'
+import * as chatChanges from './chat-changes.mjs'
+
+const applyProposal = (...args) => {
+  if (typeof chatChanges.applyProposal !== 'function') {
+    throw new Error('não implementado')
+  }
+  return chatChanges.applyProposal(...args)
+}
 
 const PROTO_DIR = path.dirname(fileURLToPath(import.meta.url))
 const TL_ADE_ROOT = path.resolve(PROTO_DIR, '..')
@@ -290,4 +299,166 @@ describe('collectProposal', () => {
     assert.equal(statusRes.stdout.trim(), '')
   })
 })
+
+describe('applyProposal', () => {
+  it('CA1: aplica proposta com a.txt alterado, b.txt apagado e novo.txt criado, com commit chat: <resumo>', async () => {
+    const repo = await makeRepo()
+    const id = newId()
+    const { path: wtPath } = await createChatWorktree(repo, id)
+    createdWorktrees.push({ repo, path: wtPath })
+
+    await fs.writeFile(path.join(wtPath, 'a.txt'), 'um alterado\n')
+    await fs.rm(path.join(wtPath, 'b.txt'))
+    await fs.writeFile(path.join(wtPath, 'novo.txt'), 'oi\n')
+
+    const proposal = await collectProposal(repo, wtPath)
+    assert.ok(proposal)
+
+    const result = await applyProposal(repo, proposal, 'ajusta textos')
+
+    const logRes = await gitCmd(['log', '-1', '--format=%s'], repo)
+    assert.equal(logRes.stdout.trim(), 'chat: ajusta textos')
+
+    const headRes = await gitCmd(['rev-parse', 'HEAD'], repo)
+    assert.equal(result.commit, headRes.stdout.trim())
+
+    const aContent = await fs.readFile(path.join(repo, 'a.txt'), 'utf8')
+    assert.equal(aContent, 'um alterado\n')
+
+    let bExists = true
+    try {
+      await fs.access(path.join(repo, 'b.txt'))
+    } catch {
+      bExists = false
+    }
+    assert.equal(bExists, false)
+
+    const novoContent = await fs.readFile(path.join(repo, 'novo.txt'), 'utf8')
+    assert.equal(novoContent, 'oi\n')
+
+    const statusRes = await gitCmd(['status', '--porcelain'], repo)
+    assert.equal(statusRes.stdout.trim(), '')
+  })
+
+  it('CA1 (resumo): formata resumo longo com reticências e resumo vazio com padrão', async () => {
+    const repo = await makeRepo()
+    const id1 = newId()
+    const { path: wt1 } = await createChatWorktree(repo, id1)
+    createdWorktrees.push({ repo, path: wt1 })
+
+    await fs.writeFile(path.join(wt1, 'c1.txt'), '1\n')
+    const p1 = await collectProposal(repo, wt1)
+    assert.ok(p1)
+
+    const longSummary = 'a'.repeat(80)
+    await applyProposal(repo, p1, longSummary)
+    const log1 = await gitCmd(['log', '-1', '--format=%s'], repo)
+    assert.equal(log1.stdout.trim(), 'chat: ' + 'a'.repeat(71) + '…')
+
+    const id2 = newId()
+    const { path: wt2 } = await createChatWorktree(repo, id2)
+    createdWorktrees.push({ repo, path: wt2 })
+
+    await fs.writeFile(path.join(wt2, 'c2.txt'), '2\n')
+    const p2 = await collectProposal(repo, wt2)
+    assert.ok(p2)
+
+    await applyProposal(repo, p2, '')
+    const log2 = await gitCmd(['log', '-1', '--format=%s'], repo)
+    assert.equal(log2.stdout.trim(), 'chat: alterações aprovadas')
+  })
+
+  it('CA2: rejeita com code stale quando o HEAD do projeto mudou após a proposta', async () => {
+    const repo = await makeRepo()
+    const id = newId()
+    const { path: wtPath } = await createChatWorktree(repo, id)
+    createdWorktrees.push({ repo, path: wtPath })
+
+    await fs.writeFile(path.join(wtPath, 'novo.txt'), 'oi\n')
+    const proposal = await collectProposal(repo, wtPath)
+    assert.ok(proposal)
+
+    await fs.writeFile(path.join(repo, 'outro.txt'), 'outro\n')
+    await gitCmd(['add', '.'], repo)
+    await gitCmd(
+      ['-c', 'user.name=TL-ADE', '-c', 'user.email=ade@local', 'commit', '-q', '-m', 'commit extra'],
+      repo
+    )
+
+    const headBefore = (await gitCmd(['rev-parse', 'HEAD'], repo)).stdout.trim()
+
+    await assert.rejects(
+      async () => {
+        await applyProposal(repo, proposal, 'ajusta')
+      },
+      (err) => {
+        assert.equal(err.code, 'stale')
+        assert.equal(err.message, MESSAGES.stale)
+        return true
+      }
+    )
+
+    const headAfter = (await gitCmd(['rev-parse', 'HEAD'], repo)).stdout.trim()
+    assert.equal(headAfter, headBefore)
+
+    let novoExists = true
+    try {
+      await fs.access(path.join(repo, 'novo.txt'))
+    } catch {
+      novoExists = false
+    }
+    assert.equal(novoExists, false)
+  })
+
+  it('CA3: rejeita com code dirty quando a pasta tem alterações não commitadas', async () => {
+    const repo = await makeRepo()
+    const id = newId()
+    const { path: wtPath } = await createChatWorktree(repo, id)
+    createdWorktrees.push({ repo, path: wtPath })
+
+    await fs.writeFile(path.join(wtPath, 'novo.txt'), 'oi\n')
+    const proposal = await collectProposal(repo, wtPath)
+    assert.ok(proposal)
+
+    const countBefore = (await gitCmd(['rev-list', '--count', 'HEAD'], repo)).stdout.trim()
+
+    await fs.writeFile(path.join(repo, 'solto.txt'), 'pendente\n')
+
+    await assert.rejects(
+      async () => {
+        await applyProposal(repo, proposal, 'ajusta')
+      },
+      (err) => {
+        assert.equal(err.code, 'dirty')
+        assert.equal(err.message, MESSAGES.dirty)
+        return true
+      }
+    )
+
+    const countAfter = (await gitCmd(['rev-list', '--count', 'HEAD'], repo)).stdout.trim()
+    assert.equal(countAfter, countBefore)
+  })
+
+  it('CA4: exclui arquivos de segredo do commit e devolve em skipped', async () => {
+    const repo = await makeRepo()
+    const id = newId()
+    const { path: wtPath } = await createChatWorktree(repo, id)
+    createdWorktrees.push({ repo, path: wtPath })
+
+    await fs.writeFile(path.join(wtPath, '.env'), 'SENHA=1\n')
+    await fs.writeFile(path.join(wtPath, 'novo.txt'), 'oi\n')
+    const proposal = await collectProposal(repo, wtPath)
+    assert.ok(proposal)
+
+    const result = await applyProposal(repo, proposal, 'adiciona env e novo')
+
+    assert.deepEqual(result.skipped, ['.env'])
+
+    const showRes = await gitCmd(['show', '--name-only', '--format=', 'HEAD'], repo)
+    const files = showRes.stdout.split('\n').map((l) => l.trim()).filter(Boolean)
+    assert.ok(files.includes('novo.txt'))
+    assert.ok(!files.includes('.env'))
+  })
+})
+
 
