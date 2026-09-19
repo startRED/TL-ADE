@@ -70,10 +70,10 @@ function isRefPath(path) {
  *   criteria?: string[],
  *   verifiedRefs?: string[],
  *   verified_refs?: string[]
- * }} context
+ * }} [context]
  * @returns {{ valid: true, errors: [] } | { valid: false, errors: Array<{ path: string, code: string, message: string }>, code: 4 }}
  */
-export function validateEvidenceResult(schemaName, doc, context) {
+export function validateEvidenceResult(schemaName, doc, context = {}) {
   if (!doc || typeof doc !== 'object') {
     return {
       valid: false,
@@ -385,10 +385,10 @@ export function validateEvidenceResult(schemaName, doc, context) {
  * Unit-result e resultados legados nunca aprovam.
  *
  * @param {any} doc
- * @param {any} context
+ * @param {any} [context]
  * @returns {{ approved: boolean, errors: Array<{ path: string, code: string, message: string }> }}
  */
-export function isReviewApproved(doc, context) {
+export function isReviewApproved(doc, context = {}) {
   if (!doc || typeof doc !== 'object') {
     return {
       approved: false,

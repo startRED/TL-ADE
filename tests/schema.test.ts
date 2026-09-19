@@ -466,7 +466,9 @@ describe('review-result v2 contract evolution', () => {
 
     const currentRes = validate('review-result', v1Doc)
     expect(currentRes.valid).toBe(false)
-    expect(currentRes.code).toBe(4)
+    if (!currentRes.valid) {
+      expect(currentRes.code).toBe(4)
+    }
   })
 })
 
