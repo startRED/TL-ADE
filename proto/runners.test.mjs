@@ -74,3 +74,21 @@ test('suítes: raiz Go + frontend JS em subpasta; exemplo e ecossistema repetido
   writeFileSync(path.join(d, 'tools', 'go.mod'), 'module t\n')
   assert.deepEqual(findSuites(d).map((s) => [s.cwd, s.runner, s.language]), [['', 'go', 'go'], ['web', 'node-test', 'js']])
 })
+
+test('só um arquivo: roda só a prova da parte; runner sem molde ou arquivo fora da suíte devolve null', async () => {
+  const { spawnSync } = await import('node:child_process')
+  const { runSuites } = await import('./runners.mjs')
+  const run = async (cmd, args, { cwd, env = {} } = {}) => { const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', env: { ...process.env, ...env } }); return { code: r.status, out: r.stdout || '', err: r.stderr || '' } }
+  const d = mkdtempSync(path.join(os.tmpdir(), 'ade-only-'))
+  writeFileSync(path.join(d, 'package.json'), JSON.stringify({ type: 'module', scripts: { test: 'node --test' } }))
+  writeFileSync(path.join(d, 'a.test.mjs'), "import test from 'node:test'\ntest('a passa', () => {})\n")
+  writeFileSync(path.join(d, 'b.test.mjs'), "import test from 'node:test'\nimport assert from 'node:assert'\ntest('b falha', () => assert.equal(1, 2))\n")
+  const suites = findSuites(d)
+  const one = await runSuites(d, suites, { run, only: 'a.test.mjs' })
+  assert.deepEqual(one.tests.map((t) => [t.name, t.status]), [['a.test.mjs > a passa', 'passed']])
+  assert.equal(one.ok, true)
+  const all = await runSuites(d, suites, { run })
+  assert.equal(all.total, 2); assert.equal(all.failed, 1)
+  assert.equal(await runSuites(d, suites, { run, only: '../fora.test.mjs' }), null)
+  assert.equal(await runSuites(d, [{ ...suites[0], one: null }], { run, only: 'a.test.mjs' }), null)
+})
