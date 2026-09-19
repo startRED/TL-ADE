@@ -104,7 +104,7 @@ const DEFAULT_SETTINGS = {
   // O motor usa o primeiro da cadeia cuja família tem cota; cota esgotada ou chamada que falhou pula para o próximo em vez de pausar.
   // Quem escreve nunca é da empresa de quem revisa (filtrado por chamada). Claude é a cota mais curta: fica de reserva onde há substituto.
   chains: {
-    epics: [{ family: 'codex', model: 'gpt-6-astra', effort: 'xhigh' }, { family: 'claude', model: 'fable', effort: 'high' }], // roda 1 vez por missão e decide tudo: Astra xhigh = nota do max (AA 53) por 71% do custo
+    epics: [{ family: 'codex', model: 'gpt-5.6-sol', effort: 'xhigh' }, { family: 'claude', model: 'fable', effort: 'high' }], // Erick: Sol no plano complexo; roda 1 vez por missão, xhigh (AA 44) por +46% do custo do high
     plan: [{ family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'medium' }], // Sol high: AA 42 por US$ 0,81; o Astra custou mais que tudo o resto no 1º épico medido
     // 19/09 (Erick): cada empresa num papel, e quem escreve nunca revisa. O Gemini 3.8 Flash (cota do Google livre) fica só com o mais
     // pesado, escrever código (Sol leu ~1,2M tokens por parte); o Codex planeja e revisa o Flash; o Claude entra na escada e como reserva.
