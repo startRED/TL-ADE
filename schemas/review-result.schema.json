@@ -4,30 +4,270 @@
   "title": "review-result",
   "type": "object",
   "additionalProperties": false,
-  "required": ["format_version", "verdict", "action_items", "deferred", "rejected", "sources", "summary"],
+  "required": [
+    "format_version",
+    "contract_revision",
+    "input_revision",
+    "verdict",
+    "action_items",
+    "deferred",
+    "rejected",
+    "evidence",
+    "requested_action",
+    "sources",
+    "summary",
+    "handoff"
+  ],
+  "definitions": {
+    "typedRef": {
+      "type": "string",
+      "pattern": "^(eval:[A-Za-z0-9._-]+|gate:[A-Za-z0-9._-]+|artifact:(?!/)(?![A-Za-z]:)(?!\\.\\.(?:/|$))(?!.*(?:/|^)\\.\\.(?:/|$))[A-Za-z0-9._/-]+|source:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}|file:(?!/)(?![A-Za-z]:)(?!\\.\\.(?:/|$))(?!.*(?:/|^)\\.\\.(?:/|$))[A-Za-z0-9._/-]+#L[1-9][0-9]*-L[1-9][0-9]*|trace:[A-Za-z0-9._-]+)$"
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "severity",
+        "category",
+        "target_role",
+        "location",
+        "problem",
+        "evidence_refs",
+        "required_action"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low"]
+        },
+        "category": {
+          "type": "string",
+          "enum": ["patch", "bad_spec", "intent_gap"]
+        },
+        "target_role": {
+          "type": "string",
+          "enum": ["maker", "planner", "human"]
+        },
+        "location": {
+          "type": "string"
+        },
+        "problem": {
+          "type": "string",
+          "maxLength": 220
+        },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/typedRef"
+          }
+        },
+        "required_action": {
+          "type": "string"
+        }
+      }
+    }
+  },
   "properties": {
-    "format_version": { "type": "integer", "minimum": 1 },
-    "verdict": { "type": "string" },
+    "format_version": {
+      "type": "integer",
+      "const": 2
+    },
+    "contract_revision": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "input_revision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tree", "digest"],
+      "properties": {
+        "tree": {
+          "type": "string",
+          "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["approved", "changes_requested"]
+    },
     "action_items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/finding"
+      }
+    },
+    "deferred": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/finding"
+      }
+    },
+    "rejected": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/finding"
+      }
+    },
+    "evidence": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["severity", "category", "target_role", "location", "problem", "evidence", "required_action"],
+        "required": ["criterion", "result_ref", "input_digest"],
         "properties": {
-          "severity": { "type": "string" },
-          "category": { "type": "string" },
-          "target_role": { "type": "string" },
-          "location": { "type": "string" },
-          "problem": { "type": "string" },
-          "evidence": { "type": "string" },
-          "required_action": { "type": "string" }
+          "criterion": {
+            "type": "string"
+          },
+          "result_ref": {
+            "$ref": "#/definitions/typedRef"
+          },
+          "input_digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
         }
       }
     },
-    "deferred": { "type": "array", "items": { "type": "object", "additionalProperties": false } },
-    "rejected": { "type": "array", "items": { "type": "object", "additionalProperties": false } },
-    "sources": { "type": "array", "items": { "type": "string" } },
-    "summary": { "type": "string" }
+    "requested_action": {
+      "type": "string",
+      "enum": ["verify", "rework", "decide"]
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/typedRef"
+      }
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 400
+    },
+    "handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claims",
+        "unknowns",
+        "questions_for_owner",
+        "deltas",
+        "next_action",
+        "notes"
+      ],
+      "properties": {
+        "claims": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "statement", "evidence_refs", "sources"],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "statement": {
+                "type": "string"
+              },
+              "evidence_refs": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/definitions/typedRef"
+                }
+              },
+              "sources": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/typedRef"
+                }
+              }
+            }
+          }
+        },
+        "unknowns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "question"],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "question": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "questions_for_owner": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "question", "options"],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "question": {
+                "type": "string"
+              },
+              "options": {
+                "type": "array",
+                "minItems": 2,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["id", "label"],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "deltas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "ref"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["added", "changed", "removed"]
+              },
+              "ref": {
+                "$ref": "#/definitions/typedRef"
+              }
+            }
+          }
+        },
+        "next_action": {
+          "type": "string",
+          "enum": ["verify", "rework", "decide"]
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    }
   }
 }

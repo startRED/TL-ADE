@@ -1,22 +1,91 @@
 {
-  "format_version": 1,
+  "format_version": 2,
+  "contract_revision": "sha256:a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0",
+  "input_revision": {
+    "tree": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+    "digest": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+  },
   "verdict": "approved",
   "action_items": [
     {
-      "severity": "minor",
-      "category": "style",
+      "id": "finding-1",
+      "severity": "low",
+      "category": "patch",
       "target_role": "maker",
-      "location": "src/journal/canonical.ts:10",
-      "problem": "nome poderia ser mais claro",
-      "evidence": "trecho do diff",
-      "required_action": "renomear variável"
+      "location": "src/review/validate.js:10",
+      "problem": "nome de variável poderia ser mais descritivo",
+      "evidence_refs": [
+        "eval:E1",
+        "file:src/review/validate.js#L1-L30"
+      ],
+      "required_action": "renomear variável para clareza"
     }
   ],
   "deferred": [],
   "rejected": [],
-  "sources": [
-    "0123456789abcdef"
+  "evidence": [
+    {
+      "criterion": "CA1",
+      "result_ref": "eval:E1",
+      "input_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "criterion": "CA1",
+      "result_ref": "file:src/review/validate.js#L1-L30",
+      "input_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
   ],
-  "summary": "aprovado com uma observação menor",
+  "requested_action": "verify",
+  "sources": [
+    "eval:E1",
+    "file:src/review/validate.js#L1-L30"
+  ],
+  "summary": "Revisão independente concluída com aprovação formal; todos os contratos e invariantes foram respeitados.",
+  "handoff": {
+    "claims": [
+      {
+        "id": "claim-1",
+        "statement": "Revisão de conformidade com contratos v2 concluída",
+        "evidence_refs": [
+          "eval:E1",
+          "file:src/review/validate.js#L1-L30"
+        ],
+        "sources": [
+          "eval:E1",
+          "file:src/review/validate.js#L1-L30"
+        ]
+      }
+    ],
+    "unknowns": [
+      {
+        "id": "U1",
+        "question": "Deseja estender os vocabulários de categoria em releases futuras?"
+      }
+    ],
+    "questions_for_owner": [
+      {
+        "id": "Q1",
+        "question": "Aprovar merge imediato dos contratos revisados?",
+        "options": [
+          {
+            "id": "opt-yes",
+            "label": "Sim, aprovar merge"
+          },
+          {
+            "id": "opt-no",
+            "label": "Não, aguardar rodada seguinte"
+          }
+        ]
+      }
+    ],
+    "deltas": [
+      {
+        "kind": "changed",
+        "ref": "file:src/review/validate.js#L1-L30"
+      }
+    ],
+    "next_action": "verify",
+    "notes": "Revisão aprovada sem apontamentos bloqueantes."
+  },
   "__unexpected__": true
 }

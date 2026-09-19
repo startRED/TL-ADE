@@ -46,10 +46,7 @@
       {
         "id": "claim-1",
         "statement": "Revisão de conformidade com contratos v2 concluída",
-        "evidence_refs": [
-          "eval:E1",
-          "file:src/review/validate.js#L1-L30"
-        ],
+        "evidence_refs": [],
         "sources": [
           "eval:E1",
           "file:src/review/validate.js#L1-L30"

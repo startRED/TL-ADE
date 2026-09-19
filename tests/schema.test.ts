@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, test } from 'vitest'
 import { validate, validateSupported } from '../src/schema/index.js'
 import { parseClaudeOutput, parseUnitResult } from '../src/adapters/claude/parse.js'
@@ -20,6 +20,58 @@ function loadFixture(schemaName: string, kind: 'valid' | 'invalid'): unknown {
     'utf8',
   )
   return JSON.parse(raw)
+}
+
+const LEGACY_V1_UNIT_RESULT = {
+  format_version: 1,
+  story_id: 'ADE-S1',
+  state: 'done',
+  phase: 'green',
+  round: 1,
+  tree_before: '0123456789abcdef',
+  tree_after: 'fedcba9876543210',
+  eval_records: [
+    {
+      id: 'E1',
+      phase: 'red',
+      passed: false,
+      red_reason: 'assertion_failed',
+    },
+  ],
+  gate_records: [],
+  passes: true,
+  reason: 'eval verde após implementação',
+  sources: ['0123456789abcdef'],
+}
+
+const LEGACY_V1_INVALID_UNIT_RESULT = {
+  ...LEGACY_V1_UNIT_RESULT,
+  __unexpected__: true,
+}
+
+const LEGACY_V1_REVIEW_RESULT = {
+  format_version: 1,
+  verdict: 'approved',
+  action_items: [
+    {
+      severity: 'minor',
+      category: 'style',
+      target_role: 'maker',
+      location: 'src/journal/canonical.ts:10',
+      problem: 'nome poderia ser mais claro',
+      evidence: 'trecho do diff',
+      required_action: 'renomear variável',
+    },
+  ],
+  deferred: [],
+  rejected: [],
+  sources: ['0123456789abcdef'],
+  summary: 'aprovado com uma observação menor',
+}
+
+const LEGACY_V1_INVALID_REVIEW_RESULT = {
+  ...LEGACY_V1_REVIEW_RESULT,
+  __unexpected__: true,
 }
 
 // AC2: cada um dos oito contratos aceita um exemplo válido e recusa um exemplo
@@ -55,33 +107,6 @@ describe('published schemas', () => {
     }
   })
 
-  const LEGACY_V1_UNIT_RESULT = {
-    format_version: 1,
-    story_id: 'ADE-S1',
-    state: 'done',
-    phase: 'green',
-    round: 1,
-    tree_before: '0123456789abcdef',
-    tree_after: 'fedcba9876543210',
-    eval_records: [
-      {
-        id: 'E1',
-        phase: 'red',
-        passed: false,
-        red_reason: 'assertion_failed',
-      },
-    ],
-    gate_records: [],
-    passes: true,
-    reason: 'eval verde após implementação',
-    sources: ['0123456789abcdef'],
-  }
-
-  const LEGACY_V1_INVALID_UNIT_RESULT = {
-    ...LEGACY_V1_UNIT_RESULT,
-    __unexpected__: true,
-  }
-
   test('CA1: validateSupported accepts format_version 1 as valid, legacy (current: false)', () => {
     const unitResult = validateSupported('unit-result', LEGACY_V1_UNIT_RESULT)
     expect(unitResult.valid).toBe(true)
@@ -89,8 +114,7 @@ describe('published schemas', () => {
     expect(unitResult.formatVersion).toBe(1)
     expect(unitResult.current).toBe(false)
 
-    const validReviewResult = loadFixture('review-result', 'valid')
-    const reviewResult = validateSupported('review-result', validReviewResult)
+    const reviewResult = validateSupported('review-result', LEGACY_V1_REVIEW_RESULT)
     expect(reviewResult.valid).toBe(true)
     expect(reviewResult.errors).toEqual([])
     expect(reviewResult.formatVersion).toBe(1)
@@ -153,7 +177,7 @@ describe('published schemas', () => {
     const unitUnexpected = unitRes.errors.find((e) => e.path === '/__unexpected__')
     expect(unitUnexpected).toBeDefined()
 
-    const invalidReviewResult = loadFixture('review-result', 'invalid')
+    const invalidReviewResult = LEGACY_V1_INVALID_REVIEW_RESULT
     const reviewRes = validateSupported('review-result', invalidReviewResult)
     expect(reviewRes.valid).toBe(false)
     expect(reviewRes.current).toBe(false)
@@ -280,6 +304,169 @@ describe('unit-result v2 contract evolution', () => {
         ),
       ).toBe(true)
     }
+  })
+})
+
+describe('review-result v2 contract evolution', () => {
+  function loadReviewFixture(kind: string): unknown {
+    const filePath = new URL(`../fixtures/schemas/review-result/${kind}.json`, import.meta.url)
+    if (!existsSync(filePath)) {
+      return null
+    }
+    const raw = readFileSync(filePath, 'utf8')
+    return JSON.parse(raw)
+  }
+
+  test('CA1: current fixture returns valid:true for format_version 2, verdict approved and typed references', () => {
+    const fixture = (loadReviewFixture('valid') || loadFixture('review-result', 'valid')) as Record<string, unknown>
+    const res = validate('review-result', fixture)
+    expect(res.valid, `valid fixture should be accepted: ${JSON.stringify(res.errors)}`).toBe(true)
+    expect(fixture.format_version).toBe(2)
+    expect(fixture.verdict).toBe('approved')
+    expect(fixture).toHaveProperty('contract_revision')
+    expect(fixture).toHaveProperty('input_revision')
+    expect(fixture).toHaveProperty('requested_action')
+    expect(fixture).toHaveProperty('evidence')
+    expect(fixture).toHaveProperty('sources')
+    expect(fixture).toHaveProperty('handoff')
+
+    const supportedRes = validateSupported('review-result', fixture)
+    expect(supportedRes.valid).toBe(true)
+    expect(supportedRes.formatVersion).toBe(2)
+    expect(supportedRes.current).toBe(true)
+  })
+
+  test('CA2: requested_action approve or evidence_refs with prose returns valid:false pointing to out-of-vocabulary value', () => {
+    const fixture = (loadReviewFixture('valid') || loadFixture('review-result', 'valid')) as Record<string, any>
+
+    // 1. requested_action: 'approve' (fora do enum verify|rework|decide)
+    const withInvalidAction = { ...fixture, requested_action: 'approve' }
+    const actionRes = validate('review-result', withInvalidAction)
+    expect(actionRes.valid).toBe(false)
+    if (!actionRes.valid) {
+      expect(actionRes.errors.some((e) => e.path === '/requested_action')).toBe(true)
+    }
+
+    // 2. evidence_refs: ['trecho do diff'] (prosa em vez de referência tipada)
+    const withProseEvidence = JSON.parse(JSON.stringify(fixture))
+    if (withProseEvidence.action_items?.[0]) {
+      withProseEvidence.action_items[0].evidence_refs = ['trecho do diff']
+    }
+    const proseRes = validate('review-result', withProseEvidence)
+    expect(proseRes.valid).toBe(false)
+    if (!proseRes.valid) {
+      expect(proseRes.errors.some((e) => e.path === '/action_items/0/evidence_refs/0')).toBe(true)
+    }
+
+    // Fixture isolada invalid-action.json
+    const invalidActionDoc = loadReviewFixture('invalid-action')
+    if (invalidActionDoc) {
+      const invalidActionRes = validate('review-result', invalidActionDoc)
+      expect(invalidActionRes.valid).toBe(false)
+      if (!invalidActionRes.valid) {
+        expect(invalidActionRes.errors.some((e) => e.path === '/requested_action')).toBe(true)
+      }
+    }
+  })
+
+  test('CA3: claim without evidence_refs returns valid:false at /handoff/claims/0/evidence_refs', () => {
+    const fixture = (loadReviewFixture('valid') || loadFixture('review-result', 'valid')) as Record<string, any>
+    const claimNoEvidence = JSON.parse(JSON.stringify(fixture))
+    if (claimNoEvidence.handoff?.claims?.[0]) {
+      claimNoEvidence.handoff.claims[0].evidence_refs = []
+    }
+    const res = validate('review-result', claimNoEvidence)
+    expect(res.valid).toBe(false)
+    if (!res.valid) {
+      expect(res.errors.some((e) => e.path === '/handoff/claims/0/evidence_refs')).toBe(true)
+    }
+
+    // Fixture isolada invalid-claim.json
+    const invalidClaimDoc = loadReviewFixture('invalid-claim')
+    if (invalidClaimDoc) {
+      const invalidClaimRes = validate('review-result', invalidClaimDoc)
+      expect(invalidClaimRes.valid).toBe(false)
+      if (!invalidClaimRes.valid) {
+        expect(invalidClaimRes.errors.some((e) => e.path === '/handoff/claims/0/evidence_refs')).toBe(true)
+      }
+    }
+  })
+
+  test('CA4: problem 221 chars, summary 401 chars, notes 501 ASCII chars or missing contract_revision are refused at corresponding field', () => {
+    const fixture = (loadReviewFixture('valid') || loadFixture('review-result', 'valid')) as Record<string, any>
+
+    // 1. problem com 221 caracteres
+    const docProblem221 = JSON.parse(JSON.stringify(fixture))
+    if (docProblem221.action_items?.[0]) {
+      docProblem221.action_items[0].problem = 'p'.repeat(221)
+    }
+    const resProblem = validate('review-result', docProblem221)
+    expect(resProblem.valid).toBe(false)
+    if (!resProblem.valid) {
+      expect(resProblem.errors.some((e) => e.path === '/action_items/0/problem')).toBe(true)
+    }
+
+    // 2. summary com 401 caracteres
+    const docSummary401 = { ...fixture, summary: 's'.repeat(401) }
+    const resSummary = validate('review-result', docSummary401)
+    expect(resSummary.valid).toBe(false)
+    if (!resSummary.valid) {
+      expect(resSummary.errors.some((e) => e.path === '/summary')).toBe(true)
+    }
+
+    // 3. notes com 501 caracteres ASCII
+    const docNotes501 = JSON.parse(JSON.stringify(fixture))
+    if (docNotes501.handoff) {
+      docNotes501.handoff.notes = 'n'.repeat(501)
+    }
+    const resNotes = validate('review-result', docNotes501)
+    expect(resNotes.valid).toBe(false)
+    if (!resNotes.valid) {
+      expect(resNotes.errors.some((e) => e.path === '/handoff/notes')).toBe(true)
+    }
+
+    // 4. ausência de contract_revision
+    const docNoContract = { ...fixture }
+    delete docNoContract.contract_revision
+    const resNoContract = validate('review-result', docNoContract)
+    expect(resNoContract.valid).toBe(false)
+    if (!resNoContract.valid) {
+      expect(
+        resNoContract.errors.some(
+          (e) => e.path.includes('contract_revision') || e.message.includes('contract_revision'),
+        ),
+      ).toBe(true)
+    }
+
+    // Fixture isolada invalid-limits.json
+    const invalidLimitsDoc = loadReviewFixture('invalid-limits')
+    if (invalidLimitsDoc) {
+      const invalidLimitsRes = validate('review-result', invalidLimitsDoc)
+      expect(invalidLimitsRes.valid).toBe(false)
+      if (!invalidLimitsRes.valid) {
+        expect(
+          invalidLimitsRes.errors.some(
+            (e) =>
+              e.path === '/summary' ||
+              e.path === '/action_items/0/problem' ||
+              e.path === '/handoff/notes',
+          ),
+        ).toBe(true)
+      }
+    }
+  })
+
+  test('review-result v1 legacy format is read with current: false by validateSupported and rejected by validate as current contract', () => {
+    const v1Doc = LEGACY_V1_REVIEW_RESULT
+    const supportedRes = validateSupported('review-result', v1Doc)
+    expect(supportedRes.valid).toBe(true)
+    expect(supportedRes.formatVersion).toBe(1)
+    expect(supportedRes.current).toBe(false)
+    expect(supportedRes.errors).toEqual([])
+
+    const currentRes = validate('review-result', v1Doc)
+    expect(currentRes.valid).toBe(false)
+    expect(currentRes.code).toBe(4)
   })
 })
 

@@ -35,7 +35,7 @@
       "input_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     }
   ],
-  "requested_action": "verify",
+  "requested_action": "approve",
   "sources": [
     "eval:E1",
     "file:src/review/validate.js#L1-L30"
