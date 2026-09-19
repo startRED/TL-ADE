@@ -124,7 +124,7 @@ const DEFAULT_SETTINGS = {
   research_enabled: true,
   visual_gate: true,
   fast_lane: true, // faixa rápida (ADR 0008 / E18): pedido curto de correção num projeto existente pula entrevista e plano no Opus
-  max_usd_per_story: 5, // orçamento por parte (spec E4): estourou com provas verdes → aceita; sem provas verdes → para
+  max_usd_per_story: 9, // orçamento por parte (spec E4): estourou com provas verdes → aceita; sem provas verdes → para. Conta todos os modelos pelo preço equivalente de API desde 19/09
   parallel_parts: 2, // partes independentes ao mesmo tempo (lanes.mjs): a atual + 1 em cópia isolada; 1 = em fila
   prova_com_codigo: true, // prova e código numa chamada só; o motor confere o vermelho guardando o código de lado (false = duas chamadas)
   suite_scope: 'epic', // 'epic' = provas afetadas por parte e suíte inteira no fim do épico; 'part' = suíte inteira em toda parte (todo commit verde). 19/09: suíte inteira por parte custava 6 min e abria rodada por prova sem relação que estourava 5 s
@@ -282,6 +282,9 @@ function trackModelCost(event) {
     try { for (const l of readFileSync(path.join(ADE_DIR, 'journal.jsonl'), 'utf8').split('\n')) { if (!l.includes(m.id) || !l.includes('"model_call"')) continue; const e = JSON.parse(l); if (e.mission === m.id && e.type === 'model_call') addModelCost(m.cost.models, e) } } catch { }
   }
   addModelCost(m.cost.models, event)
+  // orçamento por parte: só o Claude informa preço real; sem isto, Codex e agy gastavam rodadas sem teto
+  // (m-mu8usf5z, s1 e s2: 6 chamadas do Astra, US$ 9,90 equivalentes, com o teto de US$ 5 parado em zero)
+  if (event.family !== 'claude' && event.story != null) { const ss = m.stories || [], st = ss.find((x) => x.id === event.story) || ss[Number(event.story)]; if (st) st.usd = (st.usd || 0) + (callUsd(event) || 0) }
 }
 async function journal(event) {
   trackModelCost(event)
@@ -2123,10 +2126,15 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   // (épico 7, parte 6: três rodadas pagas atrás de uma prova da parte 3 que estourava 5 s; quem escreve chegou a mexer no vitest.config fora do escopo para esconder)
   // uma repetição por rodada, não por parte (missão m-mu81n0ms, épico 2, s1: a rodada 3 escalou para o Sol atrás de 3 provas antigas
   // que só estouravam 5 s com a máquina carregada; a repetição já tinha sido gasta na rodada 1)
-  if (!st.tests_after.ok && st.flaky_retry !== round && m.tests_before?.tests?.length) {
+  // rodada de correção que devolveu o MESMO diff: quem conserta não achou o que consertar. Prova antiga vermelha aqui é máquina carregada,
+  // não defeito da parte (m-mu8usf5z, s1 e s2: 4 chamadas do Astra sem mudar uma linha, US$ 9,90 equivalentes)
+  const sameDiff = !!st.diff.trim() && st.diff === st.last_round_diff
+  st.last_round_diff = st.diff
+  const oldReds = !st.tests_after.ok && !!m.tests_before?.tests?.length && st.tests_after.tests.filter((t) => t.status !== 'passed').every((t) => m.tests_before.tests.some((b) => b.name === t.name && b.status === 'passed'))
+  if (!st.tests_after.ok && (st.flaky_retry !== round || sameDiff) && m.tests_before?.tests?.length) {
     const okBefore = new Set(m.tests_before.tests.filter((t) => t.status === 'passed').map((t) => t.name))
     const reds = st.tests_after.tests.filter((t) => t.status !== 'passed')
-    if (reds.length && reds.every((t) => okBefore.has(t.name) && /timed out|timeout|tempo limite/i.test(t.message || ''))) {
+    if (reds.length && reds.every((t) => okBefore.has(t.name)) && (sameDiff || reds.every((t) => /timed out|timeout|tempo limite/i.test(t.message || '')))) {
       st.flaky_retry = round
       log('engine', `só prova(s) antiga(s) vermelha(s), por tempo limite (${reds.map((t) => t.name.slice(0, 80)).join(' | ')}); estavam verdes antes desta parte: repito a suíte uma vez antes de abrir rodada`, 'warn')
       // repete o mesmo recorte que ficou vermelho (arquivo da parte, provas afetadas ou suíte), não a suíte inteira
@@ -2149,6 +2157,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     const spentNow = (st.usd || 0) - (st.usd_start || 0)
     const redNow = st.tests_after.tests.filter((t) => t.status !== 'passed').map((t) => t.name).sort().join('|')
     if (st.contract_issue && round >= 2) { log('engine', `quem escreve diz que o contrato da parte está errado: ${st.contract_issue}. Paro de gastar rodadas; a parte volta ao planejador com esse motivo`, 'warn'); return stop('contract_wrong') }
+    if (sameDiff && oldReds) { log('engine', 'a rodada de correção não mudou uma linha e as vermelhas são provas antigas: instabilidade da máquina, não defeito desta parte. Paro de gastar rodadas nesta parte em vez de subir para um modelo mais caro', 'warn'); return stop('tests_red') }
     const stuck = round >= 5 && st.last_red === redNow; st.last_red = redNow
     if (stuck) log('engine', 'as mesmas provas seguem vermelhas depois de duas rodadas no modelo mais forte: impasse (provável conflito no plano); paro de gastar rodadas nesta parte', 'warn')
     if (!stuck && round < MAX_ROUNDS && spentNow <= (state.settings.max_usd_per_story || 4)) {
