@@ -586,7 +586,14 @@ async function refreshProject() { state.project = { ...state.project, ...(await 
 
 // Provas de qualquer ecossistema (runners.mjs). Soma a prova node:test de parte que o vitest/jest do projeto não inclui.
 // only = arquivo de prova da parte: roda só ele; null quando nada o rodou, e quem chamou roda a suíte inteira.
-async function runTests(project, { only = null } = {}) {
+// Suíte inteira uma por vez no servidor: trilho e projeto rodando juntos dobram a carga e provas antigas estouram o tempo limite
+// (TL-ADE: 460 provas com 5 s cada). A prova só da parte (only) segue livre.
+let suiteQueue = Promise.resolve()
+function runTests(project, opts = {}) {
+  if (opts.only) return runTestsNow(project, opts)
+  const p = suiteQueue.then(() => runTestsNow(project, opts)); suiteQueue = p.catch(() => {}); return p
+}
+async function runTestsNow(project, { only = null } = {}) {
   const res = await runSuites(project.dir, project.suites || findSuites(project.dir), { run, python: ensurePython, only })
   const covered = new Set((res?.covered || []).map((f) => path.relative(project.dir, f).split(path.sep).join('/')))
   const stray = res?.covered?.length || only ? await strayNodeTests(project.dir, covered, only ? [only] : null) : []
