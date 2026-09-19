@@ -1241,7 +1241,7 @@ function planPrompt(revising = false) {
     '- recipe de cada story: 3 a 8 passos numeráveis, em ordem, cada um com arquivo e ação concreta: "criar src/x.js exportando f(a, b) → tipo", "em src/y.js, dentro de render@120, chamar f antes de montar a lista", "registrar a rota em src/app.js". Cite símbolo@linha do mapa quando o arquivo existe. Nada de "implementar a lógica" ou "ajustar conforme necessário".',
     '- A recipe NUNCA manda commitar, dar push, criar branch nem rodar a suíte inteira, o typecheck ou o lint do projeto: o motor roda tudo isso e faz o commit depois das provas e da revisão. O último passo de uma recipe é código ou prova, nunca git nem "rodar os comandos de prova". Se o AGENTS.md do projeto manda commitar em certo formato, isso é com o motor, não com a story.',
     '- examples de cada story: 2 a 5 casos literais de entrada → saída que viram provas, incluindo pelo menos um caso de borda (vazio, inválido, limite). Ex.: "total([{preco: 2, qtd: 3}]) → 6", "total([]) → 0", "POST /itens sem nome → 400 {erro: \'nome obrigatório\'}".',
-    `- test_file de cada story: caminho exato do arquivo de prova a criar ou estender, no padrão que o projeto já usa, num lugar que ${p.test_cmd ? `\`${p.test_cmd}\`` : 'o runner de provas'} REALMENTE roda (confira o include da configuração do runner): prova fora do include nunca roda e a parte não tem como passar.`,
+    `- test_file de cada story: caminho exato do arquivo de prova a criar ou estender, no padrão que o projeto já usa, num lugar que ${p.test_cmd ? `\`${p.test_cmd}\`` : 'o runner de provas'} REALMENTE roda (confira o include da configuração do runner): prova fora do include nunca roda e a parte não tem como passar. Parte sem depends_on e sem arquivo em comum com outra (scope_paths e test_file) roda em paralelo com ela: dê a cada parte o próprio test_file e não declare dependência que não existe.`,
     '- A primeira story de um projeto ou épico novo cria o esqueleto: pastas, arquivos com as interfaces exportadas (corpo mínimo), runner de provas. As seguintes só preenchem; assim cada uma cita arquivos que já existem.',
     '- Story que MUDA formato de retorno, contrato público ou comportamento já provado: as provas antigas que afirmam o formato anterior entram em scope_paths (nunca em do_not_touch) e a recipe diz quais asserções atualizar. do_not_touch com prova que a própria story invalida é plano impossível.',
     '- CONTRATO de cada story (quem implementa é um modelo mais barato; o contrato é o que evita erro): scope_paths (arquivos que ela pode criar ou alterar; caminhos reais do projeto ou nomes novos), do_not_touch (arquivos que NÃO pode alterar), out_of_scope (o que fica de fora, em 1 linha cada), interfaces (assinaturas que ela expõe ou consome, ex.: "appendEvent(event) → Promise<seq>", "GET /api/items → [{id,name}]"). acceptance no formato "Dado …, quando …, então …", cada um provável por UMA prova automatizada sem chamada real de rede, CLI ou serviço (dublês). test_hint diz o arquivo de prova e como simular dependências.',
@@ -1591,9 +1591,12 @@ async function runStories() {
     const lanes = new Map(), parent = currentEngine()
     for (const x of m.stories) if (x.lane) { delete x.lane; if (x.state === 'running') x.state = 'queued' } // trilho de antes de pausa ou reinício
     const restore = (st, fresh) => { const usd = st.usd; for (const k of Object.keys(st)) delete st[k]; Object.assign(st, structuredClone(fresh), { usd }) }
+    // vaga = trilho rodando; trilho pronto esperando a vez não ocupa vaga, e ao terminar abre espaço para a próxima parte
+    let cur = 0, stopping = false
     const startLanes = (i) => {
-      const n = Math.max(0, (state.settings.parallel_parts ?? 2) - 1 - lanes.size)
-      if (!n || !m.stories[i]) return
+      cur = i
+      const n = Math.max(0, (state.settings.parallel_parts ?? 2) - 1 - [...lanes.values()].filter((l) => !l.done).length)
+      if (stopping || !n || !m.stories[i]) return
       for (const c of laneCandidates(m.stories, i, [m.stories[i], ...lanes.keys()], n)) {
         const fresh = structuredClone(c)
         c.lane = true; c.state = 'running'
@@ -1610,7 +1613,9 @@ async function runStories() {
             })
           } catch (error) { return { ok: false, error, lane } }
         })()
-        lanes.set(c, { job, local, fresh })
+        const entry = { job, local, fresh }
+        lanes.set(c, entry)
+        job.then(() => { entry.done = true; startLanes(cur) })
       }
       broadcast()
     }
@@ -1640,6 +1645,7 @@ async function runStories() {
       } finally { if (res.lane) await removeLane(run, res.lane).catch(() => {}) }
     }
     stopLanes = async () => {
+      stopping = true
       for (const { local } of lanes.values()) { local.aborted = true; for (const k of local.kids) killTree(k) }
       for (const [st, { job, fresh }] of lanes) { const r = await job; if (r.lane) await removeLane(run, r.lane).catch(() => {}); restore(st, fresh); st.state = 'queued' }
       lanes.clear()
