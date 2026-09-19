@@ -49,6 +49,13 @@ export const MESSAGES = Object.freeze({
 
 export const SECRET_FILE = /(^|\/)(\.env(\.(?!example$|sample$|template$|dist$)[^/]*)?|\.secrets?|id_(rsa|ed25519|ecdsa)|[^/]*\.(pem|p12|pfx|key))$/i
 
+export function canApprove({ busy, dirty, head, proposalHead }) {
+  if (busy) return { ok: false, reason: MESSAGES.busy }
+  if (dirty) return { ok: false, reason: MESSAGES.dirty }
+  if (head !== proposalHead) return { ok: false, reason: MESSAGES.stale }
+  return { ok: true, reason: null }
+}
+
 const ID_PATTERN = /^[a-z0-9-]{1,40}$/i
 const locks = new Map()
 

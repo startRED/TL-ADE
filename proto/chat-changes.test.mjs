@@ -23,6 +23,13 @@ const applyProposal = (...args) => {
   return chatChanges.applyProposal(...args)
 }
 
+const canApprove = (...args) => {
+  if (typeof chatChanges.canApprove !== 'function') {
+    throw new Error('não implementado')
+  }
+  return chatChanges.canApprove(...args)
+}
+
 const PROTO_DIR = path.dirname(fileURLToPath(import.meta.url))
 const TL_ADE_ROOT = path.resolve(PROTO_DIR, '..')
 
@@ -458,6 +465,40 @@ describe('applyProposal', () => {
     const files = showRes.stdout.split('\n').map((l) => l.trim()).filter(Boolean)
     assert.ok(files.includes('novo.txt'))
     assert.ok(!files.includes('.env'))
+  })
+})
+
+describe('canApprove', () => {
+  it('CA1: busy verdadeiro recusa com motivo de missão rodando mesmo com dirty e heads divergentes', () => {
+    assert.deepEqual(
+      canApprove({ busy: true, dirty: true, head: 'b', proposalHead: 'a' }),
+      { ok: false, reason: 'Tem uma missão rodando nesta pasta. Espere ela terminar para aprovar.' }
+    )
+  })
+
+  it('CA2: busy falso e dirty verdadeiro recusa com motivo de alterações não commitadas', () => {
+    assert.deepEqual(
+      canApprove({ busy: false, dirty: true, head: 'a', proposalHead: 'a' }),
+      { ok: false, reason: 'A pasta tem alterações suas ainda não commitadas. Commite ou descarte antes de aprovar.' }
+    )
+  })
+
+  it('CA3: head divergente ou nulo recusa com motivo de projeto modificado após proposta', () => {
+    assert.deepEqual(
+      canApprove({ busy: false, dirty: false, head: 'bbb', proposalHead: 'aaa' }),
+      { ok: false, reason: 'O projeto mudou depois desta proposta. Peça a mudança de novo.' }
+    )
+    assert.deepEqual(
+      canApprove({ busy: false, dirty: false, head: null, proposalHead: 'aaa' }),
+      { ok: false, reason: 'O projeto mudou depois desta proposta. Peça a mudança de novo.' }
+    )
+  })
+
+  it('CA4: sem impedimentos e com mesmo head aprova com sucesso e motivo nulo', () => {
+    assert.deepEqual(
+      canApprove({ busy: false, dirty: false, head: 'aaa', proposalHead: 'aaa' }),
+      { ok: true, reason: null }
+    )
   })
 })
 
