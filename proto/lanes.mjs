@@ -7,7 +7,8 @@ import { mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-export const LANES_DIR = path.join(os.tmpdir(), 'ade-lanes')
+// uma pasta por instância (abrir.bat 2 roda outra ADE na 4318): a limpeza no boot de uma não apaga os trilhos da outra
+export const LANES_DIR = path.join(os.tmpdir(), 'ade-lanes', process.env.ADE_PORT || '4317')
 // dependências instaladas fora do git que o trilho enxerga por junction; apagar o trilho remove só o link (conferido no Windows)
 const DEP_DIRS = ['node_modules', '.venv', 'vendor', '.ade-attachments']
 
