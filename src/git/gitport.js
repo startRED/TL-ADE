@@ -243,27 +243,80 @@ export function createGitPort(options) {
    * @returns {Promise<string[]>}
    */
   async function dirtyPaths() {
-    const { stdout } = await run(['status', '--porcelain', '-z', '--untracked-files=all'], {
-      maxBuffer: 1 << 30,
-    })
-    const fields = stdout.toString('utf8').split('\0')
-    const set = new Set()
-    for (let i = 0; i < fields.length; i++) {
-      const field = fields[i]
-      if (!field) {
-        continue
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ade-idx-'))
+    const idx = path.join(tmp, 'index')
+    const realIndex = await gitPath('index')
+    try {
+      if (fs.existsSync(realIndex)) {
+        fs.copyFileSync(realIndex, idx)
+        fs.utimesSync(idx, 1, 1)
       }
-      const status = field.slice(0, 2)
-      const target = field.slice(3)
-      set.add(target)
-      if (status[0] === 'R' || status[0] === 'C' || status[1] === 'R' || status[1] === 'C') {
-        i += 1
-        if (i < fields.length && fields[i]) {
-          set.add(fields[i])
+      await run(['add', '-A'], { maxBuffer: 1 << 26, env: { GIT_INDEX_FILE: idx } })
+
+      const set = new Set()
+
+      // Consulta status com saída NUL
+      const { stdout: statusOut } = await run(
+        ['status', '--porcelain', '-z', '--untracked-files=all'],
+        {
+          maxBuffer: 1 << 30,
+          env: { GIT_INDEX_FILE: idx },
+        },
+      )
+      const fields = statusOut.toString('utf8').split('\0')
+      for (let i = 0; i < fields.length; i++) {
+        const field = fields[i]
+        if (!field) {
+          continue
+        }
+        const status = field.slice(0, 2)
+        const target = field.slice(3)
+        set.add(target)
+        if (status[0] === 'R' || status[0] === 'C' || status[1] === 'R' || status[1] === 'C') {
+          i += 1
+          if (i < fields.length && fields[i]) {
+            set.add(fields[i])
+          }
         }
       }
+
+      // Consulta diff com saída NUL contra HEAD se houver commit
+      const head = await headInfo()
+      if (head.commit) {
+        const { stdout: diffOut } = await run(
+          ['diff-index', '--cached', '-z', '-M', 'HEAD'],
+          {
+            maxBuffer: 1 << 30,
+            env: { GIT_INDEX_FILE: idx },
+            okCodes: [0, 1],
+          },
+        )
+        const diffTokens = diffOut.toString('utf8').split('\0')
+        for (let i = 0; i < diffTokens.length; i++) {
+          const token = diffTokens[i]
+          if (!token) continue
+          if (token.startsWith(':')) {
+            const parts = token.split(' ')
+            const rawStatus = parts[parts.length - 1] ?? ''
+            const isRename = rawStatus.startsWith('R') || rawStatus.startsWith('C')
+            i += 1
+            if (i < diffTokens.length && diffTokens[i]) {
+              set.add(diffTokens[i])
+            }
+            if (isRename) {
+              i += 1
+              if (i < diffTokens.length && diffTokens[i]) {
+                set.add(diffTokens[i])
+              }
+            }
+          }
+        }
+      }
+
+      return Array.from(set).sort()
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true })
     }
-    return Array.from(set).sort()
   }
 
   /**

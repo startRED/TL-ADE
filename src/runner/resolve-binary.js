@@ -38,9 +38,14 @@ export function buildArgv(resolved, args) {
  */
 
 /**
+ * @typedef {'direct' | 'shim' | 'cmd'} BinaryVia
+ */
+
+/**
  * @typedef {Object} ResolvedBinary
  * @property {string} exe
  * @property {string[]} prefixArgs
+ * @property {BinaryVia} via
  * @property {BinaryMode} mode
  * @property {string | null} shim
  */
@@ -109,10 +114,12 @@ export function resolveBinary(command, deps = {}) {
   }
 
   if (platform !== 'win32' || /\.exe$/i.test(found)) {
+    const mode = 'native'
     return {
       exe: found,
       prefixArgs: [],
-      mode: 'native',
+      via: mode === 'native' ? 'direct' : mode === 'npm_shim' ? 'shim' : 'cmd',
+      mode,
       shim: null,
     }
   }
@@ -140,20 +147,24 @@ export function resolveBinary(command, deps = {}) {
         }
       }
 
+      const mode = 'npm_shim'
       return {
         exe: exeResolved,
         prefixArgs,
-        mode: 'npm_shim',
+        via: mode === 'native' ? 'direct' : mode === 'npm_shim' ? 'shim' : 'cmd',
+        mode,
         shim: found,
       }
     }
   }
 
   const comspec = deps.comspec ?? process.env.ComSpec ?? process.env.COMSPEC ?? 'cmd.exe'
+  const mode = 'cmd_fallback'
   return {
     exe: comspec,
-    prefixArgs: ['/c', found],
-    mode: 'cmd_fallback',
+    prefixArgs: ['/d', '/s', '/c', found],
+    via: mode === 'native' ? 'direct' : mode === 'npm_shim' ? 'shim' : 'cmd',
+    mode,
     shim: found,
   }
 }

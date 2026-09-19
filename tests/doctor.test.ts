@@ -53,6 +53,7 @@ describe('doctor - BinaryResolver', () => {
     expect(resolved).toEqual({
       exe: nodeExe,
       prefixArgs: [scriptJs],
+      via: 'shim',
       mode: 'npm_shim',
       shim: claudeCmd,
     })
@@ -67,6 +68,7 @@ describe('doctor - BinaryResolver', () => {
     expect(resolvedNative).toEqual({
       exe: toolExe,
       prefixArgs: [],
+      via: 'direct',
       mode: 'native',
       shim: null,
     })
@@ -89,13 +91,14 @@ describe('doctor - BinaryResolver', () => {
 
     expect(resolved).toEqual({
       exe: 'cmd.exe',
-      prefixArgs: ['/c', weirdCmd],
+      prefixArgs: ['/d', '/s', '/c', weirdCmd],
+      via: 'cmd',
       mode: 'cmd_fallback',
       shim: weirdCmd,
     })
 
     const argv = buildArgv(resolved, ['status'])
-    expect(argv).toEqual(['/c', weirdCmd, 'status'])
+    expect(argv).toEqual(['/d', '/s', '/c', weirdCmd, 'status'])
   })
 
   // AC3: Dado um comando que não existe em nenhum diretório do PATH informado,

@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { UnexpectedTreeStateError } from '../journal/errors.js'
-import { pathWithin, scanFile, scanText } from './secrets.js'
+import { pathWithin, scanBytes, scanFile, scanText } from './secrets.js'
 
 /**
  * Precedência fixa das violações do contain.
@@ -199,6 +199,7 @@ export async function contain(input) {
   if (changedPaths.length === 0) {
     return {
       ok: false,
+      status: 'rework',
       reason: 'no_changes',
       failureClass: 'semantic',
       action: 'rework',
@@ -210,7 +211,16 @@ export async function contain(input) {
           source: null,
         },
       ],
+      findings: [
+        {
+          kind: 'no_changes',
+          path: null,
+          pattern: null,
+          source: null,
+        },
+      ],
       changedPaths: [],
+      dirty_paths: [],
       quarantineRef: null,
       restoredTree: null,
     }
@@ -231,6 +241,7 @@ export async function contain(input) {
   /** @type {ContainViolation[]} */
   const violations = []
 
+  const wholeDiffFindings = scanBytes(res.stdout)
   const diffSections = splitDiffByFile(res.stdout.toString('latin1'))
   for (const section of diffSections) {
     const diffFindings = scanText(section.text)
@@ -241,6 +252,22 @@ export async function contain(input) {
         pattern: f.pattern,
         source: 'diff',
       })
+    }
+  }
+
+  if (wholeDiffFindings.length > 0) {
+    for (const f of wholeDiffFindings) {
+      const alreadyReported = violations.some(
+        (v) => v.kind === 'secret' && v.pattern === f.pattern,
+      )
+      if (!alreadyReported) {
+        violations.push({
+          kind: 'secret',
+          path: null,
+          pattern: f.pattern,
+          source: 'diff',
+        })
+      }
     }
   }
 
@@ -315,11 +342,14 @@ export async function contain(input) {
   if (violations.length === 0) {
     return {
       ok: true,
+      status: 'continue',
       reason: null,
       failureClass: null,
       action: 'continue',
       violations: [],
+      findings: [],
       changedPaths,
+      dirty_paths: changedPaths,
       quarantineRef: null,
       restoredTree: null,
     }
@@ -331,11 +361,14 @@ export async function contain(input) {
     const quarantineRef = await quarantine(git, unitId)
     return {
       ok: false,
+      status: 'stop',
       reason,
       failureClass: 'security',
       action: 'stop_batch',
       violations,
+      findings: violations,
       changedPaths,
+      dirty_paths: changedPaths,
       quarantineRef,
       restoredTree: null,
     }
@@ -350,22 +383,28 @@ export async function contain(input) {
       const restoreRes = await git.restore(input.treeBefore, { label: unitId })
       return {
         ok: false,
+        status: 'restore',
         reason: 'scope',
         failureClass: 'scope',
         action: 'restore',
         violations,
+        findings: violations,
         changedPaths,
+        dirty_paths: changedPaths,
         quarantineRef: null,
         restoredTree: restoreRes.tree,
       }
     }
     return {
       ok: false,
+      status: 'park',
       reason: 'scope',
       failureClass: 'scope',
       action: 'park',
       violations,
+      findings: violations,
       changedPaths,
+      dirty_paths: changedPaths,
       quarantineRef: null,
       restoredTree: null,
     }
@@ -373,11 +412,14 @@ export async function contain(input) {
 
   return {
     ok: false,
+    status: 'rework',
     reason: 'no_changes',
     failureClass: 'semantic',
     action: 'rework',
     violations,
+    findings: violations,
     changedPaths,
+    dirty_paths: changedPaths,
     quarantineRef: null,
     restoredTree: null,
   }

@@ -251,11 +251,14 @@ describe('contain parity', () => {
     })
     expect(cleanRes).toEqual({
       ok: false,
+      status: 'rework',
       reason: 'no_changes',
       failureClass: 'semantic',
       action: 'rework',
       violations: [{ kind: 'no_changes', path: null, pattern: null, source: null }],
+      findings: [{ kind: 'no_changes', path: null, pattern: null, source: null }],
       changedPaths: [],
+      dirty_paths: [],
       quarantineRef: null,
       restoredTree: null,
     })
@@ -827,11 +830,14 @@ describe('contain parity', () => {
     // Exemplo 1: aprovação limpa com changedPaths: ['src/a.js']
     expect(result).toEqual({
       ok: true,
+      status: 'continue',
       reason: null,
       failureClass: null,
       action: 'continue',
       violations: [],
+      findings: [],
       changedPaths: ['src/a.js'],
+      dirty_paths: ['src/a.js'],
       quarantineRef: null,
       restoredTree: null,
     })

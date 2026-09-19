@@ -237,10 +237,12 @@ export async function runWorker(options) {
         state,
         reason,
         exitCode,
+        exit_code: exitCode,
         pid,
         charge: chargeOf(state),
         failureClass,
         receiptFile: file,
+        receipt_path: file,
         stdout,
         stderr,
         durationMs,
@@ -250,7 +252,9 @@ export async function runWorker(options) {
     /** @type {import('node:child_process').ChildProcess} */
     let child
     try {
-      child = spawnImpl(resolved.exe, launchArgs, {
+      let spawnArgs = launchArgs
+      /** @type {import('node:child_process').SpawnOptions} */
+      const spawnOptions = {
         cwd,
         env: childEnv,
         shell: false,
@@ -258,7 +262,38 @@ export async function runWorker(options) {
         windowsHide: true,
         maxBuffer: 1 << 26,
         stdio: ['ignore', 'pipe', 'pipe'],
-      })
+      }
+
+      const isCmd =
+        resolved.mode === 'cmd_fallback' ||
+        resolved.via === 'cmd' ||
+        /[\\/]cmd(?:\.exe)?$/i.test(resolved.exe) ||
+        resolved.exe.toLowerCase() === 'cmd.exe'
+
+      if (
+        isCmd &&
+        launchArgs.length >= 4 &&
+        launchArgs[0] === '/d' &&
+        launchArgs[1] === '/s' &&
+        launchArgs[2] === '/c'
+      ) {
+        const shim = launchArgs[3]
+        const extraArgs = launchArgs.slice(4)
+        /** @param {string} value */
+        const escapeMeta = (value) => value.replace(/([()%!^"<>&| ])/g, '^$1')
+        /** @param {string} arg */
+        const escapeArg = (arg) => {
+          const quoted = '"' + arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1') + '"'
+          // O cmd interpreta a chamada e depois a expansão de %* no shim.
+          return escapeMeta(escapeMeta(quoted))
+        }
+        const inner = [escapeMeta(shim), ...extraArgs.map(escapeArg)].join(' ')
+        spawnArgs = ['/d', '/s', '/v:off', '/c', `"${inner}"`]
+        assertArgvLimit(resolved.exe, spawnArgs)
+        spawnOptions.windowsVerbatimArguments = true
+      }
+
+      child = spawnImpl(resolved.exe, spawnArgs, spawnOptions)
     } catch {
       finalize('start_failed', 'spawn_error', null, 'environment', null)
       return
