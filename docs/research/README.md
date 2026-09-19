@@ -20,7 +20,8 @@ abre o documento específico só quando precisar da evidência.
 | `landscape-context-observability.md` | Context engineering, memória, Tool Output Firewall, telemetria, harness doctor |
 | `landscape-evals-visual.md` + `addendum-frontend-engine-anchor.md` | Evals por classe; loop visual; Impeccable; rubrica; `$imagegen` testado |
 | `landscape-routing-skills-terminal.md` | Roteamento por papel com benchmark; seleção de skills; segurança de skills; node-pty |
-| `models-by-role-2026-09.md` | Benchmarks de 2026-09 (SWE-bench Pro, Terminal-Bench, GPQA, HLE, preço, velocidade) e medição das missões da demo; modelo recomendado por papel |
+| `models-by-role-2026-09.md` | Benchmarks independentes de 2026-09 (Artificial Analysis, Vals AI, ARC Prize, Arena, Scale, METR), sem números dos fabricantes, e medição das missões da demo; modelo recomendado por papel |
+| `models-independent-2026-09.json` | Linhas brutas da pesquisa independente de 2026-09 (354 linhas: quem rodou, URL, data e trecho) |
 | `landscape-dev-workflows.md` | Como construir a própria ADE: BMAD, Spec Kit, Superpowers, Ralph, Orca (`stablyai/orca`) |
 | `addendum-checker-contract-review-result.md` | Comando do Checker por família (medido); forma do review-result; ultrareview |
 | `addendum-autonomia-permissoes-por-repositorio.md` | Flags de modo desatendido por família; auto-mode; execpolicy; sandbox |
