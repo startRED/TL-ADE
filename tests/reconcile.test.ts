@@ -455,7 +455,7 @@ describe('reconciler handles model_call', () => {
     const deps = { isAlive: vi.fn(() => false), getStartTime: vi.fn(async () => null) }
     const verdict = await reconcileIntent({ intent, journal, gitPort, missionDir, deps })
 
-    expect(verdict.verdict).toBe('ambiguous')
+    expect(verdict.verdict).toBe('ok')
     expect(verdict.reason).toBe('call_consumed')
     expect(verdict.evidence.charge).toBe('charged')
     expect(typeof verdict.evidence.checkpoint_ref).toBe('string')
@@ -463,7 +463,7 @@ describe('reconciler handles model_call', () => {
 
     const events = readEvents(missionDir)
     const resultEvent = events.find((ev) => ev.kind === 'step_result' && ev.step_id === 'T042-model-call-terminal')
-    expect(resultEvent?.status).toBe('ambiguous')
+    expect(resultEvent?.status).toBe('ok')
     expect(resultEvent?.data?.reason).toBe('call_consumed')
     expect(openIntents(events)).toEqual([])
   })

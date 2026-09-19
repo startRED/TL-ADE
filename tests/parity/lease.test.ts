@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { AdeError, CoordinatorConflictError } from '../../src/journal/errors.js'
 import { acquireLease } from '../../src/lease/lease.js'
+import { makeRepo, removeRepo } from '../helpers/git-repo.js'
 
 interface LeaseOwner {
   pid: number
@@ -35,8 +36,17 @@ type AcquireLeaseFn = (options: {
 const acquire = acquireLease as unknown as AcquireLeaseFn
 
 let tmpDirs: string[] = []
+let repoDirs: string[] = []
 
 afterEach(() => {
+  for (const dir of repoDirs) {
+    try {
+      removeRepo(dir)
+    } catch {
+      // ignora falhas de limpeza no teardown
+    }
+  }
+  repoDirs = []
   for (const dir of tmpDirs) {
     try {
       rmSync(dir, { recursive: true, force: true })
@@ -59,6 +69,13 @@ describe('lease parity', () => {
     // AC1: Dado um missionDir vazio, quando acquireLease resolve:
     const missionDir = createMissionDir()
     const fixedDate = new Date('2026-09-17T12:00:00.123Z')
+
+    const repo = makeRepo()
+    repoDirs.push(repo.dir)
+    writeFileSync(path.join(repo.dir, 'base.txt'), 'base\n')
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'commit inicial'])
+    const treeBefore = repo.git(['rev-parse', 'HEAD^{tree}']).trim()
 
     // No aceite 1, NÃO passar engineVersion: o default '0.1.0' deve aparecer no arquivo
     const lease = await acquire({
@@ -113,6 +130,9 @@ describe('lease parity', () => {
       expect(conflictErr?.details?.owner).toBeDefined()
       const conflictOwner = conflictErr?.details?.owner as Record<string, unknown>
       expect(conflictOwner?.pid).toBe(process.pid)
+
+      const treeAfter = repo.git(['rev-parse', 'HEAD^{tree}']).trim()
+      expect(treeAfter).toBe(treeBefore)
 
       // O owner.json do primeiro fica intacto
       expect(JSON.parse(readFileSync(ownerPath, 'utf8'))).toEqual(expectedOwner)

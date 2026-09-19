@@ -1,4 +1,6 @@
 import path from 'node:path'
+import { findStoryStarted } from '../engine/resume.js'
+import { safeId } from '../gates/output.js'
 import { createGitPort } from '../git/gitport.js'
 import { StateIntegrityError } from '../journal/errors.js'
 import { openIntents } from '../journal/fold.js'
@@ -63,7 +65,7 @@ async function close(journal, intent, verdict, reason, evidence, result = null) 
  * @returns {Promise<{ step_id: string, effect_class: string, verdict: 'ok' | 'released' | 'ambiguous', reason: string, evidence: Record<string, unknown> & ModelCallEvidence, result: unknown }>}
  */
 async function reconcileModelCall(intent, journal, gitPort, missionDir, deps) {
-  const file = intent.receipt_path || receiptPath(missionDir, intent.step_id)
+  let file = intent.receipt_path || receiptPath(missionDir, intent.step_id)
 
   if (gitPort && intent.intent_context?.head_before) {
     const now = await gitPort.headInfo()
@@ -89,7 +91,11 @@ async function reconcileModelCall(intent, journal, gitPort, missionDir, deps) {
 
   // `readReceipt` já devolve null para arquivo inexistente (ENOENT); qualquer outro erro
   // (recibo corrompido) tem de propagar em vez de ser tratado como ausência de despacho.
-  const receipt = readReceipt(file)
+  let receipt = readReceipt(file)
+  if (!receipt && !intent.receipt_path && safeId(intent.step_id) !== intent.step_id) {
+    file = receiptPath(missionDir, safeId(intent.step_id))
+    receipt = readReceipt(file)
+  }
 
   if (!receipt || receipt.state === 'start_failed' || (receipt.state === 'starting' && !receipt.process_fingerprint)) {
     return close(journal, intent, 'released', 'receipt_no_dispatch', {
@@ -122,6 +128,13 @@ async function reconcileModelCall(intent, journal, gitPort, missionDir, deps) {
     const cp = await gitPort.checkpoint('reconcile/' + intent.step_id.replace(/[^A-Za-z0-9._-]/g, '-'))
     evidence.checkpoint_ref = cp.ref
     evidence.checkpoint_tree = cp.tree
+  }
+
+  if (evidence.checkpoint_ref && receipt.state === 'exited' && receipt.exit_code === 0) {
+    return close(journal, intent, 'ok', 'call_consumed', evidence, {
+      checkpoint: true,
+      session_ref: intent.session_ref ?? null,
+    })
   }
 
   return close(journal, intent, 'ambiguous', 'call_consumed', evidence)
@@ -237,7 +250,8 @@ export async function reconcileIntent({
   }
 
   if (intent.effect_class === 'model_call') {
-    return reconcileModelCall(intent, journal, gitPort, missionDir, { isAlive, getStartTime })
+    const port = intent.worktree ? createGitPort({ worktreeDir: intent.worktree }) : gitPort
+    return reconcileModelCall(intent, journal, port, missionDir, { isAlive, getStartTime })
   }
 
   if (intent.effect_class === 'local_commit') {
@@ -270,6 +284,7 @@ export async function reconcileAll({ journal, missionDir, gitPort = null, deps =
     if (!intentEvent) {
       throw new TypeError('step_intent não encontrado para a intenção aberta')
     }
+    const data = /** @type {Record<string, unknown>} */ (intentEvent.data ?? {})
     const intent = {
       seq: /** @type {number} */ (intentEvent.seq),
       step_id: /** @type {string} */ (intentEvent.step_id),
@@ -277,7 +292,11 @@ export async function reconcileAll({ journal, missionDir, gitPort = null, deps =
       input_digest: /** @type {string} */ (intentEvent.input_digest),
       intent_context: /** @type {Record<string, string | null> | undefined} */ (intentEvent.intent_context),
       receipt_path: /** @type {string | undefined} */ (intentEvent.receipt_path),
-      worktree: /** @type {string | undefined} */ (intentEvent.worktree),
+      worktree: /** @type {string | undefined} */ (intentEvent.worktree) ||
+        (intentEvent.effect_class === 'model_call'
+          ? findStoryStarted(events, String(data.unit))?.worktree_dir
+          : undefined),
+      session_ref: /** @type {string | null | undefined} */ (intentEvent.session_ref),
     }
     verdicts.push(await reconcileIntent({ intent, journal, gitPort, missionDir, deps }))
   }

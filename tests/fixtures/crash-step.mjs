@@ -1,7 +1,7 @@
-import { writeFileSync } from 'node:fs'
+import fs, { writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { createGitPort } from '../../src/git/gitport.js'
-import { openJournal } from '../../src/journal/journal.js'
+import { Journal, openJournal } from '../../src/journal/journal.js'
 import { startingReceipt, withRunning, withTerminal, writeReceipt } from '../../src/runner/receipt.js'
 import { createStepRunner } from '../../src/step/step.js'
 
@@ -16,6 +16,9 @@ const RUNTIME_STAMP = '1:aaaaaaaa:bbbbbbbb'
 const MAKER_RECEIPT_FILE = path.join(missionDir, 'jobs', 'T042-r1-maker.json')
 
 async function runModelCall(step) {
+  const scenarioDir = process.env.ADE_FAKE_SCENARIO || path.join(missionDir, 'scenario')
+  const counterFile = path.join(scenarioDir, 'maker.count')
+
   await step(
     {
       unit: 'T042',
@@ -25,6 +28,11 @@ async function runModelCall(step) {
       receiptPath: MAKER_RECEIPT_FILE,
     },
     async () => {
+      const count = fs.existsSync(counterFile) ? Number(fs.readFileSync(counterFile, 'utf8')) : 0
+      if (!Number.isSafeInteger(count) || count < 0) throw new Error('contador Maker inválido')
+      fs.mkdirSync(scenarioDir, { recursive: true })
+      fs.writeFileSync(counterFile, String(count + 1), 'utf8')
+
       writeFileSync(path.join(worktreeDir, 'maker.txt'), 'obra do maker\n')
 
       const req = {
@@ -62,7 +70,31 @@ async function runCommit(step, gitPort) {
   )
 }
 
+async function runStory(step, gitPort, journal) {
+  await runModelCall(step)
+  await runCommit(step, gitPort)
+  await journal.append({
+    kind: 'story_done',
+    unit: 'T042',
+    data: {
+      status: 'committed',
+      unit: 'T042',
+    },
+  })
+}
+
 async function main() {
+  if (cenario === 'command') {
+    const append = Journal.prototype.append
+    Journal.prototype.append = function (event) {
+      if (event.kind === 'step_result' && event.effect_class === 'model_call' && event.status === 'ok') {
+        process.abort()
+      }
+      return append.call(this, event)
+    }
+    const { main: runCommand } = await import('../../src/cli/index.js')
+    process.exit(await runCommand(['run', '--plan', missionDir, '--repo', worktreeDir]))
+  }
   const journal = openJournal({ missionDir, runtimeStamp: RUNTIME_STAMP })
   const gitPort = createGitPort({ worktreeDir })
   const { step } = createStepRunner({ journal, missionDir, gitPort })
@@ -71,6 +103,8 @@ async function main() {
     await runModelCall(step)
   } else if (cenario === 'commit') {
     await runCommit(step, gitPort)
+  } else if (cenario === 'story') {
+    await runStory(step, gitPort, journal)
   } else {
     throw new Error('cenário desconhecido: ' + cenario)
   }

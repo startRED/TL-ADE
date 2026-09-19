@@ -9,7 +9,7 @@ import {
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { JournalCorruptError, StaleWorkflowVersionError } from '../../src/journal/errors.js'
+import { AdeError, JournalCorruptError, StaleWorkflowVersionError } from '../../src/journal/errors.js'
 import { digest16 } from '../../src/journal/canonical.js'
 import { fold, openJournal, readJournal } from '../../src/journal/journal.js'
 import {
@@ -113,6 +113,7 @@ describe('journal parity', () => {
     writeFileSync(filePath, tamperedLines2.join('\n'), 'utf8')
 
     const err2 = catchError(() => readJournal(filePath))
+    expect(err2).toBeInstanceOf(AdeError)
     expect(err2).toBeInstanceOf(JournalCorruptError)
     const corruptErr2 = err2 as JournalCorruptError
     expect(corruptErr2.code).toBe('journal_corrupt')
