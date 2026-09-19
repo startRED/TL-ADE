@@ -26,7 +26,7 @@ const IS_WIN = process.platform === 'win32'
 const HOME = os.homedir()
 const IMPECCABLE = path.join(HOME, '.claude/plugins/cache/impeccable/impeccable/4.3.1/skills/impeccable/scripts/impeccable')
 
-// ---------- registro de modelos (verificado nas CLIs instaladas em 2026-09-16) ----------
+// ---------- registro de modelos (verificado nas CLIs instaladas em 2026-09-16; papéis por benchmark em docs/research/models-by-role-2026-09.md) ----------
 const REGISTRY = {
   claude: { label: 'Claude Code', models: [
     { id: 'sonnet', label: 'Sonnet 5', note: 'rápido e barato; padrão para escrever código' },
@@ -35,15 +35,15 @@ const REGISTRY = {
     { id: 'haiku', label: 'Haiku 4.5', note: 'muito barato; tarefas mecânicas' },
   ] },
   codex: { label: 'Codex (OpenAI)', models: [
-    { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', note: 'padrão para revisar' },
-    { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', note: 'mais leve' },
-    { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', note: '' },
-    { id: 'gpt-6-astra', label: 'GPT-6 Astra', note: 'o mais forte da OpenAI' },
+    { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', note: 'perfil equilibrado da 5.6; padrão para escrever' },
+    { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', note: 'topo da 5.6 (mais profundo e mais caro que o Terra)' },
+    { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', note: 'perfil econômico e rápido; partes leves' },
+    { id: 'gpt-6-astra', label: 'GPT-6 Astra', note: 'o mais forte da OpenAI; correção difícil e plano' },
     { id: 'gpt-5.5', label: 'GPT-5.5', note: '' },
   ] },
   agy: { label: 'Antigravity (Google)', models: [
-    { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro', note: 'padrão para pesquisa; esforço alto ou baixo' },
-    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', note: 'rápido e barato; padrão do batedor' },
+    { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro', note: 'abaixo do 3.8 Flash em código, mais lento; evite' },
+    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', note: 'rápido (~300 tokens/s); revisar, batedor e fallback de escrever' },
     { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash', note: '' },
     { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 via Google', note: 'conta como família Claude' },
     { id: 'claude-opus-4-6-thinking', label: 'Claude Opus 4.6 via Google', note: 'conta como família Claude' },
