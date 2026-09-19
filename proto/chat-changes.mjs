@@ -503,3 +503,20 @@ export async function pendingChatIds(chatsDir) {
   }
   return ids
 }
+
+export async function handleChatDecision({
+  action, projectDir, turns, id, busy,
+  approve = approveChat, reject = rejectChat,
+  refresh, save, notify
+}) {
+  const isApprove = action === 'approve'
+  const r = isApprove
+    ? await approve({ projectDir, turns, id, busy })
+    : await reject({ projectDir, turns, id })
+  if (r.status === 200) {
+    if (isApprove) await refresh()
+    await save()
+    notify()
+  }
+  return r
+}

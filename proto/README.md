@@ -58,6 +58,15 @@ Quem escreve e quem revisa têm de ser de empresas diferentes. Modelos por papel
 - O Gemini CLI (`gemini`) fica de fora enquanto não estiver logado (`oauth_creds.json`); o Gemini entra pelo Antigravity (`agy`).
 - A conversa é só leitura: para mudar arquivos, mande um pedido.
 
+## Chat que altera arquivos (roteiro manual)
+
+1. Abra uma pasta git com pelo menos um commit.
+2. No chat, peça: `crie o arquivo ola.txt com o texto oi`.
+3. Confira que `ola.txt` não existe na pasta e que `proto/.ade/chats/<pasta>.json` tem `proposal.state` igual a `pending` e `files` igual a `[{ path: 'ola.txt', kind: 'created' }]`.
+4. Aprove a proposta com `curl -X POST http://127.0.0.1:<porta>/api/chat/approve -H 'content-type: application/json' -d '{"dir":"<pasta>","id":"<proposal.id>"}'`. Confira `ola.txt` com `oi` e `git log -1` com assunto começando por `chat: `, sem push.
+5. Peça `crie o arquivo tchau.txt com o texto até logo`, pegue o novo `proposal.id`, chame `/api/chat/reject` e confira que `tchau.txt` não existe, que `git status` sai limpo e que `proto/.ade/wt/chat-<id>` sumiu.
+6. Com um arquivo alterado e não commitado na pasta, aprove uma nova proposta e confira `409` com `A pasta tem alterações suas ainda não commitadas. Commite ou descarte antes de aprovar.`
+
 ## Arquivos
 
 - `server.mjs`: motor, adaptadores das três CLIs, catálogo de skills, API e eventos ao vivo.

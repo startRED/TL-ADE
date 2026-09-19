@@ -120,6 +120,79 @@ describe('discardPending e pendingChatIds', () => {
   })
 })
 
+describe('handleChatDecision e roteiro', () => {
+  it('CA1 aprova, atualiza a pasta, salva e notifica nesta ordem', async () => {
+    const { handleChatDecision } = await import('./chat-changes.mjs')
+    const calls = []
+    const turns = []
+    const result = { status: 200, body: { ok: true, commit: 'abc' } }
+    let approveArgs
+    const approve = async (args) => {
+      calls.push('approve')
+      approveArgs = args
+      return result
+    }
+
+    const actual = await handleChatDecision({
+      action: 'approve', projectDir: 'P', turns, id: 'x1', busy: false,
+      approve,
+      refresh: async () => { calls.push('refresh') },
+      save: async () => { calls.push('save') },
+      notify: () => { calls.push('notify') }
+    })
+
+    assert.equal(actual, result)
+    assert.deepEqual(approveArgs, { projectDir: 'P', turns, id: 'x1', busy: false })
+    assert.deepEqual(calls, ['approve', 'refresh', 'save', 'notify'])
+  })
+
+  it('CA2 não produz efeitos após aprovação bloqueada', async () => {
+    const { handleChatDecision, MESSAGES } = await import('./chat-changes.mjs')
+    const calls = []
+    const result = { status: 409, body: { error: MESSAGES.busy } }
+
+    const actual = await handleChatDecision({
+      action: 'approve', projectDir: 'P', turns: [], id: 'x1', busy: true,
+      approve: async () => { calls.push('approve'); return result },
+      refresh: async () => { calls.push('refresh') },
+      save: async () => { calls.push('save') },
+      notify: () => { calls.push('notify') }
+    })
+
+    assert.equal(actual, result)
+    assert.deepEqual(calls, ['approve'])
+  })
+
+  it('CA3 recusa, salva e notifica sem atualizar a pasta', async () => {
+    const { handleChatDecision } = await import('./chat-changes.mjs')
+    const calls = []
+    const result = { status: 200, body: { ok: true } }
+
+    const actual = await handleChatDecision({
+      action: 'reject', projectDir: 'P', turns: [], id: 'x1', busy: false,
+      reject: async () => { calls.push('reject'); return result },
+      refresh: async () => { calls.push('refresh') },
+      save: async () => { calls.push('save') },
+      notify: () => { calls.push('notify') }
+    })
+
+    assert.equal(actual, result)
+    assert.deepEqual(calls, ['reject', 'save', 'notify'])
+  })
+
+  it('CA4 documenta o roteiro manual de aprovar e recusar propostas', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const readme = await readFile(new URL('./README.md', import.meta.url), 'utf8')
+    const section = readme.slice(readme.indexOf('## Chat que altera arquivos (roteiro manual)'))
+
+    assert.match(section, /crie o arquivo ola\.txt com o texto oi/)
+    assert.match(section, /crie o arquivo tchau\.txt com o texto até logo/)
+    assert.match(section, /\/api\/chat\/approve/)
+    assert.match(section, /\/api\/chat\/reject/)
+    assert.match(section, /git status/)
+  })
+})
+
 describe('chatCommand', () => {
   it('CA1: Claude permite somente ferramentas de edição e repassa esforço válido', () => {
     const command = chatChanges.chatCommand('claude', {
