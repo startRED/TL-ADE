@@ -632,10 +632,14 @@ async function runTestsNow(project, { only = null, related = null } = {}) {
 // ponytail: só node:test ao lado do vitest; prova de outro runner fora do include continua invisível, o planejador é que evita.
 async function strayNodeTests(dir, covered, files = null) {
   const out = []
-  for (const f of new Set((files || (state.mission?.stories || []).map((s) => s.test_file)).map((x) => String(x || '').replace(/\\/g, '/').replace(/^\.\//, '')))) {
+  // suíte inteira: arquivos das partes deste épico E dos anteriores (19/09: no fim do épico 3 as 40 provas do chat, do épico 2,
+  // ficaram de fora porque só as partes do épico corrente eram lembradas)
+  const m = state.mission, all = files || [...(m?.stories || []).map((s) => s.test_file), ...(m?.stray_files || [])]
+  for (const f of new Set(all.map((x) => String(x || '').replace(/\\/g, '/').replace(/^\.\//, '')))) {
     if (!/\.(m?js|cjs)$/.test(f) || covered.has(f)) continue
     let body; try { body = await readFile(path.join(dir, f), 'utf8') } catch { continue }
     if (!/['"]node:test['"]/.test(body)) continue
+    if (m && !(m.stray_files ||= []).includes(f)) m.stray_files.push(f)
     const r = await run('node', ['--test', '--test-reporter=tap', f], { cwd: dir, timeoutMs: 5 * 60 * 1000 })
     // falha no arquivo inteiro (import quebrado) vem como error: 'test failed'; o motivo real está nas linhas "# ...Error..." antes
     const why = (x) => { const e = r.out.slice(x.index).match(/^\s+error: (.+)$/m)?.[1] || ''; return (/^'test failed'$/.test(e) && r.out.match(/^# (.*Error.*)$/m)?.[1]) || e }
