@@ -432,7 +432,7 @@ async function resumeMission() {
   const mine = fresh.dirty && allow.length && (await run('git', ['status', '--porcelain', '-uall'], { cwd: fresh.dir })).out.split('\n').map((l) => l.slice(3).trim()).filter(Boolean).every((f) => allow.some((r) => r.test(f)))
   if (fresh.dirty && !nextFix && mine) log('engine', `árvore com alterações mantida: são só arquivos do contrato de "${next.title}", que recomeça sobre elas`, 'warn')
   else if (fresh.dirty && nextFix) log('engine', `árvore com alterações mantida: a próxima parte é a correção de "${nextFix}" e trabalha sobre elas`, 'warn')
-  else if (fresh.dirty) { await gitDiscard(fresh.dir) }
+  else if (fresh.dirty) { log('engine', `árvore com alterações fora do contrato${next ? ` de "${next.title}"` : ''}; descarto para recomeçar limpo`, 'warn'); await gitDiscard(fresh.dir) }
   state.project = await discover(fresh.dir); m.finished_at = null; const auto = m.reason === 'quota'; m.reason = null; m.quota_until = null; log(auto ? 'engine' : 'operador', 'continuou a missão')
   if (m.program) {
     let reopened = 0
@@ -682,7 +682,20 @@ async function gitDiff(dir, base = null, ownPaths = []) {
   if (a.code !== 0 || d.code !== 0 || o.code !== 0) throw new Error(`git diff falhou: ${(a.err || d.err || o.err).trim().split('\n')[0]}`)
   return d.out + o.out
 }
-async function gitDiscard(dir) { await run('git', ['reset', '-q', '--', '.'], { cwd: dir }); await run('git', ['checkout', '--', '.'], { cwd: dir }); await run('git', ['clean', '-fd', '.'], { cwd: dir }) }
+// Antes de descartar, guarda a árvore num ref (índice temporário, sem stash, que é um só para todas as worktrees): descarte do motor
+// nunca perde trabalho sem volta. 19/09: uma parte aprovada sumiu entre pausar e continuar sem deixar rastro.
+async function keepTree(dir) {
+  const idx = path.join(os.tmpdir(), `ade-idx-${process.pid}-${Date.now()}`), env = { GIT_INDEX_FILE: idx }
+  try {
+    await run('git', ['read-tree', 'HEAD'], { cwd: dir, env }); await run('git', ['add', '-A', '--', '.'], { cwd: dir, env })
+    const tree = (await run('git', ['write-tree'], { cwd: dir, env })).out.trim()
+    if (!tree || tree === (await run('git', ['rev-parse', 'HEAD^{tree}'], { cwd: dir })).out.trim()) return
+    const c = (await run('git', ['-c', 'user.name=TL-ADE', '-c', 'user.email=ade@local', 'commit-tree', tree, '-p', 'HEAD', '-m', 'ade: árvore descartada'], { cwd: dir })).out.trim()
+    const ref = `refs/ade/descartada/${new Date().toISOString().replace(/[:.]/g, '-')}`
+    if (c && (await run('git', ['update-ref', ref, c], { cwd: dir })).code === 0) log('engine', `alterações descartadas guardadas em ${ref} (git checkout ${ref} -- . traz de volta)`, 'warn')
+  } catch { /* guardar é melhor esforço; o descarte segue */ } finally { await rm(idx, { force: true }).catch(() => {}) }
+}
+async function gitDiscard(dir) { await keepTree(dir); await run('git', ['reset', '-q', '--', '.'], { cwd: dir }); await run('git', ['checkout', '--', '.'], { cwd: dir }); await run('git', ['clean', '-fd', '.'], { cwd: dir }) }
 const SECRET_FILE = /(^|\/)(\.env(\.(?!example$|sample$|template$|dist$)[^/]*)?|\.secrets?|id_(rsa|ed25519|ecdsa)|[^/]*\.(pem|p12|pfx|key))$/i
 async function gitCommit(dir, msg) {
   await run('git', ['add', '-A', '--', '.'], { cwd: dir })
