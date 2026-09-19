@@ -109,6 +109,46 @@ export function formatHistory(turns = []) {
   return turns.slice(-8).map((turn) => `${turn.role === 'user' ? 'Usuário' : 'Assistente'}: ${String(turn.text || '').slice(0, 1500)}${turn.proposal ? ` ${proposalNote(turn.proposal)}` : ''}`).join('\n')
 }
 
+export function proposalSummary(answer, request) {
+  let text = ''
+  for (const line of String(answer || '').split(/\r?\n/)) {
+    const trimmed = line.trim().replace(/^(?:#{1,6}|>|[-*_`])\s+/, '').trim()
+    if (trimmed) {
+      text = trimmed
+      break
+    }
+  }
+  if (!text) text = String(request || '').replace(/\s*\r?\n\s*/g, ' ').trim()
+  return text.length > 120 ? `${text.slice(0, 119)}…` : text
+}
+
+export async function attachProposal({ projectDir, id, wtPath, request, answer }) {
+  const collected = await collectProposal(projectDir, wtPath)
+  if (collected === null) {
+    await removeChatWorktree(projectDir, wtPath)
+    return null
+  }
+  return {
+    id,
+    head: collected.head,
+    files: collected.files.map(({ path: filePath, kind }) => ({ path: filePath, kind })),
+    patch: collected.patch,
+    summary: proposalSummary(answer, request),
+    state: 'pending',
+    wt: wtPath
+  }
+}
+
+export const PENDING_BLOCK = 'Decida o cartão anterior (Aprovar ou Recusar) antes de perguntar de novo.'
+
+export function pendingProposal(turns = []) {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const proposal = turns[index].proposal
+    if (proposal?.state === 'pending') return proposal
+  }
+  return null
+}
+
 const ID_PATTERN = /^[a-z0-9-]{1,40}$/i
 const locks = new Map()
 
