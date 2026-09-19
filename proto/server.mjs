@@ -1913,11 +1913,13 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   st.tests_after = quick && !quick.ok ? quick : await runTests(state.project); st.diff = await storyDiff(st)
   // prova ANTIGA (verde antes da parte) que só falha por tempo limite é instabilidade, não defeito de quem escreve: repete a suíte uma vez antes de gastar rodada
   // (épico 7, parte 6: três rodadas pagas atrás de uma prova da parte 3 que estourava 5 s; quem escreve chegou a mexer no vitest.config fora do escopo para esconder)
-  if (!st.tests_after.ok && !st.flaky_retry && m.tests_before?.tests?.length) {
+  // uma repetição por rodada, não por parte (missão m-mu81n0ms, épico 2, s1: a rodada 3 escalou para o Sol atrás de 3 provas antigas
+  // que só estouravam 5 s com a máquina carregada; a repetição já tinha sido gasta na rodada 1)
+  if (!st.tests_after.ok && st.flaky_retry !== round && m.tests_before?.tests?.length) {
     const okBefore = new Set(m.tests_before.tests.filter((t) => t.status === 'passed').map((t) => t.name))
     const reds = st.tests_after.tests.filter((t) => t.status !== 'passed')
     if (reds.length && reds.every((t) => okBefore.has(t.name) && /timed out|timeout|tempo limite/i.test(t.message || ''))) {
-      st.flaky_retry = true
+      st.flaky_retry = round
       log('engine', `só prova(s) antiga(s) vermelha(s), por tempo limite (${reds.map((t) => t.name.slice(0, 80)).join(' | ')}); estavam verdes antes desta parte: repito a suíte uma vez antes de abrir rodada`, 'warn')
       st.tests_after = await runTests(state.project)
       if (st.tests_after.ok) log('engine', 'a repetição passou: prova instável, não defeito desta parte; sigo', 'warn')
