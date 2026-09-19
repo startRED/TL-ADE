@@ -29,6 +29,7 @@ Nunca use `npx`: `spawn('npx.cmd')` sem shell falha com EINVAL no Windows (ADR 0
 
 - Tocar `proto/**`; a demo fica intocada.
   - Exceção do épico "Servidor: chat escreve na cópia e rotas aprovar/recusar": podem ser alterados somente proto/chat-changes.mjs, proto/server.mjs, proto/chat-routes.test.mjs e proto/README.md.
+  - Exceção do épico "Tela: cartão de permissão, travas e textos": podem ser criados ou alterados somente proto/src/diff-lines.mjs, proto/src/diff-lines.test.mjs, proto/src/PermissionCard.jsx, proto/src/permission-card.test.mjs, proto/src/App.jsx, proto/src/index.css e proto/README.md.
 - Converter arquivo para `.ts` ou criar passo de build.
 - Criar `workspaces` ou `packages/`.
 - Suprimir regra de tipo ou lint (diretivas ts-ignore, ts-expect-error, ts-nocheck, oxlint-disable) ou afrouxar `strict`.
