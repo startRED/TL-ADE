@@ -1067,10 +1067,77 @@ const INTENT_JSON_SCHEMA = {
     domains: { type: 'array', items: { type: 'string' } }, keywords: { type: 'array', items: { type: 'string' } },
     needs_ui: { type: 'boolean' }, needs_backend: { type: 'boolean' },
     research_questions: { type: 'array', items: { type: 'string' } },
-    questions: { type: 'array', maxItems: 5, items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, question: { type: 'string' }, why: { type: 'string' }, options: { type: 'array', minItems: 2, maxItems: 4, items: { type: 'object', additionalProperties: false, properties: { label: { type: 'string' }, hint: { type: 'string' } }, required: ['label', 'hint'] } }, allow_other: { type: 'boolean' } }, required: ['id', 'question', 'why', 'options', 'allow_other'] } },
+    questions: { type: 'array', maxItems: 10, items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, question: { type: 'string' }, why: { type: 'string' }, options: { type: 'array', minItems: 2, maxItems: 4, items: { type: 'object', additionalProperties: false, properties: { label: { type: 'string' }, hint: { type: 'string' } }, required: ['label', 'hint'] } }, allow_other: { type: 'boolean' } }, required: ['id', 'question', 'why', 'options', 'allow_other'] } },
     skills: { type: 'object', additionalProperties: false, properties: Object.fromEntries(['planner', 'maker', 'checker', 'research'].map((r) => [r, { type: 'array', items: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, reason: { type: 'string' } }, required: ['id', 'reason'] } }])), required: ['planner', 'maker', 'checker', 'research'] },
   },
   required: ['summary', 'complexity', 'difficulty', 'difficulty_why', 'domains', 'keywords', 'needs_ui', 'needs_backend', 'research_questions', 'questions', 'skills'],
+}
+// Briefing (pedido grande): transforma um pedido curto num documento de produto antes de dividir em épicos. Opus (cadeia
+// "plan"), até duas rodadas: a primeira pode devolver perguntas; a segunda, com as respostas, fecha o documento.
+const BRIEF_QUESTIONS = INTENT_JSON_SCHEMA.properties.questions
+const BRIEF_JSON_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    title: { type: 'string' }, goal: { type: 'string' }, users: { type: 'string' },
+    in_scope: { type: 'array', items: { type: 'string' } }, out_of_scope: { type: 'array', items: { type: 'string' } },
+    done_means: { type: 'array', items: { type: 'string' } }, constraints: { type: 'array', items: { type: 'string' } },
+    versions: { type: 'array', minItems: 1, maxItems: 5, items: { type: 'object', additionalProperties: false, properties: { name: { type: 'string' }, goal: { type: 'string' }, includes: { type: 'array', items: { type: 'string' } } }, required: ['name', 'goal', 'includes'] } },
+    questions: BRIEF_QUESTIONS,
+  },
+  required: ['title', 'goal', 'users', 'in_scope', 'out_of_scope', 'done_means', 'constraints', 'versions', 'questions'],
+}
+function briefPrompt(secondRound) {
+  const p = state.project, m = state.mission
+  return [
+    'Você é o Intent Compiler da TL-ADE escrevendo o BRIEFING de um pedido grande, antes de qualquer plano. O usuário é leigo e deu pouco contexto: seu trabalho é transformar o pedido num documento de produto completo, com o que ENTRA, o que FICA DE FORA e o que significa PRONTO, dividido em versões que cabem em uma missão cada.',
+    `Pedido: ${m.request}`,
+    attachBlock(m.attachments),
+    `Entendimento prévio: ${m.intent?.summary || ''} Domínios: ${(m.intent?.domains || []).join(', ')}.`,
+    m.answers?.length ? `Respostas do usuário na entrevista: ${m.answers.map((a) => `${a.question} → ${a.answer}`).join(' | ')}` : '',
+    m.brief_feedback?.length ? `Pedidos de mudança do usuário no briefing anterior (atenda todos): ${m.brief_feedback.join(' | ')}
+BRIEFING ANTERIOR: ${JSON.stringify({ ...m.brief_draft, questions: undefined })}` : '',
+    `Projeto: ${p.name} em ${p.dir}; ${p.files} itens na raiz; linguagem: ${p.language || 'nenhuma'}. Leia (no máximo 8 leituras) README, AGENTS.md, CLAUDE.md, docs/ e o roadmap se existirem: regras do repositório (pastas proibidas, o que está fora do escopo) vão em constraints, e o que JÁ EXISTE não entra em in_scope.`,
+    'Responda em português no JSON exigido:',
+    '- title (≤8 palavras); goal (2 a 4 frases leigas: o que o usuário vai conseguir fazer no fim); users (quem usa e em que situação).',
+    '- in_scope (5 a 15 itens concretos, cada um verificável); out_of_scope (o que NÃO será feito, com o motivo em poucas palavras); done_means (3 a 8 critérios objetivos de "pronto", cada um testável por uma pessoa abrindo o programa).',
+    '- constraints (regras do repositório e do usuário: pastas intocáveis, dependências permitidas, formato, custo).',
+    '- versions (1 a 5): a PRIMEIRA é a menor versão que já é útil e cabe numa missão de até 10 épicos; as seguintes são incrementos. Cada uma: name (v1, v2…), goal (uma frase), includes (itens de in_scope que entram nela). Todo item de in_scope aparece em exatamente uma versão.',
+    secondRound ? '- questions: OBRIGATORIAMENTE lista vazia (a entrevista já aconteceu duas vezes; decida você e registre a decisão em constraints).'
+      : '- questions (0 a 10): SÓ o que você não consegue decidir bem sozinho e que mudaria o briefing. Mesmo formato da entrevista: id, question (uma frase simples), why, options (2 a 4, a PRIMEIRA é a recomendada, label curto + hint), allow_other. Se não houver dúvida real, lista vazia.',
+  ].filter(Boolean).join('\n') + skillsBlock(m.skills?.planner || [])
+}
+function briefBlock(b) {
+  if (!b) return ''
+  const v1 = b.versions?.[0]
+  return [
+    `BRIEFING APROVADO PELO USUÁRIO (vale mais que o pedido original):`,
+    `Objetivo: ${b.goal}`, `Usuários: ${b.users}`,
+    `Versão a construir NESTA missão: ${v1?.name || 'v1'} — ${v1?.goal || ''}. Entra: ${(v1?.includes || b.in_scope || []).join('; ')}.`,
+    b.versions?.length > 1 ? `Fica para as versões seguintes (NÃO planeje agora): ${b.versions.slice(1).map((v) => `${v.name}: ${v.includes.join('; ')}`).join(' | ')}` : '',
+    `Fora do escopo: ${(b.out_of_scope || []).join('; ')}`,
+    `Pronto significa: ${(b.done_means || []).join('; ')}`,
+    `Restrições: ${(b.constraints || []).join('; ')}`,
+  ].filter(Boolean).join('\n')
+}
+async function makeBrief() {
+  const m = state.mission
+  m.state = 'planning'; setStep('brief', 'running'); broadcast()
+  const second = !!m.brief_round
+  const r = await plannerCall(plannerChoice('light'), { role: 'briefing', prompt: briefPrompt(second), schema: BRIEF_JSON_SCHEMA, maxTurns: 14 })
+  const b = r?.structured_output
+  if (!b?.versions?.length) { setStep('brief', 'failed'); m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'o briefing não veio no formato esperado', 'error'); return finish() }
+  m.brief_draft = b
+  if (b.questions?.length && !second && !state.settings.unattended) {
+    m.brief_round = 1
+    m.plan = { title: b.title, summary: b.goal, complexity: m.intent.complexity, domains: m.intent.domains, needs_ui: m.intent.needs_ui, needs_backend: m.intent.needs_backend, questions: b.questions, research_questions: [], stories: [] }
+    m.state = 'awaiting_plan'; m.reason = 'questions'; setStep('brief', 'running')
+    log('engine', `briefing: ${b.questions.length} pergunta(s) a mais antes de fechar o documento`); broadcast(); await persistMission().catch(() => {}); return
+  }
+  if (b.questions?.length && state.settings.unattended) { m.answers = [...(m.answers || []), ...b.questions.map((q) => ({ id: q.id, question: q.question, answer: q.options?.[0]?.label || 'não sei' }))]; log('engine', `modo noturno: perguntas do briefing respondidas com as recomendações (${b.questions.length})`, 'warn') }
+  m.brief = { ...b, questions: undefined }; m.brief_draft = null; setStep('brief', 'done')
+  log('engine', `briefing pronto: ${b.in_scope.length} item(ns) no escopo, ${b.versions.length} versão(ões); esta missão faz ${b.versions[0].name}`)
+  if (state.settings.unattended) { log('engine', 'modo noturno: briefing aprovado automaticamente', 'warn'); return makeProgram() }
+  m.state = 'awaiting_plan'; m.reason = 'brief'; broadcast(); await persistMission().catch(() => {})
 }
 function intentPrompt() {
   const p = state.project, s = state.settings
@@ -1097,7 +1164,7 @@ function interviewRule() {
   const mode = state.settings.interview || 'auto'
   if (mode === 'never') return '- questions: sempre lista vazia.'
   return [
-    `- questions: entrevista curta para o usuário (leigo) escolher o jeito do programa antes do plano. ${mode === 'always' ? 'Faça de 2 a 5 perguntas sempre que complexity não for trivial.' : 'trivial: nenhuma. bounded: até 2, só se a resposta mudaria o resultado. feature/subsystem: de 2 a 5.'}`,
+    `- questions: entrevista curta para o usuário (leigo) escolher o jeito do programa antes do plano. ${mode === 'always' ? 'Faça de 2 a 10 perguntas sempre que complexity não for trivial.' : 'trivial: nenhuma. bounded: até 2, só se a resposta mudaria o resultado. feature: de 2 a 5. subsystem/project: de 4 a 10, cobrindo tudo o que um briefing de produto precisa (para quem, o que entra na primeira versão, o que fica para depois, o que significa pronto).'}`,
     '  Cada pergunta: id curto (q1…), question (uma frase simples), why (por que importa, uma frase), options (2 a 4; a PRIMEIRA é sempre a recomendada; label curto + hint de uma frase, sem termos técnicos), allow_other (se vale escrever outra resposta).',
     '  Temas bons: estilo visual e clima, para quem é, o que é prioridade, dados (guardar onde, precisa de login?), plataforma (web, celular, desktop), integrações. Nunca pergunte o que a pasta já responde nem o que você pode decidir bem sozinho.',
   ].join('\n')
@@ -1216,6 +1283,7 @@ function epicsPrompt() {
     'Você é o Intent Compiler da TL-ADE. O pedido é grande (vários subsistemas). NÃO escreva stories: divida em ÉPICOS, cada um um subsistema ou fatia coerente que cabe em 2 a 6 partes pequenas (cada parte ~300 linhas de diff, uma prova). Ordem de execução com dependências explícitas; a base vem antes do que depende dela.',
     `Pedido: ${m.request}`,
     attachBlock(m.attachments),
+    briefBlock(m.brief),
     `Entendimento prévio: ${m.intent?.summary || ''} Domínios: ${(m.intent?.domains || []).join(', ')}.`,
     scoutBlock(m.scout), m.map || '',
     m.answers?.length ? `Escolhas do usuário: ${m.answers.map((a) => `${a.question} → ${a.answer}`).join(' | ')}` : '',
@@ -1340,7 +1408,11 @@ async function continuePlanning() {
   if (intent.research_questions?.length && state.settings.research_enabled && !m.research) {
     setStep('research', 'running'); m.research = await research(intent.research_questions.slice(0, 3)); setStep('research', m.research ? 'done' : 'failed')
   }
-  if (['subsystem', 'project'].includes(intent.complexity) && !m.program) return makeProgram()
+  if (['subsystem', 'project'].includes(intent.complexity) && !m.program) {
+    if (m.brief_round && !m.brief) return makeBrief() // segunda rodada: respostas chegaram
+    if (!m.brief && state.settings.brief !== false) return makeBrief()
+    return makeProgram()
+  }
   if (!m.scout && scoutWorth() && ['feature', 'subsystem', 'project'].includes(intent.complexity)) { setStep('scout', 'running'); m.scout = await scout(`O que quem vai planejar "${m.request.slice(0, 300)}" precisa saber deste projeto: onde ficam as partes envolvidas, padrões e provas existentes, o que já existe do pedido e o que pode atrapalhar.`); setStep('scout', m.scout ? 'done' : 'failed') }
   if (!m.map) m.map = await codeMap(state.project.dir, (await projectTree(state.project.dir)).filter((f) => TEXT_EXT.test(f)))
   return makePlan()
@@ -1832,6 +1904,8 @@ async function decide(option, payload = {}) {
       return continuePlanning()
     }
     if (option === 'revise' && payload.text?.trim()) { m.plan_feedback = [...(m.plan_feedback || []), payload.text.trim()]; m.user_feedback = (m.user_feedback || 0) + 1; m.split_tried = false; log('operador', `pediu mudanças no plano: ${payload.text.trim()}`); if (m.program && !m.epic) { m.program = null; return makeProgram() } return makePlan() }
+    if (option === 'brief_ok') { log('operador', 'aprovou o briefing'); return makeProgram() }
+    if (option === 'brief_revise' && payload.text?.trim()) { m.brief_feedback = [...(m.brief_feedback || []), payload.text.trim()]; m.brief_draft = m.brief; m.brief = null; m.brief_round = 1; log('operador', `pediu mudanças no briefing: ${payload.text.trim()}`); return makeBrief() }
     if (option === 'discard') { m.state = 'discarded'; log('operador', 'descartou o plano'); return finish() }
     return
   }

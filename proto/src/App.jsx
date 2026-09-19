@@ -140,11 +140,12 @@ function storySummary(st) {
   return bits.join(' · ')
 }
 
-const pendingDecision = (m) => !m ? null : m.state === 'awaiting_plan' ? (m.reason === 'questions' ? 'questions' : m.reason === 'planner_choice' ? 'planner' : 'plan') : m.state === 'awaiting_operator' ? 'operator' : null
+const pendingDecision = (m) => !m ? null : m.state === 'awaiting_plan' ? (m.reason === 'questions' ? 'questions' : m.reason === 'planner_choice' ? 'planner' : m.reason === 'brief' ? 'brief' : 'plan') : m.state === 'awaiting_operator' ? 'operator' : null
 const PENDING_WHY = {
   questions: 'A IA quer saber como você prefere o programa antes de montar o plano.',
   planner: 'O entendedor mediu a dificuldade do pedido e recomenda quem deve planejar. Você escolhe.',
   plan: 'O plano está pronto. Confira as partes e diga se pode começar.',
+  brief: 'O pedido é grande. Antes de dividir em épicos, a IA escreveu o briefing: o que entra, o que fica de fora e o que significa pronto. Confira.',
 }
 
 /* ========================= app ========================= */
@@ -561,6 +562,23 @@ function TurnPanel({ m, state, decide, need, onNew, onResume, err, onClose }) {
           </>
         )}
 
+        {need === 'brief' && m.brief && (
+          <>
+            <BriefView b={m.brief} />
+            <div className="decide">
+              <button className="act primary" onClick={() => decide('brief_ok')}><CheckCircle weight="fill" /><span><b>Aprovar briefing</b><small>Divide a {m.brief.versions[0].name} em épicos. As outras versões ficam guardadas.</small></span></button>
+            </div>
+            <label className="field">
+              <span className="field-lbl">Quer mudar algo?</span>
+              <textarea className="ta" rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder="Do seu jeito: tirar um item, passar algo para a v2, mudar o que é pronto…" />
+            </label>
+            <div className="decide">
+              <button className="act" disabled={!text.trim()} onClick={() => { decide('brief_revise', text); setText('') }}><ArrowCounterClockwise /><span><b>Pedir mudanças</b><small>A IA reescreve o briefing e você confere de novo.</small></span></button>
+              <button className="act danger" onClick={() => decide('discard')}><Trash /><span><b>Descartar</b><small>Nada é alterado no projeto.</small></span></button>
+            </div>
+          </>
+        )}
+
         {need === 'plan' && (
           <>
             <p className="turn-note">São {m.stories.length} parte{m.stories.length > 1 ? 's' : ''}, feitas uma de cada vez. Cada uma só é gravada depois de passar na prova e na revisão.</p>
@@ -759,6 +777,10 @@ function Conversation({ state, m }) {
 
         {m.state === 'planning' && !m.plan && (
           <Ade><h3 className="msg-h">Montando o plano</h3><p className="msg-p">Estou lendo o projeto para dividir o trabalho em partes pequenas, cada uma com o que precisa valer no fim.</p><Skeleton /><Typing live={state.live} /></Ade>
+        )}
+
+        {m.brief && need !== 'brief' && (
+          <Ade><h3 className="msg-h">Briefing: {m.brief.title}</h3><BriefView b={m.brief} compact /></Ade>
         )}
 
         {m.plan?.epics?.length > 0 && (
@@ -968,6 +990,21 @@ function StoryRow({ st, i, m, state }) {
 }
 
 /* ========================= entrevista ========================= */
+function BriefView({ b, compact }) {
+  const L = ({ title, items }) => items?.length ? <div className="brief-sec"><b>{title}</b><ul>{items.map((x, i) => <li key={i}>{x}</li>)}</ul></div> : null
+  return (
+    <div className={`brief${compact ? ' compact' : ''}`}>
+      <p className="msg-lead">{b.goal}</p>
+      <p className="msg-p"><b>Para quem:</b> {b.users}</p>
+      <div className="brief-sec"><b>Versões</b><ol className="plan-lines">{b.versions.map((v, i) => <li key={v.name}><span className="pl-n mono">{v.name}</span><span className="pl-t">{v.goal}{i === 0 ? <small className="dim"> · esta missão</small> : null}{!compact && v.includes?.length ? <small className="dim"> · {v.includes.join('; ')}</small> : null}</span></li>)}</ol></div>
+      {!compact && <L title="Entra" items={b.in_scope} />}
+      <L title="Fica de fora" items={b.out_of_scope} />
+      <L title="Pronto significa" items={b.done_means} />
+      {!compact && <L title="Restrições" items={b.constraints} />}
+    </div>
+  )
+}
+
 function Interview({ questions, plannerOptions, onAnswer, onSkip }) {
   const qs = (questions || []).map((q, i) => typeof q === 'string' ? { id: `q${i + 1}`, question: q, why: '', options: [], allow_other: true } : q)
   const [picked, setPicked] = useState(() => Object.fromEntries(qs.map((q) => [q.id, q.options?.[0]?.label || ''])))
@@ -1212,6 +1249,7 @@ function OptionsPage({ s, save }) {
           <Row title="Orçamento por parte" note="Estourou: sem novas rodadas. Com as provas verdes e nada grave, aceita e segue; senão para e pergunta." control={<label className="num"><span className="mono">US$</span><input className="ta" type="number" min={1} step={1} value={s.max_usd_per_story ?? 4} onChange={(e) => save({ max_usd_per_story: Number(e.target.value) || 4 })} /></label>} />
         </Card>
         <Card title="Entrevista e imagens" note="O que a ADE faz antes de começar a escrever código.">
+          <Row title="Briefing em pedidos grandes" note="Antes de dividir em épicos, a IA escreve o que entra, o que fica de fora, o que significa pronto e as versões. Você aprova. Custa uma chamada do planejador a mais." control={<Switch checked={s.brief !== false} onCheckedChange={(v) => save({ brief: v })} />} />
           <Row title="Entrevista antes do plano" note="Perguntas fáceis de múltipla escolha para escolher o jeito do programa. Automática: só em pedidos médios e grandes." control={<select className="sel" value={s.interview || 'auto'} onChange={(e) => save({ interview: e.target.value })}><option value="auto">automática</option><option value="always">sempre</option><option value="never">nunca</option></select>} />
           <Row title="Conferência do visual" note="Varre a interface atrás de cara de template e força uma rodada de retoque." control={<Switch checked={s.visual_gate} onCheckedChange={(v) => save({ visual_gate: v })} />} />
           <Row title="Imagens geradas por IA" note="Quando o plano pede fotos ou ilustrações, a segunda IA gera antes das partes começarem. Consome cota dela." control={<Switch checked={s.assets_enabled !== false} onCheckedChange={(v) => save({ assets_enabled: v })} />} />

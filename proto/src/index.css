@@ -834,3 +834,9 @@ button { font: inherit; color: inherit; }
 .chain-x:hover { background: var(--bg-2); color: var(--gray-12); }
 .chain-add { justify-self: start; border: 1px dashed var(--line-2); background: none; color: var(--gray-11); font: inherit; font-size: 12px; padding: 5px 10px; border-radius: var(--r-ctl); cursor: pointer; }
 .chain-add:hover { color: var(--gray-12); border-color: var(--gray-10); }
+
+/* briefing de pedido grande */
+.brief { display: grid; gap: 10px; }
+.brief-sec b { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--gray-10); }
+.brief-sec ul { margin: 4px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.5; }
+.brief.compact .brief-sec ul { font-size: 12px; }
