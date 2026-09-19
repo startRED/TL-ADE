@@ -72,7 +72,8 @@ const COMPLEXITY_PT = { trivial: 'pedido pequeno', bounded: 'pedido curto', feat
 const ROLE_CARD = {
   intent: { label: 'Entender o pedido', icon: Compass, note: 'Lê o que você escreveu, mede o tamanho e escolhe as skills de cada papel.' },
   epics: { chain: 'epics', label: 'Plano complexo', icon: ListChecks, note: 'Divide um pedido grande em épicos e faz o plano único quando a dificuldade é pesada. Roda pouco; vale o modelo mais forte.' },
-  plan: { chain: 'plan', label: 'Plano intermediário e simples', icon: ListBullets, note: 'Planeja as partes de cada épico, os planos leves e normais e as revisões automáticas de plano. Roda muito; é onde o custo se decide.' },
+  plan: { chain: 'plan', label: 'Plano intermediário e simples', icon: ListBullets, note: 'Planeja as partes de cada épico e os planos leves e normais. Roda uma vez por épico; as correções do plano ficam em Corrigir o plano.' },
+  plan_edit: { chain: 'plan_edit', label: 'Corrigir o plano', icon: ListBullets, note: 'Aplica no plano o que a checagem automática e a crítica apontaram, numa correção só. Só edita e reescreve: modelo barato.' },
   prova: { chain: 'prova', label: 'Escrever a prova', icon: Wrench, note: 'Escreve a prova que nasce vermelha antes do código. Tarefa curta: modelo barato.' },
   impl_light: { chain: 'impl_light', label: 'Código: parte leve', icon: Wrench, note: 'Configuração, documentação e ajustes pequenos.' },
   impl: { chain: 'impl', label: 'Código: parte comum', icon: Wrench, note: 'A maioria das partes: um comportamento, poucos arquivos.' },

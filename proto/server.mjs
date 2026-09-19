@@ -108,6 +108,7 @@ const DEFAULT_SETTINGS = {
     plan: [{ family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'high' }], // Sol high: AA 42 por US$ 0,81; o Astra custou mais que tudo o resto no 1º épico medido
     // 19/09 (Erick): cada empresa num papel, e quem escreve nunca revisa. O Gemini 3.8 Flash (cota do Google livre) fica só com o mais
     // pesado, escrever código (Sol leu ~1,2M tokens por parte); o Codex planeja e revisa o Flash; o Claude entra na escada e como reserva.
+    plan_edit: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }, { family: 'claude', model: 'opus', effort: 'medium' }], // correção automática do plano: só edita e reescreve o JSON (~7k tokens de saída); no Astra custava US$ 0,70 por correção
     prova: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }],
     impl_light: [{ family: 'codex', model: 'gpt-5.6-luna', effort: 'high' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }], // configuração e documentação: leve e quase de graça no Luna
     impl: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }], // parte comum
@@ -1660,13 +1661,21 @@ async function makePlan({ inProgram = false } = {}) {
   // Medido em 17/09: uma revisão no Fable custou US$ 4,83 (42 turnos, 63k tokens de saída) porque reescrevia tudo.
   const revising = !!(m.plan?.stories?.length && m.plan_feedback?.length && (m.split_tried || m.spec_tried || m.critic_tried) && m.auto_revision)
   const base = plannerChoice(!inProgram && m.intent?.difficulty === 'hard' ? 'complex' : 'light')
-  const who = revising ? { ...plannerChoice('light'), effort: 'medium' } : base
+  const edit = chainOf('plan_edit')[0], who = revising ? (edit ? { ...edit, key: 'plan_edit' } : { ...plannerChoice('light'), effort: 'medium' }) : base
   m.auto_revision = false
   const turns = revising ? 6 : 20 + (m.epic?.plan_tries || 0) * 16
   const r = await plannerCall(who, { role: revising ? 'revisão do plano' : 'plano', prompt: planPrompt(revising) + `\n\nLIMITE: você tem ${turns} turnos de ferramenta. Use o mapa e o recibo do batedor em vez de reler arquivos; leia só trechos. Entregue o plano antes do limite: plano não entregue é dinheiro perdido.`, schema: PLAN_JSON_SCHEMA, maxTurns: turns })
   const plan = r?.structured_output
   if (!plan?.stories?.length) { setStep('plan', 'failed'); if (inProgram) return false; m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'o plano não veio no formato esperado', 'error'); return finish() }
   // parte grande demais volta ao planejador uma vez, sem gastar com maker
+  // A crítica roda junto com a checagem automática e as duas viram UMA correção (cada correção reescreve o plano inteiro).
+  const criticDue = () => state.settings.plan_critic !== false && !m.critic_tried && ['feature', 'subsystem', 'project'].includes(m.intent?.complexity)
+  const addCritique = async () => {
+    const crit = await planCritic(plan); if (crit) m.critic_tried = true
+    if (crit?.verdict !== 'revise' || !crit.issues?.length) return false
+    m.plan_feedback = [...(m.plan_feedback || []), `Outra IA leu o plano como se fosse implementar e apontou onde teria de decidir sozinha. Corrija cada ponto na story indicada (recipe, examples, interfaces, decisions) e mantenha o resto: ${crit.issues.slice(0, 10).map((x) => `[${x.story}] ${x.problem} → ${x.fix}`).join(' | ')}`]
+    log('engine', `crítica do plano: ${crit.issues.length} ponto(s) em aberto; entram na mesma correção`, 'warn'); return true
+  }
   const vague = plan.stories.filter((x) => !tooBig(x) && underSpecified(x))
   const loose = plan.stories.filter((x) => !tooBig(x)).map((x) => ({ id: x.id, miss: untraced(x) })).filter((x) => x.miss.length)
   if ((vague.length || loose.length) && !m.spec_tried) {
@@ -1675,6 +1684,7 @@ async function makePlan({ inProgram = false } = {}) {
     if (loose.length) { m.plan_feedback = [...(m.plan_feedback || []), `Rastreio incompleto (cada critério CAn precisa aparecer entre colchetes em pelo menos um passo da recipe e no começo de pelo menos um example): ${loose.map((x) => `${x.id}: ${x.miss.join(', ')}`).join('; ')}. Acrescente as marcas; se um critério não tem passo ou exemplo de verdade, crie o passo ou o exemplo que falta. Mantenha o resto.`]; log('engine', `plano sem rastreio completo de critérios (${loose.map((x) => x.id).join(', ')}); pedindo as marcas ao planejador`, 'warn') }
     m.stories = plan.stories.map((s) => ({ ...s, state: 'queued', steps: [], round: 0 })); m.plan = { ...(m.plan || {}), ...plan }
     if (vague.length) log('engine', `plano com parte(s) subespecificada(s) (${vague.map((x) => x.id).join(', ')}); pedindo detalhe ao planejador`, 'warn')
+    if (criticDue()) await addCritique()
     m.auto_revision = true
     return makePlan({ inProgram })
   }
@@ -1684,19 +1694,14 @@ async function makePlan({ inProgram = false } = {}) {
     m.plan_feedback = [...(m.plan_feedback || []), `Divida a(s) parte(s) ${big.map((x) => x.id).join(', ')} em 2 ou 3 partes menores: cada uma com UM comportamento, até 4 critérios, até 120 palavras e scope_paths preenchido; mantenha as outras.`]
     m.stories = plan.stories.map((s) => ({ ...s, state: 'queued', steps: [], round: 0 })); m.plan = { ...(m.plan || {}), ...plan }
     log('engine', `plano com parte(s) grande(s) demais (${big.map((x) => x.id).join(', ')}); pedindo divisão ao planejador`, 'warn')
+    if (criticDue()) await addCritique()
     m.auto_revision = true
     return makePlan({ inProgram })
   }
-  if (state.settings.plan_critic !== false && !m.critic_tried && ['feature', 'subsystem', 'project'].includes(m.intent?.complexity)) {
-    const crit = await planCritic(plan)
-    if (crit) m.critic_tried = true
-    if (crit?.verdict === 'revise' && crit.issues?.length) {
-      m.plan_feedback = [...(m.plan_feedback || []), `Outra IA leu o plano como se fosse implementar e apontou onde teria de decidir sozinha. Corrija cada ponto na story indicada (recipe, examples, interfaces, decisions) e mantenha o resto: ${crit.issues.slice(0, 10).map((x) => `[${x.story}] ${x.problem} → ${x.fix}`).join(' | ')}`]
-      m.stories = plan.stories.map((s) => ({ ...s, state: 'queued', steps: [], round: 0 })); m.plan = { ...(m.plan || {}), ...plan }
-      log('engine', `crítica do plano: ${crit.issues.length} ponto(s) em aberto; planejador corrige uma vez`, 'warn')
-      m.auto_revision = true
+  if (criticDue() && await addCritique()) {
+    m.stories = plan.stories.map((s) => ({ ...s, state: 'queued', steps: [], round: 0 })); m.plan = { ...(m.plan || {}), ...plan }
+    m.auto_revision = true
     return makePlan({ inProgram })
-    }
   }
   const keep = m.program ? { epics: m.program.epics, explanation: m.program.explanation } : {}
   m.plan = { ...plan, ...keep, title: m.program ? m.program.title : plan.title, epic_title: m.epic?.title || null, epic_explanation: m.program ? plan.explanation : null, needs_ui: plan.needs_ui || intent.needs_ui, needs_backend: plan.needs_backend || intent.needs_backend, domains: [...new Set([...(intent.domains || []), ...(plan.domains || [])])] }
