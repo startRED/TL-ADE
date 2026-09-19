@@ -92,6 +92,21 @@ const SUGGESTIONS = [
 /* ========================= helpers ========================= */
 const fmtTok = (n) => n >= 1e6 ? `${(n / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n || 0)
 const fmtUsd = (n) => `US$ ${(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+// Custo da missão somando todos os modelos (Claude real, os outros estimados pelo preço de API); missão antiga só tem o do Claude.
+const totalUsd = (c) => c?.models ? Object.values(c.models).reduce((a, x) => a + (x.usd || 0), 0) : (c?.usd || 0)
+const FAMILY_NAME = { claude: 'Claude', codex: 'Codex', agy: 'Google' }
+function ModelCosts({ cost }) {
+  const rows = Object.entries(cost?.models || {}).sort((a, b) => (b[1].usd || 0) - (a[1].usd || 0))
+  if (!rows.length) return null
+  return (
+    <div className="model-costs">
+      {rows.map(([id, x]) => (
+        <div key={id}><span className="mono">{id}</span><small>{FAMILY_NAME[x.family] || x.family} · {x.calls} chamada{x.calls > 1 ? 's' : ''} · {fmtTok((x.tokens_in || 0) + (x.tokens_out || 0))}</small><b className="mono">{x.priced === false ? '—' : fmtUsd(x.usd)}</b></div>
+      ))}
+      <p>Preço de API equivalente. Nas assinaturas o que pesa é a cota de cada empresa.</p>
+    </div>
+  )
+}
 const fmtWhen = (iso) => iso ? new Date(iso).toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : ''
 const fmtHour = (iso) => iso ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''
 const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -515,7 +530,7 @@ function BoardView({ m }) {
         {all.length === 0
           ? <div><b>planejando</b><small>as partes do épico atual ainda estão sendo planejadas</small></div>
           : <div><b>{done} de {all.length}</b><small>partes prontas{epics.some((e) => e.state === 'queued') ? ' (épicos na fila ainda serão planejados)' : ''}{skipped ? ` · ${skipped} pulada${skipped > 1 ? 's' : ''}` : ''}</small></div>}
-        <div><b>{fmtUsd(m.cost?.usd || 0)}</b><small>gasto até agora</small></div>
+        <div><b>{fmtUsd(totalUsd(m.cost))}</b><small>gasto até agora</small></div>
       </div>
       <div className="pbar"><i style={{ transform: `scaleX(${Math.min(1, Math.max(0, pct)).toFixed(3)})` }} /></div>
       {epics.length ? epics.map((e, i) => {
@@ -646,10 +661,11 @@ function TurnPanel({ m, state, decide, need, onNew, onResume, err, onClose }) {
 
         <div className="turn-nums">
           <div><span>Chamadas de IA</span><b className="mono">{m.cost.calls}</b></div>
-          <div><span>Custo</span><b className="mono">{fmtUsd(m.cost.usd)}</b></div>
+          <div><span>Custo (todos os modelos)</span><b className="mono">{fmtUsd(totalUsd(m.cost))}</b></div>
           <div><span>Tokens</span><b className="mono">{fmtTok(m.cost.tokens_in + m.cost.tokens_out)}</b></div>
           <div><span>Cache lido</span><b className="mono">{fmtTok(m.cost.cache_read || 0)}</b></div>
         </div>
+        <ModelCosts cost={m.cost} />
       </div>
     </>
   )
@@ -856,7 +872,7 @@ function Conversation({ state, m }) {
             <h3 className="msg-h">Pronta</h3>
             <p className="msg-lead">{done} de {m.stories.length} parte{m.stories.length > 1 ? 's' : ''} provada{m.stories.length > 1 ? 's' : ''}, revisada{m.stories.length > 1 ? 's' : ''} e gravada{m.stories.length > 1 ? 's' : ''} na sua pasta.</p>
             <div className="final-grid">
-              <div><span>Custo</span><b className="mono">{fmtUsd(m.cost.usd)}</b></div>
+              <div><span>Custo (todos os modelos)</span><b className="mono">{fmtUsd(totalUsd(m.cost))}</b></div>
               <div><span>Chamadas de IA</span><b className="mono">{m.cost.calls}</b></div>
               <div><span>Tokens</span><b className="mono">{fmtTok(m.cost.tokens_in + m.cost.tokens_out)}</b></div>
               <div><span>Tempo</span><b className="mono">{Math.max(1, Math.round(activeSecs(m) / 60))} min</b></div>

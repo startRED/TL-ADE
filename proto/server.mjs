@@ -10,6 +10,7 @@ import { chatWriteTurn, chatCommand, chatIntro, formatHistory, pendingProposal, 
 import http from 'node:http'
 import { spawn } from 'node:child_process'
 import { readFile, writeFile, mkdir, appendFile, rm, stat, access, readdir, realpath , rename } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import os from 'node:os'
@@ -27,26 +28,27 @@ const HOME = os.homedir()
 const IMPECCABLE = path.join(HOME, '.claude/plugins/cache/impeccable/impeccable/4.3.1/skills/impeccable/scripts/impeccable')
 
 // ---------- registro de modelos (verificado nas CLIs instaladas em 2026-09-16; papéis por benchmark em docs/research/models-by-role-2026-09.md) ----------
+// price: US$ por 1M tokens (entrada, saída), preço de API; cache lido conta 10% da entrada. Sem price, o custo aparece como desconhecido.
 const REGISTRY = {
   claude: { label: 'Claude Code', models: [
-    { id: 'sonnet', label: 'Sonnet 5', note: 'caro para o que entrega (AA 38 a US$ 5,09; Terminal-Bench 4.0 8%); só último degrau' },
-    { id: 'opus', label: 'Opus 5', note: 'forte (AA 51, Vals Index 67); entender o pedido e reserva de plano' },
-    { id: 'fable', label: 'Fable 5.1', note: 'topo junto com o Astra (AA 53) pelo dobro do custo; reserva de dividir em épicos' },
-    { id: 'haiku', label: 'Haiku 4.5', note: 'muito barato; tarefas mecânicas' },
+    { id: 'sonnet', label: 'Sonnet 5', price: [2, 10], note: 'caro para o que entrega (AA 38 a US$ 5,09; Terminal-Bench 4.0 8%); só último degrau' },
+    { id: 'opus', label: 'Opus 5', price: [5, 25], note: 'forte (AA 51, Vals Index 67); entender o pedido e reserva de plano' },
+    { id: 'fable', label: 'Fable 5.1', price: [10, 50], note: 'topo junto com o Astra (AA 53) pelo dobro do custo; reserva de dividir em épicos' },
+    { id: 'haiku', label: 'Haiku 4.5', price: [1, 5], note: 'muito barato; tarefas mecânicas' },
   ] },
   codex: { label: 'Codex (OpenAI)', models: [
-    { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', note: 'equilibrado e rápido (84 tokens/s, IOI 88%); padrão para escrever' },
-    { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', note: 'topo da 5.6 (AA 47, IOI 91%); parte difícil e correção' },
-    { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', note: 'econômico (AA 38 a US$ 0,18, 130 tokens/s); partes leves' },
-    { id: 'gpt-6-astra', label: 'GPT-6 Astra', note: 'o mais forte (AA 53, Terminal-Bench 4.0 57%, ARC-AGI-2 95%) pela metade do custo do Fable; épicos, plano, correção difícil' },
+    { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', price: [2, 12], note: 'equilibrado e rápido (84 tokens/s, IOI 88%); padrão para escrever' },
+    { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', price: [5, 30], note: 'topo da 5.6 (AA 47, IOI 91%); parte difícil e correção' },
+    { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', price: [0.2, 1.2], note: 'econômico (AA 38 a US$ 0,18, 130 tokens/s); partes leves' },
+    { id: 'gpt-6-astra', label: 'GPT-6 Astra', price: [10, 50], note: 'o mais forte (AA 53, Terminal-Bench 4.0 57%, ARC-AGI-2 95%) pela metade do custo do Fable; épicos, plano, correção difícil' },
     { id: 'gpt-5.5', label: 'GPT-5.5', note: 'geração anterior; prefira Terra ou Sol' },
   ] },
   agy: { label: 'Antigravity (Google)', models: [
-    { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro', note: 'abaixo dos dois Flash (AA 30, Vals Index 42); evite' },
-    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', note: 'o mais rápido (~300 tokens/s, AA 41, Vals Index 62); revisar, batedor e fallback de escrever' },
+    { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro', price: [2, 12], note: 'abaixo dos dois Flash (AA 30, Vals Index 42); evite' },
+    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', price: [0.75, 3.75], note: 'o mais rápido (~300 tokens/s, AA 41, Vals Index 62); revisar, batedor e fallback de escrever' },
     { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash', note: 'geração anterior do Flash' },
-    { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 via Google', note: 'empresa Claude, cota do Google' },
-    { id: 'claude-opus-4-6-thinking', label: 'Claude Opus 4.6 via Google', note: 'empresa Claude, cota do Google (SWE-Bench Pro 52%); revisor de outra empresa sem gastar a cota do Claude' },
+    { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 via Google', price: [3, 15], note: 'empresa Claude, cota do Google' },
+    { id: 'claude-opus-4-6-thinking', label: 'Claude Opus 4.6 via Google', price: [5, 25], note: 'empresa Claude, cota do Google (SWE-Bench Pro 52%); revisor de outra empresa sem gastar a cota do Claude' },
     { id: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B', note: 'quarta opinião' },
   ] },
 }
@@ -104,12 +106,14 @@ const DEFAULT_SETTINGS = {
   chains: {
     epics: [{ family: 'codex', model: 'gpt-6-astra', effort: 'high' }, { family: 'claude', model: 'fable', effort: 'high' }], // Astra empata com o Fable (AA 53) pela metade do custo
     plan: [{ family: 'codex', model: 'gpt-6-astra', effort: 'medium' }, { family: 'claude', model: 'opus', effort: 'high' }], // Astra medium: AA 50 por US$ 1,54; Opus high 48 por US$ 3,61
-    prova: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }], // Terra escreve a prova em ~1 min; o Flash no agy levava 2 a 3
-    impl_light: [{ family: 'codex', model: 'gpt-5.6-luna', effort: 'high' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }], // configuração e documentação; o Flash cobre o Codex sem cota
-    impl: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'medium' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }], // parte comum
-    impl_hard: [{ family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'codex', model: 'gpt-6-astra', effort: 'high' }, { family: 'agy', model: 'claude-opus-4-6-thinking', effort: 'high' }], // interface larga, risco alto (metade das partes medidas)
-    fix: [{ family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'codex', model: 'gpt-6-astra', effort: 'high' }, { family: 'agy', model: 'claude-opus-4-6-thinking', effort: 'high' }], // escada: 2 rodadas por degrau; o Astra entra na rodada 3
-    checker: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'agy', model: 'claude-opus-4-6-thinking', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'high' }], // Opus 4.6 via Google revisa o Flash sem gastar a cota do Claude
+    // 19/09: Google AI Ultra livre e Codex caro por parte (Sol leu ~1,2M tokens por parte): o Gemini 3.8 Flash escreve e corrige
+    // (AA 41, igual ao Terra no máximo; medido 87% das partes commitadas); o Codex é reserva. O Flash é revisado pelo Opus 4.6 via Google.
+    prova: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }],
+    impl_light: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-luna', effort: 'high' }], // configuração e documentação
+    impl: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }], // parte comum
+    impl_hard: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }], // interface larga, risco alto
+    fix: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'codex', model: 'gpt-6-astra', effort: 'high' }], // escada: 2 rodadas por degrau; o Sol (IOI 91%) cobre o ponto fraco do Flash em algoritmo, o Astra entra na rodada 5
+    checker: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'agy', model: 'claude-opus-4-6-thinking', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'high' }], // o Flash revisa o Codex; Opus 4.6 via Google e depois o Terra revisam o Flash
   },
   planner_recommend: true, // o entendedor mede a dificuldade e recomenda quem planeja; você escolhe (modo noturno segue a recomendação)
   epic_plans_cheaper: true, // com Fable como planejador, ele só divide o pedido em épicos; o plano de cada épico sai no Opus alto (medido: US$ 5,60 e 13 min por épico no Fable, 74k tokens de saída)
@@ -257,7 +261,29 @@ function broadcast() { tickClock(); const data = `data: ${JSON.stringify(pub())}
 function broadcastSoon() { if (pending) return; pending = setTimeout(() => { pending = null; broadcast() }, 150) }
 function setLive(live) { state.live = live; broadcastSoon() }
 
+// Custo por modelo da missão: Claude pelo valor real da CLI; os outros estimados pelo preço de API do REGISTRY.
+function priceOf(model) { const id = String(model || '').replace(/-(high|medium|low)$/, ''); for (const f of Object.values(REGISTRY)) { const x = f.models.find((y) => y.id === id); if (x) return x.price || null } return null }
+function callUsd(e) {
+  if (e.family === 'claude') return e.usd || 0
+  const p = priceOf(e.model); if (!p) return null
+  const cached = e.cache_read || 0, fresh = Math.max(0, (e.tokens_in || 0) - cached) // Codex conta o cache dentro de input_tokens
+  return (fresh * p[0] + cached * p[0] * 0.1 + (e.tokens_out || 0) * p[1]) / 1e6
+}
+function addModelCost(models, e) {
+  const x = models[e.model || '?'] ||= { family: e.family, calls: 0, tokens_in: 0, cache_read: 0, tokens_out: 0, usd: 0, priced: true }
+  const usd = callUsd(e); x.calls++; x.tokens_in += e.tokens_in || 0; x.cache_read += e.cache_read || 0; x.tokens_out += e.tokens_out || 0
+  if (usd == null) x.priced = false; else x.usd += usd
+}
+function trackModelCost(event) {
+  const m = state.mission; if (event.type !== 'model_call' || !m?.cost) return
+  if (!m.cost.models) { // missão de antes do custo por modelo: refaz pelo journal uma vez
+    m.cost.models = {}
+    try { for (const l of readFileSync(path.join(ADE_DIR, 'journal.jsonl'), 'utf8').split('\n')) { if (!l.includes(m.id) || !l.includes('"model_call"')) continue; const e = JSON.parse(l); if (e.mission === m.id && e.type === 'model_call') addModelCost(m.cost.models, e) } } catch { }
+  }
+  addModelCost(m.cost.models, event)
+}
 async function journal(event) {
+  trackModelCost(event)
   await mkdir(ADE_DIR, { recursive: true })
   await appendFile(path.join(ADE_DIR, 'journal.jsonl'), JSON.stringify({ ts: now(), project: state.project?.dir, mission: state.mission?.id, ...event }) + '\n')
 }
@@ -829,7 +855,7 @@ async function research(questions) {
   if (rrole.family !== 'agy') { log('engine', `pesquisa: família ${rrole.family} não suportada (use Claude ou Gemini em Modelos); sigo sem pesquisa`, 'warn'); return null }
   log('engine', `agy (pesquisa, ${model})`)
   setLive({ source: 'agy', kind: 'thinking', text: 'pesquisando…' })
-  const r = await run('agy', [`--print=${prompt.replace(/"/g, "'")}`, '--output-format', 'json', '--model', model, '--json-schema', RESEARCH_SCHEMA, '--dangerously-skip-permissions'], { cwd: dir, timeoutMs: 5 * 60 * 1000 })
+  const r = await run('agy', [`--print=${prompt.replace(/"/g, "'")}`, '--output-format', 'json', '--model', model, '--json-schema', RESEARCH_SCHEMA, '--mode', 'plan', '--add-dir', dir, '--dangerously-skip-permissions'], { cwd: dir, timeoutMs: 5 * 60 * 1000 })
   setLive(null)
   m.cost.calls += 1
   try {
@@ -958,7 +984,7 @@ async function codeMap(dir, files, { maxFiles = 60, maxChars = 7000 } = {}) {
 // ---------- crítica do plano: quem vai implementar (1º Codex da cadeia de escrever) lê o plano antes do código ----------
 async function planCritic(plan) {
   const m = state.mission, dir = state.project.dir
-  const who = [...chainOf('impl'), ...chainOf('checker'), ...chainOf('plan')].find((w) => w.family === 'codex' && quotaAvailable('codex'))
+  const who = [...chainOf('impl'), ...chainOf('checker'), ...chainOf('plan')].find((w) => ['codex', 'agy'].includes(w.family) && quotaAvailable(w.family))
   if (!who) return null
   const model = who.model
   const prompt = [
@@ -970,15 +996,19 @@ async function planCritic(plan) {
     `Pedido do usuário: ${m.request}`, m.epic ? `Épico: ${m.epic.title}. ${m.epic.goal}` : '',
     '--- PLANO ---', JSON.stringify({ decisions: plan.decisions, stories: plan.stories }, null, 1).slice(0, 40000),
   ].filter(Boolean).join('\n')
-  log('engine', `codex (crítica do plano, ${model})`); setLive({ source: 'codex', kind: 'thinking', text: 'lendo o plano como quem vai implementar…' })
-  let last = null, usage = null
-  const r = await run('codex', ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${effortOf('checker')}`, '-C', dir, '-m', model, '--output-schema', PLANCRITIC_SCHEMA, '-'], { cwd: dir, stdin: prompt, onLine: (line) => { let ev; try { ev = JSON.parse(line) } catch { return } if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') last = ev.item.text; if (ev.type === 'turn.completed') usage = ev.usage } })
-  setLive(null); m.cost.calls += 1
-  if (usage) { m.cost.tokens_in += usage.input_tokens || 0; m.cost.tokens_out += usage.output_tokens || 0 }
-  let crit = null; try { crit = JSON.parse(last) } catch {}
-  journal({ type: 'model_call', family: 'codex', role: 'plan_critic', model, tokens_in: usage?.input_tokens || 0, tokens_out: usage?.output_tokens || 0, prompt_chars: prompt.length, verdict: crit?.verdict || null, issues: crit?.issues?.length || 0 }).catch(() => {})
+  let crit = null, r = { code: 0 }
+  if (who.family === 'agy') crit = await checkerAgy(prompt, model, effortOf('checker'), { schema: PLANCRITIC_SCHEMA, role: 'crítica do plano' })
+  else {
+    log('engine', `codex (crítica do plano, ${model})`); setLive({ source: 'codex', kind: 'thinking', text: 'lendo o plano como quem vai implementar…' })
+    let last = null, usage = null
+    r = await run('codex', ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${effortOf('checker')}`, '-C', dir, '-m', model, '--output-schema', PLANCRITIC_SCHEMA, '-'], { cwd: dir, stdin: prompt, onLine: (line) => { let ev; try { ev = JSON.parse(line) } catch { return } if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') last = ev.item.text; if (ev.type === 'turn.completed') usage = ev.usage } })
+    setLive(null); m.cost.calls += 1
+    if (usage) { m.cost.tokens_in += usage.input_tokens || 0; m.cost.tokens_out += usage.output_tokens || 0 }
+    try { crit = JSON.parse(last) } catch {}
+    journal({ type: 'model_call', family: 'codex', role: 'plan_critic', model, tokens_in: usage?.input_tokens || 0, cache_read: usage?.cached_input_tokens || 0, tokens_out: usage?.output_tokens || 0, prompt_chars: prompt.length, verdict: crit?.verdict || null, issues: crit?.issues?.length || 0 }).catch(() => {})
+  }
   if (!crit) { log('engine', `crítica do plano falhou (código ${r.code}); sigo com o plano como está`, 'warn'); return null }
-  log('codex', `plano ${crit.verdict === 'ready' ? 'executável' : 'precisa de detalhe'}: ${crit.summary}`, 'text')
+  log(who.family, `plano ${crit.verdict === 'ready' ? 'executável' : 'precisa de detalhe'}: ${crit.summary}`, 'text')
   m.plan_critic = { verdict: crit.verdict, summary: crit.summary, issues: crit.issues || [] }
   return crit
 }
@@ -1045,21 +1075,21 @@ async function checker(diff, tests, st) {
 }
 // Revisão no Antigravity (19/09, plano Google AI Ultra): Gemini Pro ou Claude via Google pela cota do Google, só leitura (--mode plan
 // com --add-dir, sem o qual o agy não enxerga o projeto). Prompt num arquivo ignorado pelo git: o diff não cabe na linha de comando do Windows.
-async function checkerAgy(prompt, model, effort) {
+async function checkerAgy(prompt, model, effort, { schema = REVIEW_SCHEMA, role = 'revisão' } = {}) {
   const m = state.mission, dir = state.project.dir, id = agyModel(model, effort)
   const rel = `${ATTACH_DIR}/review-${Date.now().toString(36)}.md`
   await mkdir(path.join(dir, ATTACH_DIR), { recursive: true }); await ensureIgnore(dir); await writeFile(path.join(dir, rel), prompt)
-  log('engine', `agy (revisão, ${id}) com saída estruturada`); setLive({ source: 'agy', kind: 'thinking', text: 'revisão: Antigravity lendo o diff (sem transmissão ao vivo)…' })
+  log('engine', `agy (${role}, ${id}) com saída estruturada`); setLive({ source: 'agy', kind: 'thinking', text: `${role}: Antigravity lendo (sem transmissão ao vivo)…` })
   const t0 = Date.now()
-  let r; try { r = await run('agy', [`--print=Leia o arquivo ${path.join(dir, rel).split(path.sep).join('/')} e faça a revisão pedida nele, respondendo no JSON exigido. Só leitura: não altere nem crie arquivo algum.`, '--output-format', 'json', '--model', id, '--mode', 'plan', '--add-dir', dir, '--json-schema', REVIEW_SCHEMA, '--dangerously-skip-permissions', '--print-timeout', '8m'], { cwd: dir, timeoutMs: 9 * 60 * 1000 }) }
+  let r; try { r = await run('agy', [`--print=Leia o arquivo ${path.join(dir, rel).split(path.sep).join('/')} e faça a revisão pedida nele, respondendo no JSON exigido. Só leitura: não altere nem crie arquivo algum.`, '--output-format', 'json', '--model', id, '--mode', 'plan', '--add-dir', dir, '--json-schema', schema, '--dangerously-skip-permissions', '--print-timeout', '8m'], { cwd: dir, timeoutMs: 9 * 60 * 1000 }) }
   finally { setLive(null); await rm(path.join(dir, rel), { force: true }).catch(() => {}) }
   m.cost.calls += 1
   let j = null; try { j = JSON.parse(r.out) } catch {}
   const u = j?.usage || {}; m.cost.tokens_in += u.input_tokens || 0; m.cost.tokens_out += u.output_tokens || 0
-  journal({ type: 'model_call', family: 'agy', role: 'revisão', model: id, effort, story: m.current, turns: j?.num_turns || 0, usd: 0, tokens_in: u.input_tokens || 0, tokens_out: u.output_tokens || 0, prompt_chars: prompt.length, wall_ms: Date.now() - t0 }).catch(() => {})
+  journal({ type: 'model_call', family: 'agy', role, model: id, effort, story: m.current, turns: j?.num_turns || 0, usd: 0, tokens_in: u.input_tokens || 0, tokens_out: u.output_tokens || 0, prompt_chars: prompt.length, wall_ms: Date.now() - t0 }).catch(() => {})
   const review = j?.structured_output
-  if (!review?.verdict) { log('engine', `agy (revisão) sem veredito (código ${r.code}, status ${j?.status ?? 'sem JSON'}): ${String(j?.response || r.err || '').slice(0, 240)}`, 'warn'); return null }
-  log('agy', `${review.verdict === 'approve' ? 'aprovou' : 'pediu mudanças'}: ${review.summary}`, 'text')
+  if (!review?.verdict) { log('engine', `agy (${role}) sem veredito (código ${r.code}, status ${j?.status ?? 'sem JSON'}): ${String(j?.response || r.err || '').slice(0, 240)}`, 'warn'); return null }
+  if (role === 'revisão') log('agy', `${review.verdict === 'approve' ? 'aprovou' : 'pediu mudanças'}: ${review.summary}`, 'text')
   return review
 }
 async function checkerCodex(prompt, model, effort) {
