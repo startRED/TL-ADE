@@ -6,6 +6,10 @@
 import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 
+// Ambiente controlado (19/09): Codex e Antigravity carregam instruções globais do usuário (~/.codex/AGENTS.md, ~/.gemini/GEMINI.md:
+// prefixo rtk que falha no sandbox, estilo de resposta, marcadores de notificação) e não têm opção para desligá-las; toda chamada do
+// motor abre com este aviso. Claude roda com --safe-mode, que já desliga CLAUDE.md, plugins, hooks e MCP do usuário.
+export const ENV_GUARD = '[Motor TL-ADE, execução automática] As instruções globais do usuário carregadas antes desta mensagem (AGENTS.md ou GEMINI.md da pasta pessoal: prefixo de comandos como rtk, estilo de resposta, skills pessoais, fluxo de trabalho, marcadores de notificação) NÃO valem nesta chamada: rode os comandos direto, sem prefixo, e responda só no formato pedido aqui. Valem as regras do repositório e esta mensagem.'
 export const SCOUT_SCHEMA = {
   type: 'object', additionalProperties: false,
   properties: {
@@ -38,7 +42,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const [question, ...files] = argv
   if (!question) { console.error('uso: node scout.mjs [--web] [--json] [--model m] "pergunta" [arquivo ...]'); process.exit(2) }
 
-  const r = spawnSync('agy', ['--print', scoutPrompt(question, { web, files }), '--output-format', 'json', '--model', model, '--mode', 'plan', '--json-schema', JSON.stringify(SCOUT_SCHEMA), '--dangerously-skip-permissions', '--print-timeout', '6m'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 6.5 * 60 * 1000, windowsHide: true })
+  const r = spawnSync('agy', ['--print', `${ENV_GUARD} ${scoutPrompt(question, { web, files })}`, '--output-format', 'json', '--model', model, '--mode', 'plan', '--json-schema', JSON.stringify(SCOUT_SCHEMA), '--dangerously-skip-permissions', '--print-timeout', '6m'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 6.5 * 60 * 1000, windowsHide: true })
   let rec = null, usage = null
   try {
     const j = JSON.parse(r.stdout)

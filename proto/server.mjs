@@ -3,7 +3,7 @@
 // prova vermelha -> implementação -> provas verdes -> portão visual -> revisão por outra família.
 // Sem durabilidade de verdade (estado em memória; journal só registra). Esse é o slice 1.
 
-import { SCOUT_SCHEMA, scoutPrompt } from './scout.mjs'
+import { SCOUT_SCHEMA, scoutPrompt, ENV_GUARD } from './scout.mjs'
 import { findSuites, runSuites, TOOLCHAINS } from './runners.mjs'
 import { laneCandidates, laneEngine, createLane, lanePatch, applyPatch, removeLane, LANES_DIR } from './lanes.mjs'
 import { chatWriteTurn, chatCommand, chatIntro, formatHistory, pendingProposal, PENDING_BLOCK, handleChatDecision, discardPending, pendingChatIds, pruneChatWorktrees } from './chat-changes.mjs'
@@ -282,7 +282,20 @@ function setStep(name, status, extra = {}) {
 }
 
 // ---------- processos ----------
+// Toda chamada de Codex e Antigravity abre com ENV_GUARD: os dois carregam instruções globais do usuário que não dá para desligar.
+function guardPrompt(cmd, args, stdin) {
+  if (cmd === 'agy') return { args: args.map((a) => a.startsWith('--print=') ? `--print=${ENV_GUARD} ${a.slice(8)}` : a), stdin }
+  if (cmd !== 'codex' || args[0] !== 'exec') return { args, stdin }
+  if (stdin != null) return { args, stdin: `${ENV_GUARD}
+
+${stdin}` }
+  const i = args.length - 1
+  return !args[i].startsWith('-') ? { args: [...args.slice(0, i), `${ENV_GUARD}
+
+${args[i]}`], stdin } : { args, stdin }
+}
 function run(cmd, args, { cwd, stdin, onLine, timeoutMs = 20 * 60 * 1000, env = {} } = {}) {
+  ({ args, stdin } = guardPrompt(cmd, args, stdin))
   return new Promise((resolve, reject) => {
     // shell:true no Windows concatena os argumentos sem aspas: qualquer argumento com espaço ou aspas
     // (mensagem de commit, prompt do agy, schema JSON) precisa de escape estilo MSVC aqui, uma vez só.
