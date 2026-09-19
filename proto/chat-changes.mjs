@@ -171,3 +171,64 @@ export async function pruneChatWorktrees(adeDir = ADE_DIR, keep = []) {
   }
   return candidates.map((entry) => entry.name)
 }
+
+function parseStatus(out) {
+  const statuses = new Map()
+  for (const record of out.split('\0')) {
+    if (!record) continue
+    const xy = record.slice(0, 2)
+    const filePath = record.slice(3)
+    const kind = xy === '??' || xy.includes('A')
+      ? 'created'
+      : xy.includes('D')
+        ? 'deleted'
+        : 'changed'
+    statuses.set(filePath, kind)
+  }
+  return statuses
+}
+
+function proposalGitError(result) {
+  const detail = result.err.trim().split(/\r?\n/)[0] || 'Falha ao executar o git.'
+  return codedError('git', `git falhou: ${detail}`)
+}
+
+export async function collectProposal(projectDir, wtPath) {
+  if (typeof projectDir !== 'string' || !projectDir || typeof wtPath !== 'string' || !wtPath) {
+    throw codedError('git', 'git falhou: Caminho do projeto ou da cópia inválido.')
+  }
+
+  const statusResult = await git([
+    'status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames', '--', '.', ...DIFF_EXCLUDES
+  ], { cwd: wtPath })
+  if (statusResult.code !== 0) throw proposalGitError(statusResult)
+  const kinds = parseStatus(statusResult.out)
+
+  const addResult = await git(['add', '-N', '--', '.'], { cwd: wtPath })
+  if (addResult.code !== 0) throw proposalGitError(addResult)
+
+  const patchResult = await git([
+    'diff', '--binary', '--no-renames', '--no-color', '--no-ext-diff', 'HEAD', '--', '.', ...DIFF_EXCLUDES
+  ], { cwd: wtPath })
+  if (patchResult.code !== 0) throw proposalGitError(patchResult)
+  if (!patchResult.out.trim()) return null
+
+  const namesResult = await git([
+    'diff', '--name-only', '-z', '--no-renames', 'HEAD', '--', '.', ...DIFF_EXCLUDES
+  ], { cwd: wtPath })
+  if (namesResult.code !== 0) throw proposalGitError(namesResult)
+
+  const files = []
+  for (const filePath of namesResult.out.split('\0')) {
+    if (!filePath) continue
+    const diffResult = await git([
+      'diff', '--binary', '--no-renames', '--no-color', '--no-ext-diff', 'HEAD', '--', `:(literal)${filePath}`
+    ], { cwd: wtPath })
+    if (diffResult.code !== 0) throw proposalGitError(diffResult)
+    files.push({ path: filePath, kind: kinds.get(filePath) ?? 'changed', diff: diffResult.out })
+  }
+
+  const headResult = await git(['rev-parse', 'HEAD'], { cwd: wtPath })
+  if (headResult.code !== 0) throw proposalGitError(headResult)
+  return { head: headResult.out.trim(), patch: patchResult.out, files }
+}

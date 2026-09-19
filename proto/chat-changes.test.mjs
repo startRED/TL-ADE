@@ -9,6 +9,7 @@ import {
   createChatWorktree,
   removeChatWorktree,
   pruneChatWorktrees,
+  collectProposal,
   WT_ROOT,
   ADE_DIR
 } from './chat-changes.mjs'
@@ -218,3 +219,75 @@ describe('chat-changes: cópia isolada (worktree)', () => {
     assert.deepEqual(emptyResult, [])
   })
 })
+
+describe('collectProposal', () => {
+  it('CA1: retorna lista ordenada com kind, diff de cada arquivo e head do commit base', async () => {
+    const repo = await makeRepo()
+    const id = newId()
+    const { path: wtPath, head } = await createChatWorktree(repo, id)
+    createdWorktrees.push({ repo, path: wtPath })
+
+    await fs.writeFile(path.join(wtPath, 'a.txt'), 'um\nmais\n')
+    await fs.rm(path.join(wtPath, 'b.txt'))
+    await fs.writeFile(path.join(wtPath, 'novo.txt'), 'oi\n')
+
+    const proposal = await collectProposal(repo, wtPath)
+    assert.ok(proposal)
+    assert.equal(proposal.head, head)
+    assert.ok(typeof proposal.patch === 'string' && proposal.patch.length > 0)
+    assert.deepEqual(
+      proposal.files.map((f) => [f.path, f.kind]),
+      [
+        ['a.txt', 'changed'],
+        ['b.txt', 'deleted'],
+        ['novo.txt', 'created']
+      ]
+    )
+    assert.ok(proposal.files[0].diff.length > 0)
+    assert.ok(proposal.files[1].diff.length > 0)
+    assert.match(proposal.files[2].diff, /\+oi/)
+  })
+
+  it('CA2: devolve null quando a cópia não tem nenhuma alteração', async () => {
+    const repo = await makeRepo()
+    const id = newId()
+    const { path: wtPath } = await createChatWorktree(repo, id)
+    createdWorktrees.push({ repo, path: wtPath })
+
+    const proposal = await collectProposal(repo, wtPath)
+    assert.equal(proposal, null)
+  })
+
+  it('CA3: devolve null quando as alterações estão apenas em pastas excluídas como node_modules', async () => {
+    const repo = await makeRepo()
+    const id = newId()
+    const { path: wtPath } = await createChatWorktree(repo, id)
+    createdWorktrees.push({ repo, path: wtPath })
+
+    await fs.mkdir(path.join(wtPath, 'node_modules'), { recursive: true })
+    await fs.writeFile(path.join(wtPath, 'node_modules', 'x.js'), 'x')
+
+    const proposal = await collectProposal(repo, wtPath)
+    assert.equal(proposal, null)
+  })
+
+  it('CA4: suporta arquivos criados com espaço no nome e não altera o status do repositório', async () => {
+    const repo = await makeRepo()
+    const id = newId()
+    const { path: wtPath } = await createChatWorktree(repo, id)
+    createdWorktrees.push({ repo, path: wtPath })
+
+    await fs.writeFile(path.join(wtPath, 'nome com espaço.txt'), 'oi\n')
+
+    const proposal = await collectProposal(repo, wtPath)
+    assert.ok(proposal)
+    const file = proposal.files.find((f) => f.path === 'nome com espaço.txt')
+    assert.ok(file)
+    assert.equal(file.kind, 'created')
+    assert.match(file.diff, /\+oi/)
+
+    const statusRes = await gitCmd(['status', '--porcelain'], repo)
+    assert.equal(statusRes.stdout.trim(), '')
+  })
+})
+
