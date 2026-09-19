@@ -2166,7 +2166,8 @@ http.createServer(async (req, res) => {
   await loadCatalog()
   await readQuota()
   await loadSavedMissions()
-  if (!activeDir) { const first = G.recent[0] || path.join(ROOT, 'example'); const e0 = engineFor(first); if (!e0.project) e0.project = await discover(first); activeDir = path.resolve(first) }
+  // pasta .ade nova: algo acima pode ter chamado currentEngine() e criado o motor 'sem-projeto'; ele não conta como projeto aberto
+  if (!engines.get(activeDir)?.project) { engines.delete('sem-projeto'); const first = G.recent[0] || path.join(ROOT, 'example'); const e0 = engineFor(first); if (!e0.project) e0.project = await discover(first); activeDir = path.resolve(first) }
   const e = engines.get(activeDir)
   console.log(`TL-ADE: http://127.0.0.1:${PORT}  projeto: ${e.project.dir}  skills no catálogo: ${G.catalog.length}  missões retomáveis: ${[...engines.values()].filter((x) => x.mission).length}`)
 })
