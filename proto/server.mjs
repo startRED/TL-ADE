@@ -1888,18 +1888,20 @@ const diffFiles = (diff, p = state.project) => [...new Set([...String(diff).matc
 const IS_TEST_FILE = (f, st) => f === st.test_file || /(^|\/)(tests?|__tests__|specs?|fixtures|__fixtures__|__mocks__)\//i.test(f) || /\.(test|spec)\.[cm]?[jt]sx?$/i.test(f) || /(^|\/)(test_[^/]+|[^/]+_test)\.py$/i.test(f)
 // devolve 'red' (provas novas falham sem o código novo), 'green' (passam sem ele: não provam nada) ou 'skip' (não deu para conferir)
 async function redWithoutCode(st, diff, fresh) {
-  const dir = state.project.dir
-  if (st.maker_committed) return 'skip' // quem escreve commitou: não há o que guardar de lado
+  const root = state.project.root || state.project.dir
+  if (st.maker_committed || !st.base) return 'skip' // quem escreve commitou: não há o que guardar de lado
   const code = [...new Set([...diff.matchAll(/^diff --git a\/(\S+)/gm)].map((x) => x[1]))].filter((f) => !IS_TEST_FILE(f, st))
   if (!code.length) return 'skip'
-  await run('git', ['reset', '-q'], { cwd: dir }) // tira a "intenção de adicionar" do índice (vem do gitDiff); com ela o stash recusa ("not uptodate")
-  const put = await run('git', ['stash', 'push', '-u', '-q', '-m', 'ade-prova-vermelha', '--', ...code], { cwd: dir })
-  if (put.code !== 0) { log('engine', `não consegui guardar o código de lado para conferir a prova vermelha (${(put.err || put.out).trim().split('\n')[0]}); sigo sem essa conferência`, 'warn'); return 'skip' }
+  // Código novo guardado em memória e arquivos de volta à versão da base, sem git stash: o stash é um só para todas as worktrees
+  // do repositório, e a parte e o trilho que conferiam ao mesmo tempo devolviam o código um do outro (s1 recebeu o arquivo da s2).
+  const saved = await Promise.all(code.map(async (f) => [path.join(root, f), await readFile(path.join(root, f)).catch(() => null)]))
   let res = null
-  try { res = (st.test_file && await runTests(state.project, { only: st.test_file })) || await runTests(state.project) } finally {
-    // numa pausa pedida no meio, run() recusa rodar o pop; a parte recomeça do zero de qualquer jeito e a entrada fica em `git stash list`
-    const back = await run('git', ['stash', 'pop', '-q'], { cwd: dir }).catch(() => ({ code: -1, err: 'pausa' }))
-    if (back.code !== 0 && back.err !== 'pausa') { log('engine', 'NÃO consegui devolver o código guardado de lado; ele está em `git stash list` com o nome ade-prova-vermelha. Rode `git stash pop` na pasta do projeto', 'error'); throw new Error('git stash pop falhou depois da conferência de prova vermelha') }
+  try {
+    for (const f of code) if ((await run('git', ['restore', `--source=${st.base}`, '--worktree', '--', f], { cwd: root })).code !== 0) await rm(path.join(root, f), { force: true }) // arquivo novo: sai
+    res = (st.test_file && await runTests(state.project, { only: st.test_file })) || await runTests(state.project)
+  } finally {
+    // devolve sem run(): numa pausa pedida no meio, run() recusa rodar, e o código da parte não pode ficar de fora
+    for (const [abs, body] of saved) await (body == null ? rm(abs, { force: true }) : writeFile(abs, body)).catch(() => {})
   }
   if (!res || res.timeout) return 'skip'
   return res.ok ? 'green' : 'red' // arquivo de prova que nem carrega sem o código conta como vermelho
