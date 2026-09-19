@@ -634,12 +634,15 @@ async function makerCommitted(dir, base) {
 async function storyDiff(st) {
   const dir = state.project.dir
   if (st.base && !st.maker_committed && (await makerCommitted(dir, st.base))) { st.maker_committed = true; log('engine', 'quem escreve fez commit por conta própria, contra a instrução; o trabalho continua visível porque o diff da parte é contado desde o começo dela. O commit dele fica; o motor não commita de novo o que já entrou', 'warn') }
-  return gitDiff(dir, st.maker_committed ? st.base : null)
+  // a pasta do motor (proto/) fica fora do diff no dogfood da ADE real; mas se o contrato da parte mira nela, ela É o trabalho
+  const self = path.relative(dir, ROOT).split(path.sep).join('/')
+  const keepOwn = (st.scope_paths || []).some((g) => String(g).replace(/^\.\//, '').startsWith(self + '/') || String(g) === self)
+  return gitDiff(dir, st.maker_committed ? st.base : null, keepOwn)
 }
-async function gitDiff(dir, base = null) {
+async function gitDiff(dir, base = null, keepOwn = false) {
   const a = await run('git', ['add', '-N', '--', '.'], { cwd: dir }) // ignorados pelo .gitignore ficam fora sozinhos; pathspec de exclusão aqui faz o git reclamar
-  // a pasta do próprio motor nunca faz parte do diff de uma missão (dogfood: a demo vive dentro do repositório que ela desenvolve)
-  const self = path.relative(dir, ROOT).split(path.sep).join('/'), own = self && !self.startsWith('..') && !path.isAbsolute(self) ? [`:(exclude)${self}`] : []
+  // a pasta do próprio motor nunca faz parte do diff de uma missão (dogfood: a demo vive dentro do repositório que ela desenvolve), salvo quando a parte é sobre ela
+  const self = path.relative(dir, ROOT).split(path.sep).join('/'), own = !keepOwn && self && !self.startsWith('..') && !path.isAbsolute(self) ? [`:(exclude)${self}`] : []
   const d = await run('git', ['diff', ...(base ? [base] : []), '--', '.', ...DIFF_EXCLUDES, ...own], { cwd: dir })
   if (a.code !== 0 || d.code !== 0) throw new Error(`git diff falhou: ${(a.err || d.err).trim().split('\n')[0]}`)
   return d.out
