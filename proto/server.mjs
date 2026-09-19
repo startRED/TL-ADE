@@ -1815,7 +1815,9 @@ async function runStories() {
     if (m.program && m.epic) { // fim de um épico: quem fecha é a fila
       const ep = m.program.epics.find((x) => x.id === m.epic.id) || m.epic; if (ep.state === 'running') closeEpic(ep, m.stories)
       m.current = null; m.epic = null; broadcast(); await persistMission().catch(() => {})
-      if (m.program.current != null && m.program.epics.some((e) => ['queued', 'incomplete'].includes(e.state))) return runProgram()
+      // quem fecha o programa (épicos restantes ou missão pronta) é runProgram; missão retomada no meio do último épico entra por aqui
+      // sem runProgram por cima, e o 'ok' deixava a missão "rodando" para sempre (19/09, missão do chat)
+      if (m.program.current != null) return runProgram()
       return 'ok'
     }
     m.state = 'complete'; m.reason = null; m.current = null
