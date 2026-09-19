@@ -828,7 +828,7 @@ async function research(questions) {
   try {
     const j = JSON.parse(r.out)
     m.cost.tokens_in += j.usage?.input_tokens || 0; m.cost.tokens_out += j.usage?.output_tokens || 0
-    const parsed = typeof j.response === 'string' ? JSON.parse(j.response) : j.response
+    const parsed = j.structured_output || (typeof j.response === 'string' ? JSON.parse(j.response) : j.response) // agy 1.2.x: objeto do schema em structured_output
     for (const f of parsed.findings || []) log('agy', `${f.question}: ${f.answer} ${f.sources?.length ? `(${f.sources.join(', ')})` : ''}`, 'text')
     return parsed
   } catch { log('engine', `agy não devolveu JSON: ${(r.out || r.err).slice(0, 300)}`, 'error'); return null }

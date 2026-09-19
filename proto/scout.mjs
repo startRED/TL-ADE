@@ -42,14 +42,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const [question, ...files] = argv
   if (!question) { console.error('uso: node scout.mjs [--web] [--json] [--model m] "pergunta" [arquivo ...]'); process.exit(2) }
 
-  const r = spawnSync('agy', ['--print', `${ENV_GUARD} ${scoutPrompt(question, { web, files })}`, '--output-format', 'json', '--model', model, '--mode', 'plan', '--json-schema', JSON.stringify(SCOUT_SCHEMA), '--dangerously-skip-permissions', '--print-timeout', '6m'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 6.5 * 60 * 1000, windowsHide: true })
+  const r = spawnSync('agy', ['--print', `${ENV_GUARD} ${scoutPrompt(question, { web, files })}`, '--output-format', 'json', '--model', model, '--mode', 'plan', '--json-schema', JSON.stringify(SCOUT_SCHEMA), '--dangerously-skip-permissions', '--add-dir', process.cwd(), '--print-timeout', '6m'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 6.5 * 60 * 1000, windowsHide: true })
   let rec = null, usage = null
   try {
     const j = JSON.parse(r.stdout)
     usage = j.usage || null
     // o agy nem sempre respeita o schema à risca: a resposta pode vir dentro de um bloco ```json
     const raw = typeof j.response === 'string' ? j.response.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '') : null
-    rec = raw != null ? JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1)) : j.response
+    // agy 1.2.x devolve o objeto do schema em structured_output; response vem em prosa (19/09: planejamento do épico 3 ficou sem recibo)
+    rec = j.structured_output || (raw != null ? JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1)) : j.response)
   } catch {}
   if (!rec?.summary) { console.error(`batedor sem resposta (código ${r.status}): ${(r.stderr || r.stdout || '').slice(0, 400)}`); process.exit(1) }
   if (asJson) { console.log(JSON.stringify({ ...rec, usage, model })); process.exit(0) }
