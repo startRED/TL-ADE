@@ -27,7 +27,7 @@
       "input_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     }
   ],
-  "requested_action": "verify",
+  "requested_action": "approve",
   "sources": [
     "file:docs/specs/evidence-review-contracts.md#L1-L200"
   ],
@@ -74,6 +74,5 @@
     ],
     "next_action": "verify",
     "notes": "Trabalho pronto e verificado localmente em conformidade com as regras de TDD."
-  },
-  "__unexpected__": true
+  }
 }

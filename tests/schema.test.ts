@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, test } from 'vitest'
 import { validate, validateSupported } from '../src/schema/index.js'
+import { parseClaudeOutput, parseUnitResult } from '../src/adapters/claude/parse.js'
 
 const SCHEMA_NAMES = [
   'journal-event',
@@ -54,9 +55,35 @@ describe('published schemas', () => {
     }
   })
 
+  const LEGACY_V1_UNIT_RESULT = {
+    format_version: 1,
+    story_id: 'ADE-S1',
+    state: 'done',
+    phase: 'green',
+    round: 1,
+    tree_before: '0123456789abcdef',
+    tree_after: 'fedcba9876543210',
+    eval_records: [
+      {
+        id: 'E1',
+        phase: 'red',
+        passed: false,
+        red_reason: 'assertion_failed',
+      },
+    ],
+    gate_records: [],
+    passes: true,
+    reason: 'eval verde após implementação',
+    sources: ['0123456789abcdef'],
+  }
+
+  const LEGACY_V1_INVALID_UNIT_RESULT = {
+    ...LEGACY_V1_UNIT_RESULT,
+    __unexpected__: true,
+  }
+
   test('CA1: validateSupported accepts format_version 1 as valid, legacy (current: false)', () => {
-    const validUnitResult = loadFixture('unit-result', 'valid')
-    const unitResult = validateSupported('unit-result', validUnitResult)
+    const unitResult = validateSupported('unit-result', LEGACY_V1_UNIT_RESULT)
     expect(unitResult.valid).toBe(true)
     expect(unitResult.errors).toEqual([])
     expect(unitResult.formatVersion).toBe(1)
@@ -115,7 +142,7 @@ describe('published schemas', () => {
   })
 
   test('CA4: validateSupported refuses legacy document with __unexpected__ field pointing to /__unexpected__ and code 4', () => {
-    const invalidUnitResult = loadFixture('unit-result', 'invalid')
+    const invalidUnitResult = LEGACY_V1_INVALID_UNIT_RESULT
     const unitRes = validateSupported('unit-result', invalidUnitResult)
     expect(unitRes.valid).toBe(false)
     expect(unitRes.current).toBe(false)
@@ -139,4 +166,121 @@ describe('published schemas', () => {
   })
 
 })
+
+describe('unit-result v2 contract evolution', () => {
+  function readTranscriptStdout(name: string): string {
+    return readFileSync(
+      new URL(`../fixtures/transcripts/claude/${name}/stdout.json`, import.meta.url),
+      'utf8',
+    )
+  }
+
+  test('CA1: current fixture and valid Claude transcript return format_version 2, ready_for_verification, verify, cited: true, and no approval property', () => {
+    const fixture = loadFixture('unit-result', 'valid') as Record<string, unknown>
+    const fixtureVal = validate('unit-result', fixture)
+    expect(fixtureVal.valid, `valid fixture should be valid: ${JSON.stringify(fixtureVal.errors)}`).toBe(true)
+    expect(fixture.format_version).toBe(2)
+    expect(fixture.state).toBe('ready_for_verification')
+    expect(fixture.requested_action).toBe('verify')
+    expect(fixture).not.toHaveProperty('passes')
+    expect(fixture).not.toHaveProperty('approved')
+    expect(fixture).not.toHaveProperty('reason')
+
+    const transcriptStdout = readTranscriptStdout('ok_with_structured_output')
+    const parsedClaude = parseClaudeOutput(transcriptStdout)
+    expect(parsedClaude.error).toBeNull()
+    const parsedResult = parseUnitResult(parsedClaude.envelope)
+    expect(parsedResult.valid).toBe(true)
+    expect(parsedResult.cited).toBe(true)
+    const unitResult = parsedResult.unit_result as Record<string, unknown>
+    expect(unitResult.format_version).toBe(2)
+    expect(unitResult.state).toBe('ready_for_verification')
+    expect(unitResult.requested_action).toBe('verify')
+    expect(unitResult).not.toHaveProperty('passes')
+    expect(unitResult).not.toHaveProperty('approved')
+    expect(unitResult).not.toHaveProperty('reason')
+
+    const withReason = { ...fixture, reason: 'narrativa legada não permitida na v2' }
+    const resReason = validate('unit-result', withReason)
+    expect(resReason.valid).toBe(false)
+  })
+
+  test('CA2: valid unit-result v1 is read with current: false by validateSupported and rejected by validate as current contract', () => {
+    const v1Doc = {
+      format_version: 1,
+      story_id: 'ADE-S1',
+      state: 'done',
+      phase: 'green',
+      round: 1,
+      tree_before: '0123456789abcdef',
+      tree_after: 'fedcba9876543210',
+      eval_records: [
+        {
+          id: 'E1',
+          phase: 'red',
+          passed: false,
+          red_reason: 'assertion_failed',
+        },
+      ],
+      gate_records: [],
+      passes: true,
+      reason: 'eval verde após implementação',
+      sources: ['0123456789abcdef'],
+    }
+
+    const supportedRes = validateSupported('unit-result', v1Doc)
+    expect(supportedRes.valid).toBe(true)
+    expect(supportedRes.formatVersion).toBe(1)
+    expect(supportedRes.current).toBe(false)
+    expect(supportedRes.errors).toEqual([])
+
+    const currentRes = validate('unit-result', v1Doc)
+    expect(currentRes.valid).toBe(false)
+    if (currentRes.valid) return
+    expect(currentRes.code).toBe(4)
+    expect(currentRes.errors.length).toBeGreaterThan(0)
+  })
+
+  test('CA3: current fixture with requested_action approve is rejected pointing to /requested_action', () => {
+    const fixture = loadFixture('unit-result', 'valid') as Record<string, unknown>
+    const mutated = { ...fixture, requested_action: 'approve' }
+    const result = validate('unit-result', mutated)
+    expect(result.valid).toBe(false)
+    if (result.valid) return
+    expect(result.errors.some((e) => e.path === '/requested_action')).toBe(true)
+  })
+
+  test('CA4: claim without evidence_refs or response without contract_revision is rejected pointing to missing field', () => {
+    const fixture = loadFixture('unit-result', 'valid') as Record<string, any>
+
+    // 1. Sem contract_revision
+    const withoutContractRevision = { ...fixture }
+    delete withoutContractRevision.contract_revision
+    const resNoContract = validate('unit-result', withoutContractRevision)
+    expect(resNoContract.valid).toBe(false)
+    if (!resNoContract.valid) {
+      expect(
+        resNoContract.errors.some(
+          (e) => e.path.includes('contract_revision') || e.message.includes('contract_revision'),
+        ),
+      ).toBe(true)
+    }
+
+    // 2. Claim sem evidence_refs
+    const withoutEvidenceRefs = JSON.parse(JSON.stringify(fixture))
+    if (withoutEvidenceRefs.handoff?.claims?.[0]) {
+      delete withoutEvidenceRefs.handoff.claims[0].evidence_refs
+    }
+    const resNoEvidence = validate('unit-result', withoutEvidenceRefs)
+    expect(resNoEvidence.valid).toBe(false)
+    if (!resNoEvidence.valid) {
+      expect(
+        resNoEvidence.errors.some(
+          (e) => e.path.includes('evidence_refs') || e.message.includes('evidence_refs'),
+        ),
+      ).toBe(true)
+    }
+  })
+})
+
 

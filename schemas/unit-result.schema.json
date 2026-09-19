@@ -4,35 +4,266 @@
   "title": "unit-result",
   "type": "object",
   "additionalProperties": false,
-  "required": ["format_version", "story_id", "state", "phase", "round", "tree_before", "tree_after", "eval_records", "gate_records", "passes", "reason", "sources"],
+  "required": [
+    "format_version",
+    "contract_revision",
+    "input_revision",
+    "story_id",
+    "state",
+    "phase",
+    "round",
+    "tree_before",
+    "tree_after",
+    "eval_records",
+    "gate_records",
+    "evidence",
+    "requested_action",
+    "sources",
+    "handoff"
+  ],
+  "definitions": {
+    "typedRef": {
+      "type": "string",
+      "pattern": "^(eval:[A-Za-z0-9._-]+|gate:[A-Za-z0-9._-]+|artifact:(?!/)(?![A-Za-z]:)(?!\\.\\.(?:/|$))(?!.*(?:/|^)\\.\\.(?:/|$))[A-Za-z0-9._/-]+|source:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}|file:(?!/)(?![A-Za-z]:)(?!\\.\\.(?:/|$))(?!.*(?:/|^)\\.\\.(?:/|$))[A-Za-z0-9._/-]+#L[1-9][0-9]*-L[1-9][0-9]*|trace:[A-Za-z0-9._-]+)$"
+    }
+  },
   "properties": {
-    "format_version": { "type": "integer", "minimum": 1 },
-    "story_id": { "type": "string" },
-    "state": { "type": "string" },
-    "phase": { "type": "string" },
-    "round": { "type": "integer" },
-    "tree_before": { "type": "string" },
-    "tree_after": { "type": "string" },
+    "format_version": {
+      "type": "integer",
+      "const": 2
+    },
+    "contract_revision": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "input_revision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tree", "digest"],
+      "properties": {
+        "tree": {
+          "type": "string",
+          "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "story_id": {
+      "type": "string"
+    },
+    "state": {
+      "type": "string",
+      "enum": ["ready_for_verification", "failed", "parked"]
+    },
+    "phase": {
+      "type": "string",
+      "enum": ["red", "make", "green", "gate"]
+    },
+    "round": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "tree_before": {
+      "type": "string"
+    },
+    "tree_after": {
+      "type": "string"
+    },
     "eval_records": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "phase", "passed"],
+        "required": ["id", "phase", "passed", "result_ref"],
         "properties": {
-          "id": { "type": "string" },
-          "phase": { "type": "string" },
-          "passed": { "type": "boolean" },
-          "red_reason": { "type": "string" }
+          "id": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string",
+            "enum": ["red", "green"]
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "result_ref": {
+            "$ref": "#/definitions/typedRef"
+          },
+          "red_reason": {
+            "type": "string"
+          }
         }
       }
     },
     "gate_records": {
       "type": "array",
-      "items": { "type": "object", "additionalProperties": false }
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "passed", "result_ref"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "result_ref": {
+            "$ref": "#/definitions/typedRef"
+          }
+        }
+      }
     },
-    "passes": { "type": "boolean" },
-    "reason": { "type": "string" },
-    "sources": { "type": "array", "items": { "type": "string" } }
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["criterion", "result_ref", "input_digest"],
+        "properties": {
+          "criterion": {
+            "type": "string"
+          },
+          "result_ref": {
+            "$ref": "#/definitions/typedRef"
+          },
+          "input_digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "requested_action": {
+      "type": "string",
+      "enum": ["verify", "rework", "decide"]
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/typedRef"
+      }
+    },
+    "handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claims",
+        "unknowns",
+        "questions_for_owner",
+        "deltas",
+        "next_action",
+        "notes"
+      ],
+      "properties": {
+        "claims": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "statement", "evidence_refs", "sources"],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "statement": {
+                "type": "string"
+              },
+              "evidence_refs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/typedRef"
+                }
+              },
+              "sources": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/typedRef"
+                }
+              }
+            }
+          }
+        },
+        "unknowns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "question"],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "question": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "questions_for_owner": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "question", "options"],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "question": {
+                "type": "string"
+              },
+              "options": {
+                "type": "array",
+                "minItems": 2,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["id", "label"],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "deltas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "ref"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["added", "changed", "removed"]
+              },
+              "ref": {
+                "$ref": "#/definitions/typedRef"
+              }
+            }
+          }
+        },
+        "next_action": {
+          "type": "string",
+          "enum": ["verify", "rework", "decide"]
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "commit": {
+      "type": "string"
+    }
   }
 }

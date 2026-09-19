@@ -36,9 +36,6 @@
       {
         "id": "claim-1",
         "statement": "Contratos documentados com suporte a entradas e saídas tipadas",
-        "evidence_refs": [
-          "eval:E1"
-        ],
         "sources": [
           "file:docs/specs/evidence-review-contracts.md#L1-L200"
         ]
@@ -74,6 +71,5 @@
     ],
     "next_action": "verify",
     "notes": "Trabalho pronto e verificado localmente em conformidade com as regras de TDD."
-  },
-  "__unexpected__": true
+  }
 }

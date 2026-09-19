@@ -1,23 +1,78 @@
 {
-  "format_version": 1,
-  "story_id": "ADE-S1",
-  "state": "done",
+  "format_version": 2,
+  "contract_revision": "sha256:a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0",
+  "input_revision": {
+    "tree": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+    "digest": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+  },
+  "story_id": "ADE-S2",
+  "state": "ready_for_verification",
   "phase": "green",
   "round": 1,
-  "tree_before": "0123456789abcdef",
-  "tree_after": "fedcba9876543210",
+  "tree_before": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+  "tree_after": "fedcba9876543210fedcba9876543210fedcba98",
   "eval_records": [
     {
       "id": "E1",
-      "phase": "red",
-      "passed": false,
-      "red_reason": "assertion_failed"
+      "phase": "green",
+      "passed": true,
+      "result_ref": "eval:E1"
     }
   ],
   "gate_records": [],
-  "passes": true,
-  "reason": "eval verde após implementação",
+  "evidence": [
+    {
+      "criterion": "CA1",
+      "result_ref": "eval:E1",
+      "input_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "requested_action": "verify",
   "sources": [
-    "0123456789abcdef"
-  ]
+    "file:docs/specs/evidence-review-contracts.md#L1-L200"
+  ],
+  "handoff": {
+    "claims": [
+      {
+        "id": "claim-1",
+        "statement": "Contratos documentados com suporte a entradas e saídas tipadas",
+        "evidence_refs": [
+          "eval:E1"
+        ],
+        "sources": [
+          "file:docs/specs/evidence-review-contracts.md#L1-L200"
+        ]
+      }
+    ],
+    "unknowns": [
+      {
+        "id": "U1",
+        "question": "Qual a latência média aceitável para validação de revisão pelo Checker?"
+      }
+    ],
+    "questions_for_owner": [
+      {
+        "id": "Q1",
+        "question": "Deseja habilitar modo estrito para limites de caracteres?",
+        "options": [
+          {
+            "id": "opt-yes",
+            "label": "Sim, rejeitar com código 4"
+          },
+          {
+            "id": "opt-warn",
+            "label": "Não, emitir apenas alerta"
+          }
+        ]
+      }
+    ],
+    "deltas": [
+      {
+        "kind": "added",
+        "ref": "file:docs/specs/evidence-review-contracts.md#L1-L200"
+      }
+    ],
+    "next_action": "verify",
+    "notes": "Trabalho pronto e verificado localmente em conformidade com as regras de TDD."
+  }
 }

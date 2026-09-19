@@ -141,8 +141,33 @@ describe('claude parse', () => {
     const okUnitResult = okResult.unit_result as Record<string, unknown>
     expect(okUnitResult.story_id).toBe('rec-ok')
     expect(validate('unit-result', okUnitResult).valid).toBe(true)
-    // sources:[] no transcript gravado -> cited nunca é true sem fontes, mesmo com resultado válido.
-    expect(okResult.cited).toBe(false)
+    expect(okUnitResult.format_version).toBe(2)
+    expect(okUnitResult.state).toBe('ready_for_verification')
+    expect(okUnitResult.requested_action).toBe('verify')
+    expect(okUnitResult).not.toHaveProperty('passes')
+    expect(okUnitResult).not.toHaveProperty('approved')
+    expect(okUnitResult).not.toHaveProperty('reason')
+    expect(okResult.cited).toBe(true)
+
+    const legacyEnvelope = {
+      structured_output: {
+        format_version: 1,
+        story_id: 'rec-legacy',
+        state: 'done',
+        phase: 'make',
+        round: 1,
+        tree_before: '0',
+        tree_after: '0',
+        eval_records: [],
+        gate_records: [],
+        passes: true,
+        reason: 'gravacao',
+        sources: [],
+      },
+    }
+    const legacyResult = parseUnitResult(legacyEnvelope)
+    expect(legacyResult.valid).toBe(false)
+    expect(legacyResult.errors.length).toBeGreaterThan(0)
 
     const okUsage = parseUsage(okParsed.envelope as Record<string, unknown>)
     expect(okUsage.cost_source).toBe('reported')
@@ -324,9 +349,14 @@ describe('claude adapter dispatch', () => {
     expect(result.exit_code).toBe(0)
     expect(result.envelope_error).toBeNull()
     expect(result.valid).toBe(true)
-    expect(result.cited).toBe(false)
-    expect((result.unit_result as Record<string, unknown>).story_id).toBe('rec-ok')
-    expect(validate('unit-result', result.unit_result as object).valid).toBe(true)
+    expect(result.cited).toBe(true)
+    const unitRes = result.unit_result as Record<string, unknown>
+    expect(unitRes.story_id).toBe('rec-ok')
+    expect(unitRes.format_version).toBe(2)
+    expect(unitRes.state).toBe('ready_for_verification')
+    expect(unitRes.requested_action).toBe('verify')
+    expect(unitRes).not.toHaveProperty('passes')
+    expect(validate('unit-result', unitRes).valid).toBe(true)
     expect(result.usage.cost_source).toBe('reported')
     expect(result.usage.cost_usd).toBe(0.058924000000000004)
 
