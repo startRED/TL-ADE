@@ -604,16 +604,13 @@ function selectSkills(intent) {
   return out
 }
 const SKILLS_MARK = '\n\n=== SKILLS ATIVAS'
-// O prompt vai inteiro em todo passo da IA: skill longa entra só com o começo (princípios); o resto fica no arquivo.
-const SKILL_CHARS = 2400
+// Skills vão inteiras (Erick, 19/09): são o padrão de qualidade de cada papel.
 function skillsBlock(selected) {
   if (!selected.length) return ''
   return '\n\n=== SKILLS ATIVAS (siga-as; são o padrão de qualidade deste projeto) ===\n' + selected.map((s) => {
     const c = state.catalog.find((x) => x.id === s.id)
     const body = c.body.replace(/^---\n[\s\S]*?\n---\n/, '')
-    if (body.length <= SKILL_CHARS) return `\n--- skill: ${s.id} ---\n${body}`
-    const cut = body.slice(0, SKILL_CHARS), end = Math.max(cut.lastIndexOf('\n## '), cut.lastIndexOf('\n\n'))
-    return `\n--- skill: ${s.id} (começo; a skill inteira está em ${c.path}, leia só se precisar) ---\n${end > SKILL_CHARS / 2 ? cut.slice(0, end) : cut}`
+    return `\n--- skill: ${s.id} ---\n${body}`
   }).join('\n')
 }
 
