@@ -63,14 +63,14 @@ async function plannerCall(who, opts) {
   const rest = chainOf(who.key).filter((w) => !(w.family === who.family && w.model === who.model))
   return withChain(who.key, { list: [who, ...rest] }, (w) => plannerOnce(w, opts))
 }
-async function plannerOnce(who, { role, prompt, schema, maxTurns }) {
+async function plannerOnce(who, { role, prompt, schema, maxTurns, timeoutMs = 30 * 60 * 1000 }) {
   if (who.family === 'codex') {
     const m = state.mission, dir = state.project.dir
     const file = path.join(ADE_DIR, 'schemas', createHash('sha1').update(JSON.stringify(schema)).digest('hex').slice(0, 12) + '.json')
     await mkdir(path.dirname(file), { recursive: true }); if (!(await exists(file))) await writeFile(file, JSON.stringify(schema))
     log('engine', `codex (${role}, ${who.model}, esforço ${who.effort}) com saída estruturada`); setLive({ source: 'codex', kind: 'thinking', text: `${role}: lendo o projeto…` })
     let last = null, usage = null; const t0 = Date.now()
-    const r = await run('codex', ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${who.effort}`, '-C', dir, '-m', who.model, '--output-schema', file, '-'], { cwd: dir, stdin: prompt, timeoutMs: 30 * 60 * 1000, onLine: (line) => {
+    const r = await run('codex', ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${who.effort}`, '-C', dir, '-m', who.model, '--output-schema', file, '-'], { cwd: dir, stdin: prompt, timeoutMs, onLine: (line) => {
       let ev; try { ev = JSON.parse(line) } catch { return }
       if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') last = ev.item.text
       if (ev.type === 'item.started' && ev.item?.type === 'command_execution') setLive({ source: 'codex', kind: 'tool', text: ev.item.command || '' })
@@ -104,7 +104,7 @@ const DEFAULT_SETTINGS = {
   // O motor usa o primeiro da cadeia cuja família tem cota; cota esgotada ou chamada que falhou pula para o próximo em vez de pausar.
   // Quem escreve nunca é da empresa de quem revisa (filtrado por chamada). Claude é a cota mais curta: fica de reserva onde há substituto.
   chains: {
-    epics: [{ family: 'codex', model: 'gpt-5.6-sol', effort: 'xhigh' }, { family: 'claude', model: 'fable', effort: 'high' }], // Erick: Sol no plano complexo; roda 1 vez por missão, xhigh (AA 44) por +46% do custo do high
+    epics: [{ family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'claude', model: 'fable', effort: 'high' }], // Erick: Sol no plano complexo; roda 1 vez por versão; high: em xhigh a divisão da v1 passou 30 min sem entregar (19/09)
     plan: [{ family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'medium' }], // Sol high: AA 42 por US$ 0,81; o Astra custou mais que tudo o resto no 1º épico medido
     // 19/09 (Erick): cada empresa num papel, e quem escreve nunca revisa. O Gemini 3.8 Flash (cota do Google livre) fica só com o mais
     // pesado, escrever código (Sol leu ~1,2M tokens por parte); o Codex planeja e revisa o Flash; o Claude entra na escada e como reserva.
@@ -999,7 +999,9 @@ async function planCritic(plan) {
     'O achado MAIS importante: para cada critério de aceite, todo valor que a story precisa produzir, calcular, gravar ou exibir cuja ORIGEM o plano não nomeia (parâmetro, campo de qual arquivo, decisão anterior), e toda decisão que quem implementa teria de inventar. Confira também: critério que não é observável de fora ou que só repete o pedido; critério sem exemplo concreto; story que depende de um comportamento de outra parte do sistema que nenhuma decision, ADR ou arquivo do projeto registra (suposição escondida: mande declarar); e, se o projeto tem AGENTS.md ou CLAUDE.md, qualquer passo do plano que viole uma proibição ou convenção escrita ali (leia o arquivo).',
     'Só liste o que BLOQUEIA a implementação sem adivinhar; sugestão de clareza ou de estilo não entra. Todo achado traz em fix o texto concreto que falta, pronto para colar na story.',
     'Não opine sobre arquitetura nem estilo, não peça escopo novo. Se o plano está executável, verdict = "ready" e issues = []. Senão verdict = "revise" e até 10 issues: story (id), problem (uma frase), fix (o texto concreto que falta). Responda em português no JSON exigido.',
-    `Pedido do usuário: ${m.request}`, m.epic ? `Épico: ${m.epic.title}. ${m.epic.goal}` : '',
+    `Pedido do usuário: ${m.request}`, m.epic ? `Épico: ${m.epic.title}. ${m.epic.goal}${m.epic.acceptance?.length ? `
+Critérios do ÉPICO: ${m.epic.acceptance.map((a, i) => `EA${i + 1}. ${a}`).join(' ')}
+Confira também: critério do épico que nenhuma story entrega vira issue com story = "novo" e fix = a story que falta, em uma frase.` : ''}` : '',
     '--- PLANO ---', JSON.stringify({ decisions: plan.decisions, stories: plan.stories }, null, 1).slice(0, 40000),
   ].filter(Boolean).join('\n')
   let crit = null, r = { code: 0 }
@@ -1440,7 +1442,7 @@ const EPICS_JSON_SCHEMA = {
 function epicsPrompt() {
   const p = state.project, m = state.mission
   return [
-    'Você é o Intent Compiler da TL-ADE. O pedido é grande (vários subsistemas). NÃO escreva stories: divida em ÉPICOS, cada um um subsistema ou fatia coerente. A QUANTIDADE SEGUE O TRABALHO, não um número fixo: versão pequena vira 1 épico; um épico a mais só quando é outro subsistema ou precisa de uma base pronta antes, porque cada épico paga planejamento e crítica (~15 min) antes de escrever código. Ordem de execução com dependências explícitas (só quando um usa o que o outro cria); a base vem antes do que depende dela. Documentação, ADR e emenda de charter vão DENTRO do épico do código que elas autorizam ou descrevem; épico só de papelada só quando a versão inteira é só documentação. O goal diz o que construir, nunca em quantas partes.',
+    'Você é o Intent Compiler da TL-ADE. O pedido é grande (vários subsistemas). NÃO escreva stories: divida em ÉPICOS, cada um um subsistema ou fatia coerente. A QUANTIDADE SEGUE O TRABALHO, não um número fixo: versão pequena vira 1 épico; um épico a mais só quando é outro subsistema ou precisa de uma base pronta antes, porque cada épico paga planejamento e crítica (~15 min) antes de escrever código. Ordem de execução com dependências explícitas (só quando um usa o que o outro cria); a base vem antes do que depende dela. Documentação, ADR e emenda de charter vão DENTRO do épico do código que elas autorizam ou descrevem; épico só de papelada só quando a versão inteira é só documentação. O goal diz o que construir, nunca em quantas partes.', 'LEITURA: NÃO leia código-fonte; o planejador de cada épico lê o código depois, com o batedor. Use o mapa abaixo para saber o que existe e leia só os documentos que o briefing ou o pedido citam (roadmap, charter, ADRs), no máximo 8 leituras de trechos. LIMITE: 10 turnos de ferramenta; entregue a divisão antes disso.',
     `Pedido: ${m.request}`,
     attachBlock(m.attachments),
     briefBlock(m.brief),
@@ -1595,7 +1597,7 @@ async function continuePlanning() {
 async function makeProgram() {
   const m = state.mission, intent = m.intent
   m.state = 'planning'; setStep('plan', 'running')
-  const r = await plannerCall(plannerChoice('complex'), { role: 'épicos', prompt: epicsPrompt(), schema: EPICS_JSON_SCHEMA, maxTurns: 10 })
+  const r = await plannerCall(plannerChoice('complex'), { role: 'épicos', prompt: epicsPrompt(), schema: EPICS_JSON_SCHEMA, maxTurns: 10, timeoutMs: 15 * 60 * 1000 })
   const pr = r?.structured_output
   if (!pr?.epics?.length) { setStep('plan', 'failed'); m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'a divisão em épicos não veio no formato esperado', 'error'); return finish() }
   m.program = { title: pr.title, explanation: pr.explanation, epics: pr.epics.map((e) => ({ ...e, state: 'queued', usd: 0, stories: [], summary: '' })), current: null }
@@ -1680,7 +1682,7 @@ async function makePlan({ inProgram = false } = {}) {
   const edit = chainOf('plan_edit')[0], who = revising ? (edit ? { ...edit, key: 'plan_edit' } : { ...plannerChoice('light'), effort: 'medium' }) : base
   m.auto_revision = false
   const turns = revising ? 6 : 20 + (m.epic?.plan_tries || 0) * 16
-  const r = await plannerCall(who, { role: revising ? 'revisão do plano' : 'plano', prompt: planPrompt(revising) + `\n\nLIMITE: você tem ${turns} turnos de ferramenta. Use o mapa e o recibo do batedor em vez de reler arquivos; leia só trechos. Entregue o plano antes do limite: plano não entregue é dinheiro perdido.`, schema: PLAN_JSON_SCHEMA, maxTurns: turns })
+  const r = await plannerCall(who, { role: revising ? 'revisão do plano' : 'plano', prompt: planPrompt(revising) + `\n\nLIMITE: você tem ${turns} turnos de ferramenta. Use o mapa e o recibo do batedor em vez de reler arquivos; leia só trechos. Entregue o plano antes do limite: plano não entregue é dinheiro perdido.`, schema: PLAN_JSON_SCHEMA, maxTurns: turns, timeoutMs: (revising ? 10 : 20) * 60 * 1000 })
   const plan = r?.structured_output
   if (!plan?.stories?.length) { setStep('plan', 'failed'); if (inProgram) return false; m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'o plano não veio no formato esperado', 'error'); return finish() }
   // parte grande demais volta ao planejador uma vez, sem gastar com maker
