@@ -146,3 +146,46 @@ test('CA4 envia decisões e preserva erro de conflito sem bloquear nova tentativ
   assert.match(markup, />Recusar</);
   assert.doesNotMatch(markup, /disabled/);
 });
+
+test('CA1 integra PermissionCard entre o texto e os metadados da conversa', async () => {
+  const app = await readFile(new URL('./App.jsx', import.meta.url), 'utf8');
+
+  assert.match(app, /<ChatView turns=\{state\.chat\} dir=\{state\.project\?\.dir\} busy=\{state\.busy\} dirty=\{state\.project\?\.dirty\} projectHead=\{state\.project\?\.head\} postDecision=\{post\} onClear=\{/);
+  assert.match(app, /function ChatView\(\{turns,dir,busy,dirty,projectHead,postDecision,onClear\}\)/);
+  assert.match(app, /import \{ PermissionCard \} from ['"]\.\/PermissionCard\.jsx['"]/);
+
+  const assistantBranch = app.slice(app.indexOf(": <Ade key={i}"), app.indexOf("<div ref={endRef} />"));
+  assert.ok(assistantBranch.indexOf('<Rich text={t.text} />') < assistantBranch.indexOf('<PermissionCard'));
+  assert.ok(assistantBranch.indexOf('<PermissionCard') < assistantBranch.indexOf('<p className="chat-meta">'));
+  assert.match(assistantBranch, /proposal=\{t\.proposal\} dir=\{dir\} busy=\{busy\} dirty=\{dirty\} projectHead=\{projectHead\} post=\{postDecision\}/);
+});
+
+test('CA2 trava pergunta enquanto há proposta pendente', async () => {
+  const app = await readFile(new URL('./App.jsx', import.meta.url), 'utf8');
+
+  assert.match(app, /const pendingProposal = \(state\.chat \|\| \[\]\)\.some\(\(message\) => message\.proposal\?\.status === 'pending'\)/);
+  assert.match(app, /async function ask\(text\) \{\s*if \(pendingProposal\) return/s);
+  assert.match(app, /disabled=\{mode === 'ask' \? \(!p \|\| pendingProposal\) : busy\}/);
+  assert.match(app, /disabled=\{mode === 'ask' \? \(!p \|\| state\.chat_busy \|\| pendingProposal \|\| !request\.trim\(\)\)/);
+  assert.match(app, /pendingProposal \? 'decida o cartão acima'/);
+});
+
+test('CA3 mostra as novas explicações da conversa', async () => {
+  const app = await readFile(new URL('./App.jsx', import.meta.url), 'utf8');
+
+  assert.match(app, /altera só com a sua permissão, não vira missão/);
+  assert.match(app, /Se a IA quiser mudar arquivos, aparece um cartão para você aprovar ou recusar\. Não vira missão\./);
+});
+
+test('CA4 documenta a cópia isolada, decisões e travas do chat', async () => {
+  const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(readme, /A conversa é só leitura/);
+  assert.match(readme, /cópia isolada/);
+  assert.match(readme, /Aprovar/);
+  assert.match(readme, /chat: …/);
+  assert.match(readme, /Recusar/);
+  assert.match(readme, /missão ativa/);
+  assert.match(readme, /alterações locais/);
+  assert.match(readme, /proposta desatualizada/);
+});

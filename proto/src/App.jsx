@@ -7,6 +7,7 @@ import {
   TestTube, Wrench, Eye, ShieldCheck, ListBullets, Terminal, ImageSquare, Compass, Table, Storefront, List,
   Kanban, ChatCircle, Binoculars, Broom,
 } from '@phosphor-icons/react'
+import { PermissionCard } from './PermissionCard.jsx'
 
 /* ========================= textos e mapas ========================= */
 const ROLES_PT = { planner: 'planejador', maker: 'maker', checker: 'revisor', research: 'pesquisador' }
@@ -178,6 +179,7 @@ export default function App() {
 
   const m = state.mission, p = state.project, s = state.settings
   const busy = !!m && ['running', 'planning'].includes(m.state)
+  const pendingProposal = (state.chat || []).some((message) => message.proposal?.status === 'pending')
   const live = !!m && !['complete', 'discarded'].includes(m.state)
   const shown = m && m.id !== cleared ? m : null
   const need = pendingDecision(shown)
@@ -219,6 +221,7 @@ export default function App() {
   const [dirtyReq, setDirtyReq] = useState(null)
   const [pendingReq, setPendingReq] = useState(null) // pedido novo por cima de missão pausada: "Guardar o feito e mandar" reenvia com replace // pedido que esbarrou em alterações pendentes; "Commitar e continuar" reenvia com commit_first
   async function ask(text) {
+    if (pendingProposal) return
     const q = (text ?? request).trim()
     if (!q || !state.dir || state.chat_busy) return
     const [family, model] = chatModel.split('|')
@@ -366,7 +369,7 @@ export default function App() {
           </div>
         ) : (
           <>
-            {view === 'chat' ? <ChatView turns={state.chat} dir={state.dir} onClear={() => post('/api/chat/clear', { dir: state.dir })} />
+            {view === 'chat' ? <ChatView turns={state.chat} dir={state.project?.dir} busy={state.busy} dirty={state.project?.dirty} projectHead={state.project?.head} postDecision={post} onClear={() => post('/api/chat/clear', { dir: state.dir })} />
               : view === 'board' ? <BoardView m={shown} />
               : shown ? <Conversation state={state} m={shown} />
               : <Empty p={p} busy={busy} onPick={(t) => run(t)} />}
@@ -393,7 +396,7 @@ export default function App() {
                         {Object.entries(state.registry || {}).map(([fam, fr]) => <optgroup key={fam} label={fr.label}>{fr.models.map((mo) => <option key={mo.id} value={`${fam}|${mo.id}`}>{mo.label}</option>)}</optgroup>)}
                       </select>
                       <select className="sel sm" value={chatEffort} onChange={(e) => setChatEffort(e.target.value)} aria-label="Esforço da conversa"><option value="low">esforço baixo</option><option value="medium">esforço médio</option><option value="high">esforço alto</option></select>
-                      <span className="mode-note">só leitura, não vira missão</span>
+                      <span className="mode-note">{pendingProposal ? 'decida o cartão acima' : 'altera só com a sua permissão, não vira missão'}</span>
                     </div>
                   ) : looksQuestion(request) && p ? (
                     <div className="mode-row"><span className="mode-note">Parece pergunta, não pedido.</span><button type="button" className="link" onClick={() => setView('chat')}>Mandar para a Conversa</button></div>
@@ -409,13 +412,13 @@ export default function App() {
                       )}
                     </div>
                     <textarea
-                      ref={askRef} className="ask" rows={1} value={request} disabled={mode === 'ask' ? !p : busy}
+                      ref={askRef} className="ask" rows={1} value={request} disabled={mode === 'ask' ? (!p || pendingProposal) : busy}
                       onChange={(e) => setRequest(e.target.value)} onPaste={onPaste}
                       onInput={(e) => { e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 176)}px` }}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run() } }}
                       placeholder={mode === 'ask' ? (p ? `Pergunte sobre ${p.name}, sobre o andamento ou peça algo pequeno; a resposta não altera arquivos.` : 'Escolha uma pasta primeiro, no botão +') : busy ? 'Rodando… pause ou espere' : paused ? 'Missão pausada: continue ou descarte ao lado, ou escreva outro pedido (o que já foi gravado fica)' : live ? 'Esperando a sua decisão ao lado' : p ? `O que construir em ${p.name}? Escreva do seu jeito; cole imagens com Ctrl+V.` : 'Escolha uma pasta primeiro, no botão +'}
                     />
-                    <button className="run" type="submit" disabled={mode === 'ask' ? (!p || state.chat_busy || !request.trim()) : (busy || !request.trim())}>{mode === 'ask' ? (state.chat_busy ? 'Respondendo' : 'Perguntar') : busy ? 'Rodando' : 'Rodar'}</button>
+                    <button className="run" type="submit" disabled={mode === 'ask' ? (!p || state.chat_busy || pendingProposal || !request.trim()) : (busy || !request.trim())}>{mode === 'ask' ? (state.chat_busy ? 'Respondendo' : 'Perguntar') : busy ? 'Rodando' : 'Rodar'}</button>
                   </div>
                 </div>
                 {s && <p className="composer-hint"><span className="mono">{s.roles.planner.model}</span> e <span className="mono">{(s.roles.planner_light || s.roles.planner).model}</span> planejam · <span className="mono">{s.roles.maker.model}</span> escreve · <span className="mono">{s.roles.checker.model}</span> revisa · comandos {s.allow_commands ? 'liberados' : 'bloqueados'}</p>}
@@ -453,14 +456,14 @@ function Rich({ text }) { // markdown mínimo: blocos ``` viram <pre>; negrito e
   const parts = String(text || '').split(/```[a-z]*\r?\n?/i)
   return <div className="chat-txt">{parts.map((p, i) => i % 2 ? <pre key={i}>{p.replace(/\n$/, '')}</pre> : <span key={i}><Inline text={p} /></span>)}</div>
 }
-function ChatView({ turns, dir, onClear }) {
+function ChatView({turns,dir,busy,dirty,projectHead,postDecision,onClear}) {
   const endRef = useRef(null)
   const last = turns?.[turns.length - 1]
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }) }, [turns?.length, last?.text?.length])
   if (!turns?.length) return (
     <div className="talk empty"><div className="empty-inner">
       <h1 className="empty-h">Pergunte o que quiser</h1>
-      <p className="empty-p">Dúvidas sobre o projeto, o andamento de um pedido, uma biblioteca, um erro, ou um pedido pequeno. Escolha o modelo abaixo. A resposta é só leitura e não vira missão.</p>
+      <p className="empty-p">Se a IA quiser mudar arquivos, aparece um cartão para você aprovar ou recusar. Não vira missão.</p>
     </div></div>
   )
   return (
@@ -480,6 +483,7 @@ function ChatView({ turns, dir, onClear }) {
             </You>
           : <Ade key={i} time={t.ts}>
               {t.pending && !t.text ? <Skeleton lines={2} /> : <Rich text={t.text} />}
+              {t.proposal && <PermissionCard proposal={t.proposal} dir={dir} busy={busy} dirty={dirty} projectHead={projectHead} post={postDecision} />}
               <p className="chat-meta"><span className="mono">{t.model}</span>{t.effort && <span>esforço {EFFORT_PT[t.effort] || t.effort}</span>}{t.usd > 0 && <span>{fmtUsd(t.usd)}</span>}{t.pending && <span className="dot-accent dot-live">respondendo…</span>}</p>
             </Ade>)}
         <div ref={endRef} />

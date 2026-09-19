@@ -20,7 +20,7 @@ Duplo clique em `abrir.bat`. Na primeira vez instala as dependências (1 a 2 min
 12. Esforço por papel (Modelos): baixo, médio ou alto. Claude recebe `--effort`; Codex `model_reasoning_effort`; Antigravity usa o sufixo do modelo (`gemini-3.8-flash-medium`; Pro só tem alto/baixo). Padrão: entender médio, planejar alto, escrever alto, revisar médio.
 13. Batedor (Gemini via Antigravity, `scout.mjs`): lê muito e devolve um recibo curto (resumo, fatos, arquivos com linhas, fontes). O motor chama antes de planejar um pedido de funcionalidade para cima em projeto com código (e a cada épico); quem escreve chama sob demanda (`node scout.mjs "pergunta" [arquivos] [--web]`) para documentação, arquivo grande ou pesquisa na web/GitHub. Junto vai o **mapa do código** (símbolo@linha, sem IA) para ler só o trecho.
 14. Quem planeja: o entendedor mede a dificuldade (leve, normal, pesada) e recomenda o planejador (Sonnet médio, Opus médio, Fable alto). Se diferir do configurado, você escolhe no painel "Sua vez" (ou na entrevista); no modo noturno a recomendação vale.
-15. Conversa (chip "Pergunta" no compositor): pergunta ou pedido pequeno vai para um chat só leitura com o modelo e o esforço que você escolher (Claude, Codex ou Antigravity), sem virar missão. Detecta pergunta sozinha ("?", "como", "o que"…); histórico por pasta em `.ade/chats/`.
+15. Conversa (chip "Pergunta" no compositor): pergunta ou pedido pequeno vai para um chat com o modelo e o esforço que você escolher (Claude, Codex ou Antigravity), sem virar missão. Se a IA quiser mudar arquivos, ela prepara a mudança numa cópia isolada e mostra um cartão para você decidir. Detecta pergunta sozinha ("?", "como", "o que"…); histórico por pasta em `.ade/chats/`.
 16. Quadro: botão no topo que mostra épicos e partes do pedido atual (prontas, em andamento, na fila, puladas, dependências e custo por épico).
 
 ## O que acontece por baixo
@@ -56,16 +56,13 @@ Quem escreve e quem revisa têm de ser de empresas diferentes. Modelos por papel
 - Tokens acima de 1000k aparecem em M; custo em dólar com vírgula (US$ 1,41).
 - Queda do servidor no meio de uma parte: a missão volta como pausada e a parte em andamento recomeça do zero ao continuar.
 - O Gemini CLI (`gemini`) fica de fora enquanto não estiver logado (`oauth_creds.json`); o Gemini entra pelo Antigravity (`agy`).
-- A conversa é só leitura: para mudar arquivos, mande um pedido.
+- No chat, a IA prepara mudanças numa cópia isolada. Você confere o cartão antes de qualquer alteração chegar à sua pasta.
 
-## Chat que altera arquivos (roteiro manual)
+## Chat que altera arquivos
 
-1. Abra uma pasta git com pelo menos um commit.
-2. No chat, peça: `crie o arquivo ola.txt com o texto oi`.
-3. Confira que `ola.txt` não existe na pasta e que `proto/.ade/chats/<pasta>.json` tem `proposal.state` igual a `pending` e `files` igual a `[{ path: 'ola.txt', kind: 'created' }]`.
-4. Aprove a proposta com `curl -X POST http://127.0.0.1:<porta>/api/chat/approve -H 'content-type: application/json' -d '{"dir":"<pasta>","id":"<proposal.id>"}'`. Confira `ola.txt` com `oi` e `git log -1` com assunto começando por `chat: `, sem push.
-5. Peça `crie o arquivo tchau.txt com o texto até logo`, pegue o novo `proposal.id`, chame `/api/chat/reject` e confira que `tchau.txt` não existe, que `git status` sai limpo e que `proto/.ade/wt/chat-<id>` sumiu.
-6. Com um arquivo alterado e não commitado na pasta, aprove uma nova proposta e confira `409` com `A pasta tem alterações suas ainda não commitadas. Commite ou descarte antes de aprovar.`
+A IA trabalha primeiro numa cópia isolada e mostra as diferenças no cartão. Ao escolher **Aprovar**, as mudanças entram na sua pasta e a ADE cria um commit como `chat: …`. Ao escolher **Recusar**, a sua pasta não muda.
+
+O botão **Aprovar** fica bloqueado quando há uma missão ativa, alterações locais ainda não commitadas ou uma proposta desatualizada porque a pasta mudou depois que a IA a preparou. Resolva a situação indicada e peça a mudança de novo quando necessário.
 
 ## Arquivos
 
