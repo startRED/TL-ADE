@@ -64,10 +64,15 @@ async function plannerCall(who, opts) {
   return withChain(who.key, { list: [who, ...rest] }, (w) => plannerOnce(w, opts))
 }
 async function plannerOnce(who, { role, prompt, schema, maxTurns, timeoutMs = 30 * 60 * 1000 }) {
+  const schemaFile = async () => { const f = path.join(ADE_DIR, 'schemas', createHash('sha1').update(JSON.stringify(schema)).digest('hex').slice(0, 12) + '.json'); await mkdir(path.dirname(f), { recursive: true }); if (!(await exists(f))) await writeFile(f, JSON.stringify(schema)); return f }
+  // agy (Antigravity) planeja em modo leitura, como na pesquisa: sem isto, o modelo que o usuário escolheu virava Opus na marra
+  if (who.family === 'agy') {
+    const out = await checkerAgy(prompt, who.model, who.effort, { schema: await schemaFile(), role, need: (x) => !!x })
+    return out ? { structured_output: out } : null
+  }
   if (who.family === 'codex') {
     const m = state.mission, dir = state.project.dir
-    const file = path.join(ADE_DIR, 'schemas', createHash('sha1').update(JSON.stringify(schema)).digest('hex').slice(0, 12) + '.json')
-    await mkdir(path.dirname(file), { recursive: true }); if (!(await exists(file))) await writeFile(file, JSON.stringify(schema))
+    const file = await schemaFile()
     log('engine', `codex (${role}, ${who.model}, esforço ${who.effort}) com saída estruturada`); setLive({ source: 'codex', kind: 'thinking', text: `${role}: lendo o projeto…` })
     let last = null, usage = null; const t0 = Date.now()
     const r = await run('codex', ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${who.effort}`, '-C', dir, '-m', who.model, '--output-schema', file, '-'], { cwd: dir, stdin: prompt, timeoutMs, onLine: (line) => {
@@ -85,7 +90,7 @@ async function plannerOnce(who, { role, prompt, schema, maxTurns, timeoutMs = 30
     if (!out) log('engine', `codex (${role}) não devolveu JSON (código ${r.code}): ${(last || r.err || r.out).trim().slice(0, 300)}`, 'error')
     return out ? { structured_output: out } : null
   }
-  if (who.family !== 'claude') { log('engine', `planejador ${who.model} não é Claude nem Codex; usando opus alto`, 'warn'); who = { family: 'claude', model: 'opus', effort: 'high' } }
+  if (who.family !== 'claude') { log('engine', `${who.model} (${who.family}) não sabe fazer ${role}; passo para o próximo modelo da sua cadeia`, 'warn'); return null }
   return claudeCall({ role, prompt, model: who.model, effort: who.effort, tools: ['Read', 'Glob', 'Grep'], schema, maxTurns })
 }
 const vendorOf = (family, model) => family === 'agy' && /^claude/.test(model) ? 'anthropic' : family === 'agy' && /^gpt/.test(model) ? 'openai' : family === 'claude' ? 'anthropic' : family === 'codex' ? 'openai' : 'google'
@@ -1008,11 +1013,11 @@ Confira também: critério do épico que nenhuma story entrega vira issue com st
     '--- PLANO ---', JSON.stringify({ decisions: plan.decisions, stories: plan.stories }, null, 1).slice(0, 40000),
   ].filter(Boolean).join('\n')
   let crit = null, r = { code: 0 }
-  if (who.family === 'agy') crit = await checkerAgy(prompt, model, effortOf('checker'), { schema: PLANCRITIC_SCHEMA, role: 'crítica do plano' })
+  if (who.family === 'agy') crit = await checkerAgy(prompt, model, who.effort || effortOf('checker'), { schema: PLANCRITIC_SCHEMA, role: 'crítica do plano' })
   else {
     log('engine', `codex (crítica do plano, ${model})`); setLive({ source: 'codex', kind: 'thinking', text: 'lendo o plano como quem vai implementar…' })
     let last = null, usage = null
-    r = await run('codex', ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${effortOf('checker')}`, '-C', dir, '-m', model, '--output-schema', PLANCRITIC_SCHEMA, '-'], { cwd: dir, stdin: prompt, onLine: (line) => { let ev; try { ev = JSON.parse(line) } catch { return } if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') last = ev.item.text; if (ev.type === 'turn.completed') usage = ev.usage } })
+    r = await run('codex', ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${who.effort || effortOf('checker')}`, '-C', dir, '-m', model, '--output-schema', PLANCRITIC_SCHEMA, '-'], { cwd: dir, stdin: prompt, onLine: (line) => { let ev; try { ev = JSON.parse(line) } catch { return } if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') last = ev.item.text; if (ev.type === 'turn.completed') usage = ev.usage } })
     setLive(null); m.cost.calls += 1
     if (usage) { m.cost.tokens_in += usage.input_tokens || 0; m.cost.tokens_out += usage.output_tokens || 0 }
     try { crit = JSON.parse(last) } catch {}
@@ -1086,20 +1091,20 @@ async function checker(diff, tests, st) {
 }
 // Revisão no Antigravity (19/09, plano Google AI Ultra): Gemini Pro ou Claude via Google pela cota do Google, só leitura (--mode plan
 // com --add-dir, sem o qual o agy não enxerga o projeto). Prompt num arquivo ignorado pelo git: o diff não cabe na linha de comando do Windows.
-async function checkerAgy(prompt, model, effort, { schema = REVIEW_SCHEMA, role = 'revisão' } = {}) {
+async function checkerAgy(prompt, model, effort, { schema = REVIEW_SCHEMA, role = 'revisão', need = (x) => !!x?.verdict } = {}) {
   const m = state.mission, dir = state.project.dir, id = agyModel(model, effort)
   const rel = `${ATTACH_DIR}/review-${Date.now().toString(36)}.md`
   await mkdir(path.join(dir, ATTACH_DIR), { recursive: true }); await ensureIgnore(dir); await writeFile(path.join(dir, rel), prompt)
   log('engine', `agy (${role}, ${id}) com saída estruturada`); setLive({ source: 'agy', kind: 'thinking', text: `${role}: Antigravity lendo (sem transmissão ao vivo)…` })
   const t0 = Date.now()
-  let r; try { r = await run('agy', [`--print=Leia o arquivo ${path.join(dir, rel).split(path.sep).join('/')} e faça a revisão pedida nele, respondendo no JSON exigido. Só leitura: não altere nem crie arquivo algum.`, '--output-format', 'json', '--model', id, '--mode', 'plan', '--add-dir', dir, '--json-schema', schema, '--dangerously-skip-permissions', '--print-timeout', '8m'], { cwd: dir, timeoutMs: 9 * 60 * 1000 }) }
+  let r; try { r = await run('agy', [`--print=Leia o arquivo ${path.join(dir, rel).split(path.sep).join('/')} e faça o que ele pede (${role}), respondendo no JSON exigido. Só leitura: não altere nem crie arquivo algum.`, '--output-format', 'json', '--model', id, '--mode', 'plan', '--add-dir', dir, '--json-schema', schema, '--dangerously-skip-permissions', '--print-timeout', '8m'], { cwd: dir, timeoutMs: 9 * 60 * 1000 }) }
   finally { setLive(null); await rm(path.join(dir, rel), { force: true }).catch(() => {}) }
   m.cost.calls += 1
   let j = null; try { j = JSON.parse(r.out) } catch {}
   const u = j?.usage || {}; m.cost.tokens_in += u.input_tokens || 0; m.cost.tokens_out += u.output_tokens || 0
   journal({ type: 'model_call', family: 'agy', role, model: id, effort, story: m.current, turns: j?.num_turns || 0, usd: 0, tokens_in: u.input_tokens || 0, tokens_out: u.output_tokens || 0, prompt_chars: prompt.length, wall_ms: Date.now() - t0 }).catch(() => {})
   const review = j?.structured_output
-  if (!review?.verdict) { log('engine', `agy (${role}) sem veredito (código ${r.code}, status ${j?.status ?? 'sem JSON'}): ${String(j?.response || r.err || '').slice(0, 240)}`, 'warn'); return null }
+  if (!need(review)) { log('engine', `agy (${role}) sem resposta no formato (código ${r.code}, status ${j?.status ?? 'sem JSON'}): ${String(j?.response || r.err || '').slice(0, 240)}`, 'warn'); return null }
   if (role === 'revisão') log('agy', `${review.verdict === 'approve' ? 'aprovou' : 'pediu mudanças'}: ${review.summary}`, 'text')
   return review
 }
