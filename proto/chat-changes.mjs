@@ -88,7 +88,7 @@ export function chatCommand(family, { model, effort, cwd, prompt }) {
 }
 
 export function chatIntro({ name, dir, wtPath }) {
-  return `Você é o assistente de conversa da TL-ADE no projeto ${name}. Responda em português, direto e curto (até ~250 palavras, salvo pedido de detalhe); listas curtas e blocos de código quando ajudarem. Você está numa cópia isolada do projeto, na pasta atual (${wtPath}); o original fica em ${dir} e você nunca escreve lá. Quando o pedido exigir, pode criar, alterar e apagar arquivos da pasta atual, usando caminhos relativos a ela. Nada disso vai direto para o projeto: suas mudanças viram uma proposta que a pessoa aprova ou recusa num cartão. Não rode comandos que alterem o projeto (instalar pacote, apagar pasta, git) e não faça commit. Se a pergunta for sobre o projeto, leia só o necessário. Ao terminar uma mudança, comece a resposta com uma linha curta dizendo o que mudou.`
+  return `Você é o assistente de conversa da TL-ADE no projeto ${name}. Responda em português, direto e curto (até ~250 palavras, salvo pedido de detalhe); listas curtas e blocos de código quando ajudarem. Você está numa cópia isolada do projeto, na pasta atual (${wtPath}); o original fica em ${dir} e você nunca escreve lá. Quando o pedido exigir, pode criar e alterar arquivos da pasta atual, usando caminhos relativos a ela. Não apague arquivos: apagar ainda não é possível por aqui; se o pedido exigir, diga quais arquivos apagaria. Nada disso vai direto para o projeto: suas mudanças viram uma proposta que a pessoa aprova ou recusa num cartão. Não rode comandos que alterem o projeto (instalar pacote, apagar pasta, git) e não faça commit. Se a pergunta for sobre o projeto, leia só o necessário. Ao terminar uma mudança, comece a resposta com uma linha curta dizendo o que mudou.`
 }
 
 const KIND_WORDS = {
@@ -142,7 +142,22 @@ export async function attachProposal({ projectDir, id, wtPath, request, answer }
 export async function chatWriteTurn({ projectDir, id, request, exec, wtRoot = WT_ROOT, attachments = [] }) {
   const { path: wtPath } = await createChatWorktree(projectDir, id, { wtRoot })
   try {
+    const copied = []
+    for (const rel of attachments) {
+      const src = path.resolve(projectDir, rel)
+      const inside = path.relative(projectDir, src)
+      if (!inside || inside.startsWith('..') || path.isAbsolute(inside)) continue
+      const dest = path.join(wtPath, inside)
+      try {
+        await fs.mkdir(path.dirname(dest), { recursive: true })
+        await fs.copyFile(src, dest)
+        copied.push(dest)
+      } catch {
+        continue
+      }
+    }
     const answer = String((await exec(wtPath)) ?? '')
+    for (const dest of copied) await fs.rm(dest, { force: true })
     const proposal = await attachProposal({ projectDir, id, wtPath, request, answer })
     return { answer, proposal }
   } catch (error) {

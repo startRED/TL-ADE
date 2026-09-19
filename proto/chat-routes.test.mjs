@@ -222,13 +222,82 @@ describe('chatWriteTurn', () => {
   })
 })
 
+describe('chatWriteTurn: anexos', () => {
+  it('CA1: copia o anexo para a cópia antes de executar a IA', async () => {
+    const repo = await makeRepo()
+    const wtRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ade-wt-'))
+    tempDirs.push(wtRoot)
+    await fs.mkdir(path.join(repo, '.ade-attachments'), { recursive: true })
+    await fs.writeFile(path.join(repo, '.ade-attachments', 'nota.txt'), 'x')
+    let lido = ''
+
+    const result = await chatChanges.chatWriteTurn({
+      projectDir: repo,
+      id: 'anexo-1',
+      request: 'leia a nota',
+      exec: async (wtPath) => {
+        lido = await fs.readFile(path.join(wtPath, '.ade-attachments', 'nota.txt'), 'utf8')
+        return 'Li a nota.'
+      },
+      wtRoot,
+      attachments: ['.ade-attachments/nota.txt']
+    })
+
+    assert.equal(lido, 'x')
+    assert.equal(result.proposal, null)
+  })
+
+  it('CA2: remove o anexo copiado antes de coletar a proposta', async () => {
+    const repo = await makeRepo()
+    const wtRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ade-wt-'))
+    tempDirs.push(wtRoot)
+    await fs.mkdir(path.join(repo, '.ade-attachments'), { recursive: true })
+    await fs.writeFile(path.join(repo, '.ade-attachments', 'nota.txt'), 'x')
+
+    const result = await chatChanges.chatWriteTurn({
+      projectDir: repo,
+      id: 'anexo-2',
+      request: 'crie ola.txt',
+      exec: async (wtPath) => {
+        await fs.writeFile(path.join(wtPath, 'ola.txt'), 'oi')
+        return 'Criei ola.txt.'
+      },
+      wtRoot,
+      attachments: ['.ade-attachments/nota.txt']
+    })
+    createdWorktrees.push({ repo, wtPath: path.join(wtRoot, 'chat-anexo-2') })
+
+    assert.deepEqual(result.proposal.files, [{ path: 'ola.txt', kind: 'created' }])
+  })
+
+  it('CA3: ignora anexos que escapam do projeto ou não existem', async () => {
+    const repo = await makeRepo()
+    const wtRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ade-wt-'))
+    tempDirs.push(wtRoot)
+
+    const result = await chatChanges.chatWriteTurn({
+      projectDir: repo,
+      id: 'anexo-3',
+      request: 'não mude nada',
+      exec: async () => 'Nada a mudar.',
+      wtRoot,
+      attachments: ['../fora.txt', '.ade-attachments/nao-existe.txt']
+    })
+
+    assert.deepEqual(result, { answer: 'Nada a mudar.', proposal: null })
+    await assert.rejects(fs.access(path.join(wtRoot, 'fora.txt')), { code: 'ENOENT' })
+  })
+})
+
 describe('chatIntro', () => {
   it('CA1: abre o chat em modo escrita na cópia isolada, sem modo somente leitura', () => {
     const intro = chatChanges.chatIntro({
       name: 'demo', dir: 'C:/proj', wtPath: 'C:/copia'
     })
 
-    assert.ok(intro.includes('pode criar, alterar e apagar arquivos'))
+    assert.ok(intro.includes('pode criar e alterar arquivos'))
+    assert.ok(intro.includes('Não apague arquivos'))
+    assert.ok(!intro.includes('alterar e apagar'))
     assert.ok(intro.includes('aprova ou recusa num cartão'))
     assert.ok(intro.includes('não faça commit'))
     assert.ok(intro.includes('C:/copia'))
