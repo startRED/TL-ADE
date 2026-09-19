@@ -527,13 +527,14 @@ function BoardView({ m }) {
     <div className="talk"><div className="talk-inner board">
       <h3 className="msg-h">{m.plan?.title || m.request}</h3>
       <div className="board-sum">
-        {epics.length > 0 && <div><b>{epicsDone}/{epics.length}</b><small>épicos prontos</small></div>}
+        {epics.length > 0 && <div><b>{epicsDone}/{epics.length}</b><small>épicos prontos{m.brief?.versions?.length > 1 ? ` na ${m.brief.versions[m.version_index || 0]?.name}` : ''}</small></div>}
         {all.length === 0
           ? <div><b>planejando</b><small>as partes do épico atual ainda estão sendo planejadas</small></div>
           : <div><b>{done} de {all.length}</b><small>partes prontas{epics.some((e) => e.state === 'queued') ? ' (épicos na fila ainda serão planejados)' : ''}{skipped ? ` · ${skipped} pulada${skipped > 1 ? 's' : ''}` : ''}</small></div>}
         <div><b>{fmtUsd(totalUsd(m.cost))}</b><small>gasto até agora</small></div>
       </div>
       <div className="pbar"><i style={{ transform: `scaleX(${Math.min(1, Math.max(0, pct)).toFixed(3)})` }} /></div>
+      {m.brief?.versions?.length > 1 && <VersionList b={m.brief} k={m.version_index || 0} />}
       {epics.length ? epics.map((e, i) => {
         const stories = storiesOf(e)
         const tone = e.state === 'done' ? 'good' : e.state === 'running' ? 'accent' : ['failed', 'blocked'].includes(e.state) ? 'warn' : 'mute'
@@ -801,7 +802,7 @@ function Conversation({ state, m }) {
         )}
 
         {m.brief && pendingDecision(m) !== 'brief' && (
-          <Ade><h3 className="msg-h">Briefing: {m.brief.title}</h3><BriefView b={m.brief} compact /></Ade>
+          <Ade><h3 className="msg-h">Briefing: {m.brief.title}</h3><BriefView b={m.brief} compact k={m.version_index || 0} /></Ade>
         )}
 
         {m.plan?.epics?.length > 0 && (
@@ -1011,15 +1012,18 @@ function StoryRow({ st, i, m, state }) {
 }
 
 /* ========================= entrevista ========================= */
-function BriefView({ b, compact }) {
+// versões em sequência (cf63aba): a missão faz todas, uma depois da outra
+function VersionList({ b, k }) {
+  return <div className="brief-sec"><b>{b.versions.length > 1 ? `Esta missão faz as ${b.versions.length} versões, uma depois da outra, sem parar` : `Esta missão faz a ${b.versions[0].name}`}</b><ul>{b.versions.map((v, i) => <li key={v.name} className={i < k ? 'dim' : ''}><span className="mono">{v.name}</span> <b>{i < k ? 'pronta' : i === k ? 'agora' : 'depois'}</b> · {v.goal}</li>)}</ul></div>
+}
+function BriefView({ b, compact, k = 0 }) {
   const [all, setAll] = useState(false)
   const L = ({ title, items, max }) => items?.length ? <div className="brief-sec"><b>{title}</b><ul>{(max ? items.slice(0, max) : items).map((x, i) => <li key={i}>{x}</li>)}{max && items.length > max ? <li className="dim">+{items.length - max} em "Ver tudo"</li> : null}</ul></div> : null
-  const v1 = b.versions[0]
+  const v1 = b.versions[k] || b.versions[0]
   return (
     <div className={`brief${compact ? ' compact' : ''}`}>
       <p className="msg-lead">{b.goal}</p>
-      <div className="brief-sec"><b>Esta missão faz a {v1.name}</b><p className="msg-p">{v1.goal}</p></div>
-      {b.versions.length > 1 && <div className="brief-sec"><b>Fica para depois</b><ul>{b.versions.slice(1).map((v) => <li key={v.name}><span className="mono dim">{v.name}</span> {v.goal}</li>)}</ul></div>}
+      <VersionList b={b} k={k} />
       {!compact && <L title="Não vai fazer" items={b.out_of_scope} max={4} />}
       {!compact && <button className="chain-add" onClick={() => setAll(!all)}>{all ? 'Esconder detalhes' : 'Ver tudo (o que entra, como sei que está pronto, restrições)'}</button>}
       {all && <>
