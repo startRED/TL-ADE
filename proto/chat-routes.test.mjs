@@ -142,6 +142,46 @@ describe('chatCommand', () => {
   })
 })
 
+describe('server.mjs: chat em modo escrita', () => {
+  const serverUrl = new URL('./server.mjs', import.meta.url)
+
+  async function source() { return fs.readFile(serverUrl, 'utf8') }
+
+  function route(text, start) {
+    const lines = text.split('\n')
+    const first = lines.findIndex((line) => line.includes(start))
+    const last = lines.findIndex((line, index) => index > first && line.includes("url.pathname ==="))
+    return lines.slice(first, last < 0 ? undefined : last).join('\n')
+  }
+
+  it('CA1: chatTurn escreve numa cópia com os auxiliares de chat', async () => {
+    const text = await source()
+    const chatTurn = text.slice(text.indexOf('async function chatTurn('), text.indexOf('// ---------- batedor'))
+    for (const needle of ['chatWriteTurn(', 'chatCommand(', 'chatIntro(', 'formatHistory(', 'attachments:']) assert.ok(chatTurn.includes(needle))
+    for (const needle of ['Só leitura', "'--permission-mode', 'plan'", "'--mode', 'plan'", "'read-only'"]) assert.ok(!chatTurn.includes(needle))
+  })
+
+  it('CA2: bloqueia nova pergunta enquanto uma proposta está pendente', async () => {
+    const chatRoute = route(await source(), "url.pathname === '/api/chat' &&")
+    assert.ok(chatRoute.indexOf('await e.chat_ready') < chatRoute.indexOf('pendingProposal(e.chat'))
+    assert.ok(chatRoute.indexOf('pendingProposal(e.chat') < chatRoute.indexOf('PENDING_BLOCK'))
+    assert.ok(chatRoute.indexOf('PENDING_BLOCK') < chatRoute.indexOf('chatTurn('))
+  })
+
+  it('CA3: engineFor espera carregar a conversa salva', async () => {
+    const text = await source()
+    const line = text.split('\n').find((entry) => entry.includes('function engineFor('))
+    assert.ok(line?.includes('e.chat_ready = loadChat(key)'))
+  })
+
+  it('CA4: server.mjs passa na verificação sintática do Node', async () => {
+    const error = await new Promise((resolve) => {
+      execFile(process.execPath, ['--check', serverUrl.pathname.slice(1)], { maxBuffer: 1024 * 1024 }, resolve)
+    })
+    assert.equal(error, null)
+  })
+})
+
 describe('chatWriteTurn', () => {
   it('CA1: cria uma proposta pendente com os arquivos alterados pela IA', async () => {
     const repo = await makeRepo()

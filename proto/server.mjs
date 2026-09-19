@@ -6,6 +6,7 @@
 import { SCOUT_SCHEMA, scoutPrompt } from './scout.mjs'
 import { findSuites, runSuites, TOOLCHAINS } from './runners.mjs'
 import { laneCandidates, laneEngine, createLane, lanePatch, applyPatch, removeLane, LANES_DIR } from './lanes.mjs'
+import { chatWriteTurn, chatCommand, chatIntro, formatHistory, pendingProposal, PENDING_BLOCK } from './chat-changes.mjs'
 import http from 'node:http'
 import { spawn } from 'node:child_process'
 import { readFile, writeFile, mkdir, appendFile, rm, stat, access, readdir, realpath , rename } from 'node:fs/promises'
@@ -141,7 +142,7 @@ let activeDir = null
 const als = new AsyncLocalStorage()
 const PAUSE = Symbol('pause')
 function newEngine(project) { return { project, mission: null, log: [], live: null, attachments: [], phase: null, children: new Set(), chat: [], chat_busy: false } }
-function engineFor(dir) { const key = path.resolve(dir); if (!engines.has(key)) { const e = newEngine(null); engines.set(key, e); loadChat(key).then((c) => { e.chat = c; broadcastSoon() }).catch(() => {}) } return engines.get(key) }
+function engineFor(dir) { const key = path.resolve(dir); if (!engines.has(key)) { const e = newEngine(null); engines.set(key, e); e.chat_ready = loadChat(key).then((c) => { e.chat = c; broadcastSoon() }).catch(() => {}) } return engines.get(key) }
 // conversa por pasta (Erick, 17/09): perguntas e pedidos variados, com o modelo que você escolher, sem virar missão. Só leitura.
 const CHATS_DIR = path.join(ADE_DIR, 'chats')
 const chatKey = (dir) => path.resolve(dir).replace(/[^\w.-]+/g, '_').slice(-90)
@@ -823,46 +824,44 @@ async function research(questions) {
 async function chatTurn(e, text, { family, model, effort }) {
   const dir = e.project.dir, m = e.mission
   const turns = e.chat || (e.chat = [])
-  const history = turns.slice(-8).map((t) => `${t.role === 'user' ? 'Usuário' : 'Assistente'}: ${t.text.slice(0, 1500)}`).join('\n')
+  const history = formatHistory(turns)
+  const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
   const tree = await projectTree(dir)
   const atts = e.attachments.splice(0) // anexos colados/escolhidos vão com a pergunta e saem da barra
-  const prompt = [
-    `Você é o assistente de conversa da TL-ADE no projeto ${e.project.name} (${dir}). Responda em português, direto e curto (até ~250 palavras, salvo pedido de detalhe); listas curtas e blocos de código quando ajudarem. Só leitura: não edite arquivos nem rode nada que altere o projeto. Se a pergunta for sobre o projeto, leia só o necessário.`,
-    m ? `Missão atual desta pasta: "${m.request.slice(0, 200)}" · estado ${m.state}${m.reason ? ` (${m.reason})` : ''} · custo US$ ${m.cost.usd.toFixed(2)} · partes: ${m.stories.map((s) => `${s.id} ${s.state}`).join(', ') || 'nenhuma'}${m.program ? ` · épicos: ${m.program.epics.map((x) => `${x.id} ${x.state}`).join(', ')}` : ''}. Detalhes das partes ficam em .ade/missions/${m.id}.json na pasta do TL-ADE (${ADE_DIR}).` : 'Sem missão nesta pasta agora.',
-    `Arquivos do projeto (${tree.length}): ${tree.slice(0, 150).join(', ')}`,
-    history ? `Conversa até aqui:\n${history}` : '', attachBlock(atts), `Usuário: ${text}`,
-  ].filter(Boolean).join('\n')
   const user = { role: 'user', text, ts: now(), attachments: atts }, ai = { role: 'ai', text: '', pending: true, family, model, effort, ts: now(), usd: 0 }
   turns.push(user, ai); e.chat_busy = true; broadcast()
   const stream = (t) => { ai.text = t; broadcastSoon() }
   let answer = '', usd = 0
-  try {
-    if (family === 'claude') {
-      const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--safe-mode', '--no-session-persistence', '--max-turns', '12', '--model', model, '--permission-mode', 'plan', '--exclude-dynamic-system-prompt-sections', '--tools', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch']
-      if (EFFORTS.includes(effort)) args.push('--effort', effort)
-      let buf = ''
-      const r = await run('claude', args, { cwd: dir, stdin: prompt, env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' }, timeoutMs: 8 * 60 * 1000, onLine: (line) => {
-        let ev; try { ev = JSON.parse(line) } catch { return }
+  const exec = async (wtPath) => {
+    const prompt = [
+      chatIntro({ name: e.project.name, dir, wtPath }),
+      m ? `Missão atual desta pasta: "${m.request.slice(0, 200)}" · estado ${m.state}${m.reason ? ` (${m.reason})` : ''} · custo US$ ${m.cost.usd.toFixed(2)} · partes: ${m.stories.map((s) => `${s.id} ${s.state}`).join(', ') || 'nenhuma'}${m.program ? ` · épicos: ${m.program.epics.map((x) => `${x.id} ${x.state}`).join(', ')}` : ''}. Detalhes das partes ficam em .ade/missions/${m.id}.json na pasta do TL-ADE (${ADE_DIR}).` : 'Sem missão nesta pasta agora.',
+      `Arquivos do projeto (${tree.length}): ${tree.slice(0, 150).join(', ')}`,
+      history ? `Conversa até aqui:\n${history}` : '', attachBlock(atts), `Usuário: ${text}`,
+    ].filter(Boolean).join('\n')
+    const c = chatCommand(family, { model: family === 'agy' ? agyModel(model, effort) : model, effort, cwd: wtPath, prompt })
+    let buf = ''
+    const r = await run(c.cmd, c.args, { cwd: c.cwd, stdin: c.stdin, timeoutMs: 8 * 60 * 1000, ...(family === 'claude' ? { env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' } } : {}), onLine: family === 'agy' ? undefined : (line) => {
+      let ev; try { ev = JSON.parse(line) } catch { return }
+      if (family === 'claude') {
         if (ev.type === 'rate_limit_event') noteClaudeRate(ev)
         if (ev.type === 'stream_event') { const ev2 = ev.event; if (ev2?.type === 'content_block_start' && ev2.content_block?.type === 'text') buf = ''; if (ev2?.type === 'content_block_delta' && ev2.delta?.text) { buf += ev2.delta.text; stream(buf) } }
-        if (ev.type === 'assistant') for (const c of ev.message?.content || []) if (c.type === 'tool_use') stream((buf ? buf + '\n\n' : '') + `_${describeTool(c, dir)}_`)
+        if (ev.type === 'assistant') for (const item of ev.message?.content || []) if (item.type === 'tool_use') stream((buf ? buf + '\n\n' : '') + `_${describeTool(item, wtPath)}_`)
         if (ev.type === 'result') { answer = ev.result || buf; usd = ev.total_cost_usd || 0 }
-      } })
-      if (!answer) answer = `(sem resposta; código ${r.code}) ${(r.err || '').slice(0, 300)}`
-    } else if (family === 'codex') {
-      const args = ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${EFFORTS.includes(effort) ? effort : 'medium'}`, '-C', dir, '-m', model, '-']
-      const r = await run('codex', args, { cwd: dir, stdin: prompt, timeoutMs: 8 * 60 * 1000, onLine: (line) => {
-        let ev; try { ev = JSON.parse(line) } catch { return }
+      } else {
         if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') { answer = ev.item.text; stream(answer) }
         if (ev.type === 'item.completed' && ev.item?.type === 'command_execution') stream((answer ? answer + '\n\n' : '') + `_$ ${(ev.item.command || '').slice(0, 120)}_`)
-      } })
-      if (!answer) answer = `(sem resposta; código ${r.code}) ${(r.err || r.out).slice(0, 300)}`
-    } else {
-      const id = agyModel(model, effort)
-      const r = await run('agy', [`--print=${prompt.replace(/"/g, "'").replace(/\r?\n/g, ' ')}`, '--output-format', 'json', '--model', id, '--mode', 'plan', '--dangerously-skip-permissions'], { cwd: dir, timeoutMs: 8 * 60 * 1000 })
+      }
+    } })
+    if (family === 'agy') {
       try { const j = JSON.parse(r.out); answer = typeof j.response === 'string' ? j.response : JSON.stringify(j.response) } catch { answer = `(sem resposta; código ${r.code}) ${(r.err || r.out).slice(0, 300)}` }
-    }
-  } catch (err) { answer = err === PAUSE ? '(interrompido)' : `(erro: ${err.message})` }
+    } else if (!answer) answer = `(sem resposta; código ${r.code}) ${(r.err || r.out).slice(0, 300)}`
+    return answer
+  }
+  try {
+    const out = await chatWriteTurn({ projectDir: dir, id, request: text, exec, attachments: atts.map((a) => a.path) })
+    answer = out.answer; if (out.proposal) ai.proposal = out.proposal
+  } catch (err) { answer = err === PAUSE ? '(interrompido)' : err?.code === 'no-head' ? err.message : `(erro: ${err.message})` }
   ai.text = answer; ai.pending = false; ai.usd = usd; ai.done_ts = now(); e.chat_busy = false
   readQuota().then(broadcastSoon); broadcast()
   await saveChat(dir, turns).catch(() => {})
@@ -2249,8 +2248,10 @@ http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/chat' && req.method === 'POST') {
       const b = await body(req); const e = await targetEngine(req, url, b); if (!e?.project) return json(res, 400, { error: 'Escolha uma pasta primeiro.' })
+      await e.chat_ready
       if (!b.text?.trim()) return json(res, 400, { error: 'Pergunta vazia.' })
       if (e.chat_busy) return json(res, 409, { error: 'Ainda estou respondendo a anterior.' })
+      if (pendingProposal(e.chat || [])) return json(res, 409, { error: PENDING_BLOCK })
       const family = ['claude', 'codex', 'agy'].includes(b.family) ? b.family : 'claude'
       const model = b.model || (family === 'claude' ? 'sonnet' : family === 'codex' ? 'gpt-5.6-sol' : 'gemini-3.8-flash')
       withEngine(e, () => chatTurn(e, b.text.trim(), { family, model, effort: EFFORTS.includes(b.effort) ? b.effort : 'medium' })).catch((err) => { e.chat_busy = false; log('engine', `conversa falhou: ${err.message}`, 'error') })
