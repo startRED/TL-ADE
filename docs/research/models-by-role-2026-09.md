@@ -230,41 +230,33 @@ IOI 45%).
 
 ## 7. Recomendação por papel
 
+A cota do Claude é a mais curta (bate 90% da semana antes da renovação). Onde outro modelo empata ou ganha nos
+placares independentes, o Claude vira degrau de reserva.
+
 | Papel | 1ª escolha | Degraus seguintes | Evidência independente |
 | :--- | :--- | :--- | :--- |
-| Dividir em épicos | Claude Fable 5.1 | GPT-6 Astra | Fable lidera o Vals Index (68,8) e empata no topo da AA; Astra empata por menos da metade do custo |
-| Planejar o épico | Claude Opus 5 | GPT-6 Astra (medium) | Opus 5: AA 48 (high), Vals Index 67,2, TB 4.0 45,45%, ARC-AGI-2 90,4%. Astra medium: AA 50 por US$ 1,54 |
-| Criticar o plano | fornecedor diferente do planejador: Astra se planejou Claude; Opus 5 se planejou Astra | GPT-5.6 Sol | Astra lidera TB 4.0, IOI e ARC-AGI-2; Sol vem logo atrás no ARC-AGI-2 (92,5%) |
-| Escrever (prova e código) | GPT-5.6 Terra high | Sol, depois Gemini 3.8 Flash high | Terra: IOI 87,6%, 84 tokens/s; medido 81% commitadas. Sol medium faz mais índice que Terra high (39 contra 34) por US$ 0,50 contra 0,34, porém mais devagar. Flash: Vals Index 62,3, perto do Sol, e 87% medido |
-| Escrever parte leve | GPT-5.6 Luna high | Terra | Luna max: AA 38 por US$ 0,18 (1/8 do Terra max), 130 tokens/s; IOI 61,8% |
-| Corrigir (rodada 3+) | GPT-6 Astra high | Claude Opus 5; via Google, Opus 4.6 | Astra: TB 4.0 57%, IOI 100%. Opus 4.6: SWE-Bench Pro 51,9% (Scale), METR ~12 h |
-| Revisar | Gemini 3.8 Flash high | Opus 4.6 via Google, depois Opus 5 | sem placar independente de revisão; Flash é de outro fornecedor que o Codex, Vals Index 62,3, 298 tokens/s; medido: pegou bug que as provas não pegaram |
-| Batedor e pesquisa | Gemini 3.8 Flash low/medium | — | AA 40 (medium) por US$ 0,93, o mais rápido da tabela |
+| Entender o pedido | Claude Opus 5 medium | — (chamada só do Claude) | Opus medium: AA 45 por US$ 2,19; Sonnet high faz 32 por US$ 1,79 |
+| Dividir em épicos | GPT-6 Astra high | Claude Fable 5.1 high | Astra empata com o Fable na AA (51 no high) por US$ 1,72 contra 3,91; lidera TB 4.0, IOI e ARC-AGI-2. Fable lidera o Vals Index (68,8) |
+| Planejar o épico | GPT-6 Astra medium | Claude Opus 5 high | Astra medium: AA 50 por US$ 1,54. Opus 5 high: 48 por US$ 3,61 |
+| Criticar o plano | o 1º Codex da cadeia de escrever (Terra high) | — | o crítico lê cada parte como quem vai implementar; o Terra é quem implementa, e não é o mesmo modelo que planejou |
+| Escrever (prova e código) | GPT-5.6 Terra high | Sol medium, depois Gemini 3.8 Flash high | Terra: IOI 87,6%, 84 tokens/s; medido 81% commitadas e mediana de 52 s por correção. Flash: Vals Index 62,3 e 87% medido |
+| Escrever parte leve | GPT-5.6 Luna high | Gemini 3.8 Flash high | Luna max: AA 38 por US$ 0,18, 130 tokens/s; o Flash cobre o Codex sem cota |
+| Escrever parte difícil | GPT-5.6 Sol high | Astra high, depois Opus 4.6 via Google | metade das partes medidas é difícil. Sol high: AA 42 por US$ 0,81 contra 34 do Terra high; IOI 91%; WebDev 1617 contra 1521 |
+| Corrigir (escada, 2 rodadas por degrau) | Sol high | Astra high na rodada 3, Opus 4.6 via Google na 5 | Astra: TB 4.0 57%, IOI 100%. Opus 4.6: outra empresa, SWE-Bench Pro 51,9% (Scale), METR ~12 h, sem gastar a cota do Claude |
+| Revisar | Gemini 3.8 Flash high | Opus 4.6 via Google, depois Opus 5 | sem placar independente de revisão; Flash é de outra empresa que o Codex, Vals Index 62,3, 298 tokens/s; medido: pegou bug que as provas não pegaram |
+| Batedor e pesquisa | Gemini 3.8 Flash medium / high | — | AA 40 (medium) por US$ 0,93, o mais rápido da tabela |
 
 Fica de fora:
 
 - **Gemini 3.1 Pro:** AA 30, Vals Index 41,9, WebDev 1447. Abaixo dos dois Flash em quase tudo; ganha só no
   Terminal-Bench 2.1 antigo.
-- **Claude Sonnet 5 escrevendo ou corrigindo:** pior custo-benefício da AA, 8% no TB 4.0 e medido pior aqui.
-  Serve de último degrau.
+- **Claude Sonnet 5:** pior custo-benefício da AA, 8% no TB 4.0 e medido pior aqui. Saiu de todas as cadeias.
 
 Regras que ficam:
 
-- O revisor é sempre de outro fornecedor que quem escreveu. O motor já evita o mesmo fornecedor.
-- Com a cota de um fornecedor acima de 90%, ele vira último degrau (reserva do motor).
+- O revisor é sempre de outra empresa que quem escreveu. O motor já evita a mesma empresa.
+- Com a cota de uma família acima de 90%, ela vira último degrau (reserva do motor).
+- O Opus 4.6 via Google conta como empresa Claude para a revisão, mas gasta a cota do Google.
 
-Estado em 19/09 à tarde: Claude com 90% da cota semanal (renova 22/09), Codex com 11%, Google AI Ultra livre.
-
-Cadeias ativas no motor:
-
-| Papel | Cadeia |
-| :--- | :--- |
-| Épicos | Fable medium > Astra medium |
-| Plano | Opus high > Astra medium |
-| Prova | Terra medium > Flash high |
-| Escrever | Terra high > Sol medium > Flash high |
-| Escrever leve | Luna high > Terra medium |
-| Escrever difícil e corrigir | Terra high > Astra high > Opus 4.6 via Google |
-| Revisar | Flash high > Opus 4.6 via Google > Opus 5 high |
-
-Elas seguem esta tabela. O segundo degrau do plano passou de Astra low (AA 46) para medium (AA 50) em 19/09.
+Estado em 19/09 à tarde: Claude com 90% da cota semanal (renova 22/09), Codex com 12% (renova 26/09), Google AI
+Ultra livre. As cadeias acima estão ativas no motor e são o padrão de `proto/server.mjs` desde 19/09.
