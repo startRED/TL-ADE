@@ -1170,17 +1170,25 @@ function Empty({ p, busy, onPick }) {
 }
 function Bar({ pct }) { return <span className="bar"><span style={{ width: `${Math.min(100, pct)}%` }} /></span> }
 function Quota({ q }) {
-  const rows = [['Claude', q?.claude], ['Codex', q?.codex]]
+  // janela que mais pesa (5 h ou semana); reset que já passou conta 0 %
+  const live = (w) => w && (!w.resets_at || new Date(w.resets_at) > new Date()) ? w : w ? { ...w, used: 0, resets_at: null } : null
+  const worst = (v) => [['sessão de 5 h', live(v?.five_hour)], ['semana', live(v?.seven_day)]].filter((x) => x[1]).sort((x, y) => y[1].used - x[1].used)[0]
+  const rows = [['Claude', 'claude', q?.claude], ['Codex', 'codex', q?.codex], ['Gemini', 'agy', null]]
   return (
     <div className="quota">
       <span className="side-lbl">Cota do plano</span>
-      {rows.map(([name, v]) => (
-        <div className="quota-row" key={name}>
-          <span className="quota-top"><span>{name}</span>{v ? <span className="mono">{(v.five_hour || v.seven_day)?.used ?? 0}%</span> : <span className="dim small">sem leitura</span>}</span>
-          {v && <Bar pct={(v.five_hour || v.seven_day)?.used ?? 0} />}
-          {v && <span className="quota-note">{v.five_hour ? 'sessão de 5 h' : 'semana'} · lido {fmtWhen(v.at)}</span>}
-        </div>
-      ))}
+      {rows.map(([name, fam, v]) => {
+        const out = q?.exhausted?.[fam] && new Date(q.exhausted[fam]) > new Date() ? q.exhausted[fam] : null, w = worst(v)
+        return (
+          <div className="quota-row" key={name}>
+            <span className="quota-top"><span>{name}</span>{out ? <span className="mono">esgotada</span> : w ? <span className="mono">{w[1].used}%</span> : <span className="dim small">sem leitura</span>}</span>
+            {(out || w) && <Bar pct={out ? 100 : w[1].used} />}
+            {out ? <span className="quota-note">volta {fmtWhen(out)}</span>
+              : w ? <span className="quota-note">{w[0]}{w[1].resets_at ? ` · renova ${fmtWhen(w[1].resets_at)}` : ''} · lido {fmtWhen(v.at)}</span>
+              : <span className="quota-note">{fam === 'agy' ? 'o Gemini só avisa quando recusa' : 'aparece depois da primeira chamada'}</span>}
+          </div>
+        )
+      })}
     </div>
   )
 }

@@ -186,26 +186,46 @@ function attachBlock(list) {
 // ---------- cota do plano ----------
 // Claude: a linha de status do Claude Code recebe rate_limits em cada turno interativo e grava em ~/.claude/ade-usage.json (ver README).
 // Codex: cada sessão (sem --ephemeral) grava token_count com rate_limits em ~/.codex/sessions. Antigravity não deixa nada legível: abrir o agy → Models & Quota.
+// Cota lida de onde cada CLI realmente informa. Claude: evento rate_limit_event de cada chamada (noteClaudeRate) e, se existir
+// e for mais novo, o arquivo da statusline. Codex: arquivo de sessão mais novo que tenha rate_limits. Gemini: o agy não expõe
+// cota; só a recusa da chamada marca a família (quotaPause). Janela cujo reset já passou conta 0 %. Tudo gravado em quota.json.
+const winLive = (w) => !w ? null : (!w.resets_at || new Date(w.resets_at) > new Date()) ? w : { ...w, used: 0, resets_at: null }
+function normalizeQuota() { for (const f of ['claude', 'codex']) { const q = state.quota[f]; if (q) state.quota[f] = { ...q, five_hour: winLive(q.five_hour), seven_day: winLive(q.seven_day) } } }
+function persistQuota() { saveJson('quota.json', state.quota).catch(() => {}) }
+function noteClaudeRate(ev) {
+  const i = ev?.rate_limit_info; if (!i) return
+  const u = i.unifiedWindows || {}, prev = state.quota.claude || {}
+  const w = (x) => ({ used: Math.round((x.utilization || 0) * 100), resets_at: x.resetsAt ? new Date(x.resetsAt * 1000).toISOString() : null })
+  state.quota.claude = { at: new Date().toISOString(), five_hour: u.five_hour ? w(u.five_hour) : prev.five_hour || null, seven_day: u.seven_day ? w(u.seven_day) : prev.seven_day || null }
+  if (i.status === 'rejected' && i.resetsAt && ['five_hour', 'seven_day'].includes(i.rateLimitType)) state.quota.exhausted.claude = new Date(i.resetsAt * 1000 + 60 * 1000).toISOString()
+  persistQuota(); broadcastSoon()
+}
 async function readQuota() {
   try {
     const j = JSON.parse(await readFile(path.join(HOME, '.claude/ade-usage.json'), 'utf8'))
-    const rl = j.rate_limits || {}
-    const pick = (w) => w ? { used: Math.round(w.used_percentage ?? w.used_percent ?? 0), resets_at: w.resets_at ? new Date(typeof w.resets_at === 'number' ? w.resets_at * 1000 : w.resets_at).toISOString() : null } : null
-    state.quota.claude = { at: j.t ? new Date(j.t * 1000).toISOString() : null, five_hour: pick(rl.five_hour), seven_day: pick(rl.seven_day) }
-  } catch { state.quota.claude = null }
-  try {
-    const root = path.join(HOME, '.codex/sessions')
-    let newest = null
-    for (const y of await readdir(root)) for (const mo of await readdir(path.join(root, y))) for (const d of await readdir(path.join(root, y, mo))) for (const f of await readdir(path.join(root, y, mo, d))) {
-      const full = path.join(root, y, mo, d, f); const st = await stat(full)
-      if (!newest || st.mtimeMs > newest.m) newest = { full, m: st.mtimeMs }
+    const at = j.t ? new Date(j.t * 1000).toISOString() : null
+    if (at && (!state.quota.claude?.at || at > state.quota.claude.at)) {
+      const rl = j.rate_limits || {}
+      const pick = (w) => w ? { used: Math.round(w.used_percentage ?? w.used_percent ?? 0), resets_at: w.resets_at ? new Date(typeof w.resets_at === 'number' ? w.resets_at * 1000 : w.resets_at).toISOString() : null } : null
+      state.quota.claude = { at, five_hour: pick(rl.five_hour), seven_day: pick(rl.seven_day) }
     }
-    const lines = (await readFile(newest.full, 'utf8')).split('\n').filter((l) => l.includes('"rate_limits"'))
-    const ev = JSON.parse(lines[lines.length - 1]); const rl = ev.payload?.rate_limits || {}
-    const win = (w) => w ? { used: Math.round(w.used_percent || 0), minutes: w.window_minutes, resets_at: w.resets_at ? new Date(w.resets_at * 1000).toISOString() : null } : null
-    const wins = [rl.primary, rl.secondary].filter(Boolean).map(win)
-    state.quota.codex = { at: new Date(newest.m).toISOString(), five_hour: wins.find((w) => w.minutes <= 300) || null, seven_day: wins.find((w) => w.minutes > 300) || null, plan: rl.plan_type || null }
-  } catch { state.quota.codex = null }
+  } catch {} // sem statusline: a leitura vem das chamadas
+  try {
+    const root = path.join(HOME, '.codex/sessions'), files = []
+    for (const y of await readdir(root)) for (const mo of await readdir(path.join(root, y))) for (const d of await readdir(path.join(root, y, mo))) for (const f of await readdir(path.join(root, y, mo, d))) {
+      const full = path.join(root, y, mo, d, f); files.push({ full, m: (await stat(full)).mtimeMs })
+    }
+    for (const { full, m } of files.sort((x, y) => y.m - x.m).slice(0, 12)) {
+      const lines = (await readFile(full, 'utf8')).split('\n').filter((l) => l.includes('"rate_limits"'))
+      if (!lines.length) continue
+      const rl = JSON.parse(lines[lines.length - 1]).payload?.rate_limits || {}
+      const win = (w) => w ? { used: Math.round(w.used_percent || 0), minutes: w.window_minutes, resets_at: w.resets_at ? new Date(w.resets_at * 1000).toISOString() : null } : null
+      const wins = [rl.primary, rl.secondary].filter(Boolean).map(win)
+      if (!state.quota.codex?.at || new Date(m).toISOString() >= state.quota.codex.at) state.quota.codex = { at: new Date(m).toISOString(), five_hour: wins.find((w) => w.minutes <= 300) || null, seven_day: wins.find((w) => w.minutes > 300) || null, plan: rl.plan_type || null }
+      break
+    }
+  } catch {} // sem ~/.codex/sessions: fica a última leitura gravada
+  normalizeQuota(); persistQuota()
 }
 let pending = null
 const clients = new Set()
@@ -317,11 +337,11 @@ const FAMILY_LABEL = { claude: 'Claude', codex: 'Codex', agy: 'Gemini' }
 const fmtWhen = (iso) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 function quotaPause(who, until) {
   const family = Object.keys(FAMILY_LABEL).find((k) => FAMILY_LABEL[k] === who) || who
-  state.quota.exhausted = state.quota.exhausted || {}; state.quota.exhausted[family] = until; broadcastSoon()
+  state.quota.exhausted = state.quota.exhausted || {}; state.quota.exhausted[family] = until; persistQuota(); broadcastSoon()
   log('engine', `cota do ${who} esgotada até ${fmtWhen(until)}; tento o próximo modelo da cadeia`, 'warn')
   throw new QuotaExhausted(family, until)
 }
-function quotaAvailable(family) { const u = state.quota.exhausted?.[family]; if (!u) return true; if (new Date(u) <= new Date()) { delete state.quota.exhausted[family]; return true } return false }
+function quotaAvailable(family) { const u = state.quota.exhausted?.[family]; if (!u) return true; if (new Date(u) <= new Date()) { delete state.quota.exhausted[family]; persistQuota(); return true } return false }
 function pauseAllExhausted(key) {
   const m = state.mission, untils = Object.values(state.quota.exhausted || {}).map((u) => +new Date(u)).filter((t) => t > Date.now())
   m.quota_until = new Date(untils.length ? Math.min(...untils) + 60 * 1000 : Date.now() + 30 * 60 * 1000).toISOString()
@@ -339,7 +359,7 @@ function storyTier(st) {
 // Roda fn(who) com o primeiro modelo disponível da cadeia; cota esgotada ou resultado nulo passa ao próximo. avoidVendor tira da cadeia a
 // empresa de quem escreveu (revisão). start pula os primeiros degraus (escada de correção). list substitui a cadeia (planejador).
 // Cota usada da família (pior janela conhecida, em %). Gemini não expõe cota: conta 0.
-function quotaUsed(family) { const q = state.quota[family]; return q ? Math.max(q.five_hour?.used || 0, q.seven_day?.used || 0) : 0 }
+function quotaUsed(family) { const q = state.quota[family]; return q ? Math.max(winLive(q.five_hour)?.used || 0, winLive(q.seven_day)?.used || 0) : 0 }
 const RESERVE_PCT = 90 // acima disso a família fica reservada para quem não tem substituto de outra empresa
 const WAIT_RENEWAL_MS = 12 * 60 * 1000 // titular sem cota que renova em até isto: espera em vez de descer de modelo
 async function waitRenewal(key, who, until) {
@@ -705,6 +725,7 @@ async function claudeCall({ role, prompt, model, effort, tools, skipPermissions,
     cwd: dir, stdin: prompt, env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
     onLine: (line) => {
       let ev; try { ev = JSON.parse(line) } catch { return }
+      if (ev.type === 'rate_limit_event') noteClaudeRate(ev)
       if (ev.type === 'system' && ev.subtype === 'init') log('claude', `sessão iniciada · modelo ${ev.model}`)
       if (ev.type === 'stream_event') {
         const e = ev.event
@@ -799,6 +820,7 @@ async function chatTurn(e, text, { family, model, effort }) {
       let buf = ''
       const r = await run('claude', args, { cwd: dir, stdin: prompt, env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' }, timeoutMs: 8 * 60 * 1000, onLine: (line) => {
         let ev; try { ev = JSON.parse(line) } catch { return }
+        if (ev.type === 'rate_limit_event') noteClaudeRate(ev)
         if (ev.type === 'stream_event') { const ev2 = ev.event; if (ev2?.type === 'content_block_start' && ev2.content_block?.type === 'text') buf = ''; if (ev2?.type === 'content_block_delta' && ev2.delta?.text) { buf += ev2.delta.text; stream(buf) } }
         if (ev.type === 'assistant') for (const c of ev.message?.content || []) if (c.type === 'tool_use') stream((buf ? buf + '\n\n' : '') + `_${describeTool(c, dir)}_`)
         if (ev.type === 'result') { answer = ev.result || buf; usd = ev.total_cost_usd || 0 }
@@ -2045,6 +2067,7 @@ http.createServer(async (req, res) => {
 }).listen(PORT, '127.0.0.1', async () => {
   state.recent = await loadJson('projects.json', [])
   state.history = await loadJson('history.json', [])
+  { const q = await loadJson('quota.json', null); if (q) state.quota = { claude: q.claude || null, codex: q.codex || null, exhausted: q.exhausted || {} } }
   readQuota().then(broadcastSoon); setInterval(() => readQuota().then(broadcastSoon), 5 * 60 * 1000) // a reserva de cota do withChain precisa de leitura fresca
   const saved = await loadJson('settings.json', null)
   if (saved) state.settings = { ...DEFAULT_SETTINGS, ...saved, roles: { ...DEFAULT_SETTINGS.roles, ...(saved.roles || {}) }, chains: { ...DEFAULT_SETTINGS.chains, ...(saved.chains || {}) }, skills: { ...DEFAULT_SETTINGS.skills, ...(saved.skills || {}) } }
