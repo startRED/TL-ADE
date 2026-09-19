@@ -597,6 +597,7 @@ async function runTests(project) {
         if (f.assertionResults.length === 0 && f.status === 'failed') return [{ name: `${path.basename(f.name)} (arquivo ainda não roda)`, status: 'failed', message: (f.message || '').split('\n')[0].slice(0, 200) }]
         return f.assertionResults.map((a) => ({ name: a.fullName, status: a.status, message: (a.failureMessages || [])[0]?.split('\n')[0] || '' }))
       })
+      tests.push(...await strayNodeTests(dir, new Set(j.testResults.map((f) => path.relative(dir, f.name).split(path.sep).join('/')))))
       const failed = tests.filter((t) => t.status !== 'passed').length
       return { ok: failed === 0 && tests.length > 0, total: tests.length, failed, tests, runner: 'vitest' }
     } catch { return { ok: false, total: 0, failed: 0, tests: [], runner: 'vitest', timeout: !!r.timedOut, error: (r.err || r.out).slice(-600) } }
@@ -622,6 +623,23 @@ async function runTests(project) {
     return { ok: r.code === 0, total: 1, failed: r.code === 0 ? 0 : 1, tests: [{ name: project.test_cmd, status: r.code === 0 ? 'passed' : 'failed', message: r.code === 0 ? '' : tail.slice(-300) }], runner: project.runner, output: tail }
   }
   return { ok: false, total: 0, failed: 0, tests: [], runner: 'none' }
+}
+// Prova de parte que o runner do projeto não roda (node:test em proto/ enquanto o vitest da raiz só inclui tests/**): roda com
+// node --test, senão o verde da suíte não diz nada sobre a parte (m-mu81n0ms: 6 rodadas sobre uma prova que nunca rodou).
+// ponytail: só node:test ao lado do vitest; prova de outro runner fora do include continua invisível, o planejador é que evita.
+async function strayNodeTests(dir, covered) {
+  const out = []
+  for (const f of new Set((state.mission?.stories || []).map((s) => String(s.test_file || '').replace(/\\/g, '/').replace(/^\.\//, '')))) {
+    if (!/\.(m?js|cjs)$/.test(f) || covered.has(f)) continue
+    let body; try { body = await readFile(path.join(dir, f), 'utf8') } catch { continue }
+    if (!/['"]node:test['"]/.test(body)) continue
+    const r = await run('node', ['--test', '--test-reporter=tap', f], { cwd: dir, timeoutMs: 5 * 60 * 1000 })
+    // falha no arquivo inteiro (import quebrado) vem como error: 'test failed'; o motivo real está nas linhas "# ...Error..." antes
+    const why = (x) => { const e = r.out.slice(x.index).match(/^\s+error: (.+)$/m)?.[1] || ''; return (/^'test failed'$/.test(e) && r.out.match(/^# (.*Error.*)$/m)?.[1]) || e }
+    const rows = [...r.out.matchAll(/^\s*(not ok|ok) \d+ - (.+?)(?:\s+# (?:SKIP|TODO)\b.*)?$/gm)].map((x) => ({ name: `${f} > ${x[2]}`, status: x[1] === 'ok' ? 'passed' : 'failed', message: x[1] === 'ok' ? '' : why(x).slice(0, 300) }))
+    out.push(...(rows.length ? rows : [{ name: `${f} (arquivo ainda não roda)`, status: 'failed', message: (r.err || r.out).trim().split('\n').slice(-3).join(' ').slice(0, 300) }]))
+  }
+  return out
 }
 // Python: interpretador do projeto em .venv (uv), com requirements.txt + pytest instalados antes de cada rodada de provas.
 async function ensurePython(dir) {
@@ -660,18 +678,20 @@ async function makerCommitted(dir, base) {
 async function storyDiff(st) {
   const dir = state.project.dir
   if (st.base && !st.maker_committed && (await makerCommitted(dir, st.base))) { st.maker_committed = true; log('engine', 'quem escreve fez commit por conta própria, contra a instrução; o trabalho continua visível porque o diff da parte é contado desde o começo dela. O commit dele fica; o motor não commita de novo o que já entrou', 'warn') }
-  // a pasta do motor (proto/) fica fora do diff no dogfood da ADE real; mas se o contrato da parte mira nela, ela É o trabalho
+  // a pasta do motor (proto/) fica fora do diff no dogfood da ADE real; se o contrato da parte mira nela, entram SÓ os caminhos
+  // do contrato ali: edição do operador no motor durante a missão não vira "alteração fora do contrato" (m-mu81n0ms, rodada 6)
   const self = path.relative(dir, ROOT).split(path.sep).join('/')
-  const keepOwn = (st.scope_paths || []).some((g) => String(g).replace(/^\.\//, '').startsWith(self + '/') || String(g) === self)
-  return gitDiff(dir, st.maker_committed ? st.base : null, keepOwn)
+  const own = [...(st.scope_paths || []), st.test_file].filter(Boolean).map((g) => String(g).replace(/\\/g, '/').replace(/^\.\//, '')).filter((g) => g === self || g.startsWith(self + '/'))
+  return gitDiff(dir, st.maker_committed ? st.base : null, own)
 }
-async function gitDiff(dir, base = null, keepOwn = false) {
+async function gitDiff(dir, base = null, ownPaths = []) {
   const a = await run('git', ['add', '-N', '--', '.'], { cwd: dir }) // ignorados pelo .gitignore ficam fora sozinhos; pathspec de exclusão aqui faz o git reclamar
-  // a pasta do próprio motor nunca faz parte do diff de uma missão (dogfood: a demo vive dentro do repositório que ela desenvolve), salvo quando a parte é sobre ela
-  const self = path.relative(dir, ROOT).split(path.sep).join('/'), own = !keepOwn && self && !self.startsWith('..') && !path.isAbsolute(self) ? [`:(exclude)${self}`] : []
+  // a pasta do próprio motor nunca faz parte do diff de uma missão (dogfood: a demo vive dentro do repositório que ela desenvolve), salvo os caminhos da parte
+  const self = path.relative(dir, ROOT).split(path.sep).join('/'), own = self && !self.startsWith('..') && !path.isAbsolute(self) ? [`:(exclude)${self}`] : []
   const d = await run('git', ['diff', ...(base ? [base] : []), '--', '.', ...DIFF_EXCLUDES, ...own], { cwd: dir })
-  if (a.code !== 0 || d.code !== 0) throw new Error(`git diff falhou: ${(a.err || d.err).trim().split('\n')[0]}`)
-  return d.out
+  const o = ownPaths.length ? await run('git', ['diff', ...(base ? [base] : []), '--', ...ownPaths, ...DIFF_EXCLUDES], { cwd: dir }) : { code: 0, out: '' }
+  if (a.code !== 0 || d.code !== 0 || o.code !== 0) throw new Error(`git diff falhou: ${(a.err || d.err || o.err).trim().split('\n')[0]}`)
+  return d.out + o.out
 }
 async function gitDiscard(dir) { await run('git', ['reset', '-q', '--', '.'], { cwd: dir }); await run('git', ['checkout', '--', '.'], { cwd: dir }); await run('git', ['clean', '-fd', '.'], { cwd: dir }) }
 const SECRET_FILE = /(^|\/)(\.env(\.(?!example$|sample$|template$|dist$)[^/]*)?|\.secrets?|id_(rsa|ed25519|ecdsa)|[^/]*\.(pem|p12|pfx|key))$/i
@@ -1245,7 +1265,7 @@ function planPrompt(revising = false) {
     '- recipe de cada story: 3 a 8 passos numeráveis, em ordem, cada um com arquivo e ação concreta: "criar src/x.js exportando f(a, b) → tipo", "em src/y.js, dentro de render@120, chamar f antes de montar a lista", "registrar a rota em src/app.js". Cite símbolo@linha do mapa quando o arquivo existe. Nada de "implementar a lógica" ou "ajustar conforme necessário".',
     '- A recipe NUNCA manda commitar, dar push, criar branch nem rodar a suíte inteira, o typecheck ou o lint do projeto: o motor roda tudo isso e faz o commit depois das provas e da revisão. O último passo de uma recipe é código ou prova, nunca git nem "rodar os comandos de prova". Se o AGENTS.md do projeto manda commitar em certo formato, isso é com o motor, não com a story.',
     '- examples de cada story: 2 a 5 casos literais de entrada → saída que viram provas, incluindo pelo menos um caso de borda (vazio, inválido, limite). Ex.: "total([{preco: 2, qtd: 3}]) → 6", "total([]) → 0", "POST /itens sem nome → 400 {erro: \'nome obrigatório\'}".',
-    '- test_file de cada story: caminho exato do arquivo de prova a criar ou estender, no padrão que o projeto já usa.',
+    `- test_file de cada story: caminho exato do arquivo de prova a criar ou estender, no padrão que o projeto já usa, num lugar que ${p.test_cmd ? `\`${p.test_cmd}\`` : 'o runner de provas'} REALMENTE roda (confira o include da configuração do runner): prova fora do include nunca roda e a parte não tem como passar.`,
     '- A primeira story de um projeto ou épico novo cria o esqueleto: pastas, arquivos com as interfaces exportadas (corpo mínimo), runner de provas. As seguintes só preenchem; assim cada uma cita arquivos que já existem.',
     '- Story que MUDA formato de retorno, contrato público ou comportamento já provado: as provas antigas que afirmam o formato anterior entram em scope_paths (nunca em do_not_touch) e a recipe diz quais asserções atualizar. do_not_touch com prova que a própria story invalida é plano impossível.',
     '- CONTRATO de cada story (quem implementa é um modelo mais barato; o contrato é o que evita erro): scope_paths (arquivos que ela pode criar ou alterar; caminhos reais do projeto ou nomes novos), do_not_touch (arquivos que NÃO pode alterar), out_of_scope (o que fica de fora, em 1 linha cada), interfaces (assinaturas que ela expõe ou consome, ex.: "appendEvent(event) → Promise<seq>", "GET /api/items → [{id,name}]"). acceptance no formato "Dado …, quando …, então …", cada um provável por UMA prova automatizada sem chamada real de rede, CLI ou serviço (dublês). test_hint diz o arquivo de prova e como simular dependências.',
@@ -1602,8 +1622,11 @@ async function runStories() {
       const reds = (st.tests_after?.tests || []).filter((t) => t.status !== 'passed').slice(0, 6)
       const fixable = !ok && state.settings.autonomy !== 'ask' && !st.fix_attempted && !st.fix_of && ((m.reason === 'review_changes' && highs.length) || (m.reason === 'tests_red' && reds.length))
       if (fixable) {
-        const problems = m.reason === 'tests_red' ? reds.map((t) => `- prova vermelha ${t.name}: ${(t.message || '').slice(0, 300)}`) : highs.map((f) => `- ${f.file}: ${f.problem} Correção sugerida: ${f.fix}`)
-        const fix = { id: `${st.id}f`, title: `Corrigir: ${st.title.slice(0, 56)}`, request: `Os arquivos da parte anterior ("${st.title}") já estão alterados no projeto (não commitados). NÃO refaça a parte: corrija APENAS os problemas abaixo, no código existente. Se uma prova vermelha depende de rede, CLI externa ou ambiente, troque a dependência por um dublê na prova; não apague provas.\n${problems.join('\n')}`, acceptance: (m.reason === 'tests_red' ? reds.map((t) => `A prova "${t.name.slice(0, 100)}" passa`) : highs.map((f) => `Achado corrigido: ${String(f.problem).slice(0, 180)}`)).slice(0, 4), test_hint: m.reason === 'tests_red' ? 'as provas vermelhas listadas já existem; não escreva novas' : 'uma prova que reproduza cada achado (falha hoje) e passe depois da correção', depends_on: [], no_test_phase: m.reason === 'tests_red', scope_paths: st.scope_paths || [], do_not_touch: st.do_not_touch || [], out_of_scope: st.out_of_scope || [], interfaces: st.interfaces || [], fix_of: st.id, state: 'queued', steps: [], round: 0, red_tests: [], tests_after: null, diff: '', review: null, visual: null }
+        // achados graves do revisor e provas vermelhas entram juntos, graves primeiro: parar por prova vermelha não apaga o que o
+        // revisor viu (m-mu81n0ms: a correção mirou uma prova antiga instável e deixou de fora "o módulo não existe")
+        const hs = highs, rs = m.reason === 'tests_red' ? reds : []
+        const problems = [...hs.map((f) => `- ${f.file}: ${f.problem} Correção sugerida: ${f.fix}`), ...rs.map((t) => `- prova vermelha ${t.name}: ${(t.message || '').slice(0, 300)}`)]
+        const fix = { id: `${st.id}f`, title: `Corrigir: ${st.title.slice(0, 56)}`, request: `Os arquivos da parte anterior ("${st.title}") já estão alterados no projeto (não commitados). NÃO refaça a parte: corrija APENAS os problemas abaixo, no código existente. Se uma prova vermelha depende de rede, CLI externa ou ambiente, troque a dependência por um dublê na prova; não apague provas.\n${problems.join('\n')}`, acceptance: [...hs.map((f) => `Achado corrigido: ${String(f.problem).slice(0, 180)}`), ...rs.map((t) => `A prova "${t.name.slice(0, 100)}" passa`)].slice(0, 4), test_hint: hs.length ? 'uma prova que reproduza cada achado (falha hoje) e passe depois da correção' : 'as provas vermelhas listadas já existem; não escreva novas', depends_on: [], no_test_phase: !hs.length, scope_paths: st.scope_paths || [], do_not_touch: st.do_not_touch || [], out_of_scope: st.out_of_scope || [], interfaces: st.interfaces || [], fix_of: st.id, state: 'queued', steps: [], round: 0, red_tests: [], tests_after: null, diff: '', review: null, visual: null }
         st.fix_attempted = true; st.state = 'skipped'; st.skipped_reason = `${m.reason === 'tests_red' ? 'provas vermelhas' : 'rejeitada pelo revisor'}; correção na parte ${fix.id}`
         m.stories.splice(i + 1, 0, fix); m.state = 'running'; m.reason = null
         log('engine', `"${st.title}" parou em ${fix.no_test_phase ? 'provas vermelhas' : 'achado grave do revisor'}; o trabalho fica e vira a parte "${fix.title}" com o modelo forte`, 'warn'); broadcast(); continue
@@ -1667,9 +1690,16 @@ function makerStep(st, round, grave, repeat = 0) {
   const last = Math.max(0, chainOf('fix').length - 1)
   return { key: 'fix', start: Math.min(last, ladderStep(round, { grave, repeat })) }
 }
+// Maker que não mudou nada e diz que o ambiente o impediu não conta como tentativa: devolve null e a cadeia passa ao próximo
+// modelo, em vez de a revisão gastar rodadas no mesmo bloqueio.
+const ENV_BLOCK = /sandbox|somente leitura|read-?only|permiss[aã]o negada|access (is )?denied|liberar escrita|habilite escrita|EPERM|EACCES/i
 async function makerCall(who, opts) {
   const st = state.mission?.stories?.[state.mission.current]; if (st) st.last_maker = { family: who.family, model: who.model }
-  return who.family === 'agy' ? agyMaker({ ...opts, model: who.model, effort: who.effort }) : who.family === 'codex' ? codexMaker({ ...opts, model: who.model, effort: who.effort }) : claudeCall({ ...opts, model: who.model, effort: who.effort })
+  const dir = state.project.dir, snap = async () => (await run('git', ['status', '--porcelain', '-uall'], { cwd: dir })).out + (await run('git', ['diff'], { cwd: dir })).out
+  const before = await snap()
+  const r = await (who.family === 'agy' ? agyMaker({ ...opts, model: who.model, effort: who.effort }) : who.family === 'codex' ? codexMaker({ ...opts, model: who.model, effort: who.effort }) : claudeCall({ ...opts, model: who.model, effort: who.effort }))
+  if (r && ENV_BLOCK.test(String(r.result || '')) && (await snap()) === before) { log('engine', `${who.model} não alterou nada e disse que o ambiente bloqueou: ${String(r.result).trim().split('\n')[0].slice(0, 200)}. Passo ao próximo modelo da cadeia`, 'error'); return null }
+  return r
 }
 // Codex como maker: prompt por stdin, sandbox de escrita na pasta do projeto, receita de chamada curta (sem config nem skills do usuário).
 async function codexMaker({ role, prompt, model, effort }) {
@@ -1679,7 +1709,9 @@ async function codexMaker({ role, prompt, model, effort }) {
   log('engine', `codex (${role}, ${model}, esforço ${effort})`); setLive({ source: 'codex', kind: 'thinking', text: `${role}: Codex trabalhando…` })
   let last = null, usage = null, r
   try {
-    r = await run('codex', ['exec', '--json', '--sandbox', 'workspace-write', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${effort}`, '-C', dir, '-m', model, '-'], {
+    // Windows: sem windows.sandbox o Codex rebaixa workspace-write para read-only calado (o [windows] do config.toml some com
+    // --ignore-user-config). Missão m-mu81n0ms: 13 chamadas de código do Codex sem gravar nada.
+    r = await run('codex', ['exec', '--json', '--sandbox', 'workspace-write', ...(IS_WIN ? ['-c', 'windows.sandbox=elevated'] : []), '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${effort}`, '-C', dir, '-m', model, '-'], {
       cwd: dir, stdin: prompt, timeoutMs: 22 * 60 * 1000,
       onLine: (line) => {
         let ev; try { ev = JSON.parse(line) } catch { return }
@@ -1785,7 +1817,9 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     if (m.plan.needs_ui && state.settings.visual_gate) st.visual_before = await visualGate()
     if (!st.red_retry || !st.base) st.base = await gitHead(state.project.dir)
     st.usd_start = m.cost.usd
-    setStep('test', 'running'); const rt = await withChain('prova', { story: st }, async (who) => makerCall(who, { role: 'prova', prompt: testPrompt(st, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: 14 })); remember(st, rt); await refreshProject(); setStep('test', 'done')
+    setStep('test', 'running'); const rt = await withChain('prova', { story: st }, async (who) => makerCall(who, { role: 'prova', prompt: testPrompt(st, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: 14 }))
+    if (!rt) { setStep('test', 'failed'); throw new Error('nenhum modelo da cadeia "prova" conseguiu escrever a prova; o motivo de cada um está no log acima') }
+    remember(st, rt); await refreshProject(); setStep('test', 'done')
     setStep('red', 'running')
     const after = await runTests(state.project)
     const before = new Set(m.tests_before.tests.map((t) => t.name))
@@ -1816,7 +1850,10 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   const pick = makerStep(st, round, grave, repeat), escalate = pick.key === 'fix'
   if (escalate) log('engine', `rodada ${round}: ${st.fix_of ? 'parte de correção' : grave ? 'problema grave' : 'revisor ainda pede mudanças'}${repeat ? `, ${repeat} achado(s) repetido(s)` : ''}; maker vai para a cadeia de correção, degrau ${pick.start + 1} de ${chainOf('fix').length}`)
   if (st.early_impl && round === 1) setStep('fix', 'skipped', { round })
-  else { setStep('fix', 'running', { round }); const rf = await withChain(pick.key, { start: pick.start }, async (who) => makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 })); remember(st, rf); await refreshProject(); setStep('fix', 'done', { round }) }
+  else { setStep('fix', 'running', { round }); const rf = await withChain(pick.key, { start: pick.start }, async (who) => makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 }))
+    // nenhum modelo alterou nada (todos falharam ou bloquearam): revisar um diff vazio só gasta rodadas; para e mostra o motivo
+    if (!rf) { setStep('fix', 'failed', { round }); throw new Error(`nenhum modelo da cadeia "${pick.key}" conseguiu alterar o código; o motivo de cada um está no log acima`) }
+    remember(st, rf); await refreshProject(); setStep('fix', 'done', { round }) }
   setStep('tests', 'running'); st.tests_after = await runTests(state.project); st.diff = await storyDiff(st)
   // prova ANTIGA (verde antes da parte) que só falha por tempo limite é instabilidade, não defeito de quem escreve: repete a suíte uma vez antes de gastar rodada
   // (épico 7, parte 6: três rodadas pagas atrás de uma prova da parte 3 que estourava 5 s; quem escreve chegou a mexer no vitest.config fora do escopo para esconder)
