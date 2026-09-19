@@ -1623,6 +1623,7 @@ async function runStories() {
     // aplica, suíte quebrou junto com o que foi commitado enquanto o trilho rodava).
     const joinLane = async (st) => {
       const { job, fresh } = lanes.get(st); lanes.delete(st); delete st.lane
+      startLanes(cur) // o trilho desta parte ocupa agora a vaga do projeto, que só espera: a vaga dele vai para a próxima
       log('engine', `vez de "${st.title}": junto o trabalho que rodou em paralelo`)
       const res = await job, root = state.project.root || state.project.dir
       const redo = (why) => { log('engine', `trilho de "${st.title}": ${why}; refaço a parte aqui`, 'warn'); restore(st, fresh); st.state = 'running'; return null }
