@@ -17,13 +17,13 @@ const val = (v, d) => (typeof v === 'function' ? v(d) : v)
 // Na ordem; vale o primeiro de cada grupo por pasta. {out} = arquivo de relatório, {outdir} = pasta de relatório (ambos fora
 // do projeto), {python} = interpretador do .venv do projeto. Sem report = só código de saída; sem test_cmd = só a linguagem.
 const ECOSYSTEMS = [
-  { group: 'js', runner: 'vitest', language: 'js', when: (d) => has(d, 'package.json') && has(d, 'node_modules/vitest/vitest.mjs'), test_cmd: 'node node_modules/vitest/vitest.mjs run', report: ['node', 'node_modules/vitest/vitest.mjs', 'run', '--reporter=json', '--outputFile={out}'], one: ['node', 'node_modules/vitest/vitest.mjs', 'run', '{file}', '--passWithNoTests', '--reporter=json', '--outputFile={out}'], format: 'jest' },
-  { group: 'js', runner: 'jest', language: 'js', when: (d) => has(d, 'package.json') && has(d, 'node_modules/jest/bin/jest.js'), test_cmd: 'node node_modules/jest/bin/jest.js', report: ['node', 'node_modules/jest/bin/jest.js', '--ci', '--json', '--outputFile={out}'], one: ['node', 'node_modules/jest/bin/jest.js', '--ci', '--json', '--outputFile={out}', '--passWithNoTests', '--runTestsByPath', '{file}'], format: 'jest' },
+  { group: 'js', runner: 'vitest', language: 'js', when: (d) => has(d, 'package.json') && has(d, 'node_modules/vitest/vitest.mjs'), test_cmd: 'node node_modules/vitest/vitest.mjs run', report: ['node', 'node_modules/vitest/vitest.mjs', 'run', '--reporter=json', '--outputFile={out}'], one: ['node', 'node_modules/vitest/vitest.mjs', 'run', '{file}', '--passWithNoTests', '--reporter=json', '--outputFile={out}'], related: ['node', 'node_modules/vitest/vitest.mjs', 'related', '--run', '--passWithNoTests', '--reporter=json', '--outputFile={out}', '{files}'], format: 'jest' },
+  { group: 'js', runner: 'jest', language: 'js', when: (d) => has(d, 'package.json') && has(d, 'node_modules/jest/bin/jest.js'), test_cmd: 'node node_modules/jest/bin/jest.js', report: ['node', 'node_modules/jest/bin/jest.js', '--ci', '--json', '--outputFile={out}'], one: ['node', 'node_modules/jest/bin/jest.js', '--ci', '--json', '--outputFile={out}', '--passWithNoTests', '--runTestsByPath', '{file}'], related: ['node', 'node_modules/jest/bin/jest.js', '--ci', '--json', '--outputFile={out}', '--passWithNoTests', '--findRelatedTests', '{files}'], format: 'jest' },
   { group: 'js', runner: 'node-test', language: 'js', when: (d) => /\bnode\s+--test\b/.test(pkg(d).scripts?.test || ''), test_cmd: 'node --test', report: ['node', '--test', '--test-reporter=junit', '--test-reporter-destination={out}'], one: ['node', '--test', '--test-reporter=junit', '--test-reporter-destination={out}', '{file}'], format: 'junit' },
   { group: 'js', runner: 'npm', language: 'js', when: (d) => { const t = pkg(d).scripts?.test; return !!t && !/no test specified/.test(t) }, test_cmd: 'npm test' },
   { group: 'js', runner: 'none', language: 'js', when: (d) => has(d, 'package.json') },
   { group: 'python', runner: 'pytest', language: 'python', when: (d) => ['pyproject.toml', 'pytest.ini', 'requirements.txt', 'setup.py', 'setup.cfg'].some((f) => has(d, f)), test_cmd: '.venv\\Scripts\\python.exe -m pytest -q', report: ['{python}', '-m', 'pytest', '-q', '-p', 'no:cacheprovider', '--junitxml={out}'], one: ['{python}', '-m', 'pytest', '-q', '-p', 'no:cacheprovider', '--junitxml={out}', '{file}'], format: 'junit' },
-  { group: 'go', runner: 'go', language: 'go', when: (d) => has(d, 'go.mod'), test_cmd: 'go test ./...', report: ['go', 'test', '-json', './...'], one: ['go', 'test', '-json', '{pkg}'], format: 'gojson' },
+  { group: 'go', runner: 'go', language: 'go', when: (d) => has(d, 'go.mod'), test_cmd: 'go test ./...', report: ['go', 'test', '-json', './...'], one: ['go', 'test', '-json', '{pkg}'], related: ['go', 'test', '-json', '{pkgs}'], format: 'gojson' },
   { group: 'rust', runner: 'cargo', language: 'rust', when: (d) => has(d, 'Cargo.toml'), test_cmd: 'cargo test', report: ['cargo', 'test', '--no-fail-fast'], format: 'cargo' },
   { group: 'jvm', runner: 'maven', language: 'java', when: (d) => has(d, 'pom.xml'), test_cmd: 'mvn test', report: ['mvn', '-q', '-B', 'test'], format: 'junit-dir', dir: 'target/surefire-reports' },
   { group: 'jvm', runner: 'gradle', language: (d) => (has(d, 'build.gradle.kts') ? 'kotlin' : 'java'), when: (d) => has(d, 'build.gradle') || has(d, 'build.gradle.kts'), test_cmd: (d) => (has(d, IS_WIN ? 'gradlew.bat' : 'gradlew') ? (IS_WIN ? 'gradlew.bat test' : './gradlew test') : 'gradle test'), report: (d) => [has(d, IS_WIN ? 'gradlew.bat' : 'gradlew') ? (IS_WIN ? 'gradlew.bat' : './gradlew') : 'gradle', 'test', '--continue'], format: 'junit-dir', dir: 'build/test-results' },
@@ -46,7 +46,7 @@ export function findSuites(root) {
     for (const e of ECOSYSTEMS) {
       if (seen.has(e.group) || !e.when(d)) continue
       seen.add(e.group)
-      out.push({ cwd: rel.split(path.sep).join('/'), group: e.group, runner: e.runner, language: val(e.language, d), test_cmd: val(e.test_cmd, d) || null, report: val(e.report, d) || null, one: e.one || null, format: e.format || null, dir: e.dir || null })
+      out.push({ cwd: rel.split(path.sep).join('/'), group: e.group, runner: e.runner, language: val(e.language, d), test_cmd: val(e.test_cmd, d) || null, report: val(e.report, d) || null, one: e.one || null, related: e.related || null, format: e.format || null, dir: e.dir || null })
     }
     return out
   }
@@ -128,19 +128,25 @@ async function readReport(s, { out, outdir, cwd, t0, stdout }) {
 // Nome de prova de subpasta leva a subpasta na frente; da raiz fica igual ao do runner (missão em andamento não muda de nomes).
 // runner que recebeu um arquivo fora do include (vitest, jest) ou sem prova coletada (pytest)
 const NO_TESTS = /no test files found|no tests found|no tests ran|collected 0 items/i
-export async function runSuites(dir, suites, { run, python, timeoutMs = 5 * 60 * 1000, only = null }) {
+// related = arquivos mudados pela parte (relativos ao projeto): cada suíte roda só as provas ligadas a eles com o recurso do
+// próprio runner (vitest related, jest --findRelatedTests, pacotes Go mudados); suíte sem arquivo mudado fica de fora; suíte
+// sem molde de afetadas roda inteira. Devolve null quando nada rodou. A suíte inteira fica para o fim do épico.
+export async function runSuites(dir, suites, { run, python, timeoutMs = 5 * 60 * 1000, only = null, related = null }) {
   const target = only && path.resolve(dir, only)
   const inSuite = (s) => { const r = path.relative(path.join(dir, s.cwd), target); return !r.startsWith('..') && !path.isAbsolute(r) ? r.split(path.sep).join('/') : null }
-  const live = suites.filter((s) => s.test_cmd && (!only || (s.one && inSuite(s))))
-  if (only && !live.length) return null
+  const mine = (s) => (related || []).map((f) => path.relative(path.join(dir, s.cwd), path.resolve(dir, f))).filter((r) => r && !r.startsWith('..') && !path.isAbsolute(r)).map((r) => r.split(path.sep).join('/'))
+  const live = suites.filter((s) => s.test_cmd && (!only || (s.one && inSuite(s))) && (!related || mine(s).length))
+  if ((only || related) && !live.length) return null
   if (!live.length) return { ok: false, total: 0, failed: 0, tests: [], runner: 'none', named: false, covered: [] }
   const tests = [], tails = [], covered = []
   let named = true, timeout = false
   for (const s of live) {
     const cwd = path.join(dir, s.cwd), tmp = await mkdtemp(path.join(os.tmpdir(), 'ade-t-')), out = path.join(tmp, 'report.out'), t0 = Date.now()
     try {
-      const file = only ? inSuite(s) : null
-      const argv = (file ? s.one : s.report || s.test_cmd.split(' ')).map((a) => a.replaceAll('{out}', out).replaceAll('{outdir}', tmp).replaceAll('{file}', file || '').replaceAll('{pkg}', file ? `./${path.posix.dirname(file)}` : ''))
+      const file = only ? inSuite(s) : null, changed = related && s.related ? mine(s) : null
+      const pkgs = [...new Set((changed || []).filter((f) => f.endsWith('.go')).map((f) => `./${path.posix.dirname(f)}`))]
+      if (changed && s.related.includes('{pkgs}') && !pkgs.length) continue // nenhum pacote Go mudou nesta suíte
+      const argv = (file ? s.one : changed ? s.related : s.report || s.test_cmd.split(' ')).flatMap((a) => (a === '{files}' ? changed : a === '{pkgs}' ? pkgs : [a.replaceAll('{out}', out).replaceAll('{outdir}', tmp).replaceAll('{file}', file || '').replaceAll('{pkg}', file ? `./${path.posix.dirname(file)}` : '')]))
       if (argv[0] === '{python}') argv[0] = await python(cwd)
       // NODE_TEST_CONTEXT herdado de um node --test em volta faz o node --test filho ignorar o relatório; undefined tira do ambiente
       const r = await run(argv[0], argv.slice(1), { cwd, timeoutMs, env: { NODE_TEST_CONTEXT: undefined } })
@@ -162,13 +168,15 @@ export async function runSuites(dir, suites, { run, python, timeoutMs = 5 * 60 *
         // ("No test files found"): contava como prova vermelha e a parte 1 do épico 2 gastou duas rodadas no Sol sem nada a corrigir
         if ((rep && r.code === 0) || NO_TESTS.test(`${r.out}\n${r.err}`)) continue
         tests.push({ name: `${pre}${file}`, status: 'failed', message: tail.slice(-300) })
+      } else if (changed && (r.code === 0 || NO_TESTS.test(`${r.out}\n${r.err}`))) {
+        continue // nenhuma prova ligada aos arquivos mudados
       } else {
         named = false
         tests.push({ name: pre + s.test_cmd, status: r.code === 0 ? 'passed' : 'failed', message: r.code === 0 ? '' : tail.slice(-300) })
       }
     } finally { await rm(tmp, { recursive: true, force: true }).catch(() => {}) }
   }
-  if (only && !tests.length) return null
+  if ((only || related) && !tests.length) return null
   const failed = tests.filter((t) => t.status !== 'passed').length
-  return { ok: failed === 0 && tests.length > 0, total: tests.length, failed, tests, runner: live.map((s) => s.runner).join('+'), named, timeout, covered, output: tails.join('\n').slice(-2000), only: only || undefined }
+  return { ok: failed === 0 && tests.length > 0, total: tests.length, failed, tests, runner: live.map((s) => s.runner).join('+'), named, timeout, covered, output: tails.join('\n').slice(-2000), only: only || undefined, related: related ? true : undefined }
 }

@@ -95,3 +95,24 @@ test('só um arquivo: roda só a prova da parte; runner sem molde ou arquivo for
   const vitestLike = { cwd: '', runner: 'vitest', test_cmd: 'vitest run', format: null, one: ['node', '-e', "console.log('No test files found, exiting with code 1'); process.exit(1)"] }
   assert.equal(await runSuites(d, [vitestLike], { run, only: 'a.test.mjs' }), null)
 })
+
+test('provas afetadas: cada suíte recebe os arquivos mudados dela; sem arquivo mudado fica de fora; sem molde roda inteira', async () => {
+  const { spawnSync } = await import('node:child_process')
+  const { runSuites } = await import('./runners.mjs')
+  const run = async (cmd, args, { cwd } = {}) => { const r = spawnSync(cmd, args, { cwd, encoding: 'utf8' }); return { code: r.status, out: r.stdout || '', err: r.stderr || '' } }
+  const d = mkdtempSync(path.join(os.tmpdir(), 'ade-related-'))
+  mkdirSync(path.join(d, 'web')); mkdirSync(path.join(d, 'api'))
+  // runner falso: uma prova por arquivo recebido
+  const junit = "require('fs').writeFileSync(process.argv[1], '<testsuite>' + process.argv.slice(2).map((f) => '<testcase name=\"' + f + '\"/>').join('') + '</testsuite>')"
+  const related = ['node', '-e', junit, '{out}', '{files}'], full = ['node', '-e', junit, '{out}', 'tudo']
+  const suites = [
+    { cwd: '', runner: 'raiz', test_cmd: 'x', format: 'junit', related },
+    { cwd: 'web', runner: 'web', test_cmd: 'x', format: 'junit', related },
+    { cwd: 'api', runner: 'api', test_cmd: 'x', format: 'junit', report: full },
+  ]
+  const r = await runSuites(d, suites, { run, related: ['src/a.js', 'web/b.js', 'api/c.js'] })
+  assert.deepEqual(r.tests.map((t) => t.name), ['src/a.js', 'web/b.js', 'api/c.js', 'web: b.js', 'api: tudo'])
+  assert.equal(r.related, true)
+  assert.deepEqual((await runSuites(d, suites.slice(1), { run, related: ['web/b.js'] })).tests.map((t) => t.name), ['web: b.js'])
+  assert.equal(await runSuites(d, suites.slice(1), { run, related: ['docs/x.md'] }), null)
+})
