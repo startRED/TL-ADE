@@ -48,7 +48,8 @@
       "properties": {
         "max_usd": { "type": "number" },
         "max_wall_clock_seconds": { "type": "integer", "minimum": 1 },
-        "max_parked_units": { "type": "integer", "minimum": 0 }
+        "max_parked_units": { "type": "integer", "minimum": 0 },
+        "max_subscription_weekly_percent": { "type": "number", "minimum": 0, "maximum": 50 }
       }
     },
     "budget": {

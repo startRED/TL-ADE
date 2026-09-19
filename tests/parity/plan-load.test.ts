@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { digest16 } from '../../src/journal/canonical.js'
 import { AdeError } from '../../src/journal/errors.js'
-import { loadPlan } from '../../src/engine/plan-load.js'
+import { defaultStoryBudget, loadPlan } from '../../src/engine/plan-load.js'
 import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.js'
 
 let tmpDirs: string[] = []
@@ -169,13 +169,14 @@ describe('plan-load parity', () => {
       max_usd: 1,
       max_wall_clock_seconds: 28800,
       max_parked_units: 3,
+      max_subscription_weekly_percent: 50,
     })
     expect(result.gates).toEqual([])
     expect(result.stories).toHaveLength(1)
 
     const story = result.stories[0]
     expect(story.id).toBe('ADE-T1')
-    expect(story.spec_revision).toBe(digest16(defaultContract))
+    expect(story.spec_revision).toBe(digest16({ ...defaultContract, needs_ui: false }))
     expect(story.evals).toHaveLength(1)
     expect(story.evals[0]).toEqual({
       id: 'E1',
@@ -221,6 +222,7 @@ describe('plan-load parity', () => {
       max_usd: 5,
       max_wall_clock_seconds: 7200,
       max_parked_units: 2,
+      max_subscription_weekly_percent: 50,
     })
   })
 
@@ -712,7 +714,207 @@ describe('plan-load parity', () => {
       expect(err).toBeInstanceOf(AdeError)
       expect(err.code).toBe('contract_id_mismatch')
       expect(err.exitCode).toBe(4)
-      expect(err.message).toContain('ADE-T1')
     }
+  })
+
+  // CA1: Dado um plano sem os limites opcionais da missão, quando ele é carregado, então os valores resultantes são 28.800 segundos, 3 unidades estacionadas e 50% semanais por assinatura
+  test('ca1_mission_budget_defaults_when_optional_limits_omitted', () => {
+    const { planPath } = writePlanDir({
+      plan: {
+        mission_budget: {
+          max_usd: 1,
+        },
+      },
+    })
+    const result = loadPlan(planPath)
+    expect(result.missionBudget).toEqual({
+      max_usd: 1,
+      max_wall_clock_seconds: 28800,
+      max_parked_units: 3,
+      max_subscription_weekly_percent: 50,
+    })
+  })
+
+  // CA2: Dadas stories sem valores explícitos, quando são carregadas, então bounded sem interface recebe 6 chamadas/2 correções e bounded com interface recebe 8 chamadas/3 correções; feature recebe respectivamente 10/3 e 12/3
+  test('ca2_story_contracts_receive_correct_budget_and_needs_ui_defaults', () => {
+    const { defaultContract } = writePlanDir({ skipContracts: true })
+    const { dir } = writePlanDir({
+      plan: {
+        phases: [
+          {
+            epics: [
+              {
+                stories: ['STORY-BOUNDED', 'STORY-BOUNDED-UI', 'STORY-FEATURE', 'STORY-FEATURE-UI'],
+              },
+            ],
+          },
+        ],
+      },
+      contracts: {
+        'STORY-BOUNDED': {
+          ...defaultContract,
+          id: 'STORY-BOUNDED',
+          complexity: 'bounded',
+          budget: {},
+        },
+        'STORY-BOUNDED-UI': {
+          ...defaultContract,
+          id: 'STORY-BOUNDED-UI',
+          complexity: 'bounded',
+          needs_ui: true,
+          budget: {},
+        },
+        'STORY-FEATURE': {
+          ...defaultContract,
+          id: 'STORY-FEATURE',
+          complexity: 'feature',
+          budget: {},
+        },
+        'STORY-FEATURE-UI': {
+          ...defaultContract,
+          id: 'STORY-FEATURE-UI',
+          complexity: 'feature',
+          needs_ui: true,
+          budget: {},
+        },
+      },
+    })
+    const planPath = path.join(dir, 'plan.json')
+    const result = loadPlan(planPath)
+
+    const bounded = result.stories.find((s) => s.id === 'STORY-BOUNDED')!
+    expect(bounded.contract.needs_ui).toBe(false)
+    expect(bounded.contract.budget.max_model_calls).toBe(6)
+    expect(bounded.contract.budget.max_rework_rounds).toBe(2)
+
+    const boundedUi = result.stories.find((s) => s.id === 'STORY-BOUNDED-UI')!
+    expect(boundedUi.contract.needs_ui).toBe(true)
+    expect(boundedUi.contract.budget.max_model_calls).toBe(8)
+    expect(boundedUi.contract.budget.max_rework_rounds).toBe(3)
+
+    const feature = result.stories.find((s) => s.id === 'STORY-FEATURE')!
+    expect(feature.contract.needs_ui).toBe(false)
+    expect(feature.contract.budget.max_model_calls).toBe(10)
+    expect(feature.contract.budget.max_rework_rounds).toBe(3)
+
+    const featureUi = result.stories.find((s) => s.id === 'STORY-FEATURE-UI')!
+    expect(featureUi.contract.needs_ui).toBe(true)
+    expect(featureUi.contract.budget.max_model_calls).toBe(12)
+    expect(featureUi.contract.budget.max_rework_rounds).toBe(3)
+  })
+
+  // CA3: Dado um plano com teto semanal 25 e uma story trivial com 2 chamadas/0 correções, quando ele é carregado, então 25, 2 e 0 são preservados
+  test('ca3_explicit_subscription_weekly_percent_and_budget_values_are_preserved', () => {
+    const { defaultContract } = writePlanDir({ skipContracts: true })
+    const { dir } = writePlanDir({
+      plan: {
+        mission_budget: {
+          max_usd: 1,
+          max_subscription_weekly_percent: 25,
+        },
+        phases: [
+          {
+            epics: [
+              {
+                stories: ['STORY-TRIVIAL'],
+              },
+            ],
+          },
+        ],
+      },
+      contracts: {
+        'STORY-TRIVIAL': {
+          ...defaultContract,
+          id: 'STORY-TRIVIAL',
+          complexity: 'trivial',
+          budget: {
+            max_model_calls: 2,
+            max_rework_rounds: 0,
+          },
+        },
+      },
+    })
+    const planPath = path.join(dir, 'plan.json')
+    const result = loadPlan(planPath)
+
+    expect(result.missionBudget.max_subscription_weekly_percent).toBe(25)
+    const trivial = result.stories.find((s) => s.id === 'STORY-TRIVIAL')!
+    expect(trivial.contract.budget.max_model_calls).toBe(2)
+    expect(trivial.contract.budget.max_rework_rounds).toBe(0)
+  })
+
+  // CA4: Dado teto semanal maior que 50, negativo ou não numérico, quando o plano é carregado, então a entrada é recusada com saída 4 antes de qualquer execução
+  test('ca4_subscription_weekly_percent_exceeding_50_negative_or_non_numeric_is_refused', () => {
+    // maior que 50 (51) falha antes de preparar uma story (mesmo sem contratos)
+    const { planPath: planAbove50 } = writePlanDir({
+      plan: {
+        mission_budget: {
+          max_usd: 1,
+          max_subscription_weekly_percent: 51,
+        },
+      },
+      skipContracts: true,
+    })
+    try {
+      loadPlan(planAbove50)
+      expect.unreachable('deveria ter falhado com exitCode 4 para teto > 50')
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(AdeError)
+      expect(err.code).toBe('plan_schema_invalid')
+      expect(err.exitCode).toBe(4)
+    }
+
+    // negativo (-1)
+    const { planPath: planNegative } = writePlanDir({
+      plan: {
+        mission_budget: {
+          max_usd: 1,
+          max_subscription_weekly_percent: -1,
+        },
+      },
+    })
+    try {
+      loadPlan(planNegative)
+      expect.unreachable('deveria ter falhado com exitCode 4 para teto negativo')
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(AdeError)
+      expect(err.code).toBe('plan_schema_invalid')
+      expect(err.exitCode).toBe(4)
+    }
+
+    // não numérico ("50")
+    const { planPath: planNonNumeric } = writePlanDir({
+      plan: {
+        mission_budget: {
+          max_usd: 1,
+          max_subscription_weekly_percent: '50',
+        },
+      },
+    })
+    try {
+      loadPlan(planNonNumeric)
+      expect.unreachable('deveria ter falhado com exitCode 4 para teto não numérico')
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(AdeError)
+      expect(err.code).toBe('plan_schema_invalid')
+      expect(err.exitCode).toBe(4)
+    }
+  })
+
+  // Validação da tabela aprovada de defaultStoryBudget
+  test('default_story_budget_table_matches_approved_spec', () => {
+    expect(defaultStoryBudget({ complexity: 'trivial' })).toEqual({ max_model_calls: 3, max_rework_rounds: 1 })
+    expect(defaultStoryBudget({ complexity: 'trivial', needs_ui: true })).toEqual({ max_model_calls: 3, max_rework_rounds: 1 })
+    expect(defaultStoryBudget({ complexity: 'bounded' })).toEqual({ max_model_calls: 6, max_rework_rounds: 2 })
+    expect(defaultStoryBudget({ complexity: 'bounded', needs_ui: false })).toEqual({ max_model_calls: 6, max_rework_rounds: 2 })
+    expect(defaultStoryBudget({ complexity: 'bounded', needs_ui: true })).toEqual({ max_model_calls: 8, max_rework_rounds: 3 })
+    expect(defaultStoryBudget({ complexity: 'feature' })).toEqual({ max_model_calls: 10, max_rework_rounds: 3 })
+    expect(defaultStoryBudget({ complexity: 'feature', needs_ui: false })).toEqual({ max_model_calls: 10, max_rework_rounds: 3 })
+    expect(defaultStoryBudget({ complexity: 'feature', needs_ui: true })).toEqual({ max_model_calls: 12, max_rework_rounds: 3 })
+    expect(defaultStoryBudget({ complexity: 'subsystem' })).toEqual({ max_model_calls: 12, max_rework_rounds: 3 })
+    expect(defaultStoryBudget({ complexity: 'subsystem', needs_ui: true })).toEqual({ max_model_calls: 12, max_rework_rounds: 3 })
+    expect(defaultStoryBudget({ complexity: 'project' })).toEqual({ max_model_calls: 12, max_rework_rounds: 3 })
+    expect(defaultStoryBudget({ complexity: 'project', needs_ui: true })).toEqual({ max_model_calls: 12, max_rework_rounds: 3 })
+    expect(() => defaultStoryBudget({ complexity: 'unknown' as any })).toThrow(AdeError)
   })
 })

@@ -10,6 +10,7 @@
     "id": { "type": "string" },
     "title": { "type": "string" },
     "complexity": { "enum": ["trivial", "bounded", "feature", "subsystem", "project"] },
+    "needs_ui": { "type": "boolean" },
     "task": { "type": "string" },
     "guardrails": {
       "type": "object",
@@ -66,7 +67,6 @@
     "budget": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["max_model_calls", "max_rework_rounds"],
       "properties": {
         "max_model_calls": { "type": "integer" },
         "max_rework_rounds": { "type": "integer" },

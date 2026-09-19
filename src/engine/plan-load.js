@@ -55,10 +55,36 @@ const EXPECTED_GATE_KEYS = ['id', 'argv', 'when', 'expect_exit', 'timeout_s']
  * @typedef {Object} LoadedPlan
  * @property {Record<string, any>} plan
  * @property {string} planDir
- * @property {{ max_usd: number, max_wall_clock_seconds: number, max_parked_units: number }} missionBudget
+ * @property {{ max_usd: number, max_wall_clock_seconds: number, max_parked_units: number, max_subscription_weekly_percent: number }} missionBudget
  * @property {GateSpec[]} gates
  * @property {LoadedStory[]} stories
  */
+
+/**
+ * Retorna o orçamento padrão de modelo e correções por complexidade e presença de UI.
+ *
+ * @param {{ complexity: string, needs_ui?: boolean }} params
+ * @returns {{ max_model_calls: number, max_rework_rounds: number }}
+ */
+export function defaultStoryBudget({ complexity, needs_ui = false }) {
+  if (complexity === 'trivial') {
+    return { max_model_calls: 3, max_rework_rounds: 1 }
+  }
+  if (complexity === 'bounded') {
+    return needs_ui
+      ? { max_model_calls: 8, max_rework_rounds: 3 }
+      : { max_model_calls: 6, max_rework_rounds: 2 }
+  }
+  if (complexity === 'feature') {
+    return needs_ui
+      ? { max_model_calls: 12, max_rework_rounds: 3 }
+      : { max_model_calls: 10, max_rework_rounds: 3 }
+  }
+  if (complexity === 'subsystem' || complexity === 'project') {
+    return { max_model_calls: 12, max_rework_rounds: 3 }
+  }
+  throw new AdeError('unknown_complexity', `complexidade desconhecida: ${complexity}`, 4)
+}
 
 /**
  * Carrega e valida um plan.json, seus contratos e gates opcionais.
@@ -221,6 +247,19 @@ export function loadPlan(planPath) {
           )
         }
 
+        contract.needs_ui = contract.needs_ui ?? false
+        const defaultBudget = defaultStoryBudget({
+          complexity: contract.complexity,
+          needs_ui: contract.needs_ui,
+        })
+        contract.budget = contract.budget ?? {}
+        if (contract.budget.max_model_calls === undefined) {
+          contract.budget.max_model_calls = defaultBudget.max_model_calls
+        }
+        if (contract.budget.max_rework_rounds === undefined) {
+          contract.budget.max_rework_rounds = defaultBudget.max_rework_rounds
+        }
+
         assertCallBudget(contract.budget, 'contract')
 
         if (contract.id !== storyId) {
@@ -331,6 +370,7 @@ export function loadPlan(planPath) {
     max_usd: doc.mission_budget.max_usd,
     max_wall_clock_seconds: doc.mission_budget.max_wall_clock_seconds ?? 28800,
     max_parked_units: doc.mission_budget.max_parked_units ?? 3,
+    max_subscription_weekly_percent: doc.mission_budget.max_subscription_weekly_percent ?? 50,
   }
 
   return {
