@@ -352,8 +352,14 @@ async function waitRenewal(key, who, until) {
 // chamada falhou ou voltou vazia; família com mais de RESERVE_PCT usada e existe substituto de outra empresa com folga
 // (reserva o resto da cota para papéis onde essa família é insubstituível). Titular sem cota que renova em minutos: espera.
 // avoidVendor tira a empresa de quem escreveu (revisão). start pula degraus (escada de correção, revisor mais forte).
+// Quem escreve só pode ser um modelo que deixa alguém de OUTRA empresa na cadeia de revisão; senão ninguém revisa a rodada.
+const MAKER_KEYS = new Set(['prova', 'impl_light', 'impl', 'impl_hard', 'fix'])
+function hasReviewerFor(w) { const v = vendorOf(w.family, w.model); return chainOf('checker').some((c) => vendorOf(c.family, c.model) !== v) }
 async function withChain(key, { avoidVendor = null, start = 0, list = null } = {}, fn) {
-  const chain = (list || chainOf(key)).filter((w) => !avoidVendor || vendorOf(w.family, w.model) !== avoidVendor)
+  const all = (list || chainOf(key)).filter((w) => !avoidVendor || vendorOf(w.family, w.model) !== avoidVendor)
+  const chain = MAKER_KEYS.has(key) ? all.filter(hasReviewerFor) : all
+  if (all.length && !chain.length) log('engine', `${key}: nenhum modelo da cadeia pode escrever, porque a cadeia de revisão só tem a mesma empresa; acrescente um revisor de outra empresa em Modelos`, 'error')
+  if (!chain.length) { if (avoidVendor) log('engine', `${key}: a cadeia só tem modelos da empresa de quem escreveu (${avoidVendor}); acrescente um de outra empresa em Modelos`, 'error'); return null }
   const first = Math.min(start, Math.max(0, chain.length - 1))
   const titular = chain[first]
   if (titular && !quotaAvailable(titular.family)) {
@@ -364,7 +370,7 @@ async function withChain(key, { avoidVendor = null, start = 0, list = null } = {
   for (let i = first; i < chain.length; i++) {
     const who = chain[i]
     if (!quotaAvailable(who.family)) { log('engine', `${key}: ${who.model} sem cota até ${fmtWhen(state.quota.exhausted[who.family])}; pulo`, 'warn'); continue }
-    const rested = chain.slice(i + 1).find((w) => vendorOf(w.family, w.model) !== vendorOf(who.family, who.model) && quotaAvailable(w.family) && quotaUsed(w.family) < RESERVE_PCT)
+    const rested = chain.slice(i + 1).find((w) => vendorOf(w.family, w.model) !== vendorOf(who.family, who.model) && quotaAvailable(w.family) && quotaUsed(w.family) < RESERVE_PCT) // chain já só tem quem tem revisor
     if (quotaUsed(who.family) >= RESERVE_PCT && rested) { log('engine', `${key}: ${FAMILY_LABEL[who.family] || who.family} com ${quotaUsed(who.family)}% da cota usada; guardo o resto e uso ${rested.model}`, 'warn'); continue }
     tried++
     journal({ type: 'model_chosen', role: key, family: who.family, model: who.model, effort: who.effort, story: state.mission?.current ?? null, step: i, reason: tried === 1 && i === first ? 'principal' : 'fallback', quota_used: quotaUsed(who.family) }).catch(() => {})
