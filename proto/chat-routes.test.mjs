@@ -67,3 +67,68 @@ describe('chatCommand', () => {
     assert.ok(codex.args.includes('model_reasoning_effort=medium'))
   })
 })
+
+describe('chatIntro', () => {
+  it('CA1: abre o chat em modo escrita na cópia isolada, sem modo somente leitura', () => {
+    const intro = chatChanges.chatIntro({
+      name: 'demo', dir: 'C:/proj', wtPath: 'C:/copia'
+    })
+
+    assert.ok(intro.includes('pode criar, alterar e apagar arquivos'))
+    assert.ok(intro.includes('aprova ou recusa num cartão'))
+    assert.ok(intro.includes('não faça commit'))
+    assert.ok(intro.includes('C:/copia'))
+    assert.ok(!intro.includes('Só leitura'))
+  })
+})
+
+describe('formatHistory', () => {
+  it('CA2: anota no histórico a proposta recusada', () => {
+    const history = chatChanges.formatHistory([
+      { role: 'user', text: 'crie ola.txt' },
+      {
+        role: 'ai',
+        text: 'Criei ola.txt.',
+        proposal: { state: 'rejected', files: [{ path: 'ola.txt', kind: 'created' }] }
+      }
+    ])
+
+    assert.equal(
+      history,
+      'Usuário: crie ola.txt\nAssistente: Criei ola.txt. [proposta recusada pelo usuário]'
+    )
+  })
+
+  it('CA3: anota arquivos e tipos de uma proposta aplicada', () => {
+    const history = chatChanges.formatHistory([
+      {
+        role: 'ai',
+        text: 'Mudanças aplicadas.',
+        proposal: {
+          state: 'applied',
+          files: [
+            { path: 'ola.txt', kind: 'created' },
+            { path: 'b.txt', kind: 'changed' },
+            { path: 'c.txt', kind: 'deleted' }
+          ]
+        }
+      }
+    ])
+
+    assert.ok(history.endsWith('[proposta aplicada: ola.txt criado, b.txt alterado, c.txt apagado]'))
+  })
+
+  it('CA4: retorna vazio sem turnos e mantém apenas os oito últimos sem notas', () => {
+    assert.equal(chatChanges.formatHistory([]), '')
+
+    const turns = Array.from({ length: 10 }, (_, index) => ({
+      role: index % 2 === 0 ? 'user' : 'ai',
+      text: `m${index}`
+    }))
+    const history = chatChanges.formatHistory(turns)
+
+    assert.equal(history.split('\n').length, 8)
+    assert.equal(history.split('\n')[0], 'Usuário: m2')
+    assert.ok(!history.includes('['))
+  })
+})

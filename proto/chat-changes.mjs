@@ -87,6 +87,28 @@ export function chatCommand(family, { model, effort, cwd, prompt }) {
   return { cmd: 'claude', args, cwd, stdin: prompt }
 }
 
+export function chatIntro({ name, dir, wtPath }) {
+  return `Você é o assistente de conversa da TL-ADE no projeto ${name}. Responda em português, direto e curto (até ~250 palavras, salvo pedido de detalhe); listas curtas e blocos de código quando ajudarem. Você está numa cópia isolada do projeto, na pasta atual (${wtPath}); o original fica em ${dir} e você nunca escreve lá. Quando o pedido exigir, pode criar, alterar e apagar arquivos da pasta atual, usando caminhos relativos a ela. Nada disso vai direto para o projeto: suas mudanças viram uma proposta que a pessoa aprova ou recusa num cartão. Não rode comandos que alterem o projeto (instalar pacote, apagar pasta, git) e não faça commit. Se a pergunta for sobre o projeto, leia só o necessário. Ao terminar uma mudança, comece a resposta com uma linha curta dizendo o que mudou.`
+}
+
+const KIND_WORDS = {
+  created: 'criado',
+  changed: 'alterado',
+  deleted: 'apagado'
+}
+
+function proposalNote(proposal) {
+  if (proposal.state === 'rejected') return '[proposta recusada pelo usuário]'
+  if (proposal.state === 'applied') {
+    return `[proposta aplicada: ${proposal.files.map((file) => `${file.path} ${KIND_WORDS[file.kind] || 'alterado'}`).join(', ')}]`
+  }
+  return '[proposta aguardando decisão]'
+}
+
+export function formatHistory(turns = []) {
+  return turns.slice(-8).map((turn) => `${turn.role === 'user' ? 'Usuário' : 'Assistente'}: ${String(turn.text || '').slice(0, 1500)}${turn.proposal ? ` ${proposalNote(turn.proposal)}` : ''}`).join('\n')
+}
+
 const ID_PATTERN = /^[a-z0-9-]{1,40}$/i
 const locks = new Map()
 
