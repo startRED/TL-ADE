@@ -61,7 +61,7 @@ const REASON = {
   planner_choice: 'O entendedor mediu a dificuldade e recomenda outro modelo para planejar. Escolha.',
 }
 const DIFF_PT = { easy: 'leve', normal: 'normal', hard: 'pesada' }
-const EFFORT_PT = { low: 'baixo', medium: 'médio', high: 'alto' }
+const EFFORT_PT = { low: 'baixo', medium: 'médio', high: 'alto', xhigh: 'extra alto' }
 const modelName = (r) => `${r?.model || ''}${r?.effort ? ` · esforço ${EFFORT_PT[r.effort] || r.effort}` : ''}`
 const EPIC_PT = { incomplete: 'incompleto', queued: 'na fila', running: 'em andamento', done: 'pronto', failed: 'falhou', blocked: 'bloqueado' }
 // pergunta ou pedido pequeno vai para a conversa (só leitura), não vira missão
@@ -1250,7 +1250,7 @@ function ModelsPage({ state, save }) {
                       {Object.entries(registry).map(([fam, fr]) => <optgroup key={fam} label={fr.label}>{fr.models.map((mo) => <option key={mo.id} value={`${fam}|${mo.id}`}>{mo.label}{mo.note ? ` · ${mo.note}` : ''}</option>)}</optgroup>)}
                     </select>
                     <select className="sel" aria-label={`Esforço de ${label}, modelo ${i + 1}`} value={w.effort || 'medium'} onChange={(e) => setAt(i, { effort: e.target.value })}>
-                      <option value="low">esforço baixo · rápido e barato</option><option value="medium">esforço médio</option><option value="high">esforço alto · pensa mais, custa mais</option>
+                      <option value="low">esforço baixo · rápido e barato</option><option value="medium">esforço médio</option><option value="high">esforço alto · pensa mais, custa mais</option>{w.family === 'codex' && <option value="xhigh">esforço extra alto · só Codex</option>}
                     </select>
                   </div>
                   {chain && list.length > 1 ? <button className="chain-x" aria-label="Tirar da cadeia" title="Tirar da cadeia" onClick={() => drop(i)}>×</button> : <span />}

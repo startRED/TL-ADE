@@ -53,7 +53,7 @@ const REGISTRY = {
   ] },
 }
 // Esforço por papel (Erick, 17/09): Claude → --effort; Codex → model_reasoning_effort; Antigravity → sufixo do modelo (pro só tem high/low).
-const EFFORTS = ['low', 'medium', 'high']
+const EFFORTS = ['low', 'medium', 'high'] // Claude e papéis simples; o Codex aceita também xhigh nas cadeias (passa direto em model_reasoning_effort)
 function effortOf(role) { return state.settings.roles[role]?.effort || DEFAULT_SETTINGS.roles[role]?.effort || 'medium' }
 function agyModel(id, effort) { const mm = /^(gemini-[\d.]+-(flash|pro))(?:-(high|medium|low))?$/.exec(id || ''); if (!mm) return id; const e = mm[2] === 'pro' && effort === 'medium' ? 'high' : (effort || 'medium'); return `${mm[1]}-${e}` }
 function plannerChoice(kind = 'complex') { const key = kind === 'light' ? 'plan' : 'epics', x = chainOf(key)[0] || state.settings.roles.planner; return { family: x.family || 'claude', model: x.model, effort: x.effort || 'high', key } }
@@ -104,17 +104,17 @@ const DEFAULT_SETTINGS = {
   // O motor usa o primeiro da cadeia cuja família tem cota; cota esgotada ou chamada que falhou pula para o próximo em vez de pausar.
   // Quem escreve nunca é da empresa de quem revisa (filtrado por chamada). Claude é a cota mais curta: fica de reserva onde há substituto.
   chains: {
-    epics: [{ family: 'codex', model: 'gpt-6-astra', effort: 'medium' }, { family: 'claude', model: 'fable', effort: 'high' }], // Astra medium: AA 50 pela metade do custo do Fable
-    plan: [{ family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'high' }], // Sol high: AA 42 por US$ 0,81; o Astra custou mais que tudo o resto no 1º épico medido
+    epics: [{ family: 'codex', model: 'gpt-6-astra', effort: 'xhigh' }, { family: 'claude', model: 'fable', effort: 'high' }], // roda 1 vez por missão e decide tudo: Astra xhigh = nota do max (AA 53) por 71% do custo
+    plan: [{ family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'medium' }], // Sol high: AA 42 por US$ 0,81; o Astra custou mais que tudo o resto no 1º épico medido
     // 19/09 (Erick): cada empresa num papel, e quem escreve nunca revisa. O Gemini 3.8 Flash (cota do Google livre) fica só com o mais
     // pesado, escrever código (Sol leu ~1,2M tokens por parte); o Codex planeja e revisa o Flash; o Claude entra na escada e como reserva.
-    plan_edit: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }, { family: 'claude', model: 'opus', effort: 'medium' }], // correção automática do plano: só edita e reescreve o JSON (~7k tokens de saída); no Astra custava US$ 0,70 por correção
+    plan_edit: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }, { family: 'claude', model: 'opus', effort: 'low' }], // correção automática do plano: só edita e reescreve o JSON (~7k tokens de saída); no Astra custava US$ 0,70 por correção
     prova: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }],
-    impl_light: [{ family: 'codex', model: 'gpt-5.6-luna', effort: 'high' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }], // configuração e documentação: leve e quase de graça no Luna
+    impl_light: [{ family: 'codex', model: 'gpt-5.6-luna', effort: 'high' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'medium' }], // configuração e documentação: leve e quase de graça no Luna
     impl: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }], // parte comum
     impl_hard: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }], // interface larga, risco alto
-    fix: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'codex', model: 'gpt-6-astra', effort: 'high' }], // escada: 2 rodadas por degrau; o Sol (IOI 91%) cobre o ponto fraco do Flash em algoritmo, o Astra entra na rodada 5
-    checker: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'agy', model: 'claude-opus-4-6-thinking', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'high' }], // Terra revisa o Flash, o Flash revisa o Codex; Opus 4.6 via Google e Opus 5 na escada
+    fix: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'xhigh' }, { family: 'codex', model: 'gpt-6-astra', effort: 'high' }], // escada: 2 rodadas por degrau; o Sol (IOI 91%) cobre o ponto fraco do Flash em algoritmo, o Astra entra na rodada 5
+    checker: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'xhigh' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'agy', model: 'claude-opus-4-6-thinking', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'high' }], // Terra revisa o Flash, o Flash revisa o Codex; Opus 4.6 via Google e Opus 5 na escada
   },
   planner_recommend: true, // o entendedor mede a dificuldade e recomenda quem planeja; você escolhe (modo noturno segue a recomendação)
   epic_plans_cheaper: true, // com Fable como planejador, ele só divide o pedido em épicos; o plano de cada épico sai no Opus alto (medido: US$ 5,60 e 13 min por épico no Fable, 74k tokens de saída)
