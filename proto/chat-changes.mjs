@@ -124,8 +124,12 @@ export async function createChatWorktree(projectDir, id, { wtRoot = WT_ROOT } = 
     if (pruneResult.code !== 0) throw gitError(pruneResult)
 
     await fs.mkdir(path.dirname(wtPath), { recursive: true })
-    const removeResult = await git(['worktree', 'remove', '--force', wtPath], { cwd: projectDir })
-    if (removeResult.code !== 0) await fs.rm(wtPath, { recursive: true, force: true, maxRetries: 3 })
+    const removeResult = await git(['worktree', 'remove', '--force', '--force', wtPath], { cwd: projectDir })
+    if (removeResult.code !== 0) {
+      await fs.rm(wtPath, { recursive: true, force: true, maxRetries: 3 })
+      const retryPruneResult = await git(['worktree', 'prune'], { cwd: projectDir })
+      if (retryPruneResult.code !== 0) throw gitError(retryPruneResult)
+    }
 
     const addResult = await git(['worktree', 'add', '--detach', wtPath, 'HEAD'], { cwd: projectDir })
     if (addResult.code !== 0) throw gitError(addResult)
@@ -136,7 +140,7 @@ export async function createChatWorktree(projectDir, id, { wtRoot = WT_ROOT } = 
 export async function removeChatWorktree(projectDir, wtPath) {
   const resolved = path.resolve(wtPath)
   await locked(resolved, async () => {
-    await git(['worktree', 'remove', '--force', resolved], { cwd: projectDir })
+    await git(['worktree', 'remove', '--force', '--force', resolved], { cwd: projectDir })
     await fs.rm(resolved, { recursive: true, force: true, maxRetries: 3 })
     const pruneResult = await git(['worktree', 'prune'], { cwd: projectDir })
     if (pruneResult.code !== 0) throw gitError(pruneResult)
@@ -159,24 +163,21 @@ export async function pruneChatWorktrees(adeDir = ADE_DIR, keep = []) {
     .sort((left, right) => left.name.localeCompare(right.name))
 
   const wtReal = await fs.realpath(wtDir)
-  const paths = []
+  const removed = []
   for (const entry of candidates) {
     const candidate = path.join(wtDir, entry.name)
-    const stats = await fs.lstat(candidate)
-    if (!entry.isDirectory() || stats.isSymbolicLink()) {
-      throw codedError('git', `Cópia de chat insegura: ${entry.name}`)
+    try {
+      const stats = await fs.lstat(candidate)
+      if (!entry.isDirectory() || stats.isSymbolicLink()) continue
+      const real = await fs.realpath(candidate)
+      if (path.dirname(real) !== wtReal) continue
+      await fs.rm(candidate, { recursive: true, force: true, maxRetries: 3 })
+      removed.push(entry.name)
+    } catch {
+      continue
     }
-    const real = await fs.realpath(candidate)
-    if (path.dirname(real) !== wtReal) {
-      throw codedError('git', `Cópia de chat fora da pasta esperada: ${entry.name}`)
-    }
-    paths.push(candidate)
   }
-
-  for (const candidate of paths) {
-    await fs.rm(candidate, { recursive: true, force: true, maxRetries: 3 })
-  }
-  return candidates.map((entry) => entry.name)
+  return removed
 }
 
 function parseStatus(out) {

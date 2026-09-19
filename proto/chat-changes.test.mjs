@@ -236,6 +236,97 @@ describe('chat-changes: cópia isolada (worktree)', () => {
   })
 })
 
+describe('pendências do e1: sobras estranhas', () => {
+  it('CA1: pruneChatWorktrees remove somente a pasta chat segura', async () => {
+    const adeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ade-prune-'))
+    const fora = await fs.mkdtemp(path.join(os.tmpdir(), 'ade-prune-fora-'))
+    tempDirs.push(adeDir, fora)
+    const wtDir = path.join(adeDir, 'wt')
+    const chatOk = path.join(wtDir, 'chat-ok')
+    await fs.mkdir(chatOk, { recursive: true })
+    await fs.writeFile(path.join(chatOk, 'arquivo.txt'), 'apagar')
+    await fs.writeFile(path.join(wtDir, 'chat-arquivo'), 'não apagar')
+    await fs.writeFile(path.join(fora, 'fora.txt'), 'intacto')
+    await fs.symlink(fora, path.join(wtDir, 'chat-link'), process.platform === 'win32' ? 'junction' : 'dir')
+
+    const removed = await pruneChatWorktrees(adeDir)
+
+    assert.deepEqual(removed, ['chat-ok'])
+    await assert.rejects(fs.access(chatOk), { code: 'ENOENT' })
+  })
+
+  it('CA2: pruneChatWorktrees preserva arquivo e link de chat que apontam para fora', async () => {
+    const adeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ade-prune-'))
+    const fora = await fs.mkdtemp(path.join(os.tmpdir(), 'ade-prune-fora-'))
+    tempDirs.push(adeDir, fora)
+    const wtDir = path.join(adeDir, 'wt')
+    await fs.mkdir(path.join(wtDir, 'chat-ok'), { recursive: true })
+    await fs.writeFile(path.join(wtDir, 'chat-arquivo'), 'não apagar')
+    await fs.writeFile(path.join(fora, 'fora.txt'), 'intacto')
+    const link = path.join(wtDir, 'chat-link')
+    await fs.symlink(fora, link, process.platform === 'win32' ? 'junction' : 'dir')
+
+    await pruneChatWorktrees(adeDir)
+
+    await assert.doesNotReject(fs.lstat(path.join(wtDir, 'chat-arquivo')))
+    await assert.doesNotReject(fs.lstat(link))
+    assert.equal(await fs.readFile(path.join(fora, 'fora.txt'), 'utf8'), 'intacto')
+    assert.deepEqual(await pruneChatWorktrees(path.join(adeDir, 'sem-wt')), [])
+  })
+
+  it('CA3: createChatWorktree substitui cópia travada sem registro locked duplicado', async () => {
+    const repo = await makeRepo()
+    const wtRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ade-prune-wt-'))
+    tempDirs.push(wtRoot)
+    const id = newId()
+    const first = await createChatWorktree(repo, id, { wtRoot })
+    const lockResult = await gitCmd(['worktree', 'lock', first.path], repo)
+    assert.equal(lockResult.code, 0)
+
+    const result = await createChatWorktree(repo, id, { wtRoot })
+    createdWorktrees.push({ repo, path: result.path })
+
+    assert.equal(result.path, first.path)
+    const headResult = await gitCmd(['rev-parse', 'HEAD'], repo)
+    assert.equal(result.head, headResult.stdout.trim())
+    const listResult = await gitCmd(['worktree', 'list', '--porcelain'], repo)
+    const listedPaths = listResult.stdout
+      .split('\n')
+      .filter((line) => line.startsWith('worktree '))
+      .map((line) => line.slice('worktree '.length))
+    const expected = await fs.realpath(path.resolve(result.path))
+    const comparableExpected = process.platform === 'win32' ? expected.toLowerCase() : expected
+    const matches = await Promise.all(listedPaths.map(async (listed) => {
+      const real = await fs.realpath(path.resolve(listed))
+      return (process.platform === 'win32' ? real.toLowerCase() : real) === comparableExpected
+    }))
+    assert.equal(matches.filter(Boolean).length, 1)
+    assert.doesNotMatch(listResult.stdout, /^locked$/m)
+  })
+
+  it('CA4: removeChatWorktree remove cópia travada e seu registro', async () => {
+    const repo = await makeRepo()
+    const wtRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ade-prune-wt-'))
+    tempDirs.push(wtRoot)
+    const { path: wtPath } = await createChatWorktree(repo, newId(), { wtRoot })
+    const lockResult = await gitCmd(['worktree', 'lock', wtPath], repo)
+    assert.equal(lockResult.code, 0)
+
+    await removeChatWorktree(repo, wtPath)
+
+    await assert.rejects(fs.access(wtPath), { code: 'ENOENT' })
+    const listResult = await gitCmd(['worktree', 'list', '--porcelain'], repo)
+    const removed = path.resolve(wtPath)
+    const comparableRemoved = process.platform === 'win32' ? removed.toLowerCase() : removed
+    const listedPaths = listResult.stdout
+      .split('\n')
+      .filter((line) => line.startsWith('worktree '))
+      .map((line) => path.resolve(line.slice('worktree '.length)))
+      .map((listed) => process.platform === 'win32' ? listed.toLowerCase() : listed)
+    assert.equal(listedPaths.includes(comparableRemoved), false)
+  })
+})
+
 describe('collectProposal', () => {
   it('CA1: retorna lista ordenada com kind, diff de cada arquivo e head do commit base', async () => {
     const repo = await makeRepo()
@@ -501,5 +592,4 @@ describe('canApprove', () => {
     )
   })
 })
-
 
