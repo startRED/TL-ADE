@@ -312,10 +312,14 @@ function setStep(name, status, extra = {}) {
 // Windows: sem windows.sandbox (o [windows] do config.toml some com --ignore-user-config) o Codex rebaixa workspace-write para
 // read-only calado e, em read-only, recusa todo comando ("blocked by policy"). Missões m-mu81n0ms (13 chamadas de código sem gravar)
 // e m-mu8kjr1p (o planejador não leu um arquivo e pediu ao Erick que colasse o projeto).
+// Ferramentas do Codex que a missão não usa: cada uma vai no contexto de todo passo (medido 19/09: 2,5k tokens a menos por passo).
+// A chamada de imagens ($imagegen) não usa --ignore-user-config e fica com tudo.
+const CODEX_UNUSED = ['apps', 'browser_use', 'browser_use_external', 'computer_use', 'image_generation', 'multi_agent', 'plugins', 'remote_plugin', 'goals', 'in_app_browser', 'in_app_chat', 'skill_search', 'tool_suggest', 'sleep_tool']
 function guardPrompt(cmd, args, stdin) {
   if (cmd === 'agy') return { args: args.map((a) => a.startsWith('--print=') ? `--print=${ENV_GUARD} ${a.slice(8)}` : a), stdin }
   if (cmd !== 'codex' || args[0] !== 'exec') return { args, stdin }
   if (IS_WIN && !args.some((a) => a.startsWith('windows.sandbox'))) args = ['exec', '-c', 'windows.sandbox=elevated', ...args.slice(1)]
+  if (args.includes('--ignore-user-config')) args = ['exec', ...CODEX_UNUSED.flatMap((f) => ['-c', `features.${f}=false`]), ...args.slice(1)]
   if (stdin != null) return { args, stdin: `${ENV_GUARD}
 
 ${stdin}` }
@@ -600,12 +604,16 @@ function selectSkills(intent) {
   return out
 }
 const SKILLS_MARK = '\n\n=== SKILLS ATIVAS'
+// O prompt vai inteiro em todo passo da IA: skill longa entra só com o começo (princípios); o resto fica no arquivo.
+const SKILL_CHARS = 2400
 function skillsBlock(selected) {
   if (!selected.length) return ''
   return '\n\n=== SKILLS ATIVAS (siga-as; são o padrão de qualidade deste projeto) ===\n' + selected.map((s) => {
     const c = state.catalog.find((x) => x.id === s.id)
     const body = c.body.replace(/^---\n[\s\S]*?\n---\n/, '')
-    return `\n--- skill: ${s.id} ---\n${body}`
+    if (body.length <= SKILL_CHARS) return `\n--- skill: ${s.id} ---\n${body}`
+    const cut = body.slice(0, SKILL_CHARS), end = Math.max(cut.lastIndexOf('\n## '), cut.lastIndexOf('\n\n'))
+    return `\n--- skill: ${s.id} (começo; a skill inteira está em ${c.path}, leia só se precisar) ---\n${end > SKILL_CHARS / 2 ? cut.slice(0, end) : cut}`
   }).join('\n')
 }
 
@@ -1374,7 +1382,7 @@ const PLAN_JSON_SCHEMA = {
 // ---------- pacote de contexto (sessão nova do Claude sem releitura) ----------
 // Cada fase abre um processo novo (decisão de Erick: sessões novas, não uma só). Para o maker não gastar turnos relendo,
 // o prompt já traz a árvore do projeto e o conteúdo atual dos arquivos que a story tocou (ou que a story cita).
-const PACK_FILE_MAX = 12000, PACK_TOTAL_MAX = 48000, PACK_FILES_MAX = 10
+const PACK_FILE_MAX = 12000, PACK_TOTAL_MAX = 48000, PACK_FILES_MAX = 10, TREE_LIST_MAX = 150 // a lista de arquivos também vai em todo passo
 const TEXT_EXT = /\.(html?|css|m?js|cjs|jsx|tsx?|vue|svelte|json|md|py|toml|txt|yml|yaml|go|mod|rs|sql|env\.example|cfg|ini|java|kts?|gradle|xml|properties|cs|csproj|fs|php|rb|swift|dart|c|h|cc|cpp|hpp|ex|exs|lua|scala|sh|ps1)$/i
 async function projectTree(dir) {
   const a = await run('git', ['ls-files', '--', '.'], { cwd: dir }), b = await run('git', ['ls-files', '--others', '--exclude-standard', '--', '.'], { cwd: dir })
@@ -1406,7 +1414,8 @@ async function contextPack(st, extra = []) {
   const dir = state.project.dir
   const tree = await projectTree(dir)
   const want = [...new Set([...(st.files || []).slice().reverse(), ...extra, ...citedFiles(st, tree)])].filter((f) => TEXT_EXT.test(f)).slice(0, PACK_FILES_MAX)
-  const parts = [`ARQUIVOS DO PROJETO (${tree.length}): ${tree.join(', ')}`]
+  const byDir = () => Object.entries(tree.reduce((a, f) => { const i = f.indexOf('/'), d = i > 0 ? f.slice(0, i + 1) : f; a[d] = (a[d] || 0) + 1; return a }, {})).map(([d, n]) => (n > 1 ? `${d} (${n})` : d)).join(', ')
+  const parts = [tree.length <= TREE_LIST_MAX ? `ARQUIVOS DO PROJETO (${tree.length}): ${tree.join(', ')}` : `PASTAS DO PROJETO (${tree.length} arquivos; a lista inteira sai com git ls-files): ${byDir()}`]
   let total = 0
   for (const f of want) {
     let body; try { body = await readFile(path.join(dir, f), 'utf8') } catch { continue }
