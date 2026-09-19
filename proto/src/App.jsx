@@ -779,7 +779,7 @@ function Conversation({ state, m }) {
           <Ade><h3 className="msg-h">Montando o plano</h3><p className="msg-p">Estou lendo o projeto para dividir o trabalho em partes pequenas, cada uma com o que precisa valer no fim.</p><Skeleton /><Typing live={state.live} /></Ade>
         )}
 
-        {m.brief && need !== 'brief' && (
+        {m.brief && pendingDecision(m) !== 'brief' && (
           <Ade><h3 className="msg-h">Briefing: {m.brief.title}</h3><BriefView b={m.brief} compact /></Ade>
         )}
 
