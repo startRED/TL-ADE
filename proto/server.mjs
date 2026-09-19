@@ -121,6 +121,8 @@ const DEFAULT_SETTINGS = {
   fast_lane: true, // faixa rápida (ADR 0008 / E18): pedido curto de correção num projeto existente pula entrevista e plano no Opus
   max_usd_per_story: 5, // orçamento por parte (spec E4): estourou com provas verdes → aceita; sem provas verdes → para
   parallel_parts: 2, // partes independentes ao mesmo tempo (lanes.mjs): a atual + 1 em cópia isolada; 1 = em fila
+  prova_com_codigo: true, // prova e código numa chamada só; o motor confere o vermelho guardando o código de lado (false = duas chamadas)
+  suite_scope: 'part', // 'part' = suíte inteira em toda parte (todo commit verde); 'epic' = provas afetadas por parte e suíte inteira no fim do épico
   unattended: false, // modo noturno (ADR 0015): responde a entrevista com as recomendações, aprova o plano, e em parada sem saída pula a parte e segue
   max_usd_per_mission: 60, // teto por missão (US$ no Claude): estourou → pausa em vez de continuar gastando
   autonomy: 'auto', // auto: após 6 rodadas com provas verdes e sem achado grave do revisor, aceita e segue; ask: para e pergunta
@@ -593,11 +595,12 @@ function runTests(project, opts = {}) {
   if (opts.only) return runTestsNow(project, opts)
   const p = suiteQueue.then(() => runTestsNow(project, opts)); suiteQueue = p.catch(() => {}); return p
 }
-async function runTestsNow(project, { only = null } = {}) {
-  const res = await runSuites(project.dir, project.suites || findSuites(project.dir), { run, python: ensurePython, only })
+async function runTestsNow(project, { only = null, related = null } = {}) {
+  const res = await runSuites(project.dir, project.suites || findSuites(project.dir), { run, python: ensurePython, only, related })
   const covered = new Set((res?.covered || []).map((f) => path.relative(project.dir, f).split(path.sep).join('/')))
-  const stray = res?.covered?.length || only ? await strayNodeTests(project.dir, covered, only ? [only] : null) : []
-  if (!res) { const failed = stray.filter((t) => t.status !== 'passed').length; return stray.length ? { ok: !failed, total: stray.length, failed, tests: stray, runner: 'node-test', named: true, covered: [], only } : null }
+  // prova avulsa (node:test fora do runner): só o arquivo da parte, só os arquivos mudados, ou todas as da missão
+  const stray = res?.covered?.length || only || related ? await strayNodeTests(project.dir, covered, only ? [only] : related) : []
+  if (!res) { const failed = stray.filter((t) => t.status !== 'passed').length; return stray.length ? { ok: !failed, total: stray.length, failed, tests: stray, runner: 'node-test', named: true, covered: [], only, related: related ? true : undefined } : null }
   if (!stray.length) return res
   const tests = [...res.tests, ...stray], failed = tests.filter((t) => t.status !== 'passed').length
   return { ...res, tests, total: tests.length, failed, ok: failed === 0 }
@@ -963,7 +966,7 @@ async function checker(diff, tests, st) {
     st.contract_issue ? `Quem escreveu alegou CONTRATO ERRADO: ${st.contract_issue}. Diga no summary se a alegação procede.` : '',
     st.scope_paths?.length ? `Contrato da story: só podia alterar ${st.scope_paths.join(', ')}${st.do_not_touch?.length ? `; proibido alterar ${st.do_not_touch.join(', ')}` : ''}${st.interfaces?.length ? `; interfaces: ${st.interfaces.join(' | ')}` : ''}${st.out_of_scope?.length ? `; FORA DO ESCOPO desta story (outra story faz): ${st.out_of_scope.join('; ')} — NÃO cobre isso nem como low, mesmo que uma decisão do plano cite o tema: o contrato da story é o que esta parte deve entregar` : ''}. Alteração fora do contrato ou interface quebrada = achado high. EXCEÇÃO legítima (não é achado): atualizar asserções de provas antigas que afirmavam o formato ou comportamento que esta story manda mudar, mesmo em arquivo da lista proibida, desde que a mudança se limite a essas asserções.` : '',
     `Skills que o autor tinha de seguir: ${(m.skills.maker || []).map((s) => s.id).join(', ') || 'nenhuma'}.`,
-    `O harness JÁ RODOU as provas fora da sandbox: ${tests.failed} falharam de ${tests.total} (runner: ${tests.runner}); a prova nova falhou antes da implementação e passou depois. Não tente rodar provas nem instalar nada (sua sandbox é somente leitura e isso vai falhar); avalie o código e o diff. Julgue pelo DIFF e pelos arquivos que ele toca; leia no máximo 6 arquivos além deles (cada leitura gasta cota do revisor) e não explore o repositório. Arquivos de lock (package-lock.json, go.sum, Cargo.lock e similares) e dependências não fazem parte do escopo revisado.`,
+    `O harness JÁ RODOU as provas fora da sandbox: ${tests.failed} falharam de ${tests.total} (runner: ${tests.runner}${tests.only ? `; só o arquivo de prova desta parte: a suíte inteira roda em paralelo com esta revisão e a parte só é aceita se ela também passar` : ''}); a prova nova falhou antes da implementação e passou depois. Não tente rodar provas nem instalar nada (sua sandbox é somente leitura e isso vai falhar); avalie o código e o diff. Julgue pelo DIFF e pelos arquivos que ele toca; leia no máximo 6 arquivos além deles (cada leitura gasta cota do revisor) e não explore o repositório. Arquivos de lock (package-lock.json, go.sum, Cargo.lock e similares) e dependências não fazem parte do escopo revisado.`,
     tests.tests?.length ? `Provas que rodaram e passaram (nomes): ${tests.tests.filter((t) => t.status === 'passed').map((t) => t.name).slice(0, 60).join(' | ')}. Um critério coberto por uma dessas provas está provado; não peça prova extra para ele.` : '',
     'Critérios de aceite sobre detalhe decorativo (borda lateral colorida, gradiente, cor exata) cedem ao portão visual (Impeccable): não peça mudanças para reintroduzir isso; avalie a intenção do critério.',
     'Severidade: high = comportamento errado, critério de aceite não atendido, segurança, acessibilidade quebrada, mudança fora do escopo. Cobertura de prova além do necessário, estilo de código, nomes e refatorações são low e NÃO impedem approve: registre como achado low e aprove.',
@@ -979,7 +982,7 @@ async function checker(diff, tests, st) {
       return forbidden.length || outside.length ? `CONFERÊNCIA MECÂNICA DO CONTRATO (feita pelo motor):${forbidden.length ? ` alterou arquivo PROIBIDO: ${forbidden.join(', ')}.` : ''}${outside.length ? ` alterou arquivo FORA de scope_paths: ${outside.join(', ')}.` : ''} Abra cada um: só é legítimo se cair na EXCEÇÃO acima (asserções de prova antiga que a story invalida) ou for o mínimo indispensável dito por quem escreveu; caso contrário é achado high.` : ''
     })(),
     diff.length > 60000 ? `ATENÇÃO: o diff tem ${diff.length} caracteres e abaixo vão só os primeiros 60000. Arquivos alterados: ${[...diff.matchAll(/^diff --git a\/(\S+)/gm)].map((x) => x[1]).join(', ')}. Abra com as suas ferramentas os que não aparecerem inteiros antes de aprovar.` : '',
-    (() => { const names = new Set((st.tests_after?.tests || []).map((t) => t.name)); const gone = (st.red_tests || []).map((t) => t.name).filter((n) => n && !/[\\/]|\.test\./.test(n) && !names.has(n)); return gone.length ? `PROVAS QUE NASCERAM VERMELHAS E NÃO EXISTEM MAIS: ${gone.slice(0, 8).join(' | ')}. Confira se foram só renomeadas; prova apagada ou asserção enfraquecida para passar é achado high.` : '' })(),
+    (() => { const names = new Set((tests.tests || []).map((t) => t.name)); const gone = (st.red_tests || []).map((t) => t.name).filter((n) => n && !/[\\/]|\.test\./.test(n) && !names.has(n)); return gone.length ? `PROVAS QUE NASCERAM VERMELHAS E NÃO EXISTEM MAIS: ${gone.slice(0, 8).join(' | ')}. Confira se foram só renomeadas; prova apagada ou asserção enfraquecida para passar é achado high.` : '' })(),
     (() => { const debt = [...diff.matchAll(/^\+(?!\+\+).*\b(TODO|FIXME|XXX|HACK)\b.*$/gm)].map((x) => x[0].slice(1, 160).trim()).filter((l) => !/#\d+|issue/i.test(l)); return debt.length ? `MARCADORES DE DÍVIDA ACRESCENTADOS POR ESTE DIFF (sem referência a item de trabalho): ${debt.slice(0, 8).join(' | ')}. Trabalho declarado como pendente dentro do escopo da story é achado high; fora do escopo, low.` : '' })(),
     '--- DIFF ---', diff.slice(0, 60000),
   ].join('\n') + skillsBlock(m.skills.checker || [])
@@ -1248,7 +1251,7 @@ function planPrompt(revising = false) {
     '- recipe de cada story: 3 a 8 passos numeráveis, em ordem, cada um com arquivo e ação concreta: "criar src/x.js exportando f(a, b) → tipo", "em src/y.js, dentro de render@120, chamar f antes de montar a lista", "registrar a rota em src/app.js". Cite símbolo@linha do mapa quando o arquivo existe. Nada de "implementar a lógica" ou "ajustar conforme necessário".',
     '- A recipe NUNCA manda commitar, dar push, criar branch nem rodar a suíte inteira, o typecheck ou o lint do projeto: o motor roda tudo isso e faz o commit depois das provas e da revisão. O último passo de uma recipe é código ou prova, nunca git nem "rodar os comandos de prova". Se o AGENTS.md do projeto manda commitar em certo formato, isso é com o motor, não com a story.',
     '- examples de cada story: 2 a 5 casos literais de entrada → saída que viram provas, incluindo pelo menos um caso de borda (vazio, inválido, limite). Ex.: "total([{preco: 2, qtd: 3}]) → 6", "total([]) → 0", "POST /itens sem nome → 400 {erro: \'nome obrigatório\'}".',
-    `- test_file de cada story: caminho exato do arquivo de prova a criar ou estender, no padrão que o projeto já usa, num lugar que ${p.test_cmd ? `\`${p.test_cmd}\`` : 'o runner de provas'} REALMENTE roda (confira o include da configuração do runner): prova fora do include nunca roda e a parte não tem como passar. Parte sem depends_on e sem arquivo em comum com outra (scope_paths e test_file) roda em paralelo com ela: dê a cada parte o próprio test_file e não declare dependência que não existe.`,
+    `- test_file de cada story: caminho exato do arquivo de prova a criar ou estender, no padrão que o projeto já usa, num lugar que ${p.test_cmd ? `\`${p.test_cmd}\`` : 'o runner de provas'} REALMENTE roda (confira o include da configuração do runner): prova fora do include nunca roda e a parte não tem como passar. Parte sem depends_on e sem arquivo em comum com outra (scope_paths e test_file) roda em paralelo com ela: dê a cada parte o próprio test_file e não declare dependência que não existe. Cada parte paga um custo fixo (prova, suíte, revisão) de alguns minutos: partes seguidas no MESMO arquivo de código, que não rodam em paralelo, viram UMA parte quando juntas cabem em 4 critérios e ~300 linhas de diff.`,
     '- A primeira story de um projeto ou épico novo cria o esqueleto: pastas, arquivos com as interfaces exportadas (corpo mínimo), runner de provas. As seguintes só preenchem; assim cada uma cita arquivos que já existem.',
     '- Story que MUDA formato de retorno, contrato público ou comportamento já provado: as provas antigas que afirmam o formato anterior entram em scope_paths (nunca em do_not_touch) e a recipe diz quais asserções atualizar. do_not_touch com prova que a própria story invalida é plano impossível.',
     '- CONTRATO de cada story (quem implementa é um modelo mais barato; o contrato é o que evita erro): scope_paths (arquivos que ela pode criar ou alterar; caminhos reais do projeto ou nomes novos), do_not_touch (arquivos que NÃO pode alterar), out_of_scope (o que fica de fora, em 1 linha cada), interfaces (assinaturas que ela expõe ou consome, ex.: "appendEvent(event) → Promise<seq>", "GET /api/items → [{id,name}]"). acceptance no formato "Dado …, quando …, então …", cada um provável por UMA prova automatizada sem chamada real de rede, CLI ou serviço (dublês). test_hint diz o arquivo de prova e como simular dependências.',
@@ -1287,6 +1290,26 @@ async function projectTree(dir) {
   return all.length > 200 ? [...all.slice(0, 200), `… e mais ${all.length - 200}`] : all
 }
 function citedFiles(st, tree) { const text = `${st.request} ${(st.acceptance || []).join(' ')} ${st.test_hint || ''}`; return tree.filter((f) => f.length > 3 && text.includes(f)) }
+// Arquivo grande: em vez do começo cortado, o mapa inteiro de símbolos e o corpo dos que a parte cita (pedido, receita,
+// interfaces, critérios, exemplos). Quem escreve relia o arquivo inteiro atrás deles (épico 2, s7: 1,3 milhão de tokens de
+// entrada relendo server.mjs numa implementação de 6 min).
+function bigFileSlice(f, body, st) {
+  const rule = MAP_RULES.find(([ext]) => ext.test(f)); if (!rule) return null
+  const lines = body.split('\n'), syms = []
+  lines.forEach((l, i) => { const name = rule[1].exec(l)?.slice(1).find(Boolean); if (name) syms.push({ name: name.trim(), at: i, ind: l.search(/\S/) }) })
+  if (!syms.length) return null
+  // trecho vai até o próximo símbolo do mesmo nível (const dentro da função não corta a função); mapa só com o nível de fora
+  const text = [st.request, st.test_hint, ...(st.recipe || []), ...(st.interfaces || []), ...(st.acceptance || []), ...(st.examples || [])].join(' ')
+  const cited = syms.filter((s) => s.name.length > 2 && new RegExp(`(^|[^\\w$])${s.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^\\w$]|$)`).test(text))
+  const out = [`(arquivo grande: ${lines.length} linhas; abaixo o mapa e só os trechos que esta parte cita; o resto, leia com Read offset/limit)`, `mapa (símbolo@linha): ${syms.filter((s) => s.ind <= 4).map((s) => `${s.name}@${s.at + 1}`).join(', ')}`]
+  let size = 0
+  for (const s of cited) {
+    const end = Math.min(syms.find((x) => x.at > s.at && x.ind <= s.ind)?.at ?? lines.length, s.at + 200), chunk = lines.slice(s.at, end).join('\n')
+    if (size + chunk.length > PACK_FILE_MAX * 2) continue
+    size += chunk.length; out.push(`--- ${s.name} (linhas ${s.at + 1}-${end}) ---\n${chunk}`)
+  }
+  return out.join('\n')
+}
 async function contextPack(st, extra = []) {
   const dir = state.project.dir
   const tree = await projectTree(dir)
@@ -1295,7 +1318,7 @@ async function contextPack(st, extra = []) {
   let total = 0
   for (const f of want) {
     let body; try { body = await readFile(path.join(dir, f), 'utf8') } catch { continue }
-    if (body.length > PACK_FILE_MAX) body = body.slice(0, PACK_FILE_MAX) + `\n… (cortado; ${body.length} caracteres no total; use Read com offset se precisar do resto)`
+    if (body.length > PACK_FILE_MAX) body = bigFileSlice(f, body, st) || body.slice(0, PACK_FILE_MAX) + `\n… (cortado; ${body.length} caracteres no total; use Read com offset se precisar do resto)`
     if (total + body.length > PACK_TOTAL_MAX) break
     total += body.length
     parts.push(`=== ${f} (estado atual) ===\n${body}`)
@@ -1374,7 +1397,22 @@ function common(st) {
     m.answers?.length ? `Escolhas do usuário na entrevista: ${m.answers.map((a) => `${a.question} → ${a.answer}`).join(' | ')}` : '',
   ].filter(Boolean)
 }
-function testPrompt(st, pack) {
+// regras de quem implementa: valem na implementação (fixPrompt) e na chamada única de prova e código (testPrompt together)
+const IMPL_RULES = [
+    'CONFLITO DE CONTRATO: se uma prova ANTIGA fica vermelha só porque afirma o formato ou comportamento que ESTA story manda mudar (ex.: igualdade estrita com o formato anterior), atualize APENAS essas asserções, mesmo que o arquivo esteja na lista de "não altere"; não mexa em mais nada desse arquivo e diga na frase final quais asserções mudou e por quê. Não reverta o comportamento pedido para agradar a prova antiga.',
+    'REGRAS DE IMPLEMENTAÇÃO: falhe fechado na fronteira (entrada inválida é erro, não valor padrão calado); falhe alto se faltar configuração obrigatória; nada de catch vazio; invariantes valem com duas chamadas ao mesmo tempo; nova tentativa só limitada e idempotente. Código que você substitui SAI: o antigo e o novo não convivem; depois de remover, procure quem ainda cita o símbolo. Nunca enfraqueça asserção, apague prova ou marque prova como skip para passar: se a prova estiver errada, escreva `PROVA ERRADA: <nome> - <motivo>` na frase final e não mexa nela.',
+    'MENOR CÓDIGO (escada do Ponytail): antes de escrever, pare no primeiro degrau que resolve: já existe no projeto (função, util, tipo, padrão)? reuse, não reimplemente; a biblioteca padrão faz? a plataforma faz (CSS antes de JS, elemento HTML nativo, restrição do banco)? uma dependência JÁ instalada faz? cabe em uma linha? Só então o mínimo que funciona. Proibido: abstração com uma implementação só, factory para um produto, configuração para valor que nunca muda, código "para depois", comentário que repete o código. Apagar é melhor que acrescentar. Nunca simplifique para fora um critério de aceite, validação na fronteira, tratamento de erro que evita perda de dado, segurança ou acessibilidade.',
+    'CONTRATO ERRADO: se a parte é irrealizável como está escrita (um critério contradiz uma decisão, um exemplo é impossível, a prova exige o que o contrato proíbe), não force nem contorne: escreva `CONTRATO ERRADO: <o que contradiz o quê>` na frase final e pare. O planejador corrige a parte; insistir só gasta rodadas.',
+    'Ao rodar provas, rode só o arquivo que importa e LIMITE a saída (reporter compacto, `| tail -40`): a saída inteira entra no seu contexto e gasta cota.',
+]
+// together: prova e código na mesma chamada (economiza uma partida a frio e uma releitura do projeto por parte); o vermelho
+// continua conferido pelo motor, que guarda o código de lado e roda a prova sem ele (redWithoutCode)
+function testPrompt(st, pack, together = false) {
+  if (together) return [`Pedido original do usuário: ${state.mission.request}`, ...common(st),
+    `DUAS ETAPAS NESTA CHAMADA, nesta ordem. (1) PROVA: escreva as provas novas (testes automatizados) desta story: uma função de teste por critério de aceite, todas no mesmo arquivo, com nomes que digam o critério. ${st.test_file ? `Arquivo de prova: ${st.test_file}. ` : ''}${st.examples?.length ? 'Cada EXEMPLO acima vira uma asserção. ' : ''}Dica de prova: ${st.test_hint}. Rode o arquivo de prova uma vez e veja as provas novas falharem. (2) CÓDIGO: implemente o comportamento até o arquivo de prova passar. Depois de você, o motor guarda o código de lado e roda a prova sem ele: prova que passa sem o código novo não prova nada e a parte volta ao começo. Não rode a suíte inteira: o motor roda todas as provas depois. Provas NUNCA fazem chamada real de rede, CLI externa ou serviço: simule com dublês (stub/mock) e teste o comportamento observável.`,
+    'QUALIDADE DA PROVA: se o arquivo de prova já existe, ACRESCENTE (nunca apague nem reescreva prova que já está lá); teste a interface pública e a saída observável; dublê só na fronteira do sistema (processo filho, relógio, sistema de arquivos, rede); determinística; valores concretos dos EXEMPLOS; pelo menos uma prova de borda ou de falha.',
+    ...IMPL_RULES,
+    pack, 'Ao terminar, escreva uma frase com o nome do arquivo de prova, os nomes das provas novas e o que mudou no código.'].filter(Boolean).join('\n') + skillsBlock(state.mission.skills.maker || [])
   return [`Pedido original do usuário: ${state.mission.request}`, ...common(st),
     `FASE 1 de 2: escreva APENAS as provas novas (testes automatizados) desta story: uma função de teste por critério de aceite, todas no mesmo arquivo, com nomes que digam o critério. Todas devem FALHAR (ou nem carregar) no código atual, porque o comportamento ainda não existe. ${st.test_file ? `Arquivo de prova: ${st.test_file}. ` : ''}${st.examples?.length ? 'Cada EXEMPLO acima vira uma asserção. ' : ''}Dica de prova: ${st.test_hint}. Não implemente o comportamento ainda (a implementação é a fase 2, outra chamada; implementar agora só gasta cota e o harness não consegue conferir o vermelho). Não rode a suíte inteira: rode no máximo o arquivo de prova novo, uma vez. Provas NUNCA fazem chamada real de rede, CLI externa ou serviço: simule com dublês (stub/mock) e teste o comportamento observável; prova que depende do ambiente vira falha falsa e trava a parte.`,
     'PROIBIDO nesta fase: criar ou alterar qualquer arquivo que não seja arquivo de prova. Se você implementar agora, as provas nascem verdes e não provam nada.',
@@ -1389,12 +1427,8 @@ function fixPrompt(st, round, review, visual, pack) {
     st.no_change_retry ? 'A tentativa anterior terminou SEM alterar arquivo algum (o tempo acabou, provavelmente esperando provas). NÃO rode a suíte inteira nem provas lentas de integração (as que sobem processos): o harness roda todas as provas depois de você. Vá direto às edições.' : '',
     st.red_regress?.length ? `Provas ANTIGAS que ficaram vermelhas depois que a prova nova entrou (em geral portão de tipos/lint reclamando do que ainda não existe). Têm de voltar a passar com a sua implementação; não as altere:\n${st.red_regress.map((t) => `- ${t.name}: ${t.message}`).join('\n')}` : '',
     'Agora implemente o necessário para a prova passar e os critérios de aceite valerem. Não modifique a prova. Não toque em nada fora do escopo da story. Seja direto: você tem no máximo 30 ações; não investigue ferramentas do harness, não reescreva provas antigas, não amplie o escopo.',
-    'CONFLITO DE CONTRATO: se uma prova ANTIGA fica vermelha só porque afirma o formato ou comportamento que ESTA story manda mudar (ex.: igualdade estrita com o formato anterior), atualize APENAS essas asserções, mesmo que o arquivo esteja na lista de "não altere"; não mexa em mais nada desse arquivo e diga na frase final quais asserções mudou e por quê. Não reverta o comportamento pedido para agradar a prova antiga.',
-    'REGRAS DE IMPLEMENTAÇÃO: falhe fechado na fronteira (entrada inválida é erro, não valor padrão calado); falhe alto se faltar configuração obrigatória; nada de catch vazio; invariantes valem com duas chamadas ao mesmo tempo; nova tentativa só limitada e idempotente. Código que você substitui SAI: o antigo e o novo não convivem; depois de remover, procure quem ainda cita o símbolo. Nunca enfraqueça asserção, apague prova ou marque prova como skip para passar: se a prova estiver errada, escreva `PROVA ERRADA: <nome> - <motivo>` na frase final e não mexa nela.',
-    'MENOR CÓDIGO (escada do Ponytail): antes de escrever, pare no primeiro degrau que resolve: já existe no projeto (função, util, tipo, padrão)? reuse, não reimplemente; a biblioteca padrão faz? a plataforma faz (CSS antes de JS, elemento HTML nativo, restrição do banco)? uma dependência JÁ instalada faz? cabe em uma linha? Só então o mínimo que funciona. Proibido: abstração com uma implementação só, factory para um produto, configuração para valor que nunca muda, código "para depois", comentário que repete o código. Apagar é melhor que acrescentar. Nunca simplifique para fora um critério de aceite, validação na fronteira, tratamento de erro que evita perda de dado, segurança ou acessibilidade.',
+    ...IMPL_RULES,
     round > 1 && st.tests_after && !st.tests_after.ok ? `DEPURAÇÃO (rodada ${round}; a tentativa anterior não deixou as provas verdes): (1) antes de mudar qualquer linha, explique em uma frase POR QUE a prova falha; (2) reproduza rodando só o arquivo de prova; (3) uma hipótese por vez sobre a CAUSA, não o sintoma; teste com a menor mudança; hipótese refutada = desfaça a mudança antes da próxima; (4) correção mínima na causa provada, sem refatoração de carona; (5) depois de verde, procure o mesmo padrão errado nos outros arquivos do escopo.` : '',
-    'CONTRATO ERRADO: se a parte é irrealizável como está escrita (um critério contradiz uma decisão, um exemplo é impossível, a prova exige o que o contrato proíbe), não force nem contorne: escreva `CONTRATO ERRADO: <o que contradiz o quê>` na frase final e pare. O planejador corrige a parte; insistir só gasta rodadas.',
-    'Ao rodar provas, rode só o arquivo que importa e LIMITE a saída (reporter compacto, `| tail -40`): a saída inteira entra no seu contexto e gasta cota.',
     'Ao terminar, escreva no máximo 3 linhas dizendo o que mudou.']
   if (round > 1 && review) { base.push('Se um pedido do revisor contradiz uma DECISÃO DO PLANO, o contrato ou um critério de aceite, não o aplique: na frase final cite literalmente a decisão ou o critério que o impede (o revisor vai ler a sua resposta). Todo o resto, corrija.'); base.push(`Rodada ${round}. O revisor (outra IA) pediu mudanças: ${review.summary}`); for (const f of review.findings) base.push(`- [${f.severity}] ${f.file}: ${f.problem} Correção sugerida: ${f.fix}`) }
   if (visual?.length) { base.push('O portão visual (Impeccable detect) apontou; corrija. Se um achado conflita com um detalhe decorativo de um critério de aceite (borda lateral, gradiente, cor), o portão vence: satisfaça a intenção do critério de outro jeito, sem investigar o detector, e diga isso na frase final.'); for (const f of visual) base.push(`- ${f.file}${f.line ? ':' + f.line : ''} [${f.rule}] ${f.message}`) }
@@ -1697,12 +1731,25 @@ async function runStories() {
       }
       if (!ok) { await stopLanes(); finish(); return 'stopped' }
       await gitCommit(state.project.dir, `ade: ${st.title.slice(0, 72)}`)
-      if (st.tests_after?.tests?.length) m.tests_before = st.tests_after
+      if (st.tests_after?.tests?.length) m.tests_before = st.tests_after.only || st.tests_after.related ? mergeTests(m.tests_before, st.tests_after) : st.tests_after
       await refreshProject()
       log('engine', `commit feito: ${st.title}`)
       st.state = 'done'
       if (st.fix_of) { const parent = m.stories.find((x) => x.id === st.fix_of); if (parent && parent.state !== 'done') { parent.state = 'done'; parent.skipped_reason = null; parent.fixed_by = st.id; log('engine', `parte "${parent.title}" concluída pela correção ${st.id}`) } }
       broadcast(); await persistMission().catch(() => {})
+      // suite_scope 'epic': cada parte rodou só as provas afetadas; depois da última, a suíte inteira. Vermelha vira UMA parte de
+      // correção com as provas que quebraram (o código de todas as partes do épico no contrato); vermelha de novo para e mostra.
+      if (state.settings.suite_scope === 'epic' && !m.stories.slice(i + 1).some((x) => !['done', 'skipped'].includes(x.state))) {
+        log('engine', 'fim do épico: rodando a suíte inteira'); const full = await runTests(state.project)
+        log('engine', `fim do épico: suíte inteira ${full.ok ? 'verde' : `com ${full.failed} vermelha(s)`} (${full.total} provas)`, full.ok ? 'info' : 'warn')
+        if (full.tests?.length) m.tests_before = full
+        if (!full.ok && m.stories.some((x) => x.id === 'suite')) { m.state = 'awaiting_operator'; m.reason = 'tests_red'; log('engine', 'a suíte inteira segue vermelha depois da parte de correção; paro para você ver', 'error'); await stopLanes(); finish(); return 'stopped' }
+        if (!full.ok) {
+          const reds = full.tests.filter((t) => t.status !== 'passed').slice(0, 6)
+          m.stories.push({ id: 'suite', title: 'Corrigir: suíte inteira no fim do épico', request: `A suíte inteira ficou vermelha no fim do épico (cada parte rodou só as provas ligadas aos arquivos dela). Corrija o código das partes deste épico para estas provas voltarem a passar; não apague nem enfraqueça provas:\n${reds.map((t) => `- ${t.name}: ${(t.message || '').slice(0, 300)}`).join('\n')}`, acceptance: reds.slice(0, 4).map((t) => `A prova "${t.name.slice(0, 100)}" passa`), test_hint: 'as provas vermelhas listadas já existem; não escreva novas', depends_on: [], no_test_phase: true, scope_paths: [...new Set(m.stories.flatMap((x) => [...(x.scope_paths || []), x.test_file].filter(Boolean)))], do_not_touch: [], out_of_scope: [], interfaces: [], state: 'queued', steps: [], round: 0, red_tests: [], tests_after: null, diff: '', review: null, visual: null })
+          broadcast()
+        }
+      }
     }
     if (m.program && m.epic) { // fim de um épico: quem fecha é a fila
       const ep = m.program.epics.find((x) => x.id === m.epic.id) || m.epic; if (ep.state === 'running') closeEpic(ep, m.stories)
@@ -1834,6 +1881,10 @@ async function agyMaker({ role, prompt, model, effort }) {
   return { result: text, touched, num_turns: j.num_turns || 0, total_cost_usd: 0 }
 }
 
+// base de provas depois de um resultado parcial (só a prova da parte ou só as afetadas): atualiza por nome sem perder o resto
+const mergeTests = (base, part) => { const tests = [...new Map([...(base?.tests || []), ...part.tests].map((t) => [t.name, t])).values()]; return { ...(base || part), tests, total: tests.length } }
+// arquivos de um diff do git, relativos à pasta do projeto (o git dá o caminho a partir da raiz do repositório)
+const diffFiles = (diff, p = state.project) => [...new Set([...String(diff).matchAll(/^diff --git a\/(\S+)/gm)].map((x) => path.relative(p.dir, path.join(p.root || p.dir, x[1])).split(path.sep).join('/')))]
 const IS_TEST_FILE = (f, st) => f === st.test_file || /(^|\/)(tests?|__tests__|specs?|fixtures|__fixtures__|__mocks__)\//i.test(f) || /\.(test|spec)\.[cm]?[jt]sx?$/i.test(f) || /(^|\/)(test_[^/]+|[^/]+_test)\.py$/i.test(f)
 // devolve 'red' (provas novas falham sem o código novo), 'green' (passam sem ele: não provam nada) ou 'skip' (não deu para conferir)
 async function redWithoutCode(st, diff, fresh) {
@@ -1875,7 +1926,10 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     if (m.plan.needs_ui && state.settings.visual_gate) st.visual_before = await visualGate()
     if (!st.red_retry || !st.base) st.base = await gitHead(state.project.dir)
     st.usd_start = st.usd || 0
-    setStep('test', 'running'); const rt = await withChain('prova', { story: st }, async (who) => makerCall(who, { role: 'prova', prompt: testPrompt(st, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: 14 }))
+    // prova e código juntos quando dá para conferir o vermelho depois (arquivo de prova + runner com resultado prova a prova);
+    // segunda tentativa de prova (a primeira passou sem o código) volta às duas chamadas separadas
+    const together = state.settings.prova_com_codigo !== false && !!st.test_file && m.tests_before?.named !== false && !st.red_retry
+    setStep('test', 'running'); const rt = await withChain(together ? makerStep(st, 1, false).key : 'prova', { story: st }, async (who) => makerCall(who, { role: together ? 'prova e código' : 'prova', prompt: testPrompt(st, await contextPack(st), together), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: together ? 36 : 14 }))
     if (!rt) { setStep('test', 'failed'); throw new Error('nenhum modelo da cadeia "prova" conseguiu escrever a prova; o motivo de cada um está no log acima') }
     remember(st, rt); await refreshProject(); setStep('test', 'done')
     setStep('red', 'running')
@@ -1897,7 +1951,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
         const red = await redWithoutCode(st, changed, fresh)
         if (red === 'green' && !st.red_retry) { st.red_retry = true; setStep('red', 'failed'); log('engine', 'quem escreve implementou junto com a prova, e as provas novas passam MESMO sem o código novo (guardei o código de lado e rodei a suíte): não provam o comportamento. Repetindo a fase de prova uma vez', 'warn'); return runStory(st, 1, null, null) }
         st.early_impl = true; st.red_verified = red === 'red'; setStep('red', red === 'red' ? 'done' : 'skipped')
-        log('engine', red === 'red' ? `quem escreve adiantou a implementação junto com a prova (${fresh.length} prova(s) nova(s)); conferi que elas ficam vermelhas sem o código novo (código guardado de lado, suíte rodada, código devolvido). Sigo para verificação e revisão` : `quem escreve adiantou a implementação junto com a prova (${fresh.length} prova(s) nova(s) já verdes) e não deu para conferir o vermelho sem o código; sigo para verificação e revisão, e o revisor julga`, 'warn')
+        log('engine', red === 'red' ? `${together ? 'prova e código na mesma chamada' : 'quem escreve adiantou a implementação junto com a prova'} (${fresh.length} prova(s) nova(s)); conferi que elas ficam vermelhas sem o código novo (código guardado de lado, suíte rodada, código devolvido). Sigo para verificação e revisão` : `quem escreve adiantou a implementação junto com a prova (${fresh.length} prova(s) nova(s) já verdes) e não deu para conferir o vermelho sem o código; sigo para verificação e revisão, e o revisor julga`, 'warn')
       }
       else if (!st.red_retry) { st.red_retry = true; setStep('red', 'failed'); log('engine', 'nenhuma prova nova ficou vermelha; repetindo a fase de prova uma vez com o motivo', 'warn'); return runStory(st, 1, null, null) }
       else { st.no_red = true; setStep('red', 'skipped'); log('engine', 'sem prova vermelha na segunda tentativa (parte de configuração ou documentação?); implemento assim mesmo e o revisor julga', 'warn') }
@@ -1917,7 +1971,15 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   // primeiro só a prova da parte: vermelha = próxima rodada sem pagar a suíte inteira; verde = suíte inteira (todo commit passa por ela)
   const quick = st.test_file ? await runTests(state.project, { only: st.test_file }) : null
   if (quick && !quick.ok) log('engine', `prova da parte ainda vermelha (${quick.failed} de ${quick.total}); pulo a suíte inteira nesta rodada`)
-  st.tests_after = quick && !quick.ok ? quick : await runTests(state.project); st.diff = await storyDiff(st)
+  st.diff = await storyDiff(st)
+  // prova da parte verde: a revisão começa já, em paralelo com a suíte (o revisor lê o diff, a suíte roda as provas; são
+  // independentes) e a parte só passa com as duas. Suíte vermelha: a revisão entra na próxima rodada junto com as provas.
+  let early = null
+  if (quick?.ok && st.diff.trim()) { setStep('checker', 'running'); early = checker(st.diff, quick, st); early.catch(() => {}) }
+  // suite_scope 'epic': por parte só as provas ligadas aos arquivos mudados (runner que sabe); a suíte inteira fica para o fim do épico
+  const byEpic = state.settings.suite_scope === 'epic' && quick?.ok
+  const related = byEpic ? await runTests(state.project, { related: diffFiles(st.diff) }) : null // diff tem caminho da raiz do git; runner quer do projeto
+  st.tests_after = quick && !quick.ok ? quick : byEpic ? related || quick : await runTests(state.project); st.diff = await storyDiff(st)
   // prova ANTIGA (verde antes da parte) que só falha por tempo limite é instabilidade, não defeito de quem escreve: repete a suíte uma vez antes de gastar rodada
   // (épico 7, parte 6: três rodadas pagas atrás de uma prova da parte 3 que estourava 5 s; quem escreve chegou a mexer no vitest.config fora do escopo para esconder)
   // uma repetição por rodada, não por parte (missão m-mu81n0ms, épico 2, s1: a rodada 3 escalou para o Sol atrás de 3 provas antigas
@@ -1933,11 +1995,15 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     }
   }
   log('engine', `provas depois: ${st.tests_after.total} no total, ${st.tests_after.failed} vermelha(s)`); setStep('tests', st.tests_after.ok ? 'done' : 'failed')
-  if (st.tests_after.timeout) { log('engine', 'a suíte de provas estourou o tempo limite (5 min) e foi interrompida: isso não é prova vermelha. Paro a parte sem gastar rodadas; veja se alguma prova ficou pendurada (processo, servidor, espera sem fim)', 'error'); return stop('tests_timeout') }
+  if (st.tests_after.timeout) { if (early) await early.catch(() => null); log('engine', 'a suíte de provas estourou o tempo limite (5 min) e foi interrompida: isso não é prova vermelha. Paro a parte sem gastar rodadas; veja se alguma prova ficou pendurada (processo, servidor, espera sem fim)', 'error'); return stop('tests_timeout') }
   // quem escreve terminou sem tocar em nada (épico 9, s3: Flash gastou a chamada inteira esperando a matriz de queda rodar e o agy estourou o tempo): uma repetição grátis com aviso antes de pular
   if (!st.diff.trim() && !st.no_change_retry && round < MAX_ROUNDS) { st.no_change_retry = true; log('engine', 'quem escreve terminou sem alterar arquivo algum; repito a rodada uma vez pedindo para não rodar provas lentas', 'warn'); return runStory(st, round + 1, previousReview, null) }
   if (!st.diff.trim()) { setStep('checker', 'skipped'); return stop('no_changes') }
   if (!st.tests_after.ok) {
+    // revisão que rodou junto com a suíte: os achados dela vão para a próxima rodada com as provas vermelhas (uma rodada corrige os dois)
+    const rv = early ? await early : null
+    if (rv) { st.review = rv; st.prev_findings = (st.last_review?.findings || []).map(findingKey); st.last_review = rv; setStep('checker', rv.verdict === 'approve' ? 'done' : 'failed') }
+    if (rv?.verdict !== 'approve' && rv) previousReview = rv
     const spentNow = (st.usd || 0) - (st.usd_start || 0)
     const redNow = st.tests_after.tests.filter((t) => t.status !== 'passed').map((t) => t.name).sort().join('|')
     if (st.contract_issue && round >= 2) { log('engine', `quem escreve diz que o contrato da parte está errado: ${st.contract_issue}. Paro de gastar rodadas; a parte volta ao planejador com esse motivo`, 'warn'); return stop('contract_wrong') }
@@ -1956,11 +2022,12 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
       log('engine', `portão visual: ${st.visual.findings.length} achado(s) novo(s)${st.visual.pre_existing ? ` (${st.visual.pre_existing} já existiam antes desta parte)` : ''}`)
       for (const f of st.visual.findings.slice(0, 12)) log('impeccable', `${f.file}${f.line ? ':' + f.line : ''} [${f.rule}] ${f.message}`, 'text')
       // um único retoque visual por story: achado que sobrevive ao retoque vira aviso, não loop
-      if (st.visual.findings.length && !st.visual_reworked && ((st.usd || 0) - (st.usd_start || 0)) <= (state.settings.max_usd_per_story || 4)) { st.visual_reworked = true; setStep('visual', 'failed'); log('engine', 'rodada de retoque visual'); return runStory(st, round + 1, null, st.visual.findings) }
+      if (st.visual.findings.length && !st.visual_reworked && ((st.usd || 0) - (st.usd_start || 0)) <= (state.settings.max_usd_per_story || 4)) { st.visual_reworked = true; setStep('visual', 'failed'); log('engine', 'rodada de retoque visual'); return runStory(st, round + 1, early ? await early : null, st.visual.findings) }
       setStep('visual', st.visual.findings.length ? 'warn' : 'done')
     }
   }
-  setStep('checker', 'running'); st.review = await checker(st.diff, st.tests_after, st); setStep('checker', st.review ? (st.review.verdict === 'approve' ? 'done' : 'failed') : 'failed')
+  if (!early) setStep('checker', 'running')
+  st.review = early ? await early : await checker(st.diff, st.tests_after, st); setStep('checker', st.review ? (st.review.verdict === 'approve' ? 'done' : 'failed') : 'failed')
   st.prev_findings = (st.last_review?.findings || []).map(findingKey); st.last_review = st.review
   if (st.review) {
     const pend = (st.review.findings || []).filter((f) => /^\s*PEND[ÊE]NCIA:/i.test(String(f.problem || '')))
