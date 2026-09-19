@@ -23,6 +23,7 @@ const ROOT_ALLOWLIST = new Set([
   'fixtures',
   'package.json',
   'package-lock.json',
+  'parity-name-map.json',
   'plans',
   'proto',
   'schemas',
@@ -228,5 +229,28 @@ describe('execFile explicit maxBuffer guard', () => {
     }
   })
 })
+
+describe('ADR 0024 e índice de ADRs', () => {
+  test('adr_0024_is_indexed_in_readme_without_modifying_accepted_adrs', () => {
+    const adrReadmePath = path.join(ROOT, 'docs', 'adr', 'README.md')
+    expect(existsSync(adrReadmePath)).toBe(true)
+    const readmeContent = readFileSync(adrReadmePath, 'utf8')
+    expect(readmeContent).toContain('0024-autorizacao-roadmap-ate-v1.md')
+    expect(readmeContent).toContain('0024')
+
+    const adr0024Path = path.join(ROOT, 'docs', 'adr', '0024-autorizacao-roadmap-ate-v1.md')
+    expect(existsSync(adr0024Path)).toBe(true)
+    const adr0024Content = readFileSync(adr0024Path, 'utf8')
+    expect(adr0024Content).toMatch(/Erick/i)
+    expect(adr0024Content).toContain('2026-09-19')
+
+    // Provar que os ADRs 0001 a 0023 permanecem indexados
+    for (let i = 1; i <= 23; i++) {
+      const num = String(i).padStart(4, '0')
+      expect(readmeContent).toContain(`[${num}]`)
+    }
+  })
+})
+
 
 

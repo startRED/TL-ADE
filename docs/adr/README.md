@@ -46,6 +46,7 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | [0021](0021-versionamento-do-journal-e-engine-stamp.md) | Versionamento do journal e `runtime_stamp` do engine | aceito 2026-09-17 |
 | [0022](0022-restricoes-windows.md) | Restrições do Windows como requisito de primeira classe | aceito 2026-09-17 |
 | [0023](0023-js-esm-com-jsdoc-e-checkjs.md) | JS ESM com JSDoc e `checkJs`: portão de tipos sem build (emenda o ADR 0001) | proposto, pendente de confirmação do Erick |
+| [0024](0024-autorizacao-roadmap-ate-v1.md) | Autorização para execução sequencial do roadmap até a v1 | Aceito (confirmado por Erick em 2026-09-19) |
 
 ## Mapa decisão → onde ela aparece
 
@@ -56,4 +57,4 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | Modelos, transporte e papéis | 0004, 0005, 0006, 0015 | §7, §11 E10, E16, E23, E24 |
 | Intenção, contrato e prova | 0007, 0008, 0016 | §4, §5, §11 E1–E4, E12, E18–E20 |
 | Contexto, skills e qualidade | 0009, 0010, 0011, 0018 | §7, §10 A1, A7, A11, A13, A14, §11 E8, E9, E13–E15, E33, E35, E39 |
-| Observação e método | 0013, 0017, 0019, 0020 | §3, §8, §10 A10, A12, §11 E11, E17, E30, E34, E37 |
+| Observação e método | 0013, 0017, 0019, 0020, 0024 | §3, §8, §10 A10, A12, §11 E11, E17, E30, E34, E37 |

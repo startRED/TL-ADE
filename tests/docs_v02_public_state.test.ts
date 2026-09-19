@@ -47,13 +47,22 @@ export function validateStateSection(baseFile: string, text: string): {
   brokenLinks: string[]
 } {
   const sec = extractStateSection(text)
-  const requiredStates = [
-    'Slice 1: fechamento pendente',
-    'Recorte local v0.2: não autorizado',
-    'Restante da v0.2: fora desta rodada',
-  ]
+  const isV1Authorized = sec.includes('Autorização até a v1')
+  const requiredStates = isV1Authorized
+    ? [
+        'Autorização até a v1',
+        'Sequência obrigatória dos marcos',
+        'Recorte ativo deste épico',
+      ]
+    : [
+        'Slice 1: fechamento pendente',
+        'Recorte local v0.2: não autorizado',
+        'Restante da v0.2: fora desta rodada',
+      ]
   const missingStates = requiredStates.filter((s) => !sec.includes(s))
-  const hasBlock = sec.includes('Implementação dependente: bloqueada')
+  const hasBlock = isV1Authorized
+    ? sec.includes('Implementação dependente: autorizada sequencialmente')
+    : sec.includes('Implementação dependente: bloqueada')
   const links = resolveLinks(baseFile, sec)
   const brokenLinks = links.filter((l) => !l.exists).map((l) => l.link)
   return {
@@ -141,7 +150,7 @@ describe('publicação do estado comprovado e bloqueios da v0.2', () => {
     expect(matrixRows.some((r) => r.estado === 'comprovado')).toBe(false)
     expect(closureText).toMatch(/^Estado:\s+\*\*fechamento pendente\*\*$/m)
 
-    // 3. Documentos publicados contêm 'Implementação dependente: bloqueada'
+    // 3. Documentos publicados contêm o estado de bloqueio ou autorização sequencial
     const docs = [
       { name: 'README.md', path: README_PATH },
       { name: 'PROJECT_CHARTER.md', path: CHARTER_PATH },
@@ -150,19 +159,22 @@ describe('publicação do estado comprovado e bloqueios da v0.2', () => {
     for (const doc of docs) {
       const content = readFileSync(doc.path, 'utf8')
       const sec = extractStateSection(content)
-      expect(sec, `Seção Estado e autorização ausente em ${doc.name}`).toContain('Implementação dependente: bloqueada')
+      const expectedStatus = sec.includes('Autorização até a v1')
+        ? 'Implementação dependente: autorizada sequencialmente'
+        : 'Implementação dependente: bloqueada'
+      expect(sec, `Seção Estado e autorização ausente em ${doc.name}`).toContain(expectedStatus)
 
-      // Teste em memória: remoção da frase de bloqueio deve ser rejeitada
-      const withoutBlock = content.replace('Implementação dependente: bloqueada', '')
-      const validation = validateStateSection(doc.path, withoutBlock)
-      expect(validation.hasBlock, `Remoção do bloqueio em ${doc.name} deve ser detectada`).toBe(false)
+      // Teste em memória: remoção da frase de estado deve ser rejeitada
+      const withoutStatus = content.replace(expectedStatus, '')
+      const validation = validateStateSection(doc.path, withoutStatus)
+      expect(validation.hasBlock, `Remoção do estado em ${doc.name} deve ser detectada`).toBe(false)
     }
 
-    // 4. Nenhum arquivo ADR 0024 publicado
+    // 4. ADR 0024 publicado conforme autorizado por Erick em 2026-09-19
     expect(existsSync(ADR_DIR), 'docs/adr deve existir').toBe(true)
     const adrFiles = readdirSync(ADR_DIR)
     const adr0024Files = adrFiles.filter((f) => /^0024.*\.md$/i.test(f))
-    expect(adr0024Files, 'ADR 0024 não pode estar publicado em docs/adr/').toEqual([])
+    expect(adr0024Files, 'ADR 0024 deve estar publicado em docs/adr/').toEqual(['0024-autorizacao-roadmap-ate-v1.md'])
   })
 
   // CA3: README Próximo passo referencia fontes e proíbe inferência por dólares
@@ -268,8 +280,8 @@ describe('publicação do estado comprovado e bloqueios da v0.2', () => {
     expect(brokenValidation.linksOk).toBe(false)
     expect(brokenValidation.brokenLinks).toContain('docs/plans/inexistente.md')
 
-    // Caso 3: Remoção do bloqueio é rejeitada
-    const unblockedCharter = charter.replace('Implementação dependente: bloqueada', '')
+    // Caso 3: Remoção do estado é rejeitada
+    const unblockedCharter = charter.replace(/Implementação dependente: [^\n\r]+/, '')
     const unblockedValidation = validateStateSection(CHARTER_PATH, unblockedCharter)
     expect(unblockedValidation.hasBlock).toBe(false)
   })

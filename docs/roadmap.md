@@ -124,11 +124,14 @@ porte mecânico e devem correr acima dessa média.
 
 ## Estado e autorização
 
+- Autorização até a v1: concedida por Erick em 2026-09-19 ([adr/0024-autorizacao-roadmap-ate-v1.md](adr/0024-autorizacao-roadmap-ate-v1.md)).
+- Sequência obrigatória dos marcos: v0.2 (durabilidade e paridade 93) -> v0.3 -> v0.4a -> v0.4b -> v0.5 -> v1.
+- Recorte ativo deste épico: v0.2 durável e base de paridade determinística (93 casos), sem Checker nem entrega remota pública nesta etapa.
 - Slice 1: fechamento pendente ([plans/slice-1-fechamento.md](plans/slice-1-fechamento.md)).
-- Recorte local v0.2: não autorizado ([plans/v02-local-proposta.md](plans/v02-local-proposta.md), [plans/v02-local-aprovacao.md](plans/v02-local-aprovacao.md)).
-- Restante da v0.2: fora desta rodada.
-Implementação dependente: bloqueada.
-A revisão integrada, o rework limitado e a integração exclusivamente local constituem proposta pendente documentada em [plans/v02-local-proposta.md](plans/v02-local-proposta.md); a autorização documental é separada de verificações posteriores de CLI, canário, capacidade e fonte de cota. O restante da v0.2 (§2), incluindo entrega remota e paridade completa, permanece preservado conforme planejado, respeitando o teto de planejamento de §11.
+- Recorte local v0.2: autorizado sequencialmente ([plans/v02-local-proposta.md](plans/v02-local-proposta.md), [plans/v02-local-aprovacao.md](plans/v02-local-aprovacao.md)).
+- Restante da v0.2: segue a ordem do roadmap.
+Implementação dependente: autorizada sequencialmente até a v1 conforme o épico ativo.
+A autorização de Erick em 2026-09-19 (ADR 0024) permite a execução autônoma sequencial até a v1; o escopo do épico atual limita-se à durabilidade e base de paridade 93/93 da v0.2, mantendo a ordem obrigatória dos marcos do roadmap.
 
 ---
 

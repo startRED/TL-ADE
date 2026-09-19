@@ -51,10 +51,13 @@ não é uma IDE, não é um provedor de modelo (nunca chama API HTTP de modelo; 
 
 ## Estado e autorização
 
+- Autorização até a v1: concedida por Erick em 2026-09-19 ([docs/adr/0024-autorizacao-roadmap-ate-v1.md](docs/adr/0024-autorizacao-roadmap-ate-v1.md)).
+- Sequência obrigatória dos marcos: v0.2 (durabilidade e paridade 93) -> v0.3 -> v0.4a -> v0.4b -> v0.5 -> v1.
+- Recorte ativo deste épico: v0.2 durável e base de paridade determinística (93 casos), sem Checker nem entrega remota pública nesta etapa.
 - Slice 1: fechamento pendente ([docs/plans/slice-1-fechamento.md](docs/plans/slice-1-fechamento.md)).
-- Recorte local v0.2: não autorizado ([docs/plans/v02-local-proposta.md](docs/plans/v02-local-proposta.md), [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md)).
-- Restante da v0.2: fora desta rodada.
-Implementação dependente: bloqueada. Esta nota não altera exclusões nem ativa a emenda.
+- Recorte local v0.2: autorizado sequencialmente ([docs/plans/v02-local-proposta.md](docs/plans/v02-local-proposta.md), [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md)).
+- Restante da v0.2: segue a ordem do roadmap.
+Implementação dependente: autorizada sequencialmente até a v1 conforme o épico ativo. Esta nota não altera exclusões nem ativa a emenda antes do seu marco.
 O registro comum de [docs/plans/v02-local-proposta.md](docs/plans/v02-local-proposta.md) exige saída 0 antes de qualquer commit para node node_modules/vitest/vitest.mjs run, node node_modules/typescript/bin/tsc --noEmit e npm run lint, sem npx nem git push.
 
 **Regra de cerimônia proporcional.** Se o diff cabe numa frase, pula plano e brainstorming.
