@@ -37,7 +37,7 @@ const STORY_FLOW = [
 const STATUS_PT = { pending: 'ainda não', running: 'fazendo agora', done: 'feito', failed: 'deu problema', warn: 'com avisos', skipped: 'pulado' }
 const STATE = {
   stopped: { label: 'Arquivada (feito guardado)', tone: 'mute' },
-  planning: { label: 'Entendendo o pedido', tone: 'accent' },
+  planning: { label: 'Planejando', tone: 'accent' },
   awaiting_plan: { label: 'Plano pronto', tone: 'warn' },
   running: { label: 'Em andamento', tone: 'accent' },
   awaiting_operator: { label: 'Precisa de você', tone: 'warn' },
@@ -421,7 +421,7 @@ export default function App() {
                     <button className="run" type="submit" disabled={mode === 'ask' ? (!p || state.chat_busy || pendingProposal || !request.trim()) : (busy || !request.trim())}>{mode === 'ask' ? (state.chat_busy ? 'Respondendo' : 'Perguntar') : busy ? 'Rodando' : 'Rodar'}</button>
                   </div>
                 </div>
-                {s && <p className="composer-hint"><span className="mono">{s.roles.planner.model}</span> e <span className="mono">{(s.roles.planner_light || s.roles.planner).model}</span> planejam · <span className="mono">{s.roles.maker.model}</span> escreve · <span className="mono">{s.roles.checker.model}</span> revisa · comandos {s.allow_commands ? 'liberados' : 'bloqueados'}</p>}
+                {s && <p className="composer-hint"><span className="mono">{(s.chains?.plan?.[0] || s.roles.planner).model}</span> planeja · <span className="mono">{(s.chains?.impl?.[0] || s.roles.maker).model}</span> escreve · <span className="mono">{(s.chains?.checker?.[0] || s.roles.checker).model}</span> revisa · comandos {s.allow_commands ? 'liberados' : 'bloqueados'}</p>}
               </div>
             </form>
           </>
