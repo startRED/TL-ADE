@@ -65,8 +65,8 @@ function isRefPath(path) {
  * @param {{
  *   contractRevision?: string,
  *   contract_revision?: string,
- *   inputRevision?: { tree: string, digest: string },
- *   input_revision?: { tree: string, digest: string },
+ *   inputRevision?: string | { tree: string, digest: string },
+ *   input_revision?: string | { tree: string, digest: string },
  *   criteria?: string[],
  *   verifiedRefs?: string[],
  *   verified_refs?: string[]
@@ -87,6 +87,31 @@ export function validateEvidenceResult(schemaName, doc, context = {}) {
       code: 4,
     }
   }
+
+  const inputRevision = context?.inputRevision ?? context?.input_revision
+  const structuredInputRevision =
+    inputRevision && typeof inputRevision === 'object' ? inputRevision : null
+  if (
+    doc.input_revision &&
+    inputRevision
+  ) {
+    const docRevStr = typeof doc.input_revision === 'string' ? doc.input_revision : null
+    const ctxRevStr = typeof inputRevision === 'string' ? inputRevision : null
+    if (docRevStr && ctxRevStr && docRevStr !== ctxRevStr) {
+      return {
+        valid: false,
+        errors: [
+          {
+            path: '/input_revision',
+            code: 'stale_result',
+            message: 'Resultado obsoleto: input_revision divergente do contexto.',
+          },
+        ],
+        code: 4,
+      }
+    }
+  }
+
 
   if (doc.format_version === 1) {
     return {
@@ -163,7 +188,6 @@ export function validateEvidenceResult(schemaName, doc, context = {}) {
   const errors = []
 
   const contractRevision = context?.contractRevision ?? context?.contract_revision
-  const inputRevision = context?.inputRevision ?? context?.input_revision
   const criteria = context?.criteria ?? []
   const verifiedRefsList = Array.isArray(context?.verifiedRefs)
     ? context.verifiedRefs
@@ -190,14 +214,14 @@ export function validateEvidenceResult(schemaName, doc, context = {}) {
   }
 
   // 2. Comparar input_revision (tree e digest)
-  if (!inputRevision?.tree || doc.input_revision?.tree !== inputRevision.tree) {
+  if (!structuredInputRevision?.tree || doc.input_revision?.tree !== structuredInputRevision.tree) {
     errors.push({
       path: '/input_revision/tree',
       code: 'stale_input_revision',
       message: 'Revisão de insumos desatualizada em relação à árvore ou insumos correntes.',
     })
   }
-  if (!inputRevision?.digest || doc.input_revision?.digest !== inputRevision.digest) {
+  if (!structuredInputRevision?.digest || doc.input_revision?.digest !== structuredInputRevision.digest) {
     errors.push({
       path: '/input_revision/digest',
       code: 'stale_input_revision',

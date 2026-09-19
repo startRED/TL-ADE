@@ -121,3 +121,161 @@ export function reserveCalls({ events, storyId, maxModelCalls }) {
 
   return { reserve: 1, reason: 'reserved' }
 }
+
+/**
+ * Verifica os orçamentos determinísticos da missão:
+ * - Quantidade de chamadas de modelo dos events
+ * - Tempo decorrido de relógio (wall clock) desde o primeiro evento até now
+ * - Quantidade de states awaiting_operator
+ *
+ * Devolve:
+ * { allowed: false, reason: 'model_call_budget_exhausted' | 'wall_clock_exhausted' | 'max_parked_units' }
+ * ou
+ * { allowed: true, reason: null }
+ *
+ * @param {Object} [params]
+ * @param {Array<Record<string, any>>} [params.events]
+ * @param {Record<string, any>} [params.budget]
+ * @param {number} [params.now]
+ * @param {Record<string, any> | Array<any>} [params.states]
+ * @returns {{
+ *   allowed: boolean,
+ *   reason: 'model_call_budget_exhausted' | 'wall_clock_exhausted' | 'max_parked_units' | null,
+ * }}
+ */
+export function checkMissionBudget({ events = [], budget = {}, now = Date.now(), states = {} } = {}) {
+  const evts = Array.isArray(events) ? events : []
+
+  // 1. Model calls dos events (correlacionando reserva e resultado da mesma story para não duplicar contagem)
+  if (budget.max_model_calls !== undefined && budget.max_model_calls !== null) {
+    /** @type {Map<string, { reserved: number, executedStepIds: Set<string>, otherExecuted: number }>} */
+    const unitStats = new Map()
+    let anonymousCalls = 0
+
+    for (const event of evts) {
+      if (!event || typeof event !== 'object') continue
+
+      const isReserved = event.kind === 'budget_reserved'
+      const isMakerResult =
+        event.kind === 'step_result' &&
+        ((typeof event.step_id === 'string' && event.step_id.endsWith(':maker')) ||
+          (typeof event.data?.step_id === 'string' && event.data.step_id.endsWith(':maker')) ||
+          event.effect_class === 'model_call' ||
+          event.data?.effect_class === 'model_call')
+      const isDirectModelCall =
+        event.kind === 'model_call' ||
+        (event.effect_class === 'model_call' && event.kind !== 'step_intent' && event.kind !== 'step_result') ||
+        (event.data?.effect_class === 'model_call' && event.kind !== 'step_intent' && event.kind !== 'step_result')
+
+      if (!isReserved && !isMakerResult && !isDirectModelCall) {
+        continue
+      }
+
+      // Identifica a unidade/story do evento
+      let unit =
+        (typeof event.unit === 'string' && event.unit) ||
+        (typeof event.data?.unit === 'string' && event.data.unit) ||
+        (typeof event.story_id === 'string' && event.story_id) ||
+        (typeof event.data?.story_id === 'string' && event.data.story_id) ||
+        null
+
+      const stepId = event.step_id ?? event.data?.step_id
+      if (!unit && typeof stepId === 'string') {
+        const colonIdx = stepId.indexOf(':')
+        if (colonIdx > 0) {
+          unit = stepId.substring(0, colonIdx)
+        }
+      }
+
+      if (!unit) {
+        anonymousCalls++
+        continue
+      }
+
+      if (!unitStats.has(unit)) {
+        unitStats.set(unit, { reserved: 0, executedStepIds: new Set(), otherExecuted: 0 })
+      }
+      const stats = /** @type {{ reserved: number, executedStepIds: Set<string>, otherExecuted: number }} */ (
+        unitStats.get(unit)
+      )
+
+      if (isReserved) {
+        const calls = typeof event.data?.calls === 'number' ? event.data.calls : 1
+        stats.reserved += calls
+      } else if (typeof stepId === 'string' && stepId) {
+        stats.executedStepIds.add(stepId)
+      } else {
+        stats.otherExecuted++
+      }
+    }
+
+    let callCount = anonymousCalls
+    for (const stats of unitStats.values()) {
+      const executed = stats.executedStepIds.size + stats.otherExecuted
+      callCount += Math.max(stats.reserved, executed)
+    }
+
+    if (callCount >= budget.max_model_calls) {
+      return { allowed: false, reason: 'model_call_budget_exhausted' }
+    }
+  }
+
+  // 2. Wall clock desde o primeiro event até now
+  const maxWallClockMs =
+    budget.max_wall_clock_ms ??
+    (budget.max_wall_clock_seconds !== undefined ? budget.max_wall_clock_seconds * 1000 : undefined)
+
+  if (maxWallClockMs !== undefined && maxWallClockMs !== null) {
+    let firstAt = null
+    for (const event of evts) {
+      if (!event || typeof event !== 'object') continue
+      const rawAt = event.at ?? event.ts ?? event.timestamp ?? event.time
+      if (rawAt !== undefined && rawAt !== null) {
+        const atVal = typeof rawAt === 'number' ? rawAt : new Date(rawAt).getTime()
+        if (Number.isFinite(atVal)) {
+          if (firstAt === null || atVal < firstAt) {
+            firstAt = atVal
+          }
+        }
+      }
+    }
+
+    if (firstAt !== null) {
+      const nowVal = typeof now === 'number' ? now : new Date(now).getTime()
+      const elapsed = nowVal - firstAt
+      if (elapsed >= maxWallClockMs) {
+        return { allowed: false, reason: 'wall_clock_exhausted' }
+      }
+    }
+  }
+
+  // 3. Quantidade de states awaiting_operator
+  if (budget.max_parked_units !== undefined && budget.max_parked_units !== null) {
+    const statesList = Array.isArray(states)
+      ? states
+      : typeof states === 'object' && states !== null
+        ? Object.values(states)
+        : []
+
+    let parkedCount = 0
+    for (const s of statesList) {
+      if (
+        s === 'awaiting_operator' ||
+        s?.status === 'awaiting_operator' ||
+        s?.state === 'awaiting_operator' ||
+        s?.outcome === 'awaiting_operator' ||
+        s?.outcome === 'parked' ||
+        s === 'parked'
+      ) {
+        parkedCount++
+      }
+    }
+
+    if (parkedCount >= budget.max_parked_units) {
+      return { allowed: false, reason: 'max_parked_units' }
+    }
+  }
+
+  return { allowed: true, reason: null }
+}
+

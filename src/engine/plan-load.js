@@ -89,22 +89,80 @@ export function defaultStoryBudget({ complexity, needs_ui = false }) {
 /**
  * Carrega e valida um plan.json, seus contratos e gates opcionais.
  *
- * @param {string} planPath
+ * @param {string | Record<string, any>} planPath
  * @returns {LoadedPlan}
  */
 export function loadPlan(planPath) {
-  let rawText
-  try {
-    rawText = fs.readFileSync(planPath, 'utf8')
-  } catch {
-    throw new AdeError('plan_unreadable', `plano ilegível: ${planPath}`, 4)
+  let doc
+  let planDir
+
+  if (typeof planPath === 'object' && planPath !== null) {
+    doc = planPath
+    planDir = process.cwd()
+  } else {
+    let rawText
+    try {
+      rawText = fs.readFileSync(planPath, 'utf8')
+    } catch {
+      throw new AdeError('plan_unreadable', `plano ilegível: ${planPath}`, 4)
+    }
+
+    try {
+      doc = JSON.parse(rawText)
+    } catch {
+      throw new AdeError('plan_unreadable', `plano ilegível: ${planPath}`, 4)
+    }
+    planDir = path.resolve(path.dirname(planPath))
   }
 
-  let doc
-  try {
-    doc = JSON.parse(rawText)
-  } catch {
-    throw new AdeError('plan_unreadable', `plano ilegível: ${planPath}`, 4)
+  // Rejeitar efeitos não booleanos ou não autorizados antes de despacho
+  if (doc && typeof doc === 'object') {
+    /**
+     * @param {string} k
+     * @param {unknown} v
+     */
+    const checkEffectEntry = (k, v) => {
+      if (typeof v !== 'boolean') {
+        throw new AdeError('invalid_effect_value', `efeito não booleano: ${k}`, 4, { effect: k, value: v })
+      }
+      if (!EXTERNAL_EFFECTS.includes(k)) {
+        throw new AdeError('unauthorized_effect', `efeito externo não autorizado: ${k}`, 4, { effect: k })
+      }
+    }
+
+    for (const eff of ['push', 'open_pr', 'merge']) {
+      if (eff in doc) {
+        checkEffectEntry(eff, doc[eff])
+      }
+    }
+
+    for (const k of Object.keys(doc)) {
+      if (
+        ![
+          'format_version',
+          'id',
+          'mission_id',
+          'immutable_digest',
+          'authorization',
+          'phases',
+          'mission_budget',
+          'budget',
+          'push',
+          'open_pr',
+          'merge',
+        ].includes(k)
+      ) {
+        if (typeof doc[k] === 'boolean' || doc[k] === 'true' || doc[k] === 'false') {
+          checkEffectEntry(k, doc[k])
+        }
+      }
+    }
+
+    if (doc.effects && typeof doc.effects === 'object' && !Array.isArray(doc.effects)) {
+      for (const [k, v] of Object.entries(doc.effects)) {
+        checkEffectEntry(k, v)
+      }
+    }
   }
 
   const planValidation = validate('plan', doc)
@@ -136,7 +194,9 @@ export function loadPlan(planPath) {
     }
   }
 
-  const planDir = path.resolve(path.dirname(planPath))
+  if (typeof planPath === 'string') {
+    planDir = path.resolve(path.dirname(planPath))
+  }
 
   // Leitura e validação de gates.json opcional
   const gatesPath = path.join(planDir, 'gates.json')
