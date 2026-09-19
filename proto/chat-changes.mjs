@@ -56,6 +56,37 @@ export function canApprove({ busy, dirty, head, proposalHead }) {
   return { ok: true, reason: null }
 }
 
+const CHAT_EFFORTS = ['low', 'medium', 'high']
+
+export function chatCommand(family, { model, effort, cwd, prompt }) {
+  if (family === 'codex') {
+    const args = [
+      'exec', '--json', '--sandbox', 'workspace-write', '--skip-git-repo-check',
+      '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c',
+      `model_reasoning_effort=${CHAT_EFFORTS.includes(effort) ? effort : 'medium'}`,
+      '-C', cwd, '-m', model, '-'
+    ]
+    return { cmd: 'codex', args, cwd, stdin: prompt }
+  }
+
+  if (family === 'agy') {
+    const args = [
+      `--print=${prompt.replace(/"/g, "'").replace(/\r?\n/g, ' ')}`,
+      '--output-format', 'json', '--model', model, '--dangerously-skip-permissions'
+    ]
+    return { cmd: 'agy', args, cwd, stdin: undefined }
+  }
+
+  const args = [
+    '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
+    '--safe-mode', '--no-session-persistence', '--max-turns', '20', '--model', model,
+    '--permission-mode', 'acceptEdits', '--exclude-dynamic-system-prompt-sections', '--tools',
+    'Read', 'Glob', 'Grep', 'Edit', 'Write', 'MultiEdit', 'WebFetch', 'WebSearch'
+  ]
+  if (CHAT_EFFORTS.includes(effort)) args.push('--effort', effort)
+  return { cmd: 'claude', args, cwd, stdin: prompt }
+}
+
 const ID_PATTERN = /^[a-z0-9-]{1,40}$/i
 const locks = new Map()
 
