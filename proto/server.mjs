@@ -282,9 +282,13 @@ function setStep(name, status, extra = {}) {
 
 // ---------- processos ----------
 // Toda chamada de Codex e Antigravity abre com ENV_GUARD: os dois carregam instruções globais do usuário que não dá para desligar.
+// Windows: sem windows.sandbox (o [windows] do config.toml some com --ignore-user-config) o Codex rebaixa workspace-write para
+// read-only calado e, em read-only, recusa todo comando ("blocked by policy"). Missões m-mu81n0ms (13 chamadas de código sem gravar)
+// e m-mu8kjr1p (o planejador não leu um arquivo e pediu ao Erick que colasse o projeto).
 function guardPrompt(cmd, args, stdin) {
   if (cmd === 'agy') return { args: args.map((a) => a.startsWith('--print=') ? `--print=${ENV_GUARD} ${a.slice(8)}` : a), stdin }
   if (cmd !== 'codex' || args[0] !== 'exec') return { args, stdin }
+  if (IS_WIN && !args.some((a) => a.startsWith('windows.sandbox'))) args = ['exec', '-c', 'windows.sandbox=elevated', ...args.slice(1)]
   if (stdin != null) return { args, stdin: `${ENV_GUARD}
 
 ${stdin}` }
@@ -1244,7 +1248,7 @@ function intentPrompt() {
     `Papéis e modelos: planejador ${chainOf('plan')[0]?.model} (monta stories); maker ${chainOf('impl')[0]?.model} (escreve provas e código); revisor ${chainOf('checker')[0]?.model} (lê o diff, não escreve); pesquisador ${s.roles.research.model} (Google, só fatos externos).`,
     'Se há anexos, abra-os antes de decidir (uma imagem de referência muda domínios, skills e perguntas).',
     'Escolha, para cada papel, as skills do catálogo abaixo que elevam a qualidade daquele papel neste pedido (ids exatos; até 4 para o maker, até 3 para os outros; lista vazia é válida). Regras fixas: se há interface ou design, o maker recebe design-taste-frontend e impeccable (pode acrescentar frontend-design e accessibility); backend/API recebe backend-patterns e api-design; banco recebe postgres-patterns; o revisor recebe skills de revisão/segurança, não de estilo; o pesquisador raramente precisa de skill.',
-    '- summary: 2 frases do que será entregue e das escolhas feitas por você quando o pedido é vago.',
+    '- summary: até 2 frases curtas, para um usuário leigo que não programa, sem sigla nem termo técnico (nada de v0.2, PR, merge, TDD, Checker, journal): o que ele vai ter no fim e as escolhas feitas por você quando o pedido é vago.',
     '- complexity: trivial (1 arquivo, correção) | bounded (1 a 3 partes pequenas) | feature (4 a 6 partes de UM subsistema) | subsystem (precisaria de mais de 6 partes, ou toca mais de um subsistema: vira uma fila de épicos) | project (vários subsistemas ou fases, ex.: "faça o motor inteiro", "crie o app completo"). Na dúvida entre feature e subsystem, escolha subsystem: partes grandes demais falham na revisão.',
     '- domains (subconjunto de frontend, design, backend, api, database, testing, security, a11y, docs, devops, mais a linguagem principal em minúsculas (js, ts, python, go, rust, java, kotlin, csharp, cpp, php, ruby, swift, dart, elixir)), keywords (5 a 12, pt e en), needs_ui, needs_backend.',
     '- research_questions: só fatos externos que mudariam a implementação; normalmente vazio.',
@@ -1314,7 +1318,8 @@ function planPrompt(revising = false) {
     '- stories: 1 a 6 stories PEQUENAS, em ordem de execução. TAMANHO É REGRA: cada story = um comportamento observável, request com no máximo 120 palavras, acceptance com 2 a 4 critérios, diff esperado de até ~300 linhas, provável de passar numa revisão rigorosa em 1 ou 2 rodadas. Nunca junte dois comportamentos com "e também". Se o trabalho não cabe em 6 stories desse tamanho, faça só a primeira fatia coerente e diga em summary o que ficou para o próximo épico. Cada uma: id (s1, s2…), title, request (instrução completa e autossuficiente para a IA que vai implementar, incluindo o estilo visual quando houver interface), acceptance, test_hint (como provar), depends_on (ids das stories anteriores de que esta depende; [] se independente).',
     p.runner === 'none' ? '- Não há runner de provas: a primeira story cria o mínimo para rodar provas com o runner padrão da linguagem, sem dependência extra quando a linguagem já traz um (JS: package.json + vitest; Python: requirements.txt + pytest; Go: go.mod + go test; Rust: cargo; C#: projeto xUnit + dotnet test; Java: Maven ou Gradle + JUnit). o motor lê prova a prova vitest, jest, node --test, pytest, go test, cargo test, Maven/Gradle, dotnet test, PHPUnit, swift test e deno test; outro runner vale só pelo código de saída, sem saber qual prova falhou.' : '',
     '- Se o pedido é visual e não há index.html, uma story deve entregar index.html na raiz funcionando como arquivos estáticos (ES modules, sem build), para abrir no navegador.',
-    'Pedidos simples viram 1 ou 2 stories. Não invente escopo além do pedido. questions: normalmente vazio (a entrevista já aconteceu).',
+    'Pedidos simples viram 1 ou 2 stories. Não invente escopo além do pedido.',
+    '- questions: normalmente vazio (a entrevista já aconteceu). Só decisão de produto que só o usuário pode tomar; ele é leigo, não programa. Mesmo formato da entrevista: question numa frase curta e simples, sem termo técnico, sigla, caminho de arquivo ou nome de código; options de 2 a 4, a PRIMEIRA é a recomendada, label com até 6 palavras. Nunca peça arquivo, código, trecho ou contexto ao usuário: leia o projeto com as suas ferramentas; o que não conseguir ler, decida você e registre em decisions.',
     revising ? `MODO EDIÇÃO: o plano abaixo já está quase pronto. NÃO explore o projeto de novo (no máximo 2 leituras para conferir um caminho ou símbolo). Devolva o MESMO JSON, alterando só o que o último pedido de mudança exige; copie o resto sem reescrever. A correção sugerida em cada pedido é uma ilustração, não uma ordem: se aplicá-la contradiz o pedido do usuário, uma escolha da entrevista ou uma decision, NÃO aplique; resolva o problema apontado de outro jeito e diga no summary qual pedido recusou e por quê. Nunca resolva um pedido entregando menos do que o épico pede.\nPLANO ATUAL:\n${JSON.stringify({ ...m.plan, epics: undefined, explanation: m.plan.epic_explanation || m.plan.explanation })}` : '',
     m.plan_feedback?.length && !revising ? `PLANO ANTERIOR (para revisar, não para repetir):\n${JSON.stringify({ title: m.plan.title, summary: m.plan.summary, stories: m.stories.map((s) => ({ id: s.id, title: s.title, request: s.request })) })}` : '',
     m.plan_feedback?.length ? `O usuário pediu estas mudanças no plano, em ordem: ${m.plan_feedback.map((f, i) => `(${i + 1}) ${f}`).join(' ')} Aplique-as e mantenha o resto.` : '',
@@ -1326,7 +1331,7 @@ const PLAN_JSON_SCHEMA = {
     title: { type: 'string' }, summary: { type: 'string' }, explanation: { type: 'string' }, complexity: { type: 'string', enum: ['trivial', 'bounded', 'feature', 'subsystem', 'project'] },
     domains: { type: 'array', items: { type: 'string' } }, keywords: { type: 'array', items: { type: 'string' } },
     needs_ui: { type: 'boolean' }, needs_backend: { type: 'boolean' },
-    research_questions: { type: 'array', items: { type: 'string' } }, questions: { type: 'array', items: { type: 'string' } },
+    research_questions: { type: 'array', items: { type: 'string' } }, questions: BRIEF_QUESTIONS,
     decisions: { type: 'array', items: { type: 'string' } },
     assets_style: { type: 'string' },
     assets: { type: 'array', maxItems: 6, items: { type: 'object', additionalProperties: false, properties: { file: { type: 'string' }, prompt: { type: 'string' }, purpose: { type: 'string' } }, required: ['file', 'prompt', 'purpose'] } },
@@ -1877,9 +1882,7 @@ async function codexMaker({ role, prompt, model, effort }) {
   log('engine', `codex (${role}, ${model}, esforço ${effort})`); setLive({ source: 'codex', kind: 'thinking', text: `${role}: Codex trabalhando…` })
   let last = null, usage = null, r
   try {
-    // Windows: sem windows.sandbox o Codex rebaixa workspace-write para read-only calado (o [windows] do config.toml some com
-    // --ignore-user-config). Missão m-mu81n0ms: 13 chamadas de código do Codex sem gravar nada.
-    r = await run('codex', ['exec', '--json', '--sandbox', 'workspace-write', ...(IS_WIN ? ['-c', 'windows.sandbox=elevated'] : []), '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${effort}`, '-C', dir, '-m', model, '-'], {
+    r = await run('codex', ['exec', '--json', '--sandbox', 'workspace-write', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${effort}`, '-C', dir, '-m', model, '-'], {
       cwd: dir, stdin: prompt, timeoutMs: 22 * 60 * 1000,
       onLine: (line) => {
         let ev; try { ev = JSON.parse(line) } catch { return }
