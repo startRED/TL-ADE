@@ -1599,7 +1599,7 @@ async function continuePlanning() {
 async function makeProgram() {
   const m = state.mission, intent = m.intent
   m.state = 'planning'; setStep('plan', 'running')
-  const r = await plannerCall(plannerChoice('complex'), { role: 'épicos', prompt: epicsPrompt(), schema: EPICS_JSON_SCHEMA, maxTurns: 10, timeoutMs: 15 * 60 * 1000 })
+  const r = await plannerCall(plannerChoice('complex'), { role: 'épicos', prompt: epicsPrompt(), schema: EPICS_JSON_SCHEMA, maxTurns: 10, timeoutMs: 20 * 60 * 1000 }) // divisão: 3,3 min normal, 4 no pior caso bom (19/09)
   const pr = r?.structured_output
   if (!pr?.epics?.length) { setStep('plan', 'failed'); m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'a divisão em épicos não veio no formato esperado', 'error'); return finish() }
   m.program = { title: pr.title, explanation: pr.explanation, epics: pr.epics.map((e) => ({ ...e, state: 'queued', usd: 0, stories: [], summary: '' })), current: null }
@@ -1684,7 +1684,7 @@ async function makePlan({ inProgram = false } = {}) {
   const edit = chainOf('plan_edit')[0], who = revising ? (edit ? { ...edit, key: 'plan_edit' } : { ...plannerChoice('light'), effort: 'medium' }) : base
   m.auto_revision = false
   const turns = revising ? 6 : 20 + (m.epic?.plan_tries || 0) * 16
-  const r = await plannerCall(who, { role: revising ? 'revisão do plano' : 'plano', prompt: planPrompt(revising) + `\n\nLIMITE: você tem ${turns} turnos de ferramenta. Use o mapa e o recibo do batedor em vez de reler arquivos; leia só trechos. Entregue o plano antes do limite: plano não entregue é dinheiro perdido.`, schema: PLAN_JSON_SCHEMA, maxTurns: turns, timeoutMs: (revising ? 10 : 20) * 60 * 1000 })
+  const r = await plannerCall(who, { role: revising ? 'revisão do plano' : 'plano', prompt: planPrompt(revising) + `\n\nLIMITE: você tem ${turns} turnos de ferramenta. Use o mapa e o recibo do batedor em vez de reler arquivos; leia só trechos. Entregue o plano antes do limite: plano não entregue é dinheiro perdido.`, schema: PLAN_JSON_SCHEMA, maxTurns: turns, timeoutMs: (revising ? 20 : 30) * 60 * 1000 }) // ~2x o pior caso bom medido: plano 14 min, correção 9,1 (19/09); cortar plano bom custa mais que esperar
   const plan = r?.structured_output
   if (!plan?.stories?.length) { setStep('plan', 'failed'); if (inProgram) return false; m.state = 'awaiting_operator'; m.reason = 'plan_failed'; log('engine', 'o plano não veio no formato esperado', 'error'); return finish() }
   // parte grande demais volta ao planejador uma vez, sem gastar com maker
