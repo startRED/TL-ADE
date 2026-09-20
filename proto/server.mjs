@@ -1071,7 +1071,7 @@ async function checker(diff, tests, st) {
     m.plan?.decisions?.length ? `DECISÕES DO PLANO (são contrato, já aprovadas; um achado que contradiz uma decisão NÃO é achado, por melhor que seja a ideia):\n${m.plan.decisions.map((d) => `- ${d}`).join('\n')}` : '',
     st.round > 1 && st.review?.findings?.length ? [
       `ESTA É A RODADA ${st.round} DE REVISÃO. Seus achados da rodada anterior: ${st.review.findings.map((f) => `[${f.severity}] ${f.file}: ${String(f.problem).slice(0, 220)}`).join(' | ')}`,
-      `Resposta de quem escreveu: ${String(st.last_summary || '(sem resposta)').slice(0, 1800)}`,
+      `Resposta de quem escreveu (o fechamento item a item fica no fim): ${String(st.last_summary || '(sem resposta)').slice(-1800)}`,
       'Regras desta rodada: (1) confira se cada achado anterior foi corrigido; (2) se quem escreveu RECUSOU um achado citando uma decisão do plano, o contrato da story ou um critério de aceite, e a citação procede, RETIRE o achado (não repita); (3) achado NOVO só vale como high se tiver sido introduzido pelo diff desta rodada ou violar LITERALMENTE um critério de aceite (cite o número); melhorias que você não pediu na primeira rodada viram no máximo low. O objetivo é convergir, não reabrir a story.',
       st.round >= 4 ? `RODADA ${st.round}: todos os vetores que você queria cobertos deviam ter sido listados na primeira rodada. Se os achados anteriores foram corrigidos, APROVE. Achado novo que não é regressão introduzida por este diff entra em findings com severity "low" e problem começando por "PENDÊNCIA:" (o motor registra e o planejador abre uma parte própria no épico seguinte); ele NÃO impede o approve, por mais grave que pareça.` : '',
     ].join('\n') : '',
@@ -1462,7 +1462,10 @@ async function contextPack(st, extra = []) {
   }
   if (want.length) parts.push('Os arquivos acima já estão no estado atual: NÃO os releia; edite direto com Edit. Leia só o que não está aqui.')
   const map = await codeMap(dir, tree.filter((f) => TEXT_EXT.test(f) && !want.includes(f)), { maxFiles: 40, maxChars: 5000 }); if (map) parts.push(map)
-  if (st.last_summary) parts.push(`Resumo da sessão anterior desta parte: ${st.last_summary.slice(0, 1200)}`)
+  // O FECHAMENTO (FEITO/NÃO FEITO/RECUSADO) fica no FIM da mensagem de quem escreve, então cortar pelo começo jogava fora
+  // justamente a parte útil e entregava à rodada seguinte o preâmbulo. Corta pelo fim: a passagem de bastão é a conclusão.
+  if (st.last_summary) parts.push(`PASSAGEM DE BASTÃO — quem mexeu nesta parte antes de você escreveu isto ao terminar. Toda linha "NÃO FEITO" ou "RECUSADO" é o seu ponto de partida; não refaça o que está como FEITO:
+${st.last_summary.slice(-1800)}`)
   return parts.join('\n')
 }
 
@@ -1536,6 +1539,15 @@ const IMPL_RULES = [
 // arquivos que ia mexer. Descobria o estrago só depois, quando o motor já tinha pago suíte, revisão e a rodada seguinte.
 // Medido na m-mu8usf5z: o Codex deixou a suíte verde em 31% das escritas, o Gemini em 43%, e o Gemini toca 6,6 arquivos por
 // chamada. O motor já sabe rodar esse recorte — agora entrega o comando pronto para quem escreve conferir antes de terminar.
+// Fechamento: o que mais abre rodada nesta missão não é quebrar código, é PARAR NO MEIO. Medido na m-mu8usf5z, 59 pareceres
+// que pediram mudanças: 11 por sair do contrato, 9 por critério de aceite não atendido, 9 por fazer a prova passar no dublê
+// enquanto o caminho real segue errado, 8 por correção parcial ("três achados corrigidos, o quarto continua"). Cada um desses
+// é barato de conferir antes de terminar e caro de descobrir depois: vira rodada nova, com suíte, revisão e um modelo mais
+// caro refazendo o trabalho. Por isso o fechamento é prestação de contas item a item, não resumo.
+const CLOSING = [
+  'ANTES DE TERMINAR, confira você mesmo, nesta ordem: (1) cada critério de aceite vale no caminho REAL (o que o CLI ou o usuário executa), não só na prova — fazer a prova passar ajustando o dublê e deixando o caminho real errado é o erro mais comum aqui; (2) `git diff --name-only` mostra só arquivo que o CONTRATO permite; (3) você não engoliu erro novo (catch vazio, valor padrão calado).',
+  'FECHAMENTO, obrigatório: uma linha por item que te pediram — cada achado do revisor, cada prova vermelha, cada critério —, começando por FEITO:, NÃO FEITO: ou RECUSADO: (com o motivo em uma frase). Entregar "corrigi três dos quatro" sem dizer qual sobrou é o que mais gasta rodada nesta missão: quem revisa reabre a parte inteira e quem conserta depois recomeça do zero. NÃO FEITO declarado vale mais que silêncio; ninguém é punido por dizer o que faltou.',
+]
 const blastTip = () => { const cmd = relatedCommand(state.project?.suites); return cmd ? `ANTES DE DIZER QUE TERMINOU, confira o seu estrago: rode \`${cmd}\` com os arquivos que você alterou e limite a saída (\`| tail -30\`). É um recorte curto, não a suíte inteira. Prova que estava VERDE e você derrubou volta como rodada paga, com outro modelo mais caro refazendo o seu trabalho: é mais barato você achar agora.` : '' }
 const testTimeTip = (st) => { const ms = state.mission?.test_ms?.[st.test_file]; return ms > 15000 ? `A prova da parte (${st.test_file}) levou ${Math.round(ms / 1000)} s na última vez aqui: ao rodá-la, espere ela terminar (tempo de espera de ${Math.ceil(ms / 500)} s ou mais) em vez de repetir o comando; saída vazia no meio quer dizer que ainda está rodando.` : '' }
 function testPrompt(st, pack, together = false) {
@@ -1543,7 +1555,7 @@ function testPrompt(st, pack, together = false) {
     `DUAS ETAPAS NESTA CHAMADA, nesta ordem. (1) PROVA: escreva as provas novas (testes automatizados) desta story: uma função de teste por critério de aceite, todas no mesmo arquivo, com nomes que digam o critério. ${st.test_file ? `Arquivo de prova: ${st.test_file}. ` : ''}${st.examples?.length ? 'Cada EXEMPLO acima vira uma asserção. ' : ''}Dica de prova: ${st.test_hint}. Rode o arquivo de prova uma vez e veja as provas novas falharem. (2) CÓDIGO: implemente o comportamento até o arquivo de prova passar. Depois de você, o motor guarda o código de lado e roda a prova sem ele: prova que passa sem o código novo não prova nada e a parte volta ao começo. Não rode a suíte inteira: o motor roda todas as provas depois. Provas NUNCA fazem chamada real de rede, CLI externa ou serviço: simule com dublês (stub/mock) e teste o comportamento observável.`,
     'QUALIDADE DA PROVA: se o arquivo de prova já existe, ACRESCENTE (nunca apague nem reescreva prova que já está lá); teste a interface pública e a saída observável; dublê só na fronteira do sistema (processo filho, relógio, sistema de arquivos, rede); determinística; valores concretos dos EXEMPLOS; pelo menos uma prova de borda ou de falha.',
     ...IMPL_RULES, testTimeTip(st), blastTip(),
-    pack, 'Ao terminar, escreva uma frase com o nome do arquivo de prova, os nomes das provas novas e o que mudou no código.'].filter(Boolean).join('\n') + skillsBlock(skillsForStory(state.mission.skills.maker || [], st, state.settings.skills.forced || []))
+    pack, ...CLOSING, 'Na última linha, o nome do arquivo de prova e os nomes das provas novas.'].filter(Boolean).join('\n') + skillsBlock(skillsForStory(state.mission.skills.maker || [], st, state.settings.skills.forced || []))
   return [`Pedido original do usuário: ${state.mission.request}`, ...common(st),
     `FASE 1 de 2: escreva APENAS as provas novas (testes automatizados) desta story: uma função de teste por critério de aceite, todas no mesmo arquivo, com nomes que digam o critério. Todas devem FALHAR (ou nem carregar) no código atual, porque o comportamento ainda não existe. ${st.test_file ? `Arquivo de prova: ${st.test_file}. ` : ''}${st.examples?.length ? 'Cada EXEMPLO acima vira uma asserção. ' : ''}Dica de prova: ${st.test_hint}. Não implemente o comportamento ainda (a implementação é a fase 2, outra chamada; implementar agora só gasta cota e o harness não consegue conferir o vermelho). Não rode a suíte inteira: rode no máximo o arquivo de prova novo, uma vez. Provas NUNCA fazem chamada real de rede, CLI externa ou serviço: simule com dublês (stub/mock) e teste o comportamento observável; prova que depende do ambiente vira falha falsa e trava a parte.`,
     'PROIBIDO nesta fase: criar ou alterar qualquer arquivo que não seja arquivo de prova. Se você implementar agora, as provas nascem verdes e não provam nada.',
@@ -1563,7 +1575,7 @@ function fixPrompt(st, round, review, visual, pack, turns = 30) {
     `Agora implemente o necessário para a prova passar e os critérios de aceite valerem. Não modifique a prova. Não toque em nada fora do escopo da story. Seja direto: você tem no máximo ${turns} ações e a chamada é cortada nesse número; não investigue ferramentas do harness, não reescreva provas antigas, não amplie o escopo.`,
     ...IMPL_RULES, testTimeTip(st), blastTip(),
     round > 1 && st.tests_after && !st.tests_after.ok ? `DEPURAÇÃO (rodada ${round}; a tentativa anterior não deixou as provas verdes): (1) antes de mudar qualquer linha, explique em uma frase POR QUE a prova falha; (2) reproduza rodando só o arquivo de prova; (3) uma hipótese por vez sobre a CAUSA, não o sintoma; teste com a menor mudança; hipótese refutada = desfaça a mudança antes da próxima; (4) correção mínima na causa provada, sem refatoração de carona; (5) depois de verde, procure o mesmo padrão errado nos outros arquivos do escopo.` : '',
-    'Ao terminar, escreva no máximo 3 linhas dizendo o que mudou.']
+    ...CLOSING]
   if (round > 1 && review) { base.push('Se um pedido do revisor contradiz uma DECISÃO DO PLANO, o contrato ou um critério de aceite, não o aplique: na frase final cite literalmente a decisão ou o critério que o impede (o revisor vai ler a sua resposta). Todo o resto, corrija.'); base.push(`Rodada ${round}. O revisor (outra IA) pediu mudanças: ${review.summary}`); for (const f of review.findings) base.push(`- [${f.severity}] ${f.file}: ${f.problem} Correção sugerida: ${f.fix}`) }
   if (visual?.length) { base.push('O portão visual (Impeccable detect) apontou; corrija. Se um achado conflita com um detalhe decorativo de um critério de aceite (borda lateral, gradiente, cor), o portão vence: satisfaça a intenção do critério de outro jeito, sem investigar o detector, e diga isso na frase final.'); for (const f of visual) base.push(`- ${f.file}${f.line ? ':' + f.line : ''} [${f.rule}] ${f.message}`) }
   return base.join('\n') + skillsBlock(skillsForStory(state.mission.skills.maker || [], st, state.settings.skills.forced || []))
