@@ -199,6 +199,14 @@ describe('e2e parity', () => {
     const report = renderReport('m1', [{ unit: 's1', status: 'committed' }], sums)
     expect(report).toContain('## Custo por papel')
     expect(report).toContain('| maker | 3 | 1 | 300 | 20 | 500 | 100 | 0.0323 |')
+
+    const quotaUsage = (reportModule as any).sumQuotaUsage(events, new Date('2026-09-20T12:00:00.000Z').getTime())
+    const reportWithQuota = renderReport('m1', [{ unit: 's1', status: 'committed' }], sums, quotaUsage)
+    expect(reportWithQuota).toContain('## Custo por papel')
+    expect(reportWithQuota).toContain('| maker | 3 | 1 | 300 | 20 | 500 | 100 | 0.0323 |')
+    expect(reportWithQuota).toContain('## Cota por dia UTC')
+    expect(reportWithQuota).toContain('## Janelas de cota')
+    expect(reportWithQuota).toContain('## Recibos oficiais')
   })
 
   test('run_plan_persists_reported_tokens_in_journal_telemetry', async () => {

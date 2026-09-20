@@ -495,4 +495,43 @@ describe('ade report', () => {
     expect(stdout.text).toBe(`relatório: ${reportPath}\n`)
     expect(stderr.text).toBe('')
   })
+
+  test('report_with_quota_flag_adds_quota_sections_compatibly', async () => {
+    const dir = await makeJournal(
+      [
+        { kind: 'story_started', data: { unit: 'ADE-T1' } },
+        {
+          kind: 'telemetry',
+          data: {
+            family: 'claude',
+            role: 'maker',
+            tokens: { input: 100, cache_read: 200, output: 50, source: 'reported' },
+          },
+        },
+        {
+          kind: 'story_done',
+          data: {
+            unit: 'ADE-T1',
+            status: 'committed',
+            commit: 'abc123def4567890',
+          },
+        },
+      ],
+      'm1-quota',
+    )
+
+    const stdout = makeSink()
+    const stderr = makeSink()
+    const exitCode = await reportMain(['--mission', dir, '--quota'], { env: {}, stdout, stderr })
+
+    expect(exitCode).toBe(0)
+    const reportPath = path.join(dir, 'report.md')
+    const content = readFileSync(reportPath, 'utf8')
+    expect(content).toContain('| ADE-T1 | committed | - | abc123def456 |')
+    expect(content).toContain('## Cota por dia UTC')
+    expect(content).toContain('## Janelas de cota')
+    expect(content).toContain('## Recibos oficiais')
+    expect(stdout.text).toBe(`relatório: ${reportPath}\n`)
+    expect(stderr.text).toBe('')
+  })
 })
