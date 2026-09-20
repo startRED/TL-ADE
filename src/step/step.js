@@ -5,7 +5,17 @@ import { AdeError, StateIntegrityError } from '../journal/errors.js'
 import { maybeFault } from './fault.js'
 
 /** Classes de efeito fechadas desta fatia do motor. */
-export const EFFECT_CLASSES = ['none', 'local_write', 'prepare', 'gate', 'model_call', 'local_commit', 'eval_run']
+export const EFFECT_CLASSES = [
+  'none',
+  'local_write',
+  'prepare',
+  'gate',
+  'model_call',
+  'local_commit',
+  'eval_run',
+  'push',
+  'local_merge',
+]
 
 /** Chaves fechadas de `intent_context`; cada valor é `string | null`. */
 export const INTENT_CONTEXT_KEYS = [
@@ -44,6 +54,7 @@ export function priorStepResult(events, stepId) {
  *   journal: { append: (partial: Record<string, unknown>) => Promise<Record<string, unknown>> },
  *   missionDir: string,
  *   gitPort?: import('../git/gitport.js').GitPort | null,
+ *   remotePort?: { readRef: (remote: string, ref: string) => Promise<string | null> } | null,
  *   env?: NodeJS.ProcessEnv,
  * }} options
  * @returns {{ step: (spec: {
@@ -64,7 +75,7 @@ export function priorStepResult(events, stepId) {
  *   evidence?: Record<string, unknown>,
  * }> }}
  */
-export function createStepRunner({ journal, missionDir, gitPort = null, env = process.env }) {
+export function createStepRunner({ journal, missionDir, gitPort = null, remotePort = null, env = process.env }) {
   /** @type {Map<string, Promise<void>>} */
   const queues = new Map()
 
@@ -166,6 +177,47 @@ export function createStepRunner({ journal, missionDir, gitPort = null, env = pr
     if (effect_class === 'model_call' && gitPort) {
       before = await gitPort.headInfo()
       recordedContext = { ...intent_context, head_before: before.commit, branch_before: before.branch }
+    }
+
+    const inputRecord = input && typeof input === 'object' && !Array.isArray(input)
+      ? /** @type {Record<string, unknown>} */ (input)
+      : {}
+    if (effect_class === 'push') {
+      if (!remotePort || typeof remotePort.readRef !== 'function') {
+        throw new TypeError('remotePort obrigatório para push')
+      }
+      const remote = inputRecord.remote ?? 'origin'
+      const branch = inputRecord.branch ?? intent_context.branch_before ?? 'main'
+      let ref = inputRecord.ref
+      if (ref === undefined) {
+        if (typeof branch !== 'string' || !branch.trim()) {
+          throw new TypeError('branch inválida para push')
+        }
+        ref = branch.startsWith('refs/') ? branch : `refs/heads/${branch}`
+      }
+      if (typeof remote !== 'string' || !remote.trim() || typeof ref !== 'string' || !ref.trim()) {
+        throw new TypeError('remote e ref inválidos para push')
+      }
+      const remoteBefore = await remotePort.readRef(remote, ref)
+      if (remoteBefore !== null && (typeof remoteBefore !== 'string' || !remoteBefore.trim())) {
+        throw new TypeError('remotePort retornou ref inválida')
+      }
+      recordedContext = { ...intent_context, remote_before: remoteBefore }
+    }
+
+    if (effect_class === 'local_merge') {
+      if (!gitPort || typeof gitPort.readLocalRef !== 'function') {
+        throw new TypeError('gitPort com readLocalRef obrigatório para local_merge')
+      }
+      const baseRef = inputRecord.base_ref ?? intent_context.branch_after ?? 'main'
+      if (typeof baseRef !== 'string' || !baseRef.trim()) {
+        throw new TypeError('base_ref inválida para local_merge')
+      }
+      const baseBefore = await gitPort.readLocalRef(baseRef)
+      if (baseBefore !== null && (typeof baseBefore !== 'string' || !baseBefore.trim())) {
+        throw new TypeError('gitPort retornou ref local inválida')
+      }
+      recordedContext = { ...intent_context, base_before: baseBefore }
     }
 
     await journal.append({

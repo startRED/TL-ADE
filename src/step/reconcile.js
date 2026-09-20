@@ -7,6 +7,7 @@ import { openIntents } from '../journal/fold.js'
 import { readJournal } from '../journal/journal.js'
 import { getProcessStartTime, isProcessAlive } from '../lease/process-info.js'
 import { readReceipt, receiptPath } from '../runner/receipt.js'
+import { reconcileLocalMerge, reconcilePush } from './reconcile-delivery.js'
 import { EFFECT_CLASSES, priorStepResult } from './step.js'
 
 /** Veredictos fechados desta fatia do reconciler. */
@@ -196,7 +197,11 @@ async function reconcileLocalCommit(intent, journal, gitPort, _missionDir) {
  *   journal: { append: (partial: Record<string, unknown>) => Promise<Record<string, unknown>> },
  *   gitPort?: import('../git/gitport.js').GitPort | null,
  *   missionDir: string,
- *   deps?: { isAlive?: (pid: number) => boolean, getStartTime?: (pid: number) => Promise<string | null> },
+ *   deps?: {
+ *     isAlive?: (pid: number) => boolean,
+ *     getStartTime?: (pid: number) => Promise<string | null>,
+ *     remotePort?: { readRef: (remote: string, ref: string) => Promise<string | null> },
+ *   },
  * }} options
  * @returns {Promise<{ step_id: string, effect_class: string, verdict: 'ok' | 'released' | 'ambiguous', reason: string, evidence: Record<string, unknown> & ModelCallEvidence, result: unknown }>}
  */
@@ -205,8 +210,9 @@ export async function reconcileIntent({
   journal,
   gitPort = null,
   missionDir,
-  deps: { isAlive = isProcessAlive, getStartTime = getProcessStartTime } = {},
+  deps = {},
 }) {
+  const { isAlive = isProcessAlive, getStartTime = getProcessStartTime } = deps
   if (!EFFECT_CLASSES.includes(intent?.effect_class)) {
     throw new TypeError('effect_class inválido')
   }
@@ -258,6 +264,40 @@ export async function reconcileIntent({
     return reconcileLocalCommit(intent, journal, gitPort, missionDir)
   }
 
+  if (intent.effect_class === 'push') {
+    const remoteP = deps.remotePort
+    if (!remoteP || typeof remoteP.readRef !== 'function') {
+      return close(journal, intent, 'ambiguous', 'push_ambiguous', { reason_detail: 'sem remotePort' })
+    }
+    const outcome = await reconcilePush({ intent, remotePort: remoteP })
+    return close(
+      journal,
+      intent,
+      outcome.verdict,
+      outcome.reason,
+      outcome.evidence,
+      outcome.commit ? { commit: outcome.commit } : outcome.remote_head ? { remote_head: outcome.remote_head } : null,
+    )
+  }
+
+  if (intent.effect_class === 'local_merge') {
+    const port =
+      gitPort ??
+      (typeof intent.worktree === 'string' && intent.worktree ? createGitPort({ worktreeDir: intent.worktree }) : null)
+    if (!port) {
+      return close(journal, intent, 'ambiguous', 'merge_ambiguous', { reason_detail: 'sem gitPort' })
+    }
+    const outcome = await reconcileLocalMerge({ intent, gitPort: port })
+    return close(
+      journal,
+      intent,
+      outcome.verdict,
+      outcome.reason,
+      outcome.evidence,
+      outcome.result ?? (outcome.commit ? { commit: outcome.commit } : null),
+    )
+  }
+
   throw new Error(
     "reconciliação de effect_class '" + intent.effect_class + "' fica fora desta fatia (entra nas stories s4/s5)",
   )
@@ -271,13 +311,13 @@ export async function reconcileIntent({
  *   gitPort?: import('../git/gitport.js').GitPort | null,
  *   deps?: Record<string, unknown>,
  * }} options
- * @returns {Promise<Array<{ step_id: string, effect_class: string, verdict: 'ok' | 'released' | 'ambiguous', reason: string, evidence: Record<string, unknown> & ModelCallEvidence, result: unknown }>>}
+ * @returns {Promise<Array<Record<string, any>>>}
  */
 export async function reconcileAll({ journal, missionDir, gitPort = null, deps = {} }) {
   const { events } = readJournal(path.join(missionDir, 'journal.jsonl'))
   const open = openIntents(events)
 
-  /** @type {Array<{ step_id: string, effect_class: string, verdict: 'ok' | 'released' | 'ambiguous', reason: string, evidence: Record<string, unknown> & ModelCallEvidence, result: unknown }>} */
+  /** @type {Array<Record<string, any>>} */
   const verdicts = []
   for (const openIntent of open) {
     const intentEvent = events.find((ev) => ev.kind === 'step_intent' && ev.seq === openIntent.seq)
@@ -286,17 +326,18 @@ export async function reconcileAll({ journal, missionDir, gitPort = null, deps =
     }
     const data = /** @type {Record<string, unknown>} */ (intentEvent.data ?? {})
     const intent = {
+      ...data,
       seq: /** @type {number} */ (intentEvent.seq),
       step_id: /** @type {string} */ (intentEvent.step_id),
       effect_class: /** @type {string} */ (intentEvent.effect_class),
       input_digest: /** @type {string} */ (intentEvent.input_digest),
-      intent_context: /** @type {Record<string, string | null> | undefined} */ (intentEvent.intent_context),
-      receipt_path: /** @type {string | undefined} */ (intentEvent.receipt_path),
-      worktree: /** @type {string | undefined} */ (intentEvent.worktree) ||
+      intent_context: /** @type {Record<string, string | null> | undefined} */ (intentEvent.intent_context ?? data.intent_context),
+      receipt_path: /** @type {string | undefined} */ (intentEvent.receipt_path ?? data.receipt_path),
+      worktree: /** @type {string | undefined} */ (intentEvent.worktree ?? data.worktree) ||
         (intentEvent.effect_class === 'model_call'
           ? findStoryStarted(events, String(data.unit))?.worktree_dir
           : undefined),
-      session_ref: /** @type {string | null | undefined} */ (intentEvent.session_ref),
+      session_ref: /** @type {string | null | undefined} */ (intentEvent.session_ref ?? data.session_ref),
     }
     verdicts.push(await reconcileIntent({ intent, journal, gitPort, missionDir, deps }))
   }

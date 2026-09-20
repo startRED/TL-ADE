@@ -2,7 +2,20 @@ import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { GitError, UnexpectedTreeStateError } from '../journal/errors.js'
+import { AdeError, GitError, UnexpectedTreeStateError } from '../journal/errors.js'
+
+/**
+ * Sinaliza entrada inválida em operações da porta Git.
+ */
+export class GitInvalidInputError extends AdeError {
+  /**
+   * @param {string} message
+   * @param {Record<string, unknown>} [details]
+   */
+  constructor(message, details = {}) {
+    super('invalid_input', message, 4, details)
+  }
+}
 
 const DEFAULT_MAX_BUFFER = 1 << 26
 
@@ -103,6 +116,10 @@ function buildEnv(hooksDir, extra = {}) {
  * @property {(label: string) => Promise<CheckpointResult>} checkpoint
  * @property {(tree: string, options: { label: string }) => Promise<RestoreTreeResult>} restoreTree
  * @property {(tree: string, options: { label: string }) => Promise<RestoreTreeResult>} restore
+ * @property {(ref: string) => Promise<string | null>} readLocalRef
+ * @property {(remote: string, ref: string) => Promise<string | null>} readRemoteRef
+ * @property {(remote: string, ref: string) => Promise<string | null>} readRef
+ * @property {(baseRef: string, reviewedCommit: string) => Promise<{ commit: string }>} fastForward
  */
 
 /**
@@ -429,6 +446,82 @@ export function createGitPort(options) {
     return { tree, discardedRef }
   }
 
+  /**
+   * Lê uma ref local via git rev-parse.
+   *
+   * @param {string} ref
+   * @returns {Promise<string | null>}
+   */
+  async function readLocalRef(ref) {
+    if (typeof ref !== 'string' || !ref.trim()) {
+      throw new GitInvalidInputError('ref inválida')
+    }
+    const res = await run(['rev-parse', '--verify', ref], {
+      maxBuffer: 1 << 20,
+      okCodes: [0, 1, 128],
+    })
+    if (res.code === 0 && res.text) {
+      return res.text
+    }
+    return null
+  }
+
+  /**
+   * Lê uma ref remota via git ls-remote.
+   *
+   * @param {string} remote
+   * @param {string} ref
+   * @returns {Promise<string | null>}
+   */
+  async function readRemoteRef(remote, ref) {
+    if (typeof remote !== 'string' || !remote.trim()) {
+      throw new GitInvalidInputError('remote inválido')
+    }
+    if (typeof ref !== 'string' || !ref.trim()) {
+      throw new GitInvalidInputError('ref inválida')
+    }
+    const res = await run(['ls-remote', remote, ref], {
+      maxBuffer: 1 << 20,
+      okCodes: [0],
+    })
+    const text = res.text.trim()
+    if (!text) {
+      return null
+    }
+    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean)
+    for (const line of lines) {
+      const [hash, name] = line.split(/\s+/)
+      if (name === ref || name === `refs/heads/${ref}`) {
+        return hash
+      }
+    }
+    const [fallbackHash] = lines[0].split(/\s+/)
+    return fallbackHash || null
+  }
+
+  /**
+   * Executa fast-forward da branch base para o commit revisado.
+   *
+   * @param {string} baseRef
+   * @param {string} reviewedCommit
+   * @returns {Promise<{ commit: string }>}
+   */
+  async function fastForward(baseRef, reviewedCommit) {
+    if (typeof baseRef !== 'string' || !baseRef.trim()) {
+      throw new GitInvalidInputError('baseRef inválido')
+    }
+    if (typeof reviewedCommit !== 'string' || !reviewedCommit.trim()) {
+      throw new GitInvalidInputError('reviewedCommit inválido')
+    }
+    const current = await headInfo()
+    if (current.branch !== baseRef) {
+      await run(['checkout', baseRef], { maxBuffer: 1 << 20 })
+    }
+    await run(['merge', '--ff-only', reviewedCommit], { maxBuffer: 1 << 20 })
+    const commit = (await run(['rev-parse', 'HEAD'], { maxBuffer: 1 << 20 })).text
+    return { commit }
+  }
+
   return {
     worktreeDir,
     run,
@@ -440,5 +533,9 @@ export function createGitPort(options) {
     checkpoint,
     restoreTree,
     restore: restoreTree,
+    readLocalRef,
+    readRemoteRef,
+    readRef: readRemoteRef,
+    fastForward,
   }
 }
