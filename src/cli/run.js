@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createLocalPreflightPorts } from '../adapters/local/preflight.js'
+import { createUnavailableQuotaPort } from '../adapters/local/quota.js'
 import { dispatchClaude } from '../adapters/claude/index.js'
 import { checkCanary, plantCanary } from '../contain/canary.js'
 import { contain } from '../contain/contain.js'
@@ -167,6 +168,7 @@ export async function runCommand(options, deps = {}) {
       reconcileAll,
       resolved,
       workerEnv,
+      quotaPort: createUnavailableQuotaPort(),
       capabilities,
       env,
       now: () => Date.now(),

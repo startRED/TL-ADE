@@ -273,6 +273,12 @@ function setupStoryFixture(options: SetupFixtureOptions = {}) {
       ADE_FAKE_SCENARIO: scenarioDir,
       ADE_FAKE_ROLE: 'maker',
     },
+    quotaPort: {
+      readReceipt: async () => ({
+        source: 'official', family: 'claude', used_percent: 0, reserved_percent: 0,
+        observed_at: new Date(Date.now()).toISOString(), weekly_reset_at: new Date(Date.now() + 86400000).toISOString(),
+      }),
+    },
     capabilities: {
       probe_ok: options.probeOk !== undefined ? options.probeOk : true,
     },

@@ -196,7 +196,7 @@ export function createLocalPreflightPorts(options) {
       check: async () => {
         try {
           if (capabilities?.probe_ok !== true) {
-            return { status: 'blocked', reason: 'sonda de acesso não confirmada' }
+            return { status: 'blocked', reason: 'rode ade doctor sem modo offline para executar uma sonda real de acesso' }
           }
 
           const nowVal = typeof now === 'function' ? Number(now()) : Number(now ?? Date.now())
@@ -215,7 +215,7 @@ export function createLocalPreflightPorts(options) {
           ) {
             return { status: 'ready', reason: null }
           }
-          return { status: 'blocked', reason: 'capacidade de acesso expirada' }
+          return { status: 'blocked', reason: 'rode ade doctor sem modo offline para renovar a sonda real de acesso' }
         } catch {
           return { status: 'blocked', reason: 'não foi possível verificar capacidade de acesso' }
         }

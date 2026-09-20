@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { AdeError } from './journal/errors.js'
 import { readJournal } from './journal/journal.js'
-import { assertCallBudget, checkUsdCap, observedUsd, reserveCalls } from './engine/budget.js'
+import { assertCallBudget, authorizePaidCall, checkUsdCap, observedUsd, reserveCalls } from './engine/budget.js'
 import { maybeEngineFault } from './engine/faults.js'
 import { findStoryCommitted, findStoryStarted } from './engine/resume.js'
 import { dedupStorySection } from './pack/dedup.js'
@@ -36,6 +36,7 @@ export const CANARY_FAMILIES = ['claude']
  * @param {{ probe_ok: boolean | null }} deps.capabilities Estado da sonda de capacidades do doctor.
  * @param {NodeJS.ProcessEnv} [deps.env] Variáveis de ambiente da execução.
  * @param {() => number} [deps.now] Provedor de timestamp atual em ms.
+ * @param {{ readReceipt: ({ family, now }: { family: string, now: number }) => Promise<any> }} deps.quotaPort Porta de recibos oficiais de cota.
  * @param {(opts: { story: any, loaded: any, repoDir: string, events: any[] }) => Promise<import('./engine/preflight.js').PreflightSummary>} [deps.preflight] Verificador de preflight.
  *
  * @param {Object} input Parâmetros de entrada da story e do plano.
@@ -61,6 +62,10 @@ export async function runStory(deps, input) {
   const makerFamily = contract.roles?.maker?.family
   if (!makerFamily || !CANARY_FAMILIES.includes(makerFamily)) {
     throw new AdeError('family_without_canary', `família sem canário aprovado: ${makerFamily}`, 4)
+  }
+
+  if (!deps.quotaPort || typeof deps.quotaPort.readReceipt !== 'function') {
+    throw new AdeError('quota_port_missing', 'porta de cota obrigatória não configurada', 4)
   }
 
   const probeOk = deps.capabilities?.probe_ok
@@ -148,9 +153,56 @@ export async function runStory(deps, input) {
     }
   }
 
-  // Reserva de chamadas de modelo
+  // Autoriza e reserva a chamada paga antes de preparar a worktree.
   assertCallBudget(loaded.plan.budget, 'plan')
   assertCallBudget(contract.budget, 'contract')
+  const eventsBeforeReservation = readEvents()
+  const previousReservation = eventsBeforeReservation.find(
+    (event) =>
+      event?.kind === 'budget_reserved' &&
+      (event.unit === storyId || event.data?.unit === storyId) &&
+      event.data?.quota_receipt,
+  )
+  const quotaReceipt = previousReservation?.data?.quota_receipt ?? await deps.quotaPort.readReceipt({
+    family: makerFamily,
+    now: deps.now?.() ?? Date.now(),
+  })
+  const hasPreviousReservation = Boolean(previousReservation)
+  const requestedUsd = hasPreviousReservation
+    ? 0
+    : contract.budget?.max_usd ?? loaded.missionBudget.max_usd
+  const paidCall = authorizePaidCall({
+    events: eventsBeforeReservation,
+    mission_budget: { ...loaded.missionBudget, max_usd: undefined },
+    story_budget: contract.budget,
+    family: makerFamily,
+    phase: 'implementation',
+    requested_usd: requestedUsd,
+    requested_calls: hasPreviousReservation ? 0 : 1,
+    requested_turns: hasPreviousReservation ? 0 : 1,
+    quota_receipt: quotaReceipt,
+    now: deps.now?.() ?? Date.now(),
+  })
+
+  if (!paidCall.allowed) {
+    await deps.journal.append({
+      kind: 'story_done',
+      unit: storyId,
+      data: {
+        status: 'awaiting_operator',
+        reason: paidCall.reason,
+        unit: storyId,
+        commit: null,
+      },
+    })
+    return {
+      status: 'awaiting_operator',
+      exitCode: 3,
+      reason: paidCall.reason,
+      commit: null,
+    }
+  }
+
   const maxModelCalls = Math.min(
     loaded.plan.budget.max_model_calls,
     contract.budget.max_model_calls,
@@ -185,7 +237,12 @@ export async function runStory(deps, input) {
       kind: 'budget_reserved',
       unit: storyId,
       data: {
-        calls: 1,
+        calls: paidCall.reservation.calls,
+        usd: paidCall.reservation.usd,
+        turns: paidCall.reservation.turns,
+        family: paidCall.reservation.family,
+        phase: 'implementation',
+        quota_receipt: quotaReceipt,
         unit: storyId,
       },
     })

@@ -263,6 +263,7 @@ describe('preflight integration', () => {
       },
       resolved: { exe: process.execPath, prefixArgs: [] },
       workerEnv: {},
+      quotaPort: { readReceipt: async () => ({ source: 'official', family: 'claude', used_percent: 0, reserved_percent: 0, observed_at: new Date(0).toISOString(), weekly_reset_at: new Date(86400000).toISOString() }) },
       capabilities,
       env,
       now,
@@ -346,6 +347,7 @@ describe('preflight integration', () => {
       dispatchClaude: dispatchClaudeSpy,
       resolved: { exe: process.execPath, prefixArgs: [] },
       workerEnv: {},
+      quotaPort: { readReceipt: async () => ({ source: 'official', family: 'claude', used_percent: 0, reserved_percent: 0, observed_at: new Date(0).toISOString(), weekly_reset_at: new Date(86400000).toISOString() }) },
       capabilities: { probe_ok: true, probed_at: 0 },
       env: { ...process.env, ANTHROPIC_API_KEY: 'x', CI: 'true' },
       now: () => 1,
@@ -422,6 +424,7 @@ describe('preflight integration', () => {
       dispatchClaude: vi.fn(),
       resolved: { exe: process.execPath, prefixArgs: [] },
       workerEnv: {},
+      quotaPort: { readReceipt: async () => ({ source: 'official', family: 'claude', used_percent: 0, reserved_percent: 0, observed_at: new Date(0).toISOString(), weekly_reset_at: new Date(86400000).toISOString() }) },
       capabilities: { probe_ok: true, probed_at: 0 },
       env: { ...process.env, ANTHROPIC_API_KEY: 'x', CI: 'true' },
       now: () => 1,
@@ -545,5 +548,27 @@ describe('preflight integration', () => {
     expect(buildResult.status).toBe('blocked')
     expect(buildResult.reason).toBe('falha na execução do build')
     expect(buildResult.reason).not.toMatch(/secret|stack|failed to compile/i)
+  })
+
+  test('CA5_external_access_requires_a_real_fresh_doctor_probe', async () => {
+    const contract = buildContract()
+    const loaded = buildLoadedPlan(contract)
+    const story = loaded.stories[0]
+    const options = (capabilities: any) => createLocalPreflightPorts({
+      repoDir: '/dummy/repo', story, loaded, capabilities,
+      gitPort: { dirtyPaths: async () => [] }, execFile: vi.fn(),
+      statfs: () => ({ bavail: 1073741824n, bsize: 1n }), now: () => 86400000,
+      env: { ANTHROPIC_API_KEY: 'x' },
+    })
+
+    await expect(options({ probe_ok: null }).external_access.check()).resolves.toMatchObject({
+      status: 'blocked', reason: expect.stringContaining('ade doctor'),
+    })
+    await expect(options({ probe_ok: true, probed_at: 0 }).external_access.check()).resolves.toMatchObject({
+      status: 'ready', reason: null,
+    })
+    await expect(options({ probe_ok: true, probed_at: -1 }).external_access.check()).resolves.toMatchObject({
+      status: 'blocked', reason: expect.stringContaining('ade doctor'),
+    })
   })
 })
