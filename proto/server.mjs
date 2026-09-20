@@ -291,6 +291,10 @@ function trackModelCost(event) {
   // orçamento por parte: só o Claude informa preço real; sem isto, Codex e agy gastavam rodadas sem teto
   // (m-mu8usf5z, s1 e s2: 6 chamadas do Astra, US$ 9,90 equivalentes, com o teto de US$ 5 parado em zero)
   if (event.family !== 'claude' && event.story != null) { const ss = m.stories || [], st = ss.find((x) => x.id === event.story) || ss[Number(event.story)]; if (st) st.usd = (st.usd || 0) + (callUsd(event) || 0) }
+  // Custo da missão é a soma do que já se calcula por modelo. Antes só o Claude somava aqui (claudeCall), então o teto da
+  // missão e o custo por épico enxergavam uma fração do gasto: na m-mu8usf5z o teto de US$ 200 comparava US$ 4,49 contra
+  // US$ 49,92 equivalentes, ou seja, não existia teto nenhum.
+  m.cost.usd = Object.values(m.cost.models).reduce((s, x) => s + (x.usd || 0), 0)
 }
 async function journal(event) {
   trackModelCost(event)
@@ -835,7 +839,7 @@ async function claudeCall({ role, prompt, model, effort, tools, skipPermissions,
   if (result) {
     result.touched = [...touched]
     const c = m.cost
-    c.usd += result.total_cost_usd || 0; c.calls += 1; c.turns += result.num_turns || 0
+    c.calls += 1; c.turns += result.num_turns || 0 // c.usd sai da soma por modelo em trackModelCost: uma fonte só
     const cur = story(); if (cur) cur.usd = (cur.usd || 0) + (result.total_cost_usd || 0) // custo por parte (orçamento de cada uma)
     c.tokens_in += (result.usage?.input_tokens || 0) + (result.usage?.cache_creation_input_tokens || 0)
     c.cache_read += result.usage?.cache_read_input_tokens || 0; c.tokens_out += result.usage?.output_tokens || 0
