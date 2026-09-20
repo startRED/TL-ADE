@@ -58,3 +58,12 @@ export function preexistingReds(tests, before) {
   const redBefore = new Set(before.filter((t) => t.status !== 'passed').map((t) => t.name))
   return tests.tests.filter((t) => t.status !== 'passed' && redBefore.has(t.name)).map((t) => t.name)
 }
+
+// Argumentos do `git diff` que mede o trabalho de uma parte. Sem commit-base o diff vai contra HEAD, NUNCA contra o índice:
+// arquivo já no índice — recuperação com `git checkout <ref> -- .`, operador que deu `git add`, quem escreve que preparou o
+// commit — some de um `git diff` puro. A parte aparece vazia, o motor para em "no_changes" e o modo noturno pula a parte
+// desfazendo a árvore. (m-mu8usf5z, v03-s4: 1993 linhas provadas e 8 provas verdes descartadas assim, e as duas partes que
+// dependiam dela caíram junto; o épico inteiro voltou ao planejador.)
+export function diffArgs(base, paths = [], excludes = []) {
+  return ['diff', base || 'HEAD', '--', ...paths, ...excludes]
+}

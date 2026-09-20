@@ -1,7 +1,7 @@
 // node --test proto/rounds.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
+import { diffArgs, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
 
 test('parte de correção herda os arquivos que a parte anterior já tinha alterado', () => {
   const stories = [{ id: 'R2', diff: 'diff --git a/src/lease/process-info.js b/src/lease/process-info.js\n', files: ['src\\adapters\\claude\\index.js'] }]
@@ -71,4 +71,12 @@ test('afrouxar tempo limite em arquivo de prova é detectado; produção e remo�
 test('diff vazio não acusa nada', () => {
   assert.deepEqual(loosenedTimeouts('', () => true), [])
   assert.deepEqual(loosenedTimeouts(null, () => true), [])
+})
+
+test('diffArgs: sem commit-base o diff vai contra HEAD, para o que está no índice contar', () => {
+  assert.deepEqual(diffArgs(null, ['.'], [':(exclude)proto']), ['diff', 'HEAD', '--', '.', ':(exclude)proto'])
+})
+
+test('diffArgs: com commit-base usa o commit-base', () => {
+  assert.deepEqual(diffArgs('abc123', ['src/a.js']), ['diff', 'abc123', '--', 'src/a.js'])
 })

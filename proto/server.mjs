@@ -17,7 +17,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { skillDescription } from './skill-meta.mjs'
-import { inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
+import { diffArgs, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
 import { PLANNING_POLICY, versionProgram, planIssues, needsPlanCritic, skillsForStory, canCombineProof } from './planning.mjs'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
@@ -765,8 +765,8 @@ async function gitDiff(dir, base = null, ownPaths = []) {
   const a = await run('git', ['add', '-N', '--', '.'], { cwd: dir }) // ignorados pelo .gitignore ficam fora sozinhos; pathspec de exclusão aqui faz o git reclamar
   // a pasta do próprio motor nunca faz parte do diff de uma missão (dogfood: a demo vive dentro do repositório que ela desenvolve), salvo os caminhos da parte
   const self = path.relative(dir, ROOT).split(path.sep).join('/'), own = self && !self.startsWith('..') && !path.isAbsolute(self) ? [`:(exclude)${self}`] : []
-  const d = await run('git', ['diff', ...(base ? [base] : []), '--', '.', ...DIFF_EXCLUDES, ...own], { cwd: dir })
-  const o = ownPaths.length ? await run('git', ['diff', ...(base ? [base] : []), '--', ...ownPaths, ...DIFF_EXCLUDES], { cwd: dir }) : { code: 0, out: '' }
+  const d = await run('git', diffArgs(base, ['.'], [...DIFF_EXCLUDES, ...own]), { cwd: dir })
+  const o = ownPaths.length ? await run('git', diffArgs(base, ownPaths, DIFF_EXCLUDES), { cwd: dir }) : { code: 0, out: '' }
   if (a.code !== 0 || d.code !== 0 || o.code !== 0) throw new Error(`git diff falhou: ${(a.err || d.err || o.err).trim().split('\n')[0]}`)
   return d.out + o.out
 }
