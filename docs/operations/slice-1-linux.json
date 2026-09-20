@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "system": "linux",
+  "status": "not_executed_locally",
+  "results": null,
+  "recipe": [
+    "npm ci",
+    "npm run test:parity",
+    "node node_modules/vitest/vitest.mjs run tests/parity/crash-matrix.test.ts",
+    "npm run test:durability-coverage"
+  ]
+}

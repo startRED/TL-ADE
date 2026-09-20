@@ -23,3 +23,20 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+
+  slice1-evidence-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:parity
+      - run: node node_modules/vitest/vitest.mjs run tests/parity/crash-matrix.test.ts
+      - run: npm run test:durability-coverage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slice-1-linux-evidence
+          path: coverage/
