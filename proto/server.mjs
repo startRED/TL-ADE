@@ -1859,6 +1859,15 @@ async function runStories() {
       if (!ok && state.settings.unattended && m.reason !== 'budget' && m.reason !== 'engine_error') {
         if (['review_failed', 'review_changes'].includes(m.reason) && st.tests_after?.ok && !(st.review?.findings || []).some((f) => f.severity === 'high')) {
           st.auto_accepted = true; ok = true; log('engine', `modo noturno: ${m.reason} com provas verdes e nada grave; parte aceita`, 'warn')
+        } else if (st.fix_of) {
+          // Parte de CORREÇÃO que para sem saída: desfazer a árvore aqui joga fora TAMBÉM o trabalho da parte anterior, que
+          // o revisor já tinha aprovado e que esta correção foi mandada a preservar — e as partes que dependem dela caem
+          // junto de qualquer jeito. O caminho da pausa já protege esse caso (server.mjs:397); o do pulo não protegia.
+          // (m-mu8usf5z, V02-R3f: 71 mil caracteres de diff a duas provas do verde, prestes a serem descartados.)
+          const why = m.reason
+          m.state = 'paused'; m.reason = 'fix_failed'
+          log('engine', `a correção "${st.title}" parou em "${why}" e desfazer a árvore levaria junto o trabalho da parte anterior. Missão pausada com tudo no lugar, para você decidir`, 'error')
+          await stopLanes(); await persistMission().catch(() => {}); return finish()
         } else {
           log('engine', `modo noturno: parada "${m.reason}" sem saída; parte pulada e arquivos dela desfeitos; segue para a próxima`, 'warn')
           if (st.maker_committed) log('engine', `ATENÇÃO: a parte "${st.title}" foi pulada, mas quem escreve tinha feito commit por conta própria; esse commit ficou no histórico SEM revisão. Confira com git log`, 'error')
