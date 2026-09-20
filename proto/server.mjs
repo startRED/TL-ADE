@@ -1074,6 +1074,7 @@ async function checker(diff, tests, st) {
     `Skills que o autor tinha de seguir: ${(m.skills.maker || []).map((s) => s.id).join(', ') || 'nenhuma'}.`,
     `O harness JÁ RODOU as provas fora da sandbox: ${tests.failed} falharam de ${tests.total} (runner: ${tests.runner}${tests.only ? `; só o arquivo de prova desta parte: a suíte inteira roda em paralelo com esta revisão e a parte só é aceita se ela também passar` : ''}); a prova nova falhou antes da implementação e passou depois. Não tente rodar provas nem instalar nada (sua sandbox é somente leitura e isso vai falhar); avalie o código e o diff. Julgue pelo DIFF e pelos arquivos que ele toca; leia no máximo 6 arquivos além deles (cada leitura gasta cota do revisor) e não explore o repositório. Arquivos de lock (package-lock.json, go.sum, Cargo.lock e similares) e dependências não fazem parte do escopo revisado.`,
     tests.tests?.length ? `Provas que rodaram e passaram (nomes): ${tests.tests.filter((t) => t.status === 'passed').map((t) => t.name).slice(0, 60).join(' | ')}. Um critério coberto por uma dessas provas está provado; não peça prova extra para ele.` : '',
+    tests.tolerated?.length ? `ESTAS PROVAS ESTOURARAM O TEMPO, não falharam: ${tests.tolerated.slice(0, 10).join(' | ')}. Estavam verdes antes desta parte e continuaram estourando mesmo com o limite folgado, com a máquina rodando o motor, o modelo e a suíte ao mesmo tempo. O harness já julgou que é a máquina, não o diff: NÃO abra achado por elas nem peça para acelerá-las.` : '',
     'Critérios de aceite sobre detalhe decorativo (borda lateral colorida, gradiente, cor exata) cedem ao portão visual (Impeccable): não peça mudanças para reintroduzir isso; avalie a intenção do critério.',
     'Severidade: high = comportamento errado, critério de aceite não atendido, segurança, acessibilidade quebrada, mudança fora do escopo. Cobertura de prova além do necessário, estilo de código, nomes e refatorações são low e NÃO impedem approve: registre como achado low e aprove.',
     'Código a mais (escada do Ponytail): abstração com uma implementação só, reimplementar o que já existe no projeto ou na biblioteca padrão, dependência nova para o que poucas linhas fazem, código morto, configuração para valor fixo = achado low (medium se dobra o tamanho do diff), nunca high por isso. O inverso também vale: NÃO peça camada, abstração, configuração ou prova além do que os critérios exigem.',
@@ -1871,7 +1872,7 @@ async function runStories() {
       // correção com as provas que quebraram (o código de todas as partes do épico no contrato); vermelha de novo para e mostra.
       if (state.settings.suite_scope === 'epic' && !m.stories.slice(i + 1).some((x) => !['done', 'skipped'].includes(x.state))) {
         log('engine', 'fim do épico: rodando a suíte inteira'); let full = acceptPreexisting(await runTests(state.project))
-        if (!full.ok && full.tests?.length && full.tests.filter((t) => t.status !== 'passed').every((t) => /timed out|timeout|tempo limite/i.test(t.message || ''))) { log('engine', `fim do épico: só provas por tempo limite; repito a suíte com ${SLOW_TEST_MS / 1000} s por prova`, 'warn'); full = acceptPreexisting(await runTests(state.project, { slowMs: SLOW_TEST_MS })) }
+        if (!full.ok && full.tests?.length && full.tests.filter((t) => t.status !== 'passed').every((t) => TIMEOUT_RX.test(t.message || ''))) { log('engine', `fim do épico: só provas por tempo limite; repito a suíte com ${SLOW_TEST_MS / 1000} s por prova`, 'warn'); full = acceptPreexisting(await runTests(state.project, { slowMs: SLOW_TEST_MS })) }
         log('engine', `fim do épico: suíte inteira ${full.ok ? 'verde' : `com ${full.failed} vermelha(s)`} (${full.total} provas)`, full.ok ? 'info' : 'warn')
         if (full.tests?.length) m.tests_before = full
         if (!full.ok && m.stories.some((x) => x.id === 'suite')) { m.state = 'awaiting_operator'; m.reason = 'tests_red'; log('engine', 'a suíte inteira segue vermelha depois da parte de correção; paro para você ver', 'error'); await stopLanes(); finish(); return 'stopped' }
@@ -1901,6 +1902,7 @@ const MAX_ROUNDS = 6 // rodadas de correção por parte antes de parar e pedir d
 // Limite por prova na REPETIÇÃO depois de um vermelho que era só estouro de tempo. 2 min: a máquina roda motor, modelo e
 // suíte ao mesmo tempo, e o padrão do vitest é 5 s. Não muda a configuração do projeto; vale só para a repetição do motor.
 const SLOW_TEST_MS = 120 * 1000
+const TIMEOUT_RX = /timed out|timeout|tempo limite/i
 
 // ---------- quem escreve: Claude ou Gemini (Antigravity), com escada de subida por falha grave ----------
 // Degraus: maker configurado → (Gemini) mesmo modelo em esforço alto → Sonnet alto → modelo do planejador. Sobe um degrau por rodada
@@ -2155,11 +2157,11 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     // só as vermelhas por que ESTA parte responde (verdes na largada). Exigir que TODAS as vermelhas fossem dessas fazia
     // uma única prova já vermelha na largada desligar o portão inteiro
     const reds = st.tests_after.tests.filter((t) => t.status !== 'passed' && okBefore.has(t.name))
-    if (reds.length && (sameDiff || reds.every((t) => /timed out|timeout|tempo limite/i.test(t.message || '')))) {
+    if (reds.length && (sameDiff || reds.every((t) => TIMEOUT_RX.test(t.message || '')))) {
       st.flaky_retry = round
       // estouro de tempo: a repetição vai com limite POR PROVA bem folgado. Repetir com o mesmo limite de 5 s numa máquina que
       // segue carregada (motor + modelo + suíte juntos) voltava vermelha igual, e a parte abria rodada paga atrás de nada.
-      const slowMs = reds.every((t) => /timed out|timeout|tempo limite/i.test(t.message || '')) ? SLOW_TEST_MS : 0
+      const slowMs = reds.every((t) => TIMEOUT_RX.test(t.message || '')) ? SLOW_TEST_MS : 0
       log('engine', `só prova(s) antiga(s) vermelha(s), por tempo limite (${reds.map((t) => t.name.slice(0, 80)).join(' | ')}); estavam verdes antes desta parte: repito${slowMs ? ` com ${slowMs / 1000} s por prova` : ' a suíte uma vez'} antes de abrir rodada`, 'warn')
       // repete o mesmo recorte que ficou vermelho (arquivo da parte, provas afetadas ou suíte), não a suíte inteira
       const again = quick && !quick.ok ? { only: st.test_file } : byEpic && related ? { related: diffFiles(st.diff) } : {}
@@ -2168,6 +2170,21 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     }
   }
   st.tests_after = acceptPreexisting(st.tests_after)
+  // Já repetiu nesta rodada, com limite folgado por prova, e o que sobrou ainda é SÓ estouro de tempo em prova que estava
+  // verde na largada: é a máquina (motor, modelo e suíte juntos), não o diff. Tolera e segue para a revisão. Antes o motor
+  // reconhecia a instabilidade e mesmo assim jogava o trabalho fora ou abria uma parte de correção atrás de prova fantasma
+  // (m-mu8usf5z, V02-R3: 68 mil caracteres de diff nunca revisados, e a V02-R3f criada para "fazer passar" 4 provas que só
+  // estouravam tempo, uma delas já vermelha desde a largada). A suíte de fim de épico reconfere tudo.
+  if (!st.tests_after.ok && st.flaky_retry === round && m.tests_before?.tests?.length) {
+    const okBefore = new Set(m.tests_before.tests.filter((t) => t.status === 'passed').map((t) => t.name))
+    const pre = st.tests_after.preexisting || []
+    const mine = st.tests_after.tests.filter((t) => t.status !== 'passed' && !pre.includes(t.name))
+    if (mine.length && mine.every((t) => okBefore.has(t.name) && TIMEOUT_RX.test(t.message || ''))) {
+      st.tolerated = mine.map((t) => t.name)
+      st.tests_after = { ...st.tests_after, ok: true, failed: 0, tolerated: st.tolerated }
+      log('engine', `${mine.length} prova(s) seguem vermelha(s) SÓ por estouro de tempo mesmo na repetição folgada (${st.tolerated.map((n) => n.slice(0, 60)).join(' | ')}); estavam verdes na largada, então é a máquina e não esta parte: tolero e sigo para a revisão. A suíte de fim de épico reconfere`, 'warn')
+    }
+  }
   log('engine', `provas depois: ${st.tests_after.total} no total, ${st.tests_after.failed} vermelha(s)`); setStep('tests', st.tests_after.ok ? 'done' : 'failed')
   if (st.tests_after.timeout) { if (early) await early.catch(() => null); log('engine', 'a suíte de provas estourou o tempo limite (15 min) e foi interrompida: isso não é prova vermelha. Paro a parte sem gastar rodadas; veja se alguma prova ficou pendurada (processo, servidor, espera sem fim)', 'error'); return stop('tests_timeout') }
   // quem escreve terminou sem tocar em nada (épico 9, s3: Flash gastou a chamada inteira esperando a matriz de queda rodar e o agy estourou o tempo): uma repetição grátis com aviso antes de pular
