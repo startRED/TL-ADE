@@ -17,6 +17,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { skillDescription } from './skill-meta.mjs'
+import { makerTurns, truncated } from './rounds.mjs'
 import { PLANNING_POLICY, versionProgram, planIssues, needsPlanCritic, skillsForStory, canCombineProof } from './planning.mjs'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
@@ -1530,13 +1531,16 @@ function testPrompt(st, pack, together = false) {
     st.red_retry ? 'SEGUNDA TENTATIVA: na primeira, nenhuma prova nova falhou no código atual. Escreva provas que exercitem o comportamento que AINDA NÃO EXISTE (importe o que será criado, chame, confira o resultado dos EXEMPLOS). Se a parte é só configuração ou documentação, prove o efeito observável: arquivo existe com tal conteúdo, comando sai com código 0, script do package.json existe.' : '',
     pack, 'Ao terminar, escreva uma frase com o nome do arquivo de prova e os nomes das provas novas.'].filter(Boolean).join('\n')
 }
-function fixPrompt(st, round, review, visual, pack) {
+function fixPrompt(st, round, review, visual, pack, turns = 30) {
   const red = st.red_tests.map((t) => `- ${t.name}: ${t.message}`).join('\n')
   const base = [`Pedido original do usuário: ${state.mission.request}`, ...common(st), pack,
     `FASE 2 de 2: a prova nova está vermelha, como esperado:\n${red}`,
     st.no_change_retry ? 'A tentativa anterior terminou SEM alterar arquivo algum (o tempo acabou, provavelmente esperando provas). NÃO rode a suíte inteira nem provas lentas de integração (as que sobem processos): o harness roda todas as provas depois de você. Vá direto às edições.' : '',
     st.red_regress?.length ? `Provas ANTIGAS que ficaram vermelhas depois que a prova nova entrou (em geral portão de tipos/lint reclamando do que ainda não existe). Têm de voltar a passar com a sua implementação; não as altere:\n${st.red_regress.map((t) => `- ${t.name}: ${t.message}`).join('\n')}` : '',
-    'Agora implemente o necessário para a prova passar e os critérios de aceite valerem. Não modifique a prova. Não toque em nada fora do escopo da story. Seja direto: você tem no máximo 30 ações; não investigue ferramentas do harness, não reescreva provas antigas, não amplie o escopo.',
+    // o número aqui é o teto real da chamada (maxTurns): dizer 30 e cortar em 20 fazia quem escreve planejar para um
+    // orçamento que não tinha e morrer no meio das edições
+    st.truncated ? `A sua tentativa anterior foi CORTADA no teto de turnos no meio do trabalho: a árvore já tem as edições parciais dela. Continue de onde parou, confira o que ficou incompleto antes de escrever mais, e feche a parte dentro de ${turns} ações. Não recomece do zero e não releia o que já leu.` : '',
+    `Agora implemente o necessário para a prova passar e os critérios de aceite valerem. Não modifique a prova. Não toque em nada fora do escopo da story. Seja direto: você tem no máximo ${turns} ações e a chamada é cortada nesse número; não investigue ferramentas do harness, não reescreva provas antigas, não amplie o escopo.`,
     ...IMPL_RULES, testTimeTip(st),
     round > 1 && st.tests_after && !st.tests_after.ok ? `DEPURAÇÃO (rodada ${round}; a tentativa anterior não deixou as provas verdes): (1) antes de mudar qualquer linha, explique em uma frase POR QUE a prova falha; (2) reproduza rodando só o arquivo de prova; (3) uma hipótese por vez sobre a CAUSA, não o sintoma; teste com a menor mudança; hipótese refutada = desfaça a mudança antes da próxima; (4) correção mínima na causa provada, sem refatoração de carona; (5) depois de verde, procure o mesmo padrão errado nos outros arquivos do escopo.` : '',
     'Ao terminar, escreva no máximo 3 linhas dizendo o que mudou.']
@@ -2066,7 +2070,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     const together = canCombineProof(state.settings, m.tests_before, st)
     setStep('test', 'running'); const rt = await withChain(together ? makerStep(st, 1, false).key : 'prova', { story: st }, async (who) => makerCall(who, { role: together ? 'prova e código' : 'prova', prompt: testPrompt(st, await contextPack(st), together), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: together ? 36 : 14 }))
     if (!rt) { setStep('test', 'failed'); throw new Error('nenhum modelo da cadeia "prova" conseguiu escrever a prova; o motivo de cada um está no log acima') }
-    remember(st, rt); await refreshProject(); setStep('test', 'done')
+    remember(st, rt); st.truncated = truncated(rt, together ? 36 : 14); await refreshProject(); setStep('test', 'done')
     setStep('red', 'running')
     // vermelho da prova nova: basta o arquivo dela; a suíte inteira roda depois da implementação
     const after = (st.test_file && await runTests(state.project, { only: st.test_file })) || await runTests(state.project)
@@ -2094,12 +2098,18 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     } else setStep('red', 'done')
   }
   // Escalada: só na 3ª rodada em diante E quando sobrou problema grave (achado high do revisor ou prova vermelha). Pedido de cobertura/estilo continua no maker barato.
-  const grave = (previousReview?.findings || []).some((f) => f.severity === 'high') || (st.tests_after && !st.tests_after.ok)
+  // suíte vermelha depois de uma chamada CORTADA no teto de turnos é trabalho inacabado, não defeito: não vale como problema
+  // grave, senão a parte sobe de modelo para consertar o que ninguém terminou de escrever (ver rounds.mjs)
+  const grave = (previousReview?.findings || []).some((f) => f.severity === 'high') || (st.tests_after && !st.tests_after.ok && !st.truncated)
   const repeat = repeatedFindings(st, previousReview)
   const pick = makerStep(st, round, grave, repeat), escalate = pick.key === 'fix'
+  const turns = makerTurns({ wasTruncated: st.truncated, escalate })
+  if (st.truncated) log('engine', `a rodada anterior foi cortada no teto de turnos: repito no mesmo degrau com ${turns} turnos em vez de escalar para um modelo mais caro`, 'warn')
   if (escalate) log('engine', `rodada ${round}: ${st.fix_of ? 'parte de correção' : grave ? 'problema grave' : 'revisor ainda pede mudanças'}${repeat ? `, ${repeat} achado(s) repetido(s)` : ''}; maker vai para a cadeia de correção, degrau ${pick.start + 1} de ${chainOf('fix').length}`)
   if (st.early_impl && round === 1) setStep('fix', 'skipped', { round })
-  else { setStep('fix', 'running', { round }); const rf = await withChain(pick.key, { start: pick.start }, async (who) => makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st)), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: escalate ? 20 : 30 }))
+  else { setStep('fix', 'running', { round }); const rf = await withChain(pick.key, { start: pick.start }, async (who) => makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st), turns), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: turns }))
+    st.truncated = truncated(rf, turns)
+    if (st.truncated) log('engine', `quem escreve gastou os ${turns} turnos sem terminar; o que já foi escrito fica e a próxima rodada continua daí`, 'warn')
     // nenhum modelo alterou nada (todos falharam ou bloquearam): revisar um diff vazio só gasta rodadas; para e mostra o motivo
     if (!rf) { setStep('fix', 'failed', { round }); throw new Error(`nenhum modelo da cadeia "${pick.key}" conseguiu alterar o código; o motivo de cada um está no log acima`) }
     remember(st, rf); await refreshProject(); setStep('fix', 'done', { round }) }
