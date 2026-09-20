@@ -73,7 +73,7 @@ export function buildWorkerEnv(extras = {}) {
  *   execFileSync?: Function,
  *   child?: { kill?: Function }
  * }} [deps]
- * @returns {void}
+ * @returns {{ terminated_by: 'taskkill' | 'job_fallback' | 'already_exited' | 'sigkill' }}
  */
 export function killTree(
   pid,
@@ -86,11 +86,31 @@ export function killTree(
         maxBuffer: 1 << 26,
         stdio: 'ignore',
       })
-    } catch {
-      // engole erro se processo já encerrou
+      return { terminated_by: 'taskkill' }
+    } catch (err) {
+      const errorObj = /** @type {any} */ (err)
+      if (errorObj?.code === 'EPERM') {
+        if (typeof child?.kill === 'function') {
+          child.kill('SIGKILL')
+          return { terminated_by: 'job_fallback' }
+        }
+        throw err
+      }
+      const msg = `${errorObj?.message ?? ''} ${errorObj?.stderr ?? ''}`
+      const isNotExist =
+        errorObj?.status === 128 ||
+        /not found|não encontrado|não foi encontrado|nenhum processo|não existe/i.test(msg)
+      if (isNotExist) {
+        return { terminated_by: 'already_exited' }
+      }
+      throw err
     }
   } else {
-    child?.kill?.('SIGKILL')
+    if (child) {
+      child?.kill?.('SIGKILL')
+      return { terminated_by: 'sigkill' }
+    }
+    return { terminated_by: 'already_exited' }
   }
 }
 

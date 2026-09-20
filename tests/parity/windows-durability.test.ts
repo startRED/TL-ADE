@@ -6,7 +6,7 @@ import { createGitPort } from '../../src/git/gitport.js'
 import { isProcessAlive } from '../../src/lease/process-info.js'
 import { readReceipt } from '../../src/runner/receipt.js'
 import { resolveBinary } from '../../src/runner/resolve-binary.js'
-import { runWorker } from '../../src/runner/spawn.js'
+import { killTree, runWorker } from '../../src/runner/spawn.js'
 import { makeRepo, removeRepo } from '../helpers/git-repo.js'
 import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.js'
 
@@ -302,4 +302,212 @@ setInterval(() => {}, 1000)
     const newTree = await port.worktreeTree()
     expect(newTree).not.toBe(commitRacy.tree)
   })
+
+  // (5) CA1 — Dado um PID Windows ativo e taskkill concluindo com sucesso, quando killTree for chamado,
+  // então ele retorna {terminated_by:'taskkill'} e não chama child.kill.
+  test('ca1_killtree_windows_taskkill_success', () => {
+    let childKillCalls = 0
+    const fakeChild = {
+      kill: () => {
+        childKillCalls++
+      },
+    }
+    let executedCmd: string | null = null
+    let executedArgs: string[] = []
+    const fakeOk = (cmd: string, args: string[]) => {
+      executedCmd = cmd
+      executedArgs = args
+    }
+
+    const result = killTree(1234, {
+      platform: 'win32',
+      execFileSync: fakeOk,
+      child: fakeChild,
+    })
+
+    expect(result).toEqual({ terminated_by: 'taskkill' })
+    expect(childKillCalls).toBe(0)
+    expect(executedCmd).toBe('taskkill')
+    expect(executedArgs).toEqual(['/T', '/F', '/PID', '1234'])
+  })
+
+  // (6) CA2 — Dado taskkill recusado com code:'EPERM', quando killTree receber o filho não destacado,
+  // então chama child.kill('SIGKILL') uma vez e retorna {terminated_by:'job_fallback'};
+  // erros Windows diferentes de processo inexistente continuam lançados.
+  test('ca2_killtree_windows_eperm_fallback_and_error_handling', () => {
+    let killedWith: string | null = null
+    const fakeChild = {
+      kill: (sig: string) => {
+        killedWith = sig
+      },
+    }
+    const fakeEperm = () => {
+      const err: any = new Error('EPERM: operation not permitted')
+      err.code = 'EPERM'
+      throw err
+    }
+
+    const resEperm = killTree(1234, {
+      platform: 'win32',
+      execFileSync: fakeEperm,
+      child: fakeChild,
+    })
+    expect(resEperm).toEqual({ terminated_by: 'job_fallback' })
+    expect(killedWith).toBe('SIGKILL')
+
+    // EPERM sem child ou sem método kill propaga a falha fechada
+    expect(() =>
+      killTree(1234, {
+        platform: 'win32',
+        execFileSync: fakeEperm,
+      }),
+    ).toThrow('EPERM')
+
+    expect(() =>
+      killTree(1234, {
+        platform: 'win32',
+        execFileSync: fakeEperm,
+        child: {} as any,
+      }),
+    ).toThrow('EPERM')
+
+    // status === 128
+    const fakeStatus128 = () => {
+      const err: any = new Error('Process 128')
+      err.status = 128
+      throw err
+    }
+    const res128 = killTree(1234, {
+      platform: 'win32',
+      execFileSync: fakeStatus128,
+      child: fakeChild,
+    })
+    expect(res128).toEqual({ terminated_by: 'already_exited' })
+
+    // Mensagem indicando processo inexistente
+    const fakeNotFound = () => {
+      throw new Error('ERROR: The process with PID 1234 not found.')
+    }
+    const resNotFound = killTree(1234, {
+      platform: 'win32',
+      execFileSync: fakeNotFound,
+      child: fakeChild,
+    })
+    expect(resNotFound).toEqual({ terminated_by: 'already_exited' })
+
+    // Erro inesperado é relançado
+    const fakeUnexpected = () => {
+      const err: any = new Error('EACCES: permission denied')
+      err.code = 'EACCES'
+      throw err
+    }
+    expect(() =>
+      killTree(1234, {
+        platform: 'win32',
+        execFileSync: fakeUnexpected,
+        child: fakeChild,
+      }),
+    ).toThrow('EACCES')
+  })
+
+  // (7) CA3 — Dado um worker Windows que cria um processo neto e excede timeoutS:1, quando o Runner terminar,
+  // então o resultado tem state:'timeout' e ambos os PIDs deixam de existir em até 1,5 segundo, sem teste ignorado.
+  // Plataforma POSIX também testada com killTree.
+  test('ca3_runworker_timeout_windows_tree_cleanup_and_posix', async () => {
+    // Prova unitária POSIX com filho
+    let posixSig: string | null = null
+    const fakeChildPosix = {
+      kill: (sig: string) => {
+        posixSig = sig
+      },
+    }
+    const resPosix = killTree(1234, { platform: 'linux', child: fakeChildPosix })
+    expect(resPosix).toEqual({ terminated_by: 'sigkill' })
+    expect(posixSig).toBe('SIGKILL')
+
+    // Prova unitária POSIX sem filho
+    const resPosixNoChild = killTree(1234, { platform: 'linux' })
+    expect(resPosixNoChild).toEqual({ terminated_by: 'already_exited' })
+
+    // Prova real de timeout com neto em loop
+    const gcScript = path.join(tmpDir, 'grandchild-ca3.mjs')
+    fs.writeFileSync(gcScript, `setInterval(() => {}, 1000)\n`, 'utf8')
+
+    const pidsFile = path.join(tmpDir, 'pids-ca3.json')
+    const parentScript = path.join(tmpDir, 'parent-ca3.mjs')
+    fs.writeFileSync(
+      parentScript,
+      `import { spawn } from 'node:child_process'
+import fs from 'node:fs'
+
+const gc = spawn(process.execPath, [process.argv[2]], { stdio: 'ignore' })
+fs.writeFileSync(process.argv[3], JSON.stringify({ parent: process.pid, child: gc.pid }), 'utf8')
+setInterval(() => {}, 1000)
+`,
+      'utf8',
+    )
+
+    const res = await runWorker({
+      resolved: { exe: process.execPath, prefixArgs: [parentScript, gcScript, pidsFile] },
+      cwd: tmpDir,
+      missionDir: tmpDir,
+      missionId: 'm-ca3',
+      stepId: 's-ca3',
+      request: {
+        unit: 'u-ca3',
+        authorization: 'auth-ca3',
+        cwd: tmpDir,
+        argv: [process.execPath, parentScript, gcScript, pidsFile],
+        timeout: 1,
+        result_file: path.join(tmpDir, 'res-ca3.json'),
+      },
+      timeoutS: 1,
+    })
+
+    expect(res.state).toBe('timeout')
+    expect(fs.existsSync(pidsFile)).toBe(true)
+    const pids = JSON.parse(fs.readFileSync(pidsFile, 'utf8'))
+    const parentPid = pids.parent
+    const childPid = pids.child
+
+    let parentAlive = isProcessAlive(parentPid)
+    let childAlive = isProcessAlive(childPid)
+    for (let i = 0; i < 30 && (parentAlive || childAlive); i++) {
+      await new Promise((r) => setTimeout(r, 50))
+      parentAlive = isProcessAlive(parentPid)
+      childAlive = isProcessAlive(childPid)
+    }
+
+    expect({
+      state: res.state,
+      parent_exists: parentAlive,
+      child_exists: childAlive,
+    }).toEqual({
+      state: 'timeout',
+      parent_exists: false,
+      child_exists: false,
+    })
+  }, 20000)
+
+  // (8) CA4 — Dado o índice de decisões, quando o novo registro for lido, então o ADR 0025 está aceito,
+  // cita a autorização de Erick e documenta taskkill, o caso EPERM, a alternativa limitada e suas consequências.
+  test('ca4_adr_0025_and_durability_index_records', () => {
+    const adrPath = path.resolve(process.cwd(), 'docs/adr/0025-fallback-da-arvore-de-processos-windows.md')
+    expect(fs.existsSync(adrPath)).toBe(true)
+    const adrContent = fs.readFileSync(adrPath, 'utf8')
+    expect(adrContent).toMatch(/Status:\s*\*?\*?\s*Aceito/i)
+    expect(adrContent).toContain('2026-09-20')
+    expect(adrContent).toContain('Erick')
+    expect(adrContent).toContain('taskkill')
+    expect(adrContent).toContain('EPERM')
+    expect(adrContent).toMatch(/job_fallback|Job Object/i)
+
+    const indexPath = path.resolve(process.cwd(), 'docs/adr/README.md')
+    expect(fs.existsSync(indexPath)).toBe(true)
+    const indexContent = fs.readFileSync(indexPath, 'utf8')
+    expect(indexContent).toContain('0025')
+    expect(indexContent).toContain('0025-fallback-da-arvore-de-processos-windows.md')
+    expect(indexContent).toMatch(/Durabilidade e recuperação.*0025/s)
+  })
 })
+

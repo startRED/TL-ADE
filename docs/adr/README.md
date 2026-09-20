@@ -47,13 +47,14 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | [0022](0022-restricoes-windows.md) | Restrições do Windows como requisito de primeira classe | aceito 2026-09-17 |
 | [0023](0023-js-esm-com-jsdoc-e-checkjs.md) | JS ESM com JSDoc e `checkJs`: portão de tipos sem build (emenda o ADR 0001) | proposto, pendente de confirmação do Erick |
 | [0024](0024-autorizacao-roadmap-ate-v1.md) | Autorização para execução sequencial do roadmap até a v1 | Aceito (confirmado por Erick em 2026-09-19) |
+| [0025](0025-fallback-da-arvore-de-processos-windows.md) | Fallback de encerramento da árvore de processos no Windows sob EPERM | Aceito (confirmado por Erick em 2026-09-20) |
 
 ## Mapa decisão → onde ela aparece
 
 | Tema | ADRs | Seção de `architecture.md` |
 | :--- | :--- | :--- |
 | Stack e repositório | 0001, 0022, 0023 | §2, §6, §11 E29 |
-| Durabilidade e recuperação | 0002, 0003, 0012, 0014, 0021 | §6, §11 E6, E7, E21, E25–E27 |
+| Durabilidade e recuperação | 0002, 0003, 0012, 0014, 0021, 0025 | §6, §11 E6, E7, E21, E25–E27 |
 | Modelos, transporte e papéis | 0004, 0005, 0006, 0015 | §7, §11 E10, E16, E23, E24 |
 | Intenção, contrato e prova | 0007, 0008, 0016 | §4, §5, §11 E1–E4, E12, E18–E20 |
 | Contexto, skills e qualidade | 0009, 0010, 0011, 0018 | §7, §10 A1, A7, A11, A13, A14, §11 E8, E9, E13–E15, E33, E35, E39 |
