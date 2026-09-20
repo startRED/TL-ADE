@@ -2155,7 +2155,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   }
   st.tests_after = acceptPreexisting(st.tests_after)
   log('engine', `provas depois: ${st.tests_after.total} no total, ${st.tests_after.failed} vermelha(s)`); setStep('tests', st.tests_after.ok ? 'done' : 'failed')
-  if (st.tests_after.timeout) { if (early) await early.catch(() => null); log('engine', 'a suíte de provas estourou o tempo limite (5 min) e foi interrompida: isso não é prova vermelha. Paro a parte sem gastar rodadas; veja se alguma prova ficou pendurada (processo, servidor, espera sem fim)', 'error'); return stop('tests_timeout') }
+  if (st.tests_after.timeout) { if (early) await early.catch(() => null); log('engine', 'a suíte de provas estourou o tempo limite (15 min) e foi interrompida: isso não é prova vermelha. Paro a parte sem gastar rodadas; veja se alguma prova ficou pendurada (processo, servidor, espera sem fim)', 'error'); return stop('tests_timeout') }
   // quem escreve terminou sem tocar em nada (épico 9, s3: Flash gastou a chamada inteira esperando a matriz de queda rodar e o agy estourou o tempo): uma repetição grátis com aviso antes de pular
   if (!st.diff.trim() && !st.no_change_retry && round < MAX_ROUNDS) { st.no_change_retry = true; log('engine', 'quem escreve terminou sem alterar arquivo algum; repito a rodada uma vez pedindo para não rodar provas lentas', 'warn'); return runStory(st, round + 1, previousReview, null) }
   if (!st.diff.trim()) { setStep('checker', 'skipped'); return stop('no_changes') }

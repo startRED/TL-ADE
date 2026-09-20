@@ -131,7 +131,9 @@ const NO_TESTS = /no test files found|no tests found|no tests ran|collected 0 it
 // related = arquivos mudados pela parte (relativos ao projeto): cada suíte roda só as provas ligadas a eles com o recurso do
 // próprio runner (vitest related, jest --findRelatedTests, pacotes Go mudados); suíte sem arquivo mudado fica de fora; suíte
 // sem molde de afetadas roda inteira. Devolve null quando nada rodou. A suíte inteira fica para o fim do épico.
-export async function runSuites(dir, suites, { run, python, timeoutMs = 5 * 60 * 1000, only = null, related = null }) {
+// 15 min, não 5: a suíte cresce a cada parte e uma prova sozinha já leva 2 min (crash-matrix). Com 5 min a parte que liga
+// cobertura morria em "tests_timeout" sem ter defeito, e o épico inteiro parava (m-mu8usf5z, s2 e a correção dela).
+export async function runSuites(dir, suites, { run, python, timeoutMs = 15 * 60 * 1000, only = null, related = null }) {
   const target = only && path.resolve(dir, only)
   const inSuite = (s) => { const r = path.relative(path.join(dir, s.cwd), target); return !r.startsWith('..') && !path.isAbsolute(r) ? r.split(path.sep).join('/') : null }
   const mine = (s) => (related || []).map((f) => path.relative(path.join(dir, s.cwd), path.resolve(dir, f))).filter((r) => r && !r.startsWith('..') && !path.isAbsolute(r)).map((r) => r.split(path.sep).join('/'))
