@@ -67,3 +67,14 @@ export function preexistingReds(tests, before) {
 export function diffArgs(base, paths = [], excludes = []) {
   return ['diff', base || 'HEAD', '--', ...paths, ...excludes]
 }
+
+// Prova vermelha, por si só, não é gravidade. Numa parte que escreve prova e código na mesma chamada, a prova nova vermelha
+// depois da rodada 1 é o estado NORMAL — a rodada 2 existe para isso. Grave é a parte QUEBRAR o que estava verde na largada.
+// Antes qualquer vermelha na rodada 2 pulava a cadeia barata inteira e caía na de correção, e na rodada 3 subia dois degraus
+// de uma vez. Mesma classe do defeito de truncamento (2310f4a, e357d83): o motor lia trabalho normal como emergência.
+export function brokeGreen(after, before) {
+  if (!after || after.ok || !before?.tests?.length) return false
+  const green = new Set(before.tests.filter((t) => t.status === 'passed').map((t) => t.name))
+  const pre = after.preexisting || []
+  return after.tests.some((t) => t.status !== 'passed' && green.has(t.name) && !pre.includes(t.name))
+}

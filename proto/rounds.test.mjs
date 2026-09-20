@@ -1,7 +1,7 @@
 // node --test proto/rounds.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { diffArgs, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
+import { brokeGreen, diffArgs, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
 
 test('parte de correção herda os arquivos que a parte anterior já tinha alterado', () => {
   const stories = [{ id: 'R2', diff: 'diff --git a/src/lease/process-info.js b/src/lease/process-info.js\n', files: ['src\\adapters\\claude\\index.js'] }]
@@ -79,4 +79,22 @@ test('diffArgs: sem commit-base o diff vai contra HEAD, para o que está no índ
 
 test('diffArgs: com commit-base usa o commit-base', () => {
   assert.deepEqual(diffArgs('abc123', ['src/a.js']), ['diff', 'abc123', '--', 'src/a.js'])
+})
+
+test('brokeGreen: prova NOVA vermelha não é gravidade', () => {
+  const before = { tests: [{ name: 'antiga', status: 'passed' }] }
+  const after = { ok: false, tests: [{ name: 'antiga', status: 'passed' }, { name: 'nova', status: 'failed' }] }
+  assert.equal(brokeGreen(after, before), false)
+})
+
+test('brokeGreen: quebrar prova que estava verde na largada é gravidade', () => {
+  const before = { tests: [{ name: 'antiga', status: 'passed' }] }
+  const after = { ok: false, tests: [{ name: 'antiga', status: 'failed' }] }
+  assert.equal(brokeGreen(after, before), true)
+})
+
+test('brokeGreen: vermelha já vermelha na largada não conta', () => {
+  const before = { tests: [{ name: 'antiga', status: 'failed' }] }
+  const after = { ok: false, tests: [{ name: 'antiga', status: 'failed' }] }
+  assert.equal(brokeGreen(after, before), false)
 })

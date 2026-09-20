@@ -17,7 +17,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { skillDescription } from './skill-meta.mjs'
-import { diffArgs, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
+import { brokeGreen, diffArgs, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
 import { PLANNING_POLICY, versionProgram, planIssues, needsPlanCritic, skillsForStory, canCombineProof } from './planning.mjs'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
@@ -2160,7 +2160,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   // Escalada: só na 3ª rodada em diante E quando sobrou problema grave (achado high do revisor ou prova vermelha). Pedido de cobertura/estilo continua no maker barato.
   // suíte vermelha depois de uma chamada CORTADA no teto de turnos é trabalho inacabado, não defeito: não vale como problema
   // grave, senão a parte sobe de modelo para consertar o que ninguém terminou de escrever (ver rounds.mjs)
-  const grave = (previousReview?.findings || []).some((f) => f.severity === 'high') || (st.tests_after && !st.tests_after.ok && !st.truncated)
+  const grave = (previousReview?.findings || []).some((f) => f.severity === 'high') || (!st.truncated && brokeGreen(st.tests_after, m.tests_before))
   // Achado repetido sobe a escada porque significa "este modelo não entendeu o pedido". Depois de uma chamada CORTADA no teto
   // de turnos não significa nada disso: quem escreve nem chegou ao achado. Contar assim mandava a parte para o modelo mais
   // caro por causa do corte, que é justo o que a correção do teto queria evitar (m-mu8usf5z, V02-R3f rodada 4).
