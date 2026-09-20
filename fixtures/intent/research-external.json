@@ -1,0 +1,23 @@
+{
+  "unknown": {
+    "id": "U-STRIPE",
+    "question": "Qual a versão da API do Stripe para assinaturas com cancelamento prorrogado?",
+    "kind": "external_fact"
+  },
+  "budget": {
+    "max_queries": 1,
+    "timeout_s": 30
+  },
+  "mock_researcher_result": {
+    "source": "https://stripe.com/docs/api/subscriptions",
+    "date": "2026-09-18",
+    "claims": [
+      {
+        "text": "Stripe Subscriptions API v2025-08-01 suporta cancel_at_period_end",
+        "tier": 1,
+        "source": "official_docs",
+        "grade": "fact"
+      }
+    ]
+  }
+}

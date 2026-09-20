@@ -1,0 +1,35 @@
+{
+  "missing_verifier": {
+    "scenarios": [
+      {
+        "id": "C1",
+        "given": "sistema rodando",
+        "when": "evento ocorre",
+        "then": "resultado esperado",
+        "verifiers": []
+      }
+    ]
+  },
+  "missing_do_not_touch": {
+    "guardrails": {
+      "scope_paths": ["src/**"],
+      "do_not_touch": [],
+      "autonomy": "safe"
+    }
+  },
+  "missing_complexity": {
+    "title": "Story sem complexidade"
+  },
+  "ui_without_brief": {
+    "needs_ui": true,
+    "design_brief": null
+  },
+  "generic_ears": {
+    "requirements": [
+      {
+        "id": "R1",
+        "ears": "THE SYSTEM SHALL work correctly"
+      }
+    ]
+  }
+}

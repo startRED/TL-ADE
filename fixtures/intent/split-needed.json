@@ -1,0 +1,67 @@
+{
+  "contract": {
+    "format_version": 2,
+    "id": "STORY-BIG",
+    "title": "Múltiplos fluxos de exportação de dados",
+    "complexity": "feature",
+    "needs_ui": false,
+    "task": "Implementar exportadores em JSON e CSV",
+    "workspace": { "kind": "git", "root": ".", "revision": "01dc2ec" },
+    "risk": { "level": "normal", "surfaces": [], "evidence": [] },
+    "guardrails": {
+      "scope_paths": ["src/export/**"],
+      "do_not_touch": ["src/auth/**"],
+      "autonomy": "safe"
+    },
+    "requirements": [
+      { "id": "R1", "ears": "WHEN user requests JSON export THE SYSTEM SHALL return valid JSON payload" },
+      { "id": "R2", "ears": "WHEN user requests CSV export THE SYSTEM SHALL return RFC4180 compliant CSV" }
+    ],
+    "scenarios": [
+      {
+        "id": "C1",
+        "given": "dataset exists",
+        "when": "export JSON requested",
+        "then": "valid JSON is returned",
+        "verifiers": ["V1"]
+      },
+      {
+        "id": "C2",
+        "given": "dataset exists",
+        "when": "export CSV requested",
+        "then": "valid CSV is returned",
+        "verifiers": ["V2"]
+      }
+    ],
+    "verifiers": [
+      {
+        "id": "V1",
+        "kind": "script",
+        "cmd": ["node", "test/export-json.js"],
+        "expect_exit": 0,
+        "timeout_s": 30,
+        "max_output_bytes": 1024,
+        "evidence": ["test/export-json.js"],
+        "strictness": { "mode": "must_fail_before" },
+        "author": "operator"
+      },
+      {
+        "id": "V2",
+        "kind": "script",
+        "cmd": ["node", "test/export-csv.js"],
+        "expect_exit": 0,
+        "timeout_s": 30,
+        "max_output_bytes": 1024,
+        "evidence": ["test/export-csv.js"],
+        "strictness": { "mode": "must_fail_before" },
+        "author": "operator"
+      }
+    ],
+    "skills": [],
+    "roles": {
+      "maker": { "family": "claude", "model_id": "claude-sonnet-5" },
+      "checker_round": { "family": "codex", "model_id": "codex-1" }
+    },
+    "budget": { "max_model_calls": 6, "max_rework_rounds": 2 }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "request": "Corrigir o botão de login que não envia o formulário",
+  "discovery": {
+    "repo": { "head": "01dc2ec", "dirty": false },
+    "languages": [{ "name": "typescript", "share": 1.0 }],
+    "scripts": { "test": "vitest run" },
+    "tests": { "framework": "vitest", "count": 10 },
+    "ui": { "present": true },
+    "anchors": [
+      { "term": "login", "path": "src/ui/LoginButton.tsx", "line": 42, "kind": "symbol" }
+    ],
+    "answerable": ["qual runner de teste", "onde fica o botão de login"]
+  },
+  "expected": {
+    "complexity": "trivial",
+    "confidence_gte": 0.8,
+    "model_calls": 0,
+    "questions_count": 0
+  }
+}

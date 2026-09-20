@@ -1,0 +1,13 @@
+{
+  "request": "Construir uma plataforma completa de comércio eletrônico com checkout, relatórios avançados em tempo real, integração com múltiplos meios de pagamento e aplicativo mobile nativo",
+  "discovery": {
+    "repo": { "head": "01dc2ec", "dirty": false },
+    "languages": [{ "name": "typescript", "share": 1.0 }],
+    "scripts": { "test": "vitest run" }
+  },
+  "expected": {
+    "direction_present": true,
+    "next_delivery_present": true,
+    "only_immediate_work_executable": true
+  }
+}

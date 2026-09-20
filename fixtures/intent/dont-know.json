@@ -1,0 +1,15 @@
+{
+  "question": {
+    "id": "Q1",
+    "unknown_ref": "U1",
+    "kind": "product_choice",
+    "text": "Qual formato padrão para respostas de relatório?",
+    "options": [
+      { "id": "opt-json", "label": "JSON compacto", "recommended": true, "why": "Padrão de telemetria v0.3" },
+      { "id": "opt-csv", "label": "CSV tabular" },
+      { "id": "dont_know", "label": "Não sei" }
+    ],
+    "default_if_unknown": "opt-json"
+  },
+  "answer": "Não sei"
+}

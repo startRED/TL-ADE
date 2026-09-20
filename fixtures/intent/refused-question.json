@@ -1,0 +1,23 @@
+{
+  "request": "Ajustar os testes do módulo de autenticação",
+  "unknowns": [
+    {
+      "id": "U1",
+      "question": "qual runner de teste utilizado no projeto?",
+      "kind": "repo_fact"
+    },
+    {
+      "id": "U2",
+      "question": "qual o timeout padrão dos testes?",
+      "kind": "product_choice"
+    }
+  ],
+  "discovery": {
+    "scripts": { "test": "vitest run" },
+    "tests": { "framework": "vitest" },
+    "answerable": ["qual runner de teste utilizado no projeto?"]
+  },
+  "repoIr": {
+    "facts": { "test_runner": "vitest" }
+  }
+}

@@ -1,0 +1,26 @@
+[
+  {
+    "id": "api-design",
+    "name": "API Design",
+    "domains": ["api", "backend"],
+    "languages": ["typescript", "javascript"]
+  },
+  {
+    "id": "backend-patterns",
+    "name": "Backend Patterns",
+    "domains": ["backend", "data", "api"],
+    "languages": ["typescript", "javascript", "python"]
+  },
+  {
+    "id": "frontend-ui",
+    "name": "Frontend UI",
+    "domains": ["ui", "frontend"],
+    "languages": ["typescript", "javascript", "css"]
+  },
+  {
+    "id": "database-migration",
+    "name": "Database Migration",
+    "domains": ["data", "migration"],
+    "languages": ["sql", "typescript"]
+  }
+]

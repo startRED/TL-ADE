@@ -1,0 +1,15 @@
+{
+  "request": "Alterar fluxo de autenticação e expiração de senhas de administradores",
+  "discovery": {
+    "anchors": [
+      { "term": "auth", "path": "src/auth/service.js", "line": 15, "kind": "symbol" }
+    ],
+    "languages": [{ "name": "javascript", "share": 1.0 }],
+    "scripts": { "test": "vitest run" }
+  },
+  "expected": {
+    "risk_level": "critical",
+    "surface": "auth",
+    "sensitive_paths": ["src/auth/**"]
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "request": "Implementar novo subsistema de sincronização e mensageria distribuída com fallback",
+  "discovery": {
+    "anchors": [],
+    "languages": [{ "name": "typescript", "share": 1.0 }],
+    "scripts": { "test": "vitest run" }
+  },
+  "mock_advisor_response": {
+    "complexity": "feature",
+    "confidence": 0.85,
+    "domains": ["api", "data"],
+    "rationale": "Novo fluxo com múltiplos componentes e integração",
+    "cost": {
+      "usd": 0.015,
+      "model_calls": 1,
+      "model_id": "claude-haiku-4-5"
+    }
+  }
+}
