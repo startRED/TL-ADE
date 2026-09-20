@@ -527,7 +527,10 @@ async function journalWallMs(id) {
 async function loadSavedMissions() {
   const saved = await loadJson('engines.json', { dirs: [], active: null })
   for (const d of saved.dirs || []) { try { const e = engineFor(d); e.project = await discover(d); if (e.project.error) engines.delete(path.resolve(d)) } catch { engines.delete(path.resolve(d)) } }
-  let files = []; try { files = (await readdir(MISSIONS_DIR)).filter((f) => f.endsWith('.json')) } catch { files = [] } // cópias de segurança e temporários da gravação atômica não são missões
+  // Só `<id>.json`: o nome da missão não tem ponto. O filtro antigo aceitava qualquer .json, então uma cópia de segurança
+  // ao lado (`<id>.backup-*.json`) entrava na disputa por pasta, e como o desempate é por started_at (igual nas duas) vencia a
+  // primeira em ordem alfabética — a cópia. O motor subia com um estado antigo sem avisar ninguém.
+  let files = []; try { files = (await readdir(MISSIONS_DIR)).filter((f) => /^[^.]+\.json$/.test(f)) } catch { files = [] }
   const latest = new Map() // dir → missão mais recente
   for (const f of files) {
     try {
