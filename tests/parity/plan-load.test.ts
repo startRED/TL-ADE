@@ -917,4 +917,32 @@ describe('plan-load parity', () => {
     expect(defaultStoryBudget({ complexity: 'project', needs_ui: true })).toEqual({ max_model_calls: 12, max_rework_rounds: 3 })
     expect(() => defaultStoryBudget({ complexity: 'unknown' as any })).toThrow(AdeError)
   })
+
+  // CA5: max_usd acima de 300 é recusado com erro/4 (budget_usd_above_absolute_cap)
+  test('ca5_plan_with_max_usd_above_300_is_refused', () => {
+    const { planPath } = writePlanDir({
+      plan: {
+        mission_budget: {
+          max_usd: 301,
+        },
+      },
+    })
+    try {
+      loadPlan(planPath)
+      expect.unreachable('deveria ter falhado com exitCode 4 para max_usd > 300')
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(AdeError)
+      expect(err.code).toBe('budget_usd_above_absolute_cap')
+      expect(err.exitCode).toBe(4)
+    }
+
+    try {
+      loadPlan({ mission_budget: { max_usd: 301 } })
+      expect.unreachable('deveria ter falhado com exitCode 4 para max_usd > 300')
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(AdeError)
+      expect(err.code).toBe('budget_usd_above_absolute_cap')
+      expect(err.exitCode).toBe(4)
+    }
+  })
 })

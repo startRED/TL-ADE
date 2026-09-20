@@ -5,9 +5,11 @@ import { AdeError } from '../../src/journal/errors.js'
 import { loadPlan } from '../../src/engine/plan-load.js'
 import {
   assertCallBudget,
+  authorizePaidCall,
   checkUsdCap,
   observedUsd,
   reserveCalls,
+  validateQuotaReceipt,
 } from '../../src/engine/budget.js'
 import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.js'
 
@@ -347,6 +349,93 @@ describe('budget parity', () => {
     expect(exhaustedByOtherStory).toEqual({
       reserve: 0,
       reason: 'exhausted',
+    })
+  })
+
+  // Contratos de extensão do orçamento: CA1, CA2, CA3, CA4
+  test('budget_controls_extensions_parity', () => {
+    // [CA1] 299+1 → absolute_usd_cap, 299+0.99 → allowed
+    expect(
+      authorizePaidCall({
+        observed_usd: 299,
+        open_reservations: [],
+        requested_usd: 1,
+      }),
+    ).toEqual({
+      allowed: false,
+      reason: 'absolute_usd_cap',
+      reservation: null,
+    })
+
+    const allowedBelow = authorizePaidCall({
+      observed_usd: 299,
+      open_reservations: [],
+      requested_usd: 0.99,
+    })
+    expect(allowedBelow.allowed).toBe(true)
+    expect(allowedBelow.reason).toBeNull()
+
+    // [CA2] cost_usd:null → observed_usd:0/unobserved_calls:1
+    expect(
+      observedUsd([
+        {
+          kind: 'step_result',
+          data: {
+            cost_usd: null,
+          },
+        },
+      ]),
+    ).toEqual({
+      observed_usd: 0,
+      unobserved_calls: 1,
+    })
+
+    // [CA3] turns 30/30 → turn_budget_exhausted
+    expect(
+      authorizePaidCall({
+        phase: 'implementation',
+        used_turns: 30,
+        requested_turns: 1,
+      }),
+    ).toEqual({
+      allowed: false,
+      reason: 'turn_budget_exhausted',
+      reservation: null,
+    })
+
+    // [CA4] observed_at com 86400001ms → quota_unavailable e used_percent:null → quota_untrusted
+    const nowFixed = 100000000
+    expect(
+      validateQuotaReceipt(
+        {
+          source: 'official',
+          used_percent: 10,
+          reserved_percent: 5,
+          observed_at: new Date(nowFixed - 86400001).toISOString(),
+          weekly_reset_at: new Date(nowFixed + 1000000).toISOString(),
+        },
+        { now: nowFixed },
+      ),
+    ).toEqual({
+      ok: false,
+      reason: 'quota_unavailable',
+      used_percent: 10,
+      reserved_percent: 5,
+    })
+
+    expect(
+      validateQuotaReceipt({
+        source: 'official',
+        used_percent: null,
+        reserved_percent: 1,
+        observed_at: '2026-09-20T00:00:00.000Z',
+        weekly_reset_at: '2026-09-27T00:00:00.000Z',
+      }),
+    ).toEqual({
+      ok: false,
+      reason: 'quota_untrusted',
+      used_percent: null,
+      reserved_percent: null,
     })
   })
 })

@@ -115,6 +115,22 @@ export function loadPlan(planPath) {
     planDir = path.resolve(path.dirname(planPath))
   }
 
+  // Rejeitar mission_budget.max_usd acima de 300 ou negativo
+  if (doc && typeof doc === 'object' && doc.mission_budget) {
+    const maxUsd = doc.mission_budget.max_usd
+    if (
+      maxUsd !== undefined &&
+      (typeof maxUsd !== 'number' || !Number.isFinite(maxUsd) || maxUsd > 300 || maxUsd < 0)
+    ) {
+      throw new AdeError(
+        'budget_usd_above_absolute_cap',
+        `orçamento max_usd (${maxUsd}) inválido ou acima do teto absoluto de US$ 300`,
+        4,
+        { max_usd: maxUsd },
+      )
+    }
+  }
+
   // Rejeitar efeitos não booleanos ou não autorizados antes de despacho
   if (doc && typeof doc === 'object') {
     /**

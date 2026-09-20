@@ -1,6 +1,15 @@
 // @ts-check
 import { AdeError } from '../journal/errors.js'
 
+export const ABSOLUTE_USD_CAP = 300
+
+export const PHASE_TURN_LIMITS = {
+  proof: 14,
+  implementation: 30,
+  correction: 20,
+  review: 10,
+}
+
 /**
  * Valida se o orçamento de chamadas de modelo é um inteiro >= 1.
  *
@@ -34,14 +43,29 @@ export function observedUsd(events) {
       if (event.kind !== 'step_result') continue
 
       const stepId = event.step_id ?? event.data?.step_id
-      if (typeof stepId === 'string' && stepId.endsWith(':maker')) {
-        const costUsd =
-          event.data?.result?.usage?.cost_usd ?? event.result?.usage?.cost_usd
-        if (typeof costUsd === 'number' && Number.isFinite(costUsd)) {
-          observed_usd += costUsd
-        } else {
-          unobserved_calls += 1
-        }
+      // Se stepId for informado e não terminar em :maker e não for model_call, ignora (ex: contain)
+      if (
+        typeof stepId === 'string' &&
+        !stepId.endsWith(':maker') &&
+        event.effect_class !== 'model_call' &&
+        event.data?.effect_class !== 'model_call'
+      ) {
+        continue
+      }
+
+      const costUsd =
+        event.data?.cost_usd !== undefined
+          ? event.data.cost_usd
+          : event.cost_usd !== undefined
+            ? event.cost_usd
+            : event.data?.result?.usage?.cost_usd !== undefined
+              ? event.data.result.usage.cost_usd
+              : event.result?.usage?.cost_usd
+
+      if (typeof costUsd === 'number' && Number.isFinite(costUsd)) {
+        observed_usd += costUsd
+      } else {
+        unobserved_calls += 1
       }
     }
   }
@@ -223,7 +247,9 @@ export function checkMissionBudget({ events = [], budget = {}, now = Date.now(),
   // 2. Wall clock desde o primeiro event até now
   const maxWallClockMs =
     budget.max_wall_clock_ms ??
-    (budget.max_wall_clock_seconds !== undefined ? budget.max_wall_clock_seconds * 1000 : undefined)
+    (budget.max_wall_clock_seconds !== undefined
+      ? budget.max_wall_clock_seconds * 1000
+      : undefined)
 
   if (maxWallClockMs !== undefined && maxWallClockMs !== null) {
     let firstAt = null
@@ -279,3 +305,418 @@ export function checkMissionBudget({ events = [], budget = {}, now = Date.now(),
   return { allowed: true, reason: null }
 }
 
+/**
+ * Extrai a unit/story_id associada a um evento.
+ *
+ * @param {Record<string, any>} event
+ * @returns {string | null}
+ */
+function getEventUnit(event) {
+  if (!event || typeof event !== 'object') return null
+  let unit =
+    (typeof event.unit === 'string' && event.unit) ||
+    (typeof event.data?.unit === 'string' && event.data.unit) ||
+    (typeof event.story_id === 'string' && event.story_id) ||
+    (typeof event.data?.story_id === 'string' && event.data.story_id) ||
+    null
+
+  const stepId = event.step_id ?? event.data?.step_id
+  if (!unit && typeof stepId === 'string') {
+    const colonIdx = stepId.indexOf(':')
+    if (colonIdx > 0) {
+      unit = stepId.substring(0, colonIdx)
+    }
+  }
+  return unit
+}
+
+/**
+ * Retorna as reservas abertas: eventos budget_reserved sem step_result de maker
+ * nem story_done para a mesma unit.
+ *
+ * @param {Array<Record<string, any>>} events
+ * @returns {Array<Record<string, any>>}
+ */
+export function getOpenReservations(events) {
+  if (!Array.isArray(events)) return []
+
+  const closedUnits = new Set()
+
+  for (const event of events) {
+    if (!event || typeof event !== 'object') continue
+    const unit = getEventUnit(event)
+    if (!unit) continue
+
+    const isMakerResult =
+      event.kind === 'step_result' &&
+      ((typeof event.step_id === 'string' && event.step_id.endsWith(':maker')) ||
+        (typeof event.data?.step_id === 'string' && event.data.step_id.endsWith(':maker')) ||
+        event.effect_class === 'model_call' ||
+        event.data?.effect_class === 'model_call')
+
+    const isStoryDone = event.kind === 'story_done' || event.kind === 'unit_done'
+
+    if (isMakerResult || isStoryDone) {
+      closedUnits.add(unit)
+    }
+  }
+
+  const openReservations = []
+  for (const event of events) {
+    if (!event || typeof event !== 'object') continue
+    if (event.kind !== 'budget_reserved') continue
+
+    const unit = getEventUnit(event)
+    if (unit && !closedUnits.has(unit)) {
+      openReservations.push(event)
+    }
+  }
+
+  return openReservations
+}
+
+/**
+ * Valida o recibo de cota oficial de uma família.
+ *
+ * @param {any} receipt
+ * @param {Object} [options]
+ * @param {string} [options.family]
+ * @param {number} [options.max_percent]
+ * @param {number | string | Date} [options.now]
+ * @returns {{
+ *   ok: boolean,
+ *   reason: 'quota_unavailable' | 'quota_untrusted' | 'quota_exhausted' | null,
+ *   used_percent: number | null,
+ *   reserved_percent: number | null,
+ * }}
+ */
+export function validateQuotaReceipt(receipt, { family, max_percent = 50, now = Date.now() } = {}) {
+  if (!receipt || typeof receipt !== 'object') {
+    return {
+      ok: false,
+      reason: 'quota_unavailable',
+      used_percent: null,
+      reserved_percent: null,
+    }
+  }
+
+  if (receipt.source !== 'official') {
+    return {
+      ok: false,
+      reason: 'quota_untrusted',
+      used_percent: null,
+      reserved_percent: null,
+    }
+  }
+
+  if (
+    family &&
+    (typeof receipt.family !== 'string' ||
+      receipt.family.trim().length === 0 ||
+      receipt.family !== family)
+  ) {
+    return {
+      ok: false,
+      reason: 'quota_untrusted',
+      used_percent: null,
+      reserved_percent: null,
+    }
+  }
+
+  const used = receipt.used_percent
+  const reserved = receipt.reserved_percent
+  if (
+    used === null ||
+    used === undefined ||
+    typeof used !== 'number' ||
+    !Number.isFinite(used) ||
+    reserved === null ||
+    reserved === undefined ||
+    typeof reserved !== 'number' ||
+    !Number.isFinite(reserved) ||
+    used < 0 ||
+    reserved < 0
+  ) {
+    return {
+      ok: false,
+      reason: 'quota_untrusted',
+      used_percent: null,
+      reserved_percent: null,
+    }
+  }
+
+  if (!receipt.observed_at || !receipt.weekly_reset_at) {
+    return {
+      ok: false,
+      reason: 'quota_unavailable',
+      used_percent: used,
+      reserved_percent: reserved,
+    }
+  }
+
+  const obsTime = new Date(receipt.observed_at).getTime()
+  const resetTime = new Date(receipt.weekly_reset_at).getTime()
+  if (!Number.isFinite(obsTime) || !Number.isFinite(resetTime)) {
+    return {
+      ok: false,
+      reason: 'quota_unavailable',
+      used_percent: used,
+      reserved_percent: reserved,
+    }
+  }
+
+  const nowTime = typeof now === 'number' ? now : new Date(now).getTime()
+  if (nowTime - obsTime > 86400000 || nowTime > resetTime) {
+    return {
+      ok: false,
+      reason: 'quota_unavailable',
+      used_percent: used,
+      reserved_percent: reserved,
+    }
+  }
+
+  const cap = typeof max_percent === 'number' ? max_percent : 50
+  if (used + reserved >= cap) {
+    return {
+      ok: false,
+      reason: 'quota_exhausted',
+      used_percent: used,
+      reserved_percent: reserved,
+    }
+  }
+
+  return {
+    ok: true,
+    reason: null,
+    used_percent: used,
+    reserved_percent: reserved,
+  }
+}
+
+/**
+ * Autoriza uma chamada paga após checar tetos absolutos, reservas abertas, limites de missão,
+ * turnos, contexto e cota por família.
+ *
+ * @param {Object} [params]
+ * @param {Array<Record<string, any>>} [params.events]
+ * @param {Record<string, any>} [params.mission_budget]
+ * @param {Record<string, any>} [params.story_budget]
+ * @param {string} [params.family]
+ * @param {string} [params.phase]
+ * @param {number} [params.requested_usd]
+ * @param {number} [params.requested_calls]
+ * @param {number} [params.requested_turns]
+ * @param {number} [params.used_turns]
+ * @param {number} [params.context_bytes]
+ * @param {number} [params.context_limit]
+ * @param {any} [params.quota_receipt]
+ * @param {number | string | Date} [params.now]
+ * @param {Record<string, any> | Array<any>} [params.states]
+ * @param {number} [params.observed_usd]
+ * @param {Array<any>} [params.open_reservations]
+ * @returns {{
+ *   allowed: boolean,
+ *   reason: string | null,
+ *   reservation: { calls: number, usd: number, turns: number, family: string } | null,
+ * }}
+ */
+export function authorizePaidCall(params = {}) {
+  const {
+    events = [],
+    mission_budget,
+    story_budget,
+    family,
+    phase,
+    requested_usd = 0,
+    requested_calls = 1,
+    requested_turns = 1,
+    context_bytes,
+    context_limit,
+    quota_receipt,
+    now = Date.now(),
+    states = {},
+  } = params
+
+  // 1. Validações de sanidade / CA5: valores negativos ou não finitos
+  if (typeof requested_usd !== 'number' || !Number.isFinite(requested_usd) || requested_usd < 0) {
+    throw new AdeError('invalid_budget_reservation', 'requested_usd inválido', 4)
+  }
+  if (typeof requested_calls !== 'number' || !Number.isFinite(requested_calls) || requested_calls < 0) {
+    throw new AdeError('invalid_budget_reservation', 'requested_calls inválido', 4)
+  }
+  if (typeof requested_turns !== 'number' || !Number.isFinite(requested_turns) || requested_turns < 0) {
+    throw new AdeError('invalid_budget_reservation', 'requested_turns inválido', 4)
+  }
+  if (context_bytes !== undefined && (typeof context_bytes !== 'number' || !Number.isFinite(context_bytes) || context_bytes < 0)) {
+    throw new AdeError('invalid_budget_reservation', 'context_bytes inválido', 4)
+  }
+  if (context_limit !== undefined && (typeof context_limit !== 'number' || !Number.isFinite(context_limit) || context_limit < 0)) {
+    throw new AdeError('invalid_budget_reservation', 'context_limit inválido', 4)
+  }
+
+  if (mission_budget?.max_usd !== undefined) {
+    const maxUsd = mission_budget.max_usd
+    if (typeof maxUsd !== 'number' || !Number.isFinite(maxUsd) || maxUsd > ABSOLUTE_USD_CAP || maxUsd < 0) {
+      throw new AdeError(
+        'budget_usd_above_absolute_cap',
+        `orçamento max_usd (${maxUsd}) inválido ou acima do teto absoluto de US$ 300`,
+        4,
+        { max_usd: maxUsd },
+      )
+    }
+  }
+
+  const nowMs = typeof now === 'number' ? now : new Date(now).getTime()
+
+  // 2. Validação de cota por família se family informada ou se quota_receipt informado
+  if (family !== undefined || quota_receipt !== undefined) {
+    const quotaCheck = validateQuotaReceipt(quota_receipt, {
+      family,
+      max_percent: 50,
+      now: nowMs,
+    })
+    if (!quotaCheck.ok) {
+      return {
+        allowed: false,
+        reason: quotaCheck.reason,
+        reservation: null,
+      }
+    }
+  }
+
+  // 3. Teto de USD: observed_usd + reservas abertas + requested_usd
+  let obsUsd = 0
+  if (typeof params.observed_usd === 'number') {
+    obsUsd = params.observed_usd
+  } else if (Array.isArray(events)) {
+    obsUsd = observedUsd(events).observed_usd
+  }
+
+  let openResUsd = 0
+  if (Array.isArray(params.open_reservations)) {
+    for (const r of params.open_reservations) {
+      const usd =
+        typeof r === 'number'
+          ? r
+          : r && typeof r === 'object'
+            ? (r.data?.usd ?? r.usd ?? 0)
+            : NaN
+      if (typeof usd !== 'number' || !Number.isFinite(usd) || usd < 0) {
+        throw new AdeError('invalid_budget_reservation', 'reserva usd inválida', 4)
+      }
+      openResUsd += usd
+    }
+  } else if (Array.isArray(events)) {
+    const openRes = getOpenReservations(events)
+    for (const r of openRes) {
+      const usd = r.data?.usd ?? r.usd ?? 0
+      if (typeof usd !== 'number' || !Number.isFinite(usd) || usd < 0) {
+        throw new AdeError('invalid_budget_reservation', 'reserva usd inválida', 4)
+      }
+      openResUsd += usd
+    }
+  }
+
+  const totalUsd = obsUsd + openResUsd + requested_usd
+
+  // Teto absoluto de US$ 300
+  if (totalUsd >= ABSOLUTE_USD_CAP) {
+    return {
+      allowed: false,
+      reason: 'absolute_usd_cap',
+      reservation: null,
+    }
+  }
+
+  // Teto do mission_budget.max_usd se configurado
+  if (mission_budget?.max_usd !== undefined && mission_budget?.max_usd !== null) {
+    if (totalUsd >= mission_budget.max_usd) {
+      return {
+        allowed: false,
+        reason: 'budget_usd_exceeded',
+        reservation: null,
+      }
+    }
+  }
+
+  // 4. Limites determinísticos da missão (model calls, wall clock, parked units)
+  if (mission_budget || story_budget || Array.isArray(events) || states) {
+    const maxModelCalls = [mission_budget?.max_model_calls, story_budget?.max_model_calls]
+      .filter((value) => value !== undefined && value !== null)
+      .reduce((minimum, value) => Math.min(minimum, value), Infinity)
+    const applicableBudget = {
+      ...mission_budget,
+      ...(Number.isFinite(maxModelCalls) ? { max_model_calls: maxModelCalls } : {}),
+    }
+    const eventsWithRequest = [
+      ...events,
+      {
+        kind: 'budget_reserved',
+        unit: '__pending_paid_call__',
+        data: { calls: requested_calls },
+      },
+    ]
+    const missionCheck = checkMissionBudget({
+      events: eventsWithRequest,
+      budget: applicableBudget,
+      now: nowMs,
+      states,
+    })
+    if (!missionCheck.allowed) {
+      return {
+        allowed: false,
+        reason: missionCheck.reason,
+        reservation: null,
+      }
+    }
+  }
+
+  // 5. Limite de turnos por fase
+  if (phase) {
+    /** @type {Record<string, number>} */
+    const turnLimits = PHASE_TURN_LIMITS
+    const phaseLimit = turnLimits[phase] ?? Infinity
+    let usedTurns = 0
+    if (typeof params.used_turns === 'number') {
+      usedTurns = params.used_turns
+    } else if (Array.isArray(events)) {
+      for (const e of events) {
+        if (!e || typeof e !== 'object') continue
+        const ePhase = e.phase ?? e.data?.phase
+        if (ePhase === phase && e.kind === 'step_result') {
+          usedTurns += (typeof e.data?.turns === 'number' ? e.data.turns : 1)
+        }
+      }
+    }
+    if (usedTurns + requested_turns >= phaseLimit) {
+      return {
+        allowed: false,
+        reason: 'turn_budget_exhausted',
+        reservation: null,
+      }
+    }
+  }
+
+  // 6. Limite de contexto
+  if (context_bytes !== undefined && context_bytes !== null) {
+    const maxCtx = context_limit ?? 120000
+    if (context_bytes >= maxCtx) {
+      return {
+        allowed: false,
+        reason: 'context_limit_exceeded',
+        reservation: null,
+      }
+    }
+  }
+
+  return {
+    allowed: true,
+    reason: null,
+    reservation: {
+      calls: requested_calls,
+      usd: requested_usd,
+      turns: requested_turns,
+      family: family ?? '',
+    },
+  }
+}
