@@ -64,7 +64,7 @@ async function plannerCall(who, opts) {
   const rest = chainOf(who.key).filter((w) => !(w.family === who.family && w.model === who.model))
   return withChain(who.key, { list: [who, ...rest] }, (w) => plannerOnce(w, opts))
 }
-async function plannerOnce(who, { role, prompt, schema, maxTurns, timeoutMs = 30 * 60 * 1000 }) {
+async function plannerOnce(who, { role, prompt, schema, maxTurns, timeoutMs = 30 * 60 * 1000, web = false }) {
   const schemaFile = async () => { const f = path.join(ADE_DIR, 'schemas', createHash('sha1').update(JSON.stringify(schema)).digest('hex').slice(0, 12) + '.json'); await mkdir(path.dirname(f), { recursive: true }); if (!(await exists(f))) await writeFile(f, JSON.stringify(schema)); return f }
   // agy (Antigravity) planeja em modo leitura, como na pesquisa: sem isto, o modelo que o usuário escolheu virava Opus na marra
   if (who.family === 'agy') {
@@ -76,7 +76,8 @@ async function plannerOnce(who, { role, prompt, schema, maxTurns, timeoutMs = 30
     const file = await schemaFile()
     log('engine', `codex (${role}, ${who.model}, esforço ${who.effort}) com saída estruturada`); setLive({ source: 'codex', kind: 'thinking', text: `${role}: lendo o projeto…` })
     let last = null, usage = null; const t0 = Date.now()
-    const r = await run('codex', ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${who.effort}`, '-C', dir, '-m', who.model, '--output-schema', file, '-'], { cwd: dir, stdin: prompt, timeoutMs, onLine: (line) => {
+    // `--ignore-user-config` desliga a busca na web do config pessoal; papéis que precisam de fato de fora pedem web: true
+    const r = await run('codex', ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', ...(web ? ['-c', 'tools.web_search=true'] : []), '-c', `model_reasoning_effort=${who.effort}`, '-C', dir, '-m', who.model, '--output-schema', file, '-'], { cwd: dir, stdin: prompt, timeoutMs, onLine: (line) => {
       let ev; try { ev = JSON.parse(line) } catch { return }
       if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') last = ev.item.text
       if (ev.type === 'item.started' && ev.item?.type === 'command_execution') setLive({ source: 'codex', kind: 'tool', text: ev.item.command || '' })
@@ -92,7 +93,7 @@ async function plannerOnce(who, { role, prompt, schema, maxTurns, timeoutMs = 30
     return out ? { structured_output: out } : null
   }
   if (who.family !== 'claude') { log('engine', `${who.model} (${who.family}) não sabe fazer ${role}; passo para o próximo modelo da sua cadeia`, 'warn'); return null }
-  return claudeCall({ role, prompt, model: who.model, effort: who.effort, tools: ['Read', 'Glob', 'Grep'], schema, maxTurns })
+  return claudeCall({ role, prompt, model: who.model, effort: who.effort, tools: web ? ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'] : ['Read', 'Glob', 'Grep'], schema, maxTurns })
 }
 const vendorOf = (family, model) => family === 'agy' && /^claude/.test(model) ? 'anthropic' : family === 'agy' && /^gpt/.test(model) ? 'openai' : family === 'claude' ? 'anthropic' : family === 'codex' ? 'openai' : 'google'
 
@@ -864,14 +865,15 @@ async function research(questions) {
   const model = agyModel(state.settings.roles.research.model, effortOf('research'))
   const prompt = `Responda em português, com fontes verificáveis (URL), às perguntas abaixo, no formato JSON exigido. Seja curto e factual; se não souber, diga desconhecido.\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n')}`
   const rrole = state.settings.roles.research
-  if (rrole.family === 'claude') { // pesquisa num modelo Claude (papel configurado em Modelos): busca na web, mesmo formato de resposta
-    const rc = await claudeCall({ role: 'pesquisa', prompt, model: rrole.model, effort: effortOf('research'), tools: ['WebSearch', 'WebFetch'], schema: JSON.parse(await readFile(RESEARCH_SCHEMA, 'utf8')), maxTurns: 12 })
+  // Pesquisa fora do agy (papel configurado em Modelos): sempre com busca na web, porque o trabalho dela é fato de fora do repositório.
+  if (rrole.family !== 'agy') {
+    log('engine', `pesquisa (${rrole.family} ${rrole.model}, esforço ${effortOf('research')})`)
+    const rc = await plannerOnce({ family: rrole.family, model: rrole.model, effort: effortOf('research') }, { role: 'pesquisa', prompt, schema: JSON.parse(await readFile(RESEARCH_SCHEMA, 'utf8')), maxTurns: 12, timeoutMs: 10 * 60 * 1000, web: true })
     const parsed = rc?.structured_output || null
-    for (const f of parsed?.findings || []) log('claude', `${f.question}: ${f.answer} ${f.sources?.length ? `(${f.sources.join(', ')})` : ''}`, 'text')
-    if (!parsed) log('engine', 'pesquisa sem resposta (claude não devolveu o JSON)', 'error')
+    for (const f of parsed?.findings || []) log(rrole.family, `${f.question}: ${f.answer} ${f.sources?.length ? `(${f.sources.join(', ')})` : ''}`, 'text')
+    if (!parsed) log('engine', `pesquisa sem resposta (${rrole.family} não devolveu o JSON)`, 'error')
     return parsed
   }
-  if (rrole.family !== 'agy') { log('engine', `pesquisa: família ${rrole.family} não suportada (use Claude ou Gemini em Modelos); sigo sem pesquisa`, 'warn'); return null }
   log('engine', `agy (pesquisa, ${model})`)
   setLive({ source: 'agy', kind: 'thinking', text: 'pesquisando…' })
   const r = await run('agy', [`--print=${prompt.replace(/"/g, "'")}`, '--output-format', 'json', '--model', model, '--json-schema', RESEARCH_SCHEMA, '--mode', 'plan', '--add-dir', dir, '--dangerously-skip-permissions'], { cwd: dir, timeoutMs: 5 * 60 * 1000 })
@@ -942,15 +944,17 @@ async function scout(question, { web = false, files = [] } = {}) {
   // batedor num modelo Claude (papel configurado em Modelos): mesmo prompt e mesmo schema do scout.mjs, só leitura.
   // Antes o motor só sabia chamar o agy e mandava `--model sonnet` para o Gemini, que recusava.
   const role = state.settings.roles.scout
-  if (role.family === 'claude') {
-    log('engine', `batedor (claude ${role.model}, esforço ${effortOf('scout')}): ${question.slice(0, 140)}`)
-    const r = await claudeCall({ role: 'batedor', prompt: scoutPrompt(question, { web, files }), model: role.model, effort: effortOf('scout'), tools: web ? ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'] : ['Read', 'Glob', 'Grep'], schema: SCOUT_SCHEMA, maxTurns: 14 })
+  // Batedor fora do agy (papel configurado em Modelos): mesmo prompt e mesmo schema do scout.mjs, só leitura. Passa pelo
+  // plannerOnce, que já sabe falar com Claude e Codex; antes o Codex caía no aviso de família não suportada e a missão ficava
+  // sem recibo nenhum (19/09: gpt-5.6-luna escolhido como batedor virou batedor nenhum).
+  if (role.family !== 'agy') {
+    log('engine', `batedor (${role.family} ${role.model}, esforço ${effortOf('scout')}): ${question.slice(0, 140)}`)
+    const r = await plannerOnce({ family: role.family, model: role.model, effort: effortOf('scout') }, { role: 'batedor', prompt: scoutPrompt(question, { web, files }), schema: SCOUT_SCHEMA, maxTurns: 14, timeoutMs: 7 * 60 * 1000, web })
     const rec = r?.structured_output
-    if (!rec?.summary) { log('engine', 'batedor sem recibo (claude não devolveu o JSON do recibo)', 'error'); return null }
-    log('claude', `recibo do batedor: ${rec.summary}`, 'text')
+    if (!rec?.summary) { log('engine', `batedor sem recibo (${role.family} não devolveu o JSON do recibo)`, 'error'); return null }
+    log(role.family, `recibo do batedor: ${rec.summary}`, 'text')
     return { summary: rec.summary, facts: rec.facts || [], files: rec.files || [], sources: rec.sources || [], model: role.model, question, at: now() }
   }
-  if (role.family !== 'agy') { log('engine', `batedor: família ${role.family} não suportada (use Claude ou Gemini em Modelos); sigo sem recibo`, 'warn'); return null }
   const model = agyModel(state.settings.roles.scout.model, effortOf('scout'))
   log('engine', `batedor (agy ${model}): ${question.slice(0, 140)}`)
   setLive({ source: 'agy', kind: 'thinking', text: 'batedor lendo o projeto…' })
@@ -966,7 +970,7 @@ async function scout(question, { web = false, files = [] } = {}) {
 }
 function scoutBlock(rec) {
   if (!rec) return ''
-  return [`RECIBO DO BATEDOR (Gemini já leu o projeto para isto; confie e leia só o trecho apontado):`, rec.summary,
+  return [`RECIBO DO BATEDOR (${rec.model || 'outro modelo'} já leu o projeto para isto; confie e leia só o trecho apontado):`, rec.summary,
     rec.facts.length ? `Fatos: ${rec.facts.join(' | ')}` : '', rec.files.length ? `Arquivos: ${rec.files.map((f) => `${f.path} linhas ${f.lines} (${f.why})`).join('; ')}` : '',
     rec.sources.length ? `Fontes: ${rec.sources.join(' ')}` : ''].filter(Boolean).join('\n')
 }
