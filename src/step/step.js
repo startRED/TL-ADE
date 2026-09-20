@@ -15,6 +15,9 @@ export const EFFECT_CLASSES = [
   'eval_run',
   'push',
   'local_merge',
+  'pull_request',
+  'pull_request_merge',
+  'ci_rerun',
 ]
 
 /** Chaves fechadas de `intent_context`; cada valor é `string | null`. */

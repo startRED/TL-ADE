@@ -288,3 +288,365 @@ export async function reconcileLocalMerge({ intent, gitPort }) {
     },
   }
 }
+
+const NETWORK_ERROR_CODES = new Set([
+  'ENETUNREACH',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'ENOTFOUND',
+  'ECONNRESET',
+  'EHOSTUNREACH',
+  'EAI_AGAIN',
+  'ENETDOWN',
+  'ENETRESET',
+  'ECONNABORTED',
+])
+
+/**
+ * Classifica se um erro representa falha de conectividade ou indisponibilidade de porta.
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function isNetworkError(err) {
+  if (!err || typeof err !== 'object') {
+    return false
+  }
+  const anyErr = /** @type {{ code?: unknown, message?: unknown, cause?: unknown }} */ (err)
+  const code = anyErr.code
+  if (typeof code === 'string' && NETWORK_ERROR_CODES.has(code)) {
+    return true
+  }
+  if (anyErr.cause && typeof anyErr.cause === 'object') {
+    const causeCode = /** @type {{ code?: unknown }} */ (anyErr.cause).code
+    if (typeof causeCode === 'string' && NETWORK_ERROR_CODES.has(causeCode)) {
+      return true
+    }
+  }
+  const message = anyErr.message
+  if (typeof message === 'string') {
+    for (const netCode of NETWORK_ERROR_CODES) {
+      if (message.includes(netCode)) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Constrói o resultado padrão de awaiting_operator para falhas de rede da porta.
+ * @param {unknown} err
+ * @returns {{
+ *   verdict: 'ambiguous',
+ *   reason: 'network',
+ *   state: 'awaiting_operator',
+ *   handoff: 'awaiting_operator',
+ *   evidence: { reason: 'network', state: 'awaiting_operator', error: string },
+ * }}
+ */
+function buildNetworkUnavailableResult(err) {
+  const anyErr = /** @type {{ message?: unknown, code?: unknown }} */ (err ?? {})
+  const errorMsg =
+    typeof anyErr.message === 'string'
+      ? anyErr.message
+      : typeof anyErr.code === 'string'
+        ? anyErr.code
+        : 'ENETUNREACH'
+
+  return {
+    verdict: 'ambiguous',
+    reason: 'network',
+    state: 'awaiting_operator',
+    handoff: 'awaiting_operator',
+    evidence: {
+      reason: 'network',
+      state: 'awaiting_operator',
+      error: errorMsg,
+    },
+  }
+}
+
+/**
+ * Extrai e normaliza os campos de base_ref, head_commit e head_ref da intenção para operações no forge.
+ * @param {Record<string, any>} intent
+ * @returns {{ baseRef: string, headCommit: string | null, headRef: string }}
+ */
+function extractForgeIntentRefs(intent) {
+  const intentContext = intent.intent_context ?? {}
+  const baseRef =
+    intent.base_ref ??
+    intent.base ??
+    intent.data?.base_ref ??
+    intentContext.base_ref ??
+    intentContext.branch_before ??
+    'main'
+  const headCommit =
+    intent.head_commit ??
+    intent.commit ??
+    intent.data?.head_commit ??
+    intent.data?.commit ??
+    intentContext.head_commit ??
+    intentContext.head_after ??
+    intentContext.head_before ??
+    null
+  const headRef =
+    intent.head_ref ??
+    intent.branch ??
+    intent.data?.head_ref ??
+    intent.data?.branch ??
+    intentContext.head_ref ??
+    intentContext.branch_after ??
+    'head'
+
+  return { baseRef, headCommit, headRef }
+}
+
+/**
+ * Consulta o pull request no forgePort tratando erros de conectividade de rede sem nova consulta.
+ * @param {{ findPullRequest: (params: { headRef?: string }) => Promise<any> }} forgePort
+ * @param {string} headRef
+ * @returns {Promise<{ ok: true, pr: any } | { ok: false, result: ReturnType<typeof buildNetworkUnavailableResult> }>}
+ */
+async function queryForgePullRequest(forgePort, headRef) {
+  try {
+    const pr = await forgePort.findPullRequest({ headRef })
+    return { ok: true, pr }
+  } catch (err) {
+    if (isNetworkError(err)) {
+      return { ok: false, result: buildNetworkUnavailableResult(err) }
+    }
+    throw err
+  }
+}
+
+/**
+ * Reconcilia uma intenção de efeito 'pull_request'.
+ *
+ * @param {{
+ *   intent: Record<string, any>,
+ *   forgePort: {
+ *     findPullRequest: (params: { headRef?: string }) => Promise<{
+ *       state: string,
+ *       baseRefName: string,
+ *       headRefOid: string,
+ *       mergedAt?: string | null,
+ *     } | null>,
+ *   },
+ * }} options
+ * @returns {Promise<{
+ *   verdict: 'ok' | 'released' | 'ambiguous',
+ *   reason: string,
+ *   state?: string,
+ *   handoff?: string,
+ *   evidence: Record<string, unknown>,
+ *   pr?: unknown,
+ * }>}
+ */
+export async function reconcilePullRequest({ intent, forgePort }) {
+  if (!intent || typeof intent !== 'object' || Array.isArray(intent)) {
+    throw new DeliveryInvalidInputError('intent inválido')
+  }
+  if (!forgePort || typeof forgePort.findPullRequest !== 'function') {
+    throw new DeliveryInvalidInputError('forgePort inválido')
+  }
+
+  const { baseRef, headCommit, headRef } = extractForgeIntentRefs(intent)
+
+  const query = await queryForgePullRequest(forgePort, headRef)
+  if (!query.ok) {
+    return query.result
+  }
+  const pr = query.pr
+
+  if (!pr) {
+    return {
+      verdict: 'ambiguous',
+      reason: 'pr_not_found',
+      state: 'awaiting_operator',
+      handoff: 'awaiting_operator',
+      evidence: {
+        expected_base: baseRef,
+        expected_head: headCommit,
+        head_ref: headRef,
+        pr: null,
+      },
+    }
+  }
+
+  const isStateOpen = pr.state === 'OPEN'
+  const baseMatches = pr.baseRefName === baseRef
+  const headMatches = pr.headRefOid === headCommit
+
+  if (isStateOpen && baseMatches && headMatches) {
+    return {
+      verdict: 'ok',
+      reason: 'pr_open_adopted',
+      evidence: {
+        state: pr.state,
+        baseRefName: pr.baseRefName,
+        headRefOid: pr.headRefOid,
+        mergedAt: pr.mergedAt ?? null,
+      },
+      pr,
+    }
+  }
+
+  const reason = !isStateOpen
+    ? 'pr_state_mismatch'
+    : !headMatches
+      ? 'pr_head_mismatch'
+      : 'pr_base_mismatch'
+
+  return {
+    verdict: 'ambiguous',
+    reason,
+    state: 'awaiting_operator',
+    handoff: 'awaiting_operator',
+    evidence: {
+      expected_base: baseRef,
+      expected_head: headCommit,
+      state: pr.state,
+      baseRefName: pr.baseRefName,
+      headRefOid: pr.headRefOid,
+      mergedAt: pr.mergedAt ?? null,
+    },
+    pr,
+  }
+}
+
+/**
+ * Reconcilia uma intenção de efeito 'pull_request_merge'.
+ *
+ * @param {{
+ *   intent: Record<string, any>,
+ *   forgePort: {
+ *     findPullRequest: (params: { headRef?: string }) => Promise<{
+ *       state: string,
+ *       baseRefName: string,
+ *       headRefOid: string,
+ *       mergedAt?: string | null,
+ *     } | null>,
+ *   },
+ * }} options
+ * @returns {Promise<{
+ *   verdict: 'ok' | 'released' | 'ambiguous',
+ *   reason: string,
+ *   commit?: string,
+ *   state?: string,
+ *   handoff?: string,
+ *   evidence: Record<string, unknown>,
+ *   pr?: unknown,
+ * }>}
+ */
+export async function reconcileRemoteMerge({ intent, forgePort }) {
+  if (!intent || typeof intent !== 'object' || Array.isArray(intent)) {
+    throw new DeliveryInvalidInputError('intent inválido')
+  }
+  if (!forgePort || typeof forgePort.findPullRequest !== 'function') {
+    throw new DeliveryInvalidInputError('forgePort inválido')
+  }
+
+  const { baseRef, headCommit, headRef } = extractForgeIntentRefs(intent)
+
+  const query = await queryForgePullRequest(forgePort, headRef)
+  if (!query.ok) {
+    return query.result
+  }
+  const pr = query.pr
+
+  if (!pr) {
+    return {
+      verdict: 'ambiguous',
+      reason: 'pr_not_found',
+      state: 'awaiting_operator',
+      handoff: 'awaiting_operator',
+      evidence: {
+        expected_base: baseRef,
+        expected_head: headCommit,
+        head_ref: headRef,
+        pr: null,
+      },
+    }
+  }
+
+  const isMerged = pr.state === 'MERGED'
+  const baseMatches = pr.baseRefName === baseRef
+  const headMatches = pr.headRefOid === headCommit
+
+  if (isMerged && baseMatches && headMatches) {
+    return {
+      verdict: 'ok',
+      reason: 'remote_merged',
+      commit: pr.headRefOid,
+      evidence: {
+        state: pr.state,
+        baseRefName: pr.baseRefName,
+        headRefOid: pr.headRefOid,
+        mergedAt: pr.mergedAt ?? null,
+      },
+      pr,
+    }
+  }
+
+  let reason = 'merge_ambiguous'
+  if (pr.state === 'CLOSED') {
+    reason = 'pr_closed'
+  } else if (pr.state === 'OPEN') {
+    reason = 'merge_enqueued_still_open'
+  } else if (!headMatches) {
+    reason = 'pr_head_mismatch'
+  } else if (!baseMatches) {
+    reason = 'pr_base_mismatch'
+  }
+
+  return {
+    verdict: 'ambiguous',
+    reason,
+    state: 'awaiting_operator',
+    handoff: 'awaiting_operator',
+    evidence: {
+      expected_base: baseRef,
+      expected_head: headCommit,
+      state: pr.state,
+      baseRefName: pr.baseRefName,
+      headRefOid: pr.headRefOid,
+      mergedAt: pr.mergedAt ?? null,
+    },
+    pr,
+  }
+}
+
+/**
+ * Reconcilia uma intenção de efeito 'ci_rerun'.
+ *
+ * @param {{
+ *   intent: Record<string, any>,
+ * }} options
+ * @returns {{
+ *   verdict: 'ambiguous',
+ *   reason: string,
+ *   attempts: number,
+ *   rerun_calls: number,
+ *   state: string,
+ *   handoff: string,
+ *   evidence: { attempts: number, rerun_calls: number },
+ * }}
+ */
+export function reconcileCiRerun({ intent }) {
+  if (!intent || typeof intent !== 'object' || Array.isArray(intent)) {
+    throw new DeliveryInvalidInputError('intent inválido')
+  }
+
+  return {
+    verdict: 'ambiguous',
+    reason: 'ci_rerun_requires_operator',
+    attempts: 1,
+    rerun_calls: 0,
+    state: 'awaiting_operator',
+    handoff: 'awaiting_operator',
+    evidence: {
+      attempts: 1,
+      rerun_calls: 0,
+    },
+  }
+}
