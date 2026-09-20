@@ -17,7 +17,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { skillDescription } from './skill-meta.mjs'
-import { makerTurns, preexistingReds, truncated } from './rounds.mjs'
+import { inheritedFiles, makerTurns, preexistingReds, truncated } from './rounds.mjs'
 import { PLANNING_POLICY, versionProgram, planIssues, needsPlanCritic, skillsForStory, canCombineProof } from './planning.mjs'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
@@ -1084,8 +1084,13 @@ async function checker(diff, tests, st) {
       const rx = scopeRx
       const files = [...new Set([...diff.matchAll(/^diff --git a\/(\S+)/gm)].map((x) => x[1]))]
       const allow = st.scope_paths.map(rx), deny = (st.do_not_touch || []).map(rx)
-      const forbidden = files.filter((f) => deny.some((r) => r.test(f))), outside = files.filter((f) => !allow.some((r) => r.test(f)) && !forbidden.includes(f))
-      return forbidden.length || outside.length ? `CONFERÊNCIA MECÂNICA DO CONTRATO (feita pelo motor):${forbidden.length ? ` alterou arquivo PROIBIDO: ${forbidden.join(', ')}.` : ''}${outside.length ? ` alterou arquivo FORA de scope_paths: ${outside.join(', ')}.` : ''} Abra cada um: só é legítimo se cair na EXCEÇÃO acima (asserções de prova antiga que a story invalida) ou for o mínimo indispensável dito por quem escreveu; caso contrário é achado high.` : ''
+      // parte de correção trabalha sobre a árvore da parte anterior, e o diff dela conta desde o mesmo commit base: o que
+      // veio de lá já foi julgado lá e não é alteração fora do contrato DESTA parte (ver inheritedFiles em rounds.mjs)
+      const inherited = new Set(inheritedFiles(st, m.stories || []))
+      const mine = files.filter((f) => !inherited.has(f))
+      const forbidden = mine.filter((f) => deny.some((r) => r.test(f))), outside = mine.filter((f) => !allow.some((r) => r.test(f)) && !forbidden.includes(f))
+      const herdados = files.filter((f) => inherited.has(f) && !allow.some((r) => r.test(f)))
+      return forbidden.length || outside.length || herdados.length ? `CONFERÊNCIA MECÂNICA DO CONTRATO (feita pelo motor):${forbidden.length ? ` alterou arquivo PROIBIDO: ${forbidden.join(', ')}.` : ''}${outside.length ? ` alterou arquivo FORA de scope_paths: ${outside.join(', ')}.` : ''}${forbidden.length || outside.length ? ' Abra cada um: só é legítimo se cair na EXCEÇÃO acima (asserções de prova antiga que a story invalida) ou for o mínimo indispensável dito por quem escreveu; caso contrário é achado high.' : ''}${herdados.length ? ` Já vieram alterados da parte anterior, que esta correção foi mandada a NÃO refazer: ${herdados.join(', ')}. O contrato deles foi julgado na parte anterior; NÃO conte como alteração fora do contrato desta parte e não peça para desfazer.` : ''}` : ''
     })(),
     diff.length > 60000 ? `ATENÇÃO: o diff tem ${diff.length} caracteres e abaixo vão só os primeiros 60000. Arquivos alterados: ${[...diff.matchAll(/^diff --git a\/(\S+)/gm)].map((x) => x[1]).join(', ')}. Abra com as suas ferramentas os que não aparecerem inteiros antes de aprovar.` : '',
     (() => { const names = new Set((tests.tests || []).map((t) => t.name)); const gone = (st.red_tests || []).map((t) => t.name).filter((n) => n && !/[\\/]|\.test\./.test(n) && !names.has(n)); return gone.length ? `PROVAS QUE NASCERAM VERMELHAS E NÃO EXISTEM MAIS: ${gone.slice(0, 8).join(' | ')}. Confira se foram só renomeadas; prova apagada ou asserção enfraquecida para passar é achado high.` : '' })(),

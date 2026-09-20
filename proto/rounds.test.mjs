@@ -1,7 +1,17 @@
 // node --test proto/rounds.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { makerTurns, preexistingReds, truncated } from './rounds.mjs'
+import { inheritedFiles, makerTurns, preexistingReds, truncated } from './rounds.mjs'
+
+test('parte de correção herda os arquivos que a parte anterior já tinha alterado', () => {
+  const stories = [{ id: 'R2', diff: 'diff --git a/src/lease/process-info.js b/src/lease/process-info.js\n', files: ['src\\adapters\\claude\\index.js'] }]
+  assert.deepEqual(inheritedFiles({ fix_of: 'R2' }, stories), ['src/lease/process-info.js', 'src/adapters/claude/index.js'])
+})
+
+test('parte normal não herda nada', () => {
+  assert.deepEqual(inheritedFiles({ id: 'R3' }, [{ id: 'R2', files: ['a.js'] }]), [])
+  assert.deepEqual(inheritedFiles({ fix_of: 'sumiu' }, []), [])
+})
 
 const t = (name, status, message = '') => ({ name, status, message })
 

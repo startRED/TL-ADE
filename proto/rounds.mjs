@@ -25,6 +25,19 @@ export function makerTurns({ wasTruncated = false, escalate = false } = {}) {
 // antigas; "prova instável" só valia se TODAS fossem novas. Uma mistura das duas escapava dos dois portões e abria rodada
 // paga sem defeito algum (m-mu8usf5z, V02-R2f, rodadas 2 e 3: 4 vermelhas antigas + 6 estouros de 5 s com a máquina
 // carregada, zero falha de verdade, e a parte subiu para o degrau mais caro da cadeia).
+// Arquivos que a parte de CORREÇÃO já recebeu alterados da parte anterior.
+// Ela é mandada a não refazer o trabalho ("corrija APENAS os problemas abaixo, no código existente"), mas o diff dela conta
+// desde o mesmo commit base, então o contrato era conferido em cima do trabalho alheio. Na m-mu8usf5z a V02-R2f levou dois
+// achados high por src/lease/process-info.js e src/adapters/claude/index.js, arquivos que a V02-R2 mexeu e que a revisão da
+// V02-R2 aceitou. Achado high impede o approve E conta como problema grave, então a parte subia para o modelo mais caro e
+// gastava rodadas para desfazer exatamente o que mandaram manter.
+export function inheritedFiles(st, stories = []) {
+  const prev = st?.fix_of && stories.find((x) => x.id === st.fix_of)
+  if (!prev) return []
+  const fromDiff = [...String(prev.diff || '').matchAll(/^diff --git a\/(\S+)/gm)].map((x) => x[1])
+  return [...new Set([...fromDiff, ...(prev.files || []).map((f) => f.split('\\').join('/'))])]
+}
+
 export function preexistingReds(tests, before) {
   if (!tests?.tests?.length || !before?.length) return []
   const redBefore = new Set(before.filter((t) => t.status !== 'passed').map((t) => t.name))
