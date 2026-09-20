@@ -4,12 +4,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { AdeError } from './journal/errors.js'
 import { readJournal } from './journal/journal.js'
-import { assertCallBudget, authorizePaidCall, checkUsdCap, observedUsd, reserveCalls } from './engine/budget.js'
+import { assertCallBudget, authorizePaidCall, checkUsdCap, DEFAULT_CONTEXT_LIMIT_BYTES, observedUsd, reserveCalls } from './engine/budget.js'
 import { deliverStory, withDeliveryFlag } from './engine/deliver.js'
 import { authorizedStep } from './engine/paid-call.js'
 import { maybeEngineFault } from './engine/faults.js'
 import { findStoryCommitted, findStoryStarted } from './engine/resume.js'
 import { dedupStorySection } from './pack/dedup.js'
+import { measurePackBytes } from './pack/pack.js'
+import { buildStoryContext, guardStoryContext } from './context/story.js'
 import { dispatchClaude } from './adapters/claude/index.js'
 import { dispatchCodex } from './adapters/codex/index.js'
 
@@ -212,21 +214,35 @@ async function runStoryImpl(deps, input) {
   // Autoriza e reserva a chamada paga antes de preparar a worktree.
   assertCallBudget(loaded.plan.budget, 'plan')
   assertCallBudget(contract.budget, 'contract')
-  const dedup = dedupStorySection(story)
-  const packResult = deps.compilePack({
-    missionDir,
-    stepId: `${storyId}:r1:maker`,
-    sections: {
-      contract: typeof contract === 'string' ? contract : JSON.stringify(contract, null, 2),
-      policy: JSON.stringify(loaded.plan.authorization ?? {}, null, 2),
-      story: dedup.text,
-    },
-    savedBytes: dedup.saved_bytes,
-  })
-  const contextBytes = packResult.manifest?.bytes
-  if (typeof contextBytes !== 'number' || !Number.isSafeInteger(contextBytes) || contextBytes < 0) {
-    throw new AdeError('invalid_pack_manifest', 'manifesto do pack sem tamanho de contexto válido', 4)
+  // Contrato acima do teto ou verificador sem comando recusam a story antes de reservar cota.
+  const contextGuard = guardStoryContext({ story, contract, workspaceDir: repoDir })
+  if (contextGuard.status !== 'ready') {
+    await deps.journal.append({
+      kind: 'story_done',
+      unit: storyId,
+      data: {
+        status: 'awaiting_operator',
+        reason: contextGuard.reason,
+        unit: storyId,
+        commit: null,
+      },
+    })
+    return {
+      status: 'awaiting_operator',
+      exitCode: 3,
+      reason: contextGuard.reason,
+      commit: null,
+    }
   }
+
+  const dedup = dedupStorySection(story)
+  // O pack só é montado depois do worktree preparado; aqui medimos o contexto para a reserva.
+  const baseSections = {
+    contract: typeof contract === 'string' ? contract : JSON.stringify(contract, null, 2),
+    policy: JSON.stringify(loaded.plan.authorization ?? {}, null, 2),
+    story: dedup.text,
+  }
+  const contextBytes = measurePackBytes(baseSections)
   const eventsBeforeReservation = readEvents()
   const previousReservation = eventsBeforeReservation.find((event) => {
     const data = event.data
@@ -440,6 +456,77 @@ async function runStoryImpl(deps, input) {
         base_before: baseBefore,
       },
     })
+  }
+
+  // A descoberta que vale é a do workspace preparado: reconfere os verificadores contra ele antes
+  // de montar contexto ou despachar qualquer agente (a guarda anterior já barrou o que dava na base).
+  const preparedGuard = guardStoryContext({ story, contract, workspaceDir: worktreeDir })
+  if (preparedGuard.status !== 'ready') {
+    await deps.journal.append({
+      kind: 'story_done',
+      unit: storyId,
+      data: {
+        status: 'awaiting_operator',
+        reason: preparedGuard.reason,
+        unit: storyId,
+        commit: null,
+      },
+    })
+    return {
+      status: 'awaiting_operator',
+      exitCode: 3,
+      reason: preparedGuard.reason,
+      commit: null,
+    }
+  }
+
+  // Contexto compacto da story: montado só agora, sobre a árvore e os comandos reais do worktree.
+  const storyContext = await buildStoryContext(
+    { loaded, story, worktreeDir, missionDir, operatorNotes: deps.operatorNotes },
+    { journal: deps.journal, eligibleSkills: deps.eligibleSkills, ir: deps.ir },
+  )
+  const contextStorySection = storyContext.sections.story
+  // O que a dedup economizou é medido contra a seção que de fato vai no pack.
+  const contextSavedBytes = Math.max(
+    0,
+    dedup.saved_bytes + Buffer.byteLength(dedup.text) - Buffer.byteLength(contextStorySection),
+  )
+  const packResult = deps.compilePack({
+    missionDir,
+    stepId: `${storyId}:r1:maker`,
+    sections: { ...baseSections, story: contextStorySection },
+    savedBytes: contextSavedBytes,
+    skills: storyContext.selectedSkills.map((s) => ({
+      name: s.name,
+      source: s.source,
+      sha256: s.sha256,
+      bytes: s.bytes,
+    })),
+    artifactRefs: storyContext.artifactRefs,
+  })
+
+  // O pack montado é o que vai ao modelo: acima do limite de contexto, ninguém é despachado.
+  const packBytes = packResult.manifest?.bytes
+  if (typeof packBytes !== 'number' || !Number.isSafeInteger(packBytes) || packBytes < 0) {
+    throw new AdeError('invalid_pack_manifest', 'manifesto do pack sem tamanho de contexto válido', 4)
+  }
+  if (packBytes >= DEFAULT_CONTEXT_LIMIT_BYTES) {
+    await deps.journal.append({
+      kind: 'story_done',
+      unit: storyId,
+      data: {
+        status: 'awaiting_operator',
+        reason: 'context_limit_exceeded',
+        unit: storyId,
+        commit: null,
+      },
+    })
+    return {
+      status: 'awaiting_operator',
+      exitCode: 3,
+      reason: 'context_limit_exceeded',
+      commit: null,
+    }
   }
 
   const redGitPort = started

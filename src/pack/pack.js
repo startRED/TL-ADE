@@ -148,6 +148,17 @@ function buildRawPack(sections) {
 }
 
 /**
+ * Mede, sem gravar nada, quantos bytes o pack ocuparia com estas seções.
+ *
+ * @param {{contract: string, policy: string, story: string}} sections
+ * @returns {number}
+ */
+export function measurePackBytes(sections) {
+  validateSections(sections)
+  return Buffer.byteLength(buildRawPack(sections), 'utf8')
+}
+
+/**
  * Separa de volta os corpos de cada seção a partir do texto do pack montado.
  *
  * @param {string} text
@@ -306,6 +317,8 @@ export function compilePack(options) {
       contract_bytes: Buffer.byteLength(finalBodies.contract),
       saved_bytes: savedBytes ?? 0,
     },
+    ...(options.skills ? { skills: options.skills } : {}),
+    ...(options.artifactRefs ? { artifact_refs: options.artifactRefs } : {}),
   }
 
   const packDir = path.join(missionDir, 'artifacts', 'packs', id)
