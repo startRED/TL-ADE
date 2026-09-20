@@ -1569,7 +1569,12 @@ function testPrompt(st, pack, together = false) {
 function fixPrompt(st, round, review, visual, pack, turns = 30) {
   const red = st.red_tests.map((t) => `- ${t.name}: ${t.message}`).join('\n')
   const base = [`Pedido original do usuário: ${state.mission.request}`, ...common(st), pack,
-    `FASE 2 de 2: a prova nova está vermelha, como esperado:\n${red}`,
+    // Rodada aberta pelo REVISOR começa com as provas verdes, e st.red_tests ainda guarda o vermelho da rodada 1. Repetir
+    // aquele texto manda o modelo mais caro da cadeia caçar um erro que já foi corrigido (m-mu8usf5z, v03-s4 rodada 3: o
+    // Opus abriu com "Failed to load url ../src/mission/plan-lifecycle.js" de um arquivo que já existia havia duas rodadas).
+    st.tests_after?.ok
+      ? 'FASE 2 de 2: as provas da parte estão VERDES. Esta rodada é SÓ para os achados do revisor abaixo; não refaça o que já passa e não procure erro de prova.'
+      : `FASE 2 de 2: a prova nova está vermelha, como esperado:\n${red}`,
     st.no_change_retry ? 'A tentativa anterior terminou SEM alterar arquivo algum (o tempo acabou, provavelmente esperando provas). NÃO rode a suíte inteira nem provas lentas de integração (as que sobem processos): o harness roda todas as provas depois de você. Vá direto às edições.' : '',
     st.red_regress?.length ? `Provas ANTIGAS que ficaram vermelhas depois que a prova nova entrou (em geral portão de tipos/lint reclamando do que ainda não existe). Têm de voltar a passar com a sua implementação; não as altere:\n${st.red_regress.map((t) => `- ${t.name}: ${t.message}`).join('\n')}` : '',
     // o número aqui é o teto real da chamada (maxTurns): dizer 30 e cortar em 20 fazia quem escreve planejar para um
