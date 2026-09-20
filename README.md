@@ -9,10 +9,13 @@ operacional mora no harness.
 
 ## Estado e autorização
 
-- Slice 1: fechamento pendente ([docs/plans/slice-1-fechamento.md](docs/plans/slice-1-fechamento.md)). O dogfood D1 de 18/09 consta como evidência parcial histórica.
-- Recorte local v0.2: não autorizado ([docs/plans/v02-local-proposta.md](docs/plans/v02-local-proposta.md), [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md)).
-- Restante da v0.2: fora desta rodada.
-Implementação dependente: bloqueada.
+- Autorização até a v1: concedida por Erick em 2026-09-19 ([docs/adr/0024-autorizacao-roadmap-ate-v1.md](docs/adr/0024-autorizacao-roadmap-ate-v1.md)).
+- Sequência obrigatória dos marcos: v0.2 (durabilidade e paridade 93) -> v0.3 -> v0.4a -> v0.4b -> v0.5 -> v1.
+- Recorte ativo deste épico: v0.3 — Intent Compiler, Task Contracts v0.3, governança durável e contratos auditáveis.
+- Slice 1: fechamento pendente ([docs/plans/slice-1-fechamento.md](docs/plans/slice-1-fechamento.md)).
+- Recorte local v0.2: autorizado sequencialmente ([docs/plans/v02-local-proposta.md](docs/plans/v02-local-proposta.md), [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md)).
+- Restante da v0.2: segue a ordem do roadmap.
+Implementação dependente: autorizada sequencialmente até a v1 conforme o épico ativo.
 
 Repositório canônico: [`startRED/TL-ADE`](https://github.com/startRED/TL-ADE) (público). Autor: Erick.
 Trabalho novo entra por branch + PR contra `main`; convenções em [`docs/development-method.md`](docs/development-method.md).

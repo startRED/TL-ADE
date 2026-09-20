@@ -43,11 +43,20 @@ afterEach(async () => {
 
 function buildContract(overrides: Record<string, any> = {}) {
   return {
-    format_version: 1,
+    format_version: 2,
     id: 'ADE-T1',
     title: 'Preflight Story',
     complexity: 'bounded',
     task: 'Run preflight verification',
+    workspace: {
+      kind: 'git',
+      root: '.',
+    },
+    risk: {
+      level: 'normal',
+      surfaces: [],
+      evidence: ['repo:tests/a.test.ts'],
+    },
     guardrails: {
       scope_paths: ['src/**', 'tests/**'],
       do_not_touch: ['.ade/**'],
@@ -60,14 +69,37 @@ function buildContract(overrides: Record<string, any> = {}) {
       },
     ],
     scenarios: [
-      JSON.parse(
-        '{"id":"C1","given":"clean worktree and valid environment","when":"preflight evaluates checks","then":"all ports are ready","evals":["E1"]}',
+      Object.assign(
+        {
+          id: 'C1',
+          given: 'clean worktree and valid environment',
+          when: 'preflight evaluates checks',
+          evals: ['E1'],
+          verifiers: ['V1'],
+        },
+        JSON.parse('{"then":"all ports are ready"}'),
       ),
     ],
+    verifiers: [
+      {
+        id: 'V1',
+        kind: 'script',
+        cmd: ['node', 'tests/a.test.ts'],
+        expect_exit: 0,
+        timeout_s: 120,
+        max_output_bytes: 65536,
+        evidence: ['tests/a.test.ts'],
+        strictness: {
+          mode: 'must_fail_before',
+        },
+        author: 'operator',
+      },
+    ],
+    unknowns: [],
     evals: [
       {
         format_version: 1,
-        kind: 'test',
+        kind: 'script',
         cmd: ['node', 'tests/a.test.ts'],
         expect_exit: 0,
         timeout_s: 120,
@@ -103,9 +135,14 @@ function buildLoadedPlan(contract: any, planMaxCalls = 6): any {
     planDir: '',
     gates: [],
     plan: {
-      format_version: 1,
+      format_version: 2,
       id: 'plan-preflight',
       mission_id: 'mission-preflight-1',
+      direction: 'verify preflight',
+      next_delivery: 'tests pass',
+      intent: 'verify preflight integration',
+      briefing: 'preflight checks',
+      unknowns: [],
       immutable_digest: '0123456789abcdef',
       authorization: {
         autonomy: 'safe',
@@ -179,9 +216,11 @@ describe('preflight integration', () => {
     openJournals.push(journal)
 
     const eventsAppended: string[] = []
+    const rawEventsAppended: any[] = []
     const origAppend = journal.append.bind(journal)
     journal.append = async (evt: any) => {
       eventsAppended.push(evt.kind)
+      rawEventsAppended.push(evt)
       return origAppend(evt)
     }
 

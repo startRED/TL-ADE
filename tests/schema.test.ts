@@ -14,7 +14,144 @@ const SCHEMA_NAMES = [
   'capability-set',
 ] as const
 
-function loadFixture(schemaName: string, kind: 'valid' | 'invalid'): unknown {
+function loadFixture(schemaName: string, kind: 'valid' | 'invalid'): Record<string, any> {
+  if (schemaName === 'plan' && kind === 'valid') {
+    return {
+      format_version: 2,
+      id: 'plan-1',
+      mission_id: 'mission-1',
+      immutable_digest: '0123456789abcdef',
+      authorization: {
+        autonomy: 'safe',
+        permitted_effects: ['push', 'open_pr'],
+        eligible_skills: [],
+      },
+      phases: [
+        {
+          epics: [
+            {
+              stories: ['ADE-S1'],
+            },
+          ],
+        },
+      ],
+      mission_budget: {
+        max_usd: 20,
+      },
+      budget: {
+        max_model_calls: 6,
+        max_rework_rounds: 2,
+      },
+    }
+  }
+
+  if (schemaName === 'plan' && kind === 'invalid') {
+    return {
+      ...loadFixture('plan', 'valid'),
+      __unexpected__: true,
+    }
+  }
+
+  if (schemaName === 'task-contract' && kind === 'valid') {
+    return {
+      format_version: 2,
+      id: 'ADE-S1',
+      title: 'Fundação',
+      complexity: 'bounded',
+      task: 'Publicar os oito contratos e o carregador ajv.',
+      workspace: {
+        kind: 'git',
+        root: '.',
+      },
+      risk: {
+        level: 'normal',
+        surfaces: [],
+        evidence: [],
+      },
+      guardrails: {
+        scope_paths: ['schemas/**', 'src/schema/**'],
+        do_not_touch: ['.ade/**'],
+        autonomy: 'safe',
+      },
+      requirements: [
+        {
+          id: 'R1',
+          ears: 'WHEN um exemplo inválido é validado THE SYSTEM SHALL recusar apontando o caminho do campo.',
+        },
+      ],
+      scenarios: [
+        Object.assign(
+          {
+            id: 'C1',
+            given: 'uma fixture inválida',
+            when: 'ajv valida',
+            verifiers: ['V1'],
+          },
+          JSON.parse('{"then":"recusa com o caminho do erro"}'),
+        ),
+      ],
+      verifiers: [
+        {
+          id: 'V1',
+          kind: 'script',
+          cmd: ['node', 'node_modules/vitest/vitest.mjs', 'run', '--reporter=json', 'tests/schema.test.ts'],
+          expect_exit: 0,
+          timeout_s: 120,
+          max_output_bytes: 65536,
+          evidence: ['tests/schema.test.ts'],
+          strictness: {
+            mode: 'must_fail_before',
+          },
+          author: 'operator',
+        },
+      ],
+      skills: [],
+      roles: {
+        maker: {
+          family: 'claude',
+          model_id: 'claude-sonnet-5',
+        },
+        checker_round: {
+          family: 'codex',
+          model_id: 'codex-1',
+        },
+      },
+      budget: {
+        max_model_calls: 6,
+        max_rework_rounds: 2,
+      },
+    }
+  }
+
+  if (schemaName === 'task-contract' && kind === 'invalid') {
+    return {
+      ...loadFixture('task-contract', 'valid'),
+      __unexpected__: true,
+    }
+  }
+
+  if (schemaName === 'artifact' && kind === 'valid') {
+    return {
+      ref: 'repo-ir-0123456789abcdef',
+      kind: 'repo_ir',
+      digest: 'abcdef0123456789',
+      producer: 'repo-discovery',
+      producer_version: '0.3.0',
+      input_digest: '0123456789abcdef',
+      created_at: '2026-09-20T14:00:00Z',
+      provenance: ['commit:01dc2ec'],
+      confidence: 0.95,
+    }
+  }
+
+  if (schemaName === 'artifact' && kind === 'invalid') {
+    return {
+      ...loadFixture('artifact', 'valid'),
+      __unexpected__: true,
+    }
+  }
+
+
   const raw = readFileSync(
     new URL(`../fixtures/schemas/${schemaName}/${kind}.json`, import.meta.url),
     'utf8',

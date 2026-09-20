@@ -4,12 +4,26 @@
   "title": "plan",
   "type": "object",
   "additionalProperties": false,
-  "required": ["format_version", "id", "mission_id", "immutable_digest", "authorization", "phases", "mission_budget", "budget"],
+  "required": [
+    "format_version",
+    "id",
+    "mission_id",
+    "immutable_digest",
+    "authorization",
+    "phases",
+    "mission_budget",
+    "budget"
+  ],
   "properties": {
-    "format_version": { "type": "integer", "minimum": 1 },
+    "format_version": { "type": "integer", "enum": [2] },
     "id": { "type": "string" },
     "mission_id": { "type": "string" },
     "immutable_digest": { "type": "string" },
+    "direction": { "type": "object" },
+    "next_delivery": { "type": "object" },
+    "intent": { "type": "string" },
+    "briefing": { "type": "object" },
+    "unknowns": { "type": "array" },
     "authorization": {
       "type": "object",
       "additionalProperties": false,

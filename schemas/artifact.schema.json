@@ -1,0 +1,40 @@
+{
+  "$id": "https://tl-ade.dev/schemas/artifact.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ref",
+    "kind",
+    "digest",
+    "producer",
+    "producer_version",
+    "input_digest",
+    "created_at",
+    "provenance",
+    "confidence"
+  ],
+  "properties": {
+    "format_version": { "type": "integer", "minimum": 1 },
+    "ref": { "type": "string", "minLength": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "kind": { "type": "string", "minLength": 1 },
+    "digest": { "type": "string", "minLength": 1 },
+    "producer": { "type": "string", "minLength": 1 },
+    "producer_version": { "type": "string", "minLength": 1 },
+    "input_digest": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "minLength": 1 },
+    "provenance": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "raw_ref": { "type": "string" },
+    "config_digest": { "type": "string" },
+    "model_id": { "type": "string" },
+    "data": { "type": "object" },
+    "summary": { "type": "string" },
+    "items": { "type": "array" }
+  }
+}

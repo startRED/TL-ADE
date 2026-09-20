@@ -90,7 +90,7 @@ function setupConvergenceFixture(options: FixtureOptions = {}) {
   fs.mkdirSync(storiesDir, { recursive: true })
 
   const planObj = {
-    format_version: 1,
+    format_version: 2,
     id: 'plan-conv-1',
     mission_id: 'mission-conv-1',
     immutable_digest: '0123456789abcdef',
@@ -127,11 +127,20 @@ function setupConvergenceFixture(options: FixtureOptions = {}) {
       : { family: 'codex', model_id: 'gpt-5.6-terra' }
 
   const contractObj = {
-    format_version: 1,
+    format_version: 2,
     id: 'ADE-C1',
     title: 'Story Convergence',
     complexity: 'bounded',
     task: 'Create src/hello.txt with ok',
+    workspace: {
+      kind: 'git',
+      root: '.',
+    },
+    risk: {
+      level: 'normal',
+      surfaces: [],
+      evidence: ['repo:tests/check.mjs'],
+    },
     guardrails: {
       scope_paths: ['src/**', 'tests/**'],
       do_not_touch: ['.ade/**'],
@@ -141,14 +150,38 @@ function setupConvergenceFixture(options: FixtureOptions = {}) {
       { id: 'R1', ears: 'WHEN check runs THE SYSTEM SHALL pass.' },
     ],
     scenarios: [
-      JSON.parse(
-        '{"id":"C1","given":"initial state without hello.txt","when":"maker creates hello.txt with ok","then":"eval check passes","evals":["E1"]}',
+      Object.assign(
+        {
+          id: 'C1',
+          given: 'initial state without hello.txt',
+          when: 'maker creates hello.txt with ok',
+          evals: ['E1'],
+          verifiers: ['V1'],
+        },
+        JSON.parse('{"then":"eval check passes"}'),
       ),
     ],
+    verifiers: [
+      {
+        id: 'V1',
+        kind: 'script',
+        cmd: ['node', 'tests/check.mjs'],
+        expect_exit: 0,
+        timeout_s: 120,
+        max_output_bytes: 65536,
+        evidence: ['tests/check.mjs'],
+        strictness: {
+          mode: 'must_fail_before',
+        },
+        author: 'operator',
+      },
+    ],
+    unknowns: [],
     evals: [
       {
         format_version: 1,
-        kind: 'test',
+        id: 'E1',
+        kind: 'script',
         cmd: ['node', 'tests/check.mjs'],
         expect_exit: 0,
         timeout_s: 120,

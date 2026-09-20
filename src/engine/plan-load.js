@@ -4,7 +4,7 @@ import path from 'node:path'
 import { matchesGlob } from '../contain/contain.js'
 import { digest16 } from '../journal/canonical.js'
 import { AdeError } from '../journal/errors.js'
-import { validate } from '../schema/index.js'
+import { validate, validateSupported } from '../schema/index.js'
 import { assertCallBudget } from './budget.js'
 
 export const EXTERNAL_EFFECTS = ['push', 'open_pr', 'merge']
@@ -88,13 +88,17 @@ export function defaultStoryBudget({ complexity, needs_ui = false }) {
 
 /**
  * Carrega e valida um plan.json, seus contratos e gates opcionais.
+ * O modo 'read' existe para leitura e inspeção de planos históricos em formatos legados
+ * (ainda sem chamador de produção na v0.3, usado para validação e leitura não-bloqueante).
  *
  * @param {string | Record<string, any>} planPath
+ * @param {{ mode?: 'read' | 'approval' }} [options]
  * @returns {LoadedPlan}
  */
-export function loadPlan(planPath) {
+export function loadPlan(planPath, options = {}) {
   let doc
   let planDir
+  const mode = options?.mode ?? 'approval'
 
   if (typeof planPath === 'object' && planPath !== null) {
     doc = planPath
@@ -163,6 +167,11 @@ export function loadPlan(planPath) {
           'phases',
           'mission_budget',
           'budget',
+          'direction',
+          'next_delivery',
+          'intent',
+          'briefing',
+          'unknowns',
           'push',
           'open_pr',
           'merge',
@@ -181,12 +190,31 @@ export function loadPlan(planPath) {
     }
   }
 
-  const planValidation = validate('plan', doc)
-  if (!planValidation.valid) {
-    const details = planValidation.errors.map((e) => `${e.path} ${e.message}`).join('; ')
-    throw new AdeError('plan_schema_invalid', `plano inválido: ${details}`, 4, {
-      errors: planValidation.errors,
-    })
+  if (mode === 'read') {
+    const supportedRes = validateSupported('plan', doc)
+    if (!supportedRes.valid) {
+      const details = supportedRes.errors.map((e) => `${e.path} ${e.message}`).join('; ')
+      throw new AdeError('plan_schema_invalid', `plano inválido: ${details}`, 4, {
+        errors: supportedRes.errors,
+      })
+    }
+  } else {
+    if (doc && typeof doc === 'object' && doc.format_version === 1) {
+      throw new AdeError(
+        'plan_obsolete',
+        'formato legado obsoleto para nova aprovação/execução; esperado formato corrente v0.3 (format_version 2)',
+        4,
+        { format_version: 1 },
+      )
+    }
+
+    const planValidation = validate('plan', doc)
+    if (!planValidation.valid) {
+      const details = planValidation.errors.map((e) => `${e.path} ${e.message}`).join('; ')
+      throw new AdeError('plan_schema_invalid', `plano inválido: ${details}`, 4, {
+        errors: planValidation.errors,
+      })
+    }
   }
 
   assertCallBudget(doc.budget, 'plan')
@@ -312,15 +340,28 @@ export function loadPlan(planPath) {
           )
         }
 
-        const contractValidation = validate('task-contract', contract)
-        if (!contractValidation.valid) {
-          const details = contractValidation.errors.map((e) => `${e.path} ${e.message}`).join('; ')
-          throw new AdeError(
-            'contract_schema_invalid',
-            `contrato inválido: ${storyId}: ${details}`,
-            4,
-            { storyId, errors: contractValidation.errors },
-          )
+        if (mode === 'read') {
+          const contractValidation = validateSupported('task-contract', contract)
+          if (!contractValidation.valid) {
+            const details = contractValidation.errors.map((e) => `${e.path} ${e.message}`).join('; ')
+            throw new AdeError(
+              'contract_schema_invalid',
+              `contrato inválido: ${storyId}: ${details}`,
+              4,
+              { storyId, errors: contractValidation.errors },
+            )
+          }
+        } else {
+          const contractValidation = validate('task-contract', contract)
+          if (!contractValidation.valid) {
+            const details = contractValidation.errors.map((e) => `${e.path} ${e.message}`).join('; ')
+            throw new AdeError(
+              'contract_schema_invalid',
+              `contrato inválido: ${storyId}: ${details}`,
+              4,
+              { storyId, errors: contractValidation.errors },
+            )
+          }
         }
 
         contract.needs_ui = contract.needs_ui ?? false
@@ -347,12 +388,15 @@ export function loadPlan(planPath) {
           )
         }
 
-        // Checagem de escopo dos evals
+        // Checagem de escopo dos evals / verifiers
         const scopePaths = contract.guardrails?.scope_paths ?? []
-        const evals = contract.evals ?? []
-        for (let i = 0; i < evals.length; i++) {
-          const evalItem = evals[i]
-          const evalId = `E${i + 1}`
+        const verifiersList = [
+          ...(Array.isArray(contract.evals) && contract.evals.length > 0 ? contract.evals : []),
+          ...(Array.isArray(contract.verifiers) ? contract.verifiers : []),
+        ]
+        for (let i = 0; i < verifiersList.length; i++) {
+          const evalItem = verifiersList[i]
+          const evalId = evalItem.id || `E${i + 1}`
           /** @type {string[]} */
           const candidates = []
 
@@ -422,13 +466,30 @@ export function loadPlan(planPath) {
           )
         }
         /** @type {any[]} */
-        const rawEvals = Array.isArray(contract.evals) ? contract.evals : []
+        const rawEvals = Array.isArray(contract.evals) && contract.evals.length > 0
+          ? contract.evals
+          : (Array.isArray(contract.verifiers) ? contract.verifiers : [])
         const normalizedEvals = rawEvals.map((/** @type {any} */ e, /** @type {number} */ idx) => {
           const { cmd, ...rest } = e
+          const id = e.id || `E${idx + 1}`
+          if (e.kind === 'script' || (e.kind === undefined && Array.isArray(cmd))) {
+            if (!Array.isArray(cmd) || cmd.length === 0) {
+              throw new AdeError(
+                'contract_invalid',
+                `contrato inválido: ${storyId}: verificador ${id} da classe script sem comando`,
+                4,
+                { storyId, evalId: id },
+              )
+            }
+            return {
+              id,
+              ...rest,
+              argv: cmd,
+            }
+          }
           return {
-            id: `E${idx + 1}`,
+            id,
             ...rest,
-            argv: cmd,
           }
         })
 

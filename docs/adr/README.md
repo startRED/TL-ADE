@@ -62,5 +62,5 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | Observação e método | 0013, 0017, 0019, 0020, 0024 | §3, §8, §10 A10, A12, §11 E11, E17, E30, E34, E37 |
 | Orçamento e execução | 0026 | §7, §9.8, §11 E20, E24 |
 
-O [ADR 0026](0026-governanca-execucao-custos.md) consolida a autorização até a v1 e define o recorte ativo de governança da v0.2, fixando os padrões provisórios de execução: teto absoluto de US$ 300, cota semanal de 50% por assinatura, máximo de 8 horas de parede, até 3 unidades estacionadas, turnos por classe (proof: 14, implementation: 30, correction: 20 e review: 10) e limites de contexto de 32000 bytes para contrato e 120000 bytes para pack.
+O [ADR 0024](0024-autorizacao-roadmap-ate-v1.md) registra a autorização contínua até a v1 e define o recorte ativo de governança da v0.2 (com ativação sequencial do recorte ativo da v0.3 sob o ADR 0024 e o [ADR 0026](0026-governanca-execucao-custos.md)), aplicando-se os padrões de execução: teto absoluto de US$ 300, cota semanal de 50% por assinatura, máximo de 8 horas de parede, até 3 unidades estacionadas, turnos por classe (proof: 14, implementation: 30, correction: 20 e review: 10) e limites de contexto de 32000 bytes para contrato e 120000 bytes para pack.
 

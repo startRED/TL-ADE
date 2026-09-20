@@ -35,7 +35,7 @@ function writePlanDir(overrides: WritePlanDirOptions = {}): {
   tmpDirs.push(dir)
 
   const defaultPlan = {
-    format_version: 1,
+    format_version: 2,
     id: 'plan-1',
     mission_id: 'mission-1',
     immutable_digest: '0123456789abcdef',
@@ -63,11 +63,20 @@ function writePlanDir(overrides: WritePlanDirOptions = {}): {
   }
 
   const defaultContract = {
-    format_version: 1,
+    format_version: 2,
     id: 'ADE-T1',
     title: 'Test Story',
     complexity: 'bounded',
     task: 'Test task',
+    workspace: {
+      kind: 'git',
+      root: '.',
+    },
+    risk: {
+      level: 'normal',
+      surfaces: [],
+      evidence: [],
+    },
     guardrails: {
       scope_paths: ['src/**', 'tests/**'],
       do_not_touch: ['.ade/**'],
@@ -85,13 +94,30 @@ function writePlanDir(overrides: WritePlanDirOptions = {}): {
         given: 'initial state',
         when: 'action taken',
         then: 'result verified',
+        verifiers: ['E1'],
         evals: ['E1'],
+      },
+    ],
+    verifiers: [
+      {
+        id: 'E1',
+        format_version: 1,
+        kind: 'script',
+        cmd: ['node', 'tests/check.mjs'],
+        expect_exit: 0,
+        timeout_s: 120,
+        max_output_bytes: 65536,
+        evidence: ['tests/check.mjs'],
+        strictness: {
+          mode: 'must_fail_before',
+        },
+        author: 'operator',
       },
     ],
     evals: [
       {
         format_version: 1,
-        kind: 'test',
+        kind: 'script',
         cmd: ['node', 'tests/check.mjs'],
         expect_exit: 0,
         timeout_s: 120,
@@ -138,7 +164,35 @@ function writePlanDir(overrides: WritePlanDirOptions = {}): {
       }
     } else if (overrides.contracts) {
       for (const [storyId, contract] of Object.entries(overrides.contracts)) {
-        writeFileSync(path.join(storiesDir, `${storyId}.json`), JSON.stringify(contract, null, 2), 'utf8')
+        let fullContract = contract
+        if (contract.title) {
+          fullContract = {
+            ...defaultContract,
+            ...contract,
+            format_version: 2,
+            workspace: contract.workspace ?? defaultContract.workspace,
+            risk: contract.risk ?? defaultContract.risk,
+            guardrails: {
+              ...defaultContract.guardrails,
+              ...contract.guardrails,
+            },
+            verifiers: (contract.verifiers ?? contract.evals ?? defaultContract.verifiers).map((v: any, idx: number) => ({
+              id: v.id || `E${idx + 1}`,
+              ...v,
+              kind: v.kind === 'test' ? 'script' : (v.kind ?? 'script'),
+            })),
+            evals: (contract.evals ?? defaultContract.evals).map((v: any, idx: number) => ({
+              id: v.id || `E${idx + 1}`,
+              ...v,
+              kind: v.kind === 'test' ? 'script' : (v.kind ?? 'script'),
+            })),
+            scenarios: (contract.scenarios ?? defaultContract.scenarios).map((s: any) => ({
+              ...s,
+              verifiers: s.verifiers ?? s.evals ?? ['E1'],
+            })),
+          }
+        }
+        writeFileSync(path.join(storiesDir, `${storyId}.json`), JSON.stringify(fullContract, null, 2), 'utf8')
       }
     } else {
       writeFileSync(
@@ -181,7 +235,7 @@ describe('plan-load parity', () => {
     expect(story.evals[0]).toEqual({
       id: 'E1',
       format_version: 1,
-      kind: 'test',
+      kind: 'script',
       argv: ['node', 'tests/check.mjs'],
       expect_exit: 0,
       timeout_s: 120,
@@ -621,22 +675,31 @@ describe('plan-load parity', () => {
     const { planPath } = writePlanDir({
       contractsRaw: {
         'ADE-T1': JSON.stringify({
-          format_version: 1,
+          format_version: 2,
           id: 'ADE-T1',
           title: 'Test Story with lone surrogate \uD800',
           complexity: 'bounded',
           task: 'Test task',
+          workspace: {
+            kind: 'git',
+            root: '.',
+          },
+          risk: {
+            level: 'normal',
+            surfaces: [],
+            evidence: [],
+          },
           guardrails: {
             scope_paths: ['src/**'],
             do_not_touch: ['.ade/**'],
             autonomy: 'safe',
           },
           requirements: [{ id: 'R1', ears: 'WHEN x THE SYSTEM SHALL y.' }],
-          scenarios: [{ id: 'C1', given: 'g', when: 'w', then: 't', evals: ['E1'] }],
-          evals: [
+          scenarios: [{ id: 'C1', given: 'g', when: 'w', then: 't', verifiers: ['E1'] }],
+          verifiers: [
             {
-              format_version: 1,
-              kind: 'test',
+              id: 'E1',
+              kind: 'script',
               cmd: ['node', 'src/check.mjs'],
               expect_exit: 0,
               timeout_s: 120,

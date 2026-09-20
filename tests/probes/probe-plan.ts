@@ -40,7 +40,7 @@ export function writeProbeSandbox(repoDir: string): void {
  */
 export function writeProbePlan(planDir: string): string {
   const planObj = {
-    format_version: 1,
+    format_version: 2,
     id: 'probe-plan',
     mission_id: 'probe-m1',
     immutable_digest: '0123456789abcdef',
@@ -62,6 +62,7 @@ export function writeProbePlan(planDir: string): string {
       max_usd: 1,
       max_wall_clock_seconds: 3600,
       max_parked_units: 1,
+      max_subscription_weekly_percent: 50,
     },
     budget: {
       max_model_calls: 3,
@@ -76,11 +77,20 @@ export function writeProbePlan(planDir: string): string {
   fs.mkdirSync(storiesDir, { recursive: true })
 
   const contractObj = {
-    format_version: 1,
+    format_version: 2,
     id: 'PROBE-1',
     title: 'Trivial Story',
     complexity: 'bounded',
     task: 'Crie o arquivo src/hello.txt contendo a palavra ok',
+    workspace: {
+      kind: 'git',
+      root: '.',
+    },
+    risk: {
+      level: 'normal',
+      surfaces: [],
+      evidence: [],
+    },
     guardrails: {
       scope_paths: ['src/**'],
       do_not_touch: ['.ade/**'],
@@ -98,15 +108,31 @@ export function writeProbePlan(planDir: string): string {
           id: 'C1',
           given: 'initial state without hello.txt',
           when: 'maker creates hello.txt with ok',
+          verifiers: ['E1'],
           evals: ['E1'],
         },
         JSON.parse('{"then":"eval check passes"}'),
       ),
     ],
+    verifiers: [
+      {
+        id: 'E1',
+        kind: 'script',
+        cmd: ['node', 'src/check.mjs'],
+        expect_exit: 0,
+        timeout_s: 120,
+        max_output_bytes: 65536,
+        evidence: ['src/check.mjs'],
+        strictness: {
+          mode: 'must_fail_before',
+        },
+        author: 'operator',
+      },
+    ],
     evals: [
       {
-        format_version: 1,
-        kind: 'test',
+        id: 'E1',
+        kind: 'script',
         cmd: ['node', 'src/check.mjs'],
         expect_exit: 0,
         timeout_s: 120,

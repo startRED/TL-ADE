@@ -4,33 +4,33 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'vitest'
 import { loadPlan } from '../src/engine/plan-load.js'
-import { validate } from '../src/schema/index.js'
+import { validateSupported } from '../src/schema/index.js'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
 
 describe('example and dogfood plans', () => {
   // CA1: Dado os três planos, quando loadPlan lê cada um, então nenhum lança e as stories são exatamente ['TEMPLATE-1'], ['SKIN-1'] e ['ADE-D1']
   test('example_plans_load_with_one_story_each', () => {
-    const templatePlan = loadPlan(path.join(ROOT, 'examples/plan-template.json'))
+    const templatePlan = loadPlan(path.join(ROOT, 'examples/plan-template.json'), { mode: 'read' })
     expect(templatePlan.stories.map((s) => s.id)).toEqual(['TEMPLATE-1'])
 
-    const skinPlan = loadPlan(path.join(ROOT, 'examples/skin-sniper/plan.json'))
+    const skinPlan = loadPlan(path.join(ROOT, 'examples/skin-sniper/plan.json'), { mode: 'read' })
     expect(skinPlan.stories.map((s) => s.id)).toEqual(['SKIN-1'])
 
-    const dogfoodPlan = loadPlan(path.join(ROOT, 'plans/dogfood/journal-event-field.plan.json'))
+    const dogfoodPlan = loadPlan(path.join(ROOT, 'plans/dogfood/journal-event-field.plan.json'), { mode: 'read' })
     expect(dogfoodPlan.stories.map((s) => s.id)).toEqual(['ADE-D1'])
   })
 
-  // CA2: Dado os três plan.json, quando validate('plan', json) roda, então valid é true para os três, e a task do contrato SKIN-1 começa com 'TROQUE:'
+  // CA2: Dado os três plan.json, quando validateSupported('plan', json) roda em modo de leitura, então valid é true para os três, e a task do contrato SKIN-1 começa com 'TROQUE:'
   test('example_plans_validate_against_plan_schema', () => {
     const templateRaw = JSON.parse(readFileSync(path.join(ROOT, 'examples/plan-template.json'), 'utf8'))
-    expect(validate('plan', templateRaw).valid).toBe(true)
+    expect(validateSupported('plan', templateRaw).valid).toBe(true)
 
     const skinRaw = JSON.parse(readFileSync(path.join(ROOT, 'examples/skin-sniper/plan.json'), 'utf8'))
-    expect(validate('plan', skinRaw).valid).toBe(true)
+    expect(validateSupported('plan', skinRaw).valid).toBe(true)
 
     const dogfoodRaw = JSON.parse(readFileSync(path.join(ROOT, 'plans/dogfood/journal-event-field.plan.json'), 'utf8'))
-    expect(validate('plan', dogfoodRaw).valid).toBe(true)
+    expect(validateSupported('plan', dogfoodRaw).valid).toBe(true)
 
     const skinStory = JSON.parse(readFileSync(path.join(ROOT, 'examples/skin-sniper/stories/SKIN-1.json'), 'utf8'))
     expect(skinStory.task.startsWith('TROQUE:')).toBe(true)

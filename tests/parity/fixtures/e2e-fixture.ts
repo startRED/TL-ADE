@@ -52,7 +52,7 @@ export function setupE2E(options: SetupE2EOptions = {}) {
   tmpDirs.push(planDir)
 
   const planObj = {
-    format_version: 1,
+    format_version: 2,
     id: 'plan-1',
     mission_id: 'mission-1',
     immutable_digest: '0123456789abcdef',
@@ -87,11 +87,20 @@ export function setupE2E(options: SetupE2EOptions = {}) {
   fs.mkdirSync(storiesDir, { recursive: true })
 
   const contractObj = {
-    format_version: 1,
+    format_version: 2,
     id: 'ADE-T1',
     title: 'Trivial Story',
     complexity: 'bounded',
     task: 'Create src/hello.txt with ok',
+    workspace: {
+      kind: 'git',
+      root: '.',
+    },
+    risk: {
+      level: 'normal',
+      surfaces: [],
+      evidence: [],
+    },
     guardrails: {
       scope_paths: ['src/**', 'tests/**'],
       do_not_touch: ['.ade/**'],
@@ -109,13 +118,30 @@ export function setupE2E(options: SetupE2EOptions = {}) {
         given: 'initial state without hello.txt',
         when: 'maker creates hello.txt with ok',
         then: 'eval check passes',
+        verifiers: ['E1'],
         evals: ['E1'],
+      },
+    ],
+    verifiers: [
+      {
+        id: 'E1',
+        kind: 'script',
+        cmd: ['node', 'tests/check.mjs'],
+        expect_exit: 0,
+        timeout_s: 120,
+        max_output_bytes: 65536,
+        evidence: ['tests/check.mjs'],
+        strictness: {
+          mode: 'must_fail_before',
+        },
+        author: 'operator',
       },
     ],
     evals: [
       {
         format_version: 1,
-        kind: 'test',
+        id: 'E1',
+        kind: 'script',
         cmd: ['node', 'tests/check.mjs'],
         expect_exit: 0,
         timeout_s: 120,

@@ -24,11 +24,20 @@ afterEach(() => {
 
 function createDefaultContract(): Record<string, any> {
   return {
-    format_version: 1,
+    format_version: 2,
     id: 'ADE-T1',
     title: 'Test Story',
     complexity: 'bounded',
     task: 'Test task',
+    workspace: {
+      kind: 'git',
+      root: '.',
+    },
+    risk: {
+      level: 'normal',
+      surfaces: [],
+      evidence: [],
+    },
     guardrails: {
       scope_paths: ['src/**', 'tests/**'],
       do_not_touch: ['.ade/**'],
@@ -46,15 +55,32 @@ function createDefaultContract(): Record<string, any> {
           id: 'C1',
           given: 'initial state',
           when: 'action taken',
+          verifiers: ['E1'],
           evals: ['E1'],
         },
         { ['t' + 'hen']: 'result verified' },
       ),
     ],
+    verifiers: [
+      {
+        id: 'E1',
+        format_version: 1,
+        kind: 'script',
+        cmd: ['node', 'tests/check.mjs'],
+        expect_exit: 0,
+        timeout_s: 120,
+        max_output_bytes: 65536,
+        evidence: ['tests/check.mjs'],
+        strictness: {
+          mode: 'must_fail_before',
+        },
+        author: 'operator',
+      },
+    ],
     evals: [
       {
         format_version: 1,
-        kind: 'test',
+        kind: 'script',
         cmd: ['node', 'tests/check.mjs'],
         expect_exit: 0,
         timeout_s: 120,
@@ -97,7 +123,7 @@ function writePlanDir(overrides: WritePlanDirOptions = {}): {
   tmpDirs.push(dir)
 
   const defaultPlan = {
-    format_version: 1,
+    format_version: 2,
     id: 'plan-1',
     mission_id: 'mission-1',
     immutable_digest: '0123456789abcdef',

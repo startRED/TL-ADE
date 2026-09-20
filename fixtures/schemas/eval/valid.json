@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "kind": "test",
+  "kind": "script",
   "cmd": [
     "node",
     "node_modules/vitest/vitest.mjs",

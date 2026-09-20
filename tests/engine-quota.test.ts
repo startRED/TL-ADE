@@ -183,10 +183,30 @@ function makePlanFixture(repoDir: string) {
   fs.mkdirSync(path.join(repoDir, '.git', 'info'), { recursive: true })
   fs.writeFileSync(path.join(repoDir, '.git', 'info', 'exclude'), '.ade\nnode_modules\nquota-receipt.json\n', 'utf8')
   fs.mkdirSync(path.join(repoDir, 'node_modules'), { recursive: true })
+
+  const checkCode = [
+    "import fs from 'node:fs'",
+    'let ok = false',
+    'try {',
+    "  const content = fs.readFileSync('src/hello.txt', 'utf8')",
+    "  ok = content.includes('ok')",
+    '} catch {}',
+    'if (ok) {',
+    '  process.stdout.write(JSON.stringify({ numTotalTests: 1, numPassedTests: 1, numFailedTests: 0 }) + "\\n")',
+    '  process.exit(0)',
+    '} else {',
+    '  process.stdout.write(JSON.stringify({ numTotalTests: 1, numPassedTests: 0, numFailedTests: 1 }) + "\\n")',
+    '  process.exit(1)',
+    '}',
+  ].join('\n')
+
+  fs.mkdirSync(path.join(repoDir, 'tests'), { recursive: true })
+  fs.writeFileSync(path.join(repoDir, 'tests', 'check.mjs'), checkCode, 'utf8')
+
   try {
     const { execFileSync } = require('node:child_process')
     fs.writeFileSync(path.join(repoDir, '.gitkeep'), '', 'utf8')
-    execFileSync('git', ['add', '.gitkeep'], { cwd: repoDir })
+    execFileSync('git', ['add', '-A'], { cwd: repoDir })
     execFileSync('git', ['commit', '-m', 'initial'], { cwd: repoDir })
   } catch {}
   const planDir = path.join(repoDir, '.ade', 'plan-quota')
@@ -194,7 +214,7 @@ function makePlanFixture(repoDir: string) {
   fs.mkdirSync(storiesDir, { recursive: true })
   const planPath = path.join(planDir, 'plan.json')
   fs.writeFileSync(planPath, JSON.stringify({
-    format_version: 1,
+    format_version: 2,
     id: 'plan-quota',
     mission_id: 'mission-quota',
     immutable_digest: '0123456789abcdef',
@@ -224,11 +244,20 @@ function makePlanFixture(repoDir: string) {
   }, null, 2), 'utf8')
 
   fs.writeFileSync(path.join(storiesDir, 'ADE-Q1.json'), JSON.stringify({
-    format_version: 1,
+    format_version: 2,
     id: 'ADE-Q1',
     title: 'Quota Story',
     complexity: 'bounded',
     task: 'Test task',
+    workspace: {
+      kind: 'git',
+      root: '.',
+    },
+    risk: {
+      level: 'normal',
+      surfaces: [],
+      evidence: [],
+    },
     guardrails: {
       scope_paths: ['src/**', 'tests/**'],
       do_not_touch: ['.ade/**'],
@@ -241,11 +270,45 @@ function makePlanFixture(repoDir: string) {
       },
     ],
     scenarios: [
-      JSON.parse(
-        '{"id":"C1","given":"initial state","when":"action taken","then":"result verified","evals":[]}',
-      ),
+      {
+        id: 'C1',
+        given: 'initial state',
+        when: 'action taken',
+        then: 'result verified',
+        verifiers: ['E1'],
+        evals: ['E1'],
+      },
     ],
-    evals: [],
+    verifiers: [
+      {
+        id: 'E1',
+        kind: 'script',
+        cmd: ['node', 'tests/check.mjs'],
+        expect_exit: 0,
+        timeout_s: 120,
+        max_output_bytes: 65536,
+        evidence: ['tests/check.mjs'],
+        strictness: {
+          mode: 'must_fail_before',
+        },
+        author: 'operator',
+      },
+    ],
+    evals: [
+      {
+        id: 'E1',
+        kind: 'script',
+        cmd: ['node', 'tests/check.mjs'],
+        expect_exit: 0,
+        timeout_s: 120,
+        max_output_bytes: 65536,
+        evidence: ['tests/check.mjs'],
+        strictness: {
+          mode: 'must_fail_before',
+        },
+        author: 'operator',
+      },
+    ],
     skills: [],
     roles: {
       maker: {

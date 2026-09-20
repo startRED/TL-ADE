@@ -30,7 +30,7 @@ const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.js')
 // é gravado em stories/<id>.json) para não virar um objeto literal thenable no código.
 const SCENARIO_C1_JSON =
   '{"id":"C1","given":"initial state without hello.txt","when":"maker creates hello.txt with ok",' +
-  '"then":"eval check passes","evals":["E1"]}'
+  '"then":"eval check passes","verifiers":["E1"],"evals":["E1"]}'
 
 let repoDirs: string[] = []
 let tmpDirs: string[] = []
@@ -105,7 +105,7 @@ function setupStoryFixture(options: SetupFixtureOptions = {}) {
   tmpDirs.push(planDir)
 
   const planObj = {
-    format_version: 1,
+    format_version: 2,
     id: 'plan-1',
     mission_id: 'mission-1',
     immutable_digest: '0123456789abcdef',
@@ -139,11 +139,20 @@ function setupStoryFixture(options: SetupFixtureOptions = {}) {
   fs.mkdirSync(storiesDir, { recursive: true })
 
   const contractObj = {
-    format_version: 1,
+    format_version: 2,
     id: 'ADE-T1',
     title: 'Trivial Story',
     complexity: 'bounded',
     task: 'Create src/hello.txt with ok',
+    workspace: {
+      kind: 'git',
+      root: '.',
+    },
+    risk: {
+      level: 'normal',
+      surfaces: [],
+      evidence: [],
+    },
     guardrails: {
       scope_paths: ['src/**', 'tests/**'],
       do_not_touch: ['.ade/**'],
@@ -156,10 +165,25 @@ function setupStoryFixture(options: SetupFixtureOptions = {}) {
       },
     ],
     scenarios: [JSON.parse(SCENARIO_C1_JSON)],
+    verifiers: [
+      {
+        id: 'E1',
+        kind: 'script',
+        cmd: ['node', 'tests/check.mjs'],
+        expect_exit: 0,
+        timeout_s: 120,
+        max_output_bytes: 65536,
+        evidence: ['tests/check.mjs'],
+        strictness: {
+          mode: 'must_fail_before',
+        },
+        author: 'operator',
+      },
+    ],
     evals: [
       {
-        format_version: 1,
-        kind: 'test',
+        id: 'E1',
+        kind: 'script',
         cmd: ['node', 'tests/check.mjs'],
         expect_exit: 0,
         timeout_s: 120,

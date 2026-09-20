@@ -4,21 +4,103 @@
   "title": "task-contract",
   "type": "object",
   "additionalProperties": false,
-  "required": ["format_version", "id", "title", "complexity", "task", "guardrails", "requirements", "scenarios", "evals", "skills", "roles", "budget"],
+  "required": [
+    "format_version",
+    "id",
+    "title",
+    "complexity",
+    "task",
+    "workspace",
+    "risk",
+    "guardrails",
+    "requirements",
+    "scenarios",
+    "verifiers",
+    "skills",
+    "roles",
+    "budget"
+  ],
   "properties": {
-    "format_version": { "type": "integer", "minimum": 1 },
+    "format_version": { "type": "integer", "enum": [2] },
     "id": { "type": "string" },
     "title": { "type": "string" },
     "complexity": { "enum": ["trivial", "bounded", "feature", "subsystem", "project"] },
     "needs_ui": { "type": "boolean" },
     "task": { "type": "string" },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "root"],
+      "properties": {
+        "kind": { "enum": ["git", "folder"] },
+        "root": { "type": "string" },
+        "revision": { "type": "string" }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "surfaces", "evidence"],
+      "properties": {
+        "level": { "enum": ["light", "normal", "critical"] },
+        "surfaces": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "auth",
+              "secrets",
+              "money",
+              "billing",
+              "personal_data",
+              "migration",
+              "data_loss",
+              "public_api",
+              "external_effect",
+              "concurrency",
+              "durability",
+              "security_boundary",
+              "supply_chain",
+              "agent_control_plane",
+              "autorizacao",
+              "segredo",
+              "dinheiro",
+              "migracao",
+              "perda_de_dados",
+              "controle_do_agente"
+            ]
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9_-]+:\\S+$"
+          }
+        }
+      }
+    },
+    "unknowns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "question", "kind"],
+        "properties": {
+          "id": { "type": "string" },
+          "question": { "type": "string" },
+          "kind": { "enum": ["product_choice", "external_fact", "repo_fact"] },
+          "resolved_by": { "type": "string" }
+        }
+      }
+    },
     "guardrails": {
       "type": "object",
       "additionalProperties": false,
       "required": ["scope_paths", "do_not_touch", "autonomy"],
       "properties": {
-        "scope_paths": { "type": "array", "items": { "type": "string" } },
-        "do_not_touch": { "type": "array", "items": { "type": "string" } },
+        "scope_paths": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "do_not_touch": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
         "sensitive_paths": { "type": "array", "items": { "type": "string" } },
         "autonomy": { "enum": ["safe", "controlled", "restricted"] },
         "ask_operator": { "type": "array", "items": { "type": "string" } }
@@ -41,17 +123,19 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "given", "when", "then", "evals"],
+        "required": ["id", "given", "when", "then", "verifiers"],
         "properties": {
           "id": { "type": "string" },
           "given": { "type": "string" },
           "when": { "type": "string" },
           "then": { "type": "string" },
+          "verifiers": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
           "evals": { "type": "array", "items": { "type": "string" } }
         }
       }
     },
-    "evals": { "type": "array", "items": { "$ref": "#/definitions/eval" } },
+    "verifiers": { "type": "array", "items": { "$ref": "#/definitions/verifier" }, "minItems": 1 },
+    "evals": { "type": "array", "items": { "$ref": "#/definitions/verifier" } },
     "skills": { "type": "array", "items": { "type": "string" } },
     "roles": {
       "type": "object",
@@ -85,28 +169,115 @@
         "effort": { "type": "string" }
       }
     },
-    "eval": {
+    "verifier": {
       "type": "object",
-      "additionalProperties": false,
-      "required": ["format_version", "kind", "cmd", "expect_exit", "timeout_s", "max_output_bytes", "evidence", "strictness", "author"],
-      "properties": {
-        "format_version": { "type": "integer" },
-        "kind": { "type": "string" },
-        "cmd": { "type": "array", "items": { "type": "string" } },
-        "expect_exit": { "type": "integer" },
-        "timeout_s": { "type": "integer" },
-        "max_output_bytes": { "type": "integer" },
-        "evidence": { "type": "array", "items": { "type": "string" } },
-        "strictness": {
+      "oneOf": [
+        {
           "type": "object",
           "additionalProperties": false,
-          "required": ["mode"],
+          "required": [
+            "kind",
+            "cmd",
+            "expect_exit",
+            "timeout_s",
+            "max_output_bytes",
+            "evidence",
+            "strictness",
+            "author"
+          ],
           "properties": {
-            "mode": { "type": "string" }
+            "id": { "type": "string" },
+            "format_version": { "type": "integer", "minimum": 1 },
+            "kind": { "const": "script" },
+            "cmd": { "type": "array", "items": { "type": "string" } },
+            "expect_exit": { "type": "integer" },
+            "timeout_s": { "type": "integer" },
+            "max_output_bytes": { "type": "integer" },
+            "evidence": { "type": "array", "items": { "type": "string" } },
+            "strictness": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mode"],
+              "properties": {
+                "mode": { "type": "string", "enum": ["must_fail_before", "additive", "mutate"] }
+              }
+            },
+            "author": { "type": "string" },
+            "description": { "type": "string" }
           }
         },
-        "author": { "type": "string" }
-      }
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "id": { "type": "string" },
+            "format_version": { "type": "integer", "minimum": 1 },
+            "kind": { "const": "schema" },
+            "schema_path": { "type": "string" },
+            "schema_ref": { "type": "string" },
+            "target_path": { "type": "string" },
+            "target": { "type": "string" },
+            "format": { "type": "string" },
+            "evidence": { "type": "array", "items": { "type": "string" } },
+            "description": { "type": "string" },
+            "author": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "rubric"],
+          "properties": {
+            "id": { "type": "string" },
+            "format_version": { "type": "integer", "minimum": 1 },
+            "kind": { "const": "judge" },
+            "rubric": { "type": "string" },
+            "threshold": { "type": "number" },
+            "min_score": { "type": "number" },
+            "model": { "anyOf": [{ "type": "string" }, { "type": "object" }] },
+            "prompt": { "type": "string" },
+            "evidence": { "type": "array", "items": { "type": "string" } },
+            "description": { "type": "string" },
+            "author": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "id": { "type": "string" },
+            "format_version": { "type": "integer", "minimum": 1 },
+            "kind": { "const": "human" },
+            "prompt": { "type": "string" },
+            "instructions": { "type": "string" },
+            "options": { "type": "array", "items": { "type": "string" } },
+            "timeout_s": { "type": "integer" },
+            "deadline": { "type": "string" },
+            "evidence": { "type": "array", "items": { "type": "string" } },
+            "description": { "type": "string" },
+            "author": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "id": { "type": "string" },
+            "format_version": { "type": "integer", "minimum": 1 },
+            "kind": { "const": "external" },
+            "service": { "type": "string" },
+            "endpoint": { "type": "string" },
+            "url": { "type": "string" },
+            "timeout_s": { "type": "integer" },
+            "evidence": { "type": "array", "items": { "type": "string" } },
+            "description": { "type": "string" },
+            "author": { "type": "string" }
+          }
+        }
+      ]
     }
   }
 }

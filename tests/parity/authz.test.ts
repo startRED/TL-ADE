@@ -24,7 +24,7 @@ function writePlanDir(options: WritePlanDirOptions = {}): { dir: string; planPat
   tmpDirs.push(dir)
 
   const plan = {
-    format_version: 1,
+    format_version: 2,
     id: 'plan-1',
     mission_id: 'mission-1',
     immutable_digest: '0123456789abcdef',
@@ -52,11 +52,20 @@ function writePlanDir(options: WritePlanDirOptions = {}): { dir: string; planPat
   }
 
   const defaultContract = {
-    format_version: 1,
+    format_version: 2,
     id: 'ADE-T1',
     title: 'Test Story',
     complexity: 'bounded',
     task: 'Test task',
+    workspace: {
+      kind: 'git',
+      root: '.',
+    },
+    risk: {
+      level: 'normal',
+      surfaces: [],
+      evidence: [],
+    },
     guardrails: {
       scope_paths: ['src/**', 'tests/**'],
       do_not_touch: ['.ade/**'],
@@ -74,13 +83,30 @@ function writePlanDir(options: WritePlanDirOptions = {}): { dir: string; planPat
         given: 'initial',
         when: 'act',
         then: 'check',
+        verifiers: ['E1'],
         evals: ['E1'],
+      },
+    ],
+    verifiers: [
+      {
+        id: 'E1',
+        format_version: 1,
+        kind: 'script',
+        cmd: ['node', 'tests/check.mjs'],
+        expect_exit: 0,
+        timeout_s: 120,
+        max_output_bytes: 65536,
+        evidence: ['tests/check.mjs'],
+        strictness: {
+          mode: 'must_fail_before',
+        },
+        author: 'operator',
       },
     ],
     evals: [
       {
         format_version: 1,
-        kind: 'test',
+        kind: 'script',
         cmd: ['node', 'tests/check.mjs'],
         expect_exit: 0,
         timeout_s: 120,

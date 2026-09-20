@@ -3,24 +3,111 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "eval",
   "type": "object",
-  "additionalProperties": false,
-  "required": ["format_version", "kind", "cmd", "expect_exit", "timeout_s", "max_output_bytes", "evidence", "strictness", "author"],
-  "properties": {
-    "format_version": { "type": "integer", "minimum": 1 },
-    "kind": { "type": "string" },
-    "cmd": { "type": "array", "items": { "type": "string" } },
-    "expect_exit": { "type": "integer" },
-    "timeout_s": { "type": "integer" },
-    "max_output_bytes": { "type": "integer" },
-    "evidence": { "type": "array", "items": { "type": "string" } },
-    "strictness": {
+  "oneOf": [
+    {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode"],
+      "required": [
+        "kind",
+        "cmd",
+        "expect_exit",
+        "timeout_s",
+        "max_output_bytes",
+        "evidence",
+        "strictness",
+        "author"
+      ],
       "properties": {
-        "mode": { "type": "string", "enum": ["must_fail_before", "additive", "mutate"] }
+        "id": { "type": "string" },
+        "format_version": { "type": "integer", "minimum": 1 },
+        "kind": { "const": "script" },
+        "cmd": { "type": "array", "items": { "type": "string" } },
+        "expect_exit": { "type": "integer" },
+        "timeout_s": { "type": "integer" },
+        "max_output_bytes": { "type": "integer" },
+        "evidence": { "type": "array", "items": { "type": "string" } },
+        "strictness": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": {
+            "mode": { "type": "string", "enum": ["must_fail_before", "additive", "mutate"] }
+          }
+        },
+        "author": { "type": "string" },
+        "description": { "type": "string" }
       }
     },
-    "author": { "type": "string" }
-  }
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "id": { "type": "string" },
+        "format_version": { "type": "integer", "minimum": 1 },
+        "kind": { "const": "schema" },
+        "schema_path": { "type": "string" },
+        "schema_ref": { "type": "string" },
+        "target_path": { "type": "string" },
+        "target": { "type": "string" },
+        "format": { "type": "string" },
+        "evidence": { "type": "array", "items": { "type": "string" } },
+        "description": { "type": "string" },
+        "author": { "type": "string" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "rubric"],
+      "properties": {
+        "id": { "type": "string" },
+        "format_version": { "type": "integer", "minimum": 1 },
+        "kind": { "const": "judge" },
+        "rubric": { "type": "string" },
+        "threshold": { "type": "number" },
+        "min_score": { "type": "number" },
+        "model": { "anyOf": [{ "type": "string" }, { "type": "object" }] },
+        "prompt": { "type": "string" },
+        "evidence": { "type": "array", "items": { "type": "string" } },
+        "description": { "type": "string" },
+        "author": { "type": "string" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "id": { "type": "string" },
+        "format_version": { "type": "integer", "minimum": 1 },
+        "kind": { "const": "human" },
+        "prompt": { "type": "string" },
+        "instructions": { "type": "string" },
+        "options": { "type": "array", "items": { "type": "string" } },
+        "timeout_s": { "type": "integer" },
+        "deadline": { "type": "string" },
+        "evidence": { "type": "array", "items": { "type": "string" } },
+        "description": { "type": "string" },
+        "author": { "type": "string" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "id": { "type": "string" },
+        "format_version": { "type": "integer", "minimum": 1 },
+        "kind": { "const": "external" },
+        "service": { "type": "string" },
+        "endpoint": { "type": "string" },
+        "url": { "type": "string" },
+        "timeout_s": { "type": "integer" },
+        "evidence": { "type": "array", "items": { "type": "string" } },
+        "description": { "type": "string" },
+        "author": { "type": "string" }
+      }
+    }
+  ]
 }

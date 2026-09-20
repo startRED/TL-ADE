@@ -21,7 +21,7 @@ binários instalados já fazem nativamente (`claude`, `codex`); ela só escreve 
 o journal, o Task Contract com eval provado, e o Context Pack. A ADE não é um CI, não é um issue tracker,
 não é uma IDE, não é um provedor de modelo (nunca chama API HTTP de modelo; só CLI com assinatura), não é um framework de agentes.
 
-## Recorte ativo de governança da v0.2 (o que entra em `src/` nesta fatia e épico)
+## Recorte ativo de governança da v0.3 (o que entra em `src/` nesta fatia e épico)
 
 `ade run --plan plan.json` executa uma story sob controle prévio de governança e preflight, família `claude`, `local_commit` local, zero rede além da CLI; código em JS ESM com JSDoc, ADR 0023.
 
@@ -62,8 +62,8 @@ Padrões provisórios de execução e custos fixados para o recorte ativo de gov
 
 - Autorização até a v1: concedida por Erick em 2026-09-19 ([docs/adr/0024-autorizacao-roadmap-ate-v1.md](docs/adr/0024-autorizacao-roadmap-ate-v1.md)) e confirmada para governança e custos em 2026-09-20 ([docs/adr/0026-governanca-execucao-custos.md](docs/adr/0026-governanca-execucao-custos.md)).
 - Sequência obrigatória dos marcos: v0.2 (durabilidade e paridade 93) -> v0.3 -> v0.4a -> v0.4b -> v0.5 -> v1.
-- Recorte ativo deste épico: v0.2 durável e base de paridade determinística (93 casos), sem Checker nem entrega remota pública nesta etapa.
-- Recorte ativo de governança da v0.2: preflight determinístico e padrões provisórios de US$ 300, 50%, 8 horas, 3 unidades, turnos (proof: 14, implementation: 30, correction: 20, review: 10) e contexto (contrato de 32000 bytes, pack de 120000 bytes) ([docs/adr/0026-governanca-execucao-custos.md](docs/adr/0026-governanca-execucao-custos.md)).
+- Recorte ativo deste épico: v0.3 — Intent Compiler, Task Contracts v0.3, governança e durabilidade sequencial conforme autorização até a v1 concedida no [ADR 0024](docs/adr/0024-autorizacao-roadmap-ate-v1.md).
+- Recorte ativo de governança da v0.3: preflight determinístico, contratos v0.3 (planejamento progressivo, workspace, verificadores, incógnitas, risco objetivo, proveniência e artefatos certificados) e padrões provisórios de US$ 300, 50%, 8 horas, 3 unidades, turnos (proof: 14, implementation: 30, correction: 20, review: 10) e contexto (contrato de 32000 bytes, pack de 120000 bytes) ([docs/adr/0024-autorizacao-roadmap-ate-v1.md](docs/adr/0024-autorizacao-roadmap-ate-v1.md), [docs/adr/0026-governanca-execucao-custos.md](docs/adr/0026-governanca-execucao-custos.md)).
 - Slice 1: fechamento pendente ([docs/plans/slice-1-fechamento.md](docs/plans/slice-1-fechamento.md)).
 - Recorte local v0.2: autorizado sequencialmente ([docs/plans/v02-local-proposta.md](docs/plans/v02-local-proposta.md), [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md)).
 - Restante da v0.2: segue a ordem do roadmap.
