@@ -38,6 +38,21 @@ export function inheritedFiles(st, stories = []) {
   return [...new Set([...fromDiff, ...(prev.files || []).map((f) => f.split('\\').join('/'))])]
 }
 
+// Linhas ACRESCENTADAS por um diff que afrouxam o tempo limite de uma prova (`{ timeout: 30000 }`, `testTimeout`, …).
+// Afrouxar o tempo de uma prova para ela passar esconde instabilidade dentro do projeto para sempre, igual a enfraquecer
+// asserção — e o motor empurrava quem escreve para isso ao mandar consertar prova que só estourava tempo. Na m-mu8usf5z a
+// V02-R3f pôs `{ timeout: 30000 }` em quatro arquivos de prova que nem eram da story, e o revisor classificou como low:
+// sem achado high, isso entraria no projeto no commit da parte.
+export function loosenedTimeouts(diff, isTestFile = () => true) {
+  const hits = []
+  for (const sec of String(diff || '').split(/^diff --git a\//m).slice(1)) {
+    const file = sec.slice(0, Math.max(0, sec.indexOf(' '))).trim()
+    if (!file || !isTestFile(file)) continue
+    for (const l of sec.split('\n')) if (/^\+(?!\+\+)/.test(l) && /\b(?:testTimeout|test-timeout|timeout)\b\W{0,3}\d{4,}/i.test(l)) hits.push(`${file}: ${l.slice(1, 120).trim()}`)
+  }
+  return hits
+}
+
 export function preexistingReds(tests, before) {
   if (!tests?.tests?.length || !before?.length) return []
   const redBefore = new Set(before.filter((t) => t.status !== 'passed').map((t) => t.name))

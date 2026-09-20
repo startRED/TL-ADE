@@ -1,7 +1,7 @@
 // node --test proto/rounds.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { inheritedFiles, makerTurns, preexistingReds, truncated } from './rounds.mjs'
+import { inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
 
 test('parte de correção herda os arquivos que a parte anterior já tinha alterado', () => {
   const stories = [{ id: 'R2', diff: 'diff --git a/src/lease/process-info.js b/src/lease/process-info.js\n', files: ['src\\adapters\\claude\\index.js'] }]
@@ -51,4 +51,24 @@ test('escalar nunca dá menos turnos que a rodada normal', () => {
 
 test('quem foi cortado repete com folga', () => {
   assert.ok(makerTurns({ wasTruncated: true }) > makerTurns({ escalate: true }))
+})
+
+test('afrouxar tempo limite em arquivo de prova é detectado; produção e remoção não', () => {
+  const diff = [
+    'diff --git a/tests/prepare.test.ts b/tests/prepare.test.ts',
+    "+describe('prepare', { timeout: 30000 }, () => {",
+    '-  const old = 1',
+    'diff --git a/src/engine.js b/src/engine.js',
+    '+  const timeoutMs = 900000',
+    'diff --git a/tests/ok.test.ts b/tests/ok.test.ts',
+    "+  assert.equal(a, b)",
+  ].join('\n')
+  const hits = loosenedTimeouts(diff, (f) => f.startsWith('tests/'))
+  assert.equal(hits.length, 1)
+  assert.match(hits[0], /^tests\/prepare\.test\.ts: describe/)
+})
+
+test('diff vazio não acusa nada', () => {
+  assert.deepEqual(loosenedTimeouts('', () => true), [])
+  assert.deepEqual(loosenedTimeouts(null, () => true), [])
 })
