@@ -342,14 +342,14 @@ describe('engine', () => {
 
     const result = await runStory(fixture.deps, fixture.input)
 
-    expect(result.status).toBe('committed')
+    expect(result.status).toBe('delivered')
     expect(result.exitCode).toBe(0)
     expect(result.commit).toBeTruthy()
     expect(result.reason).toBeNull()
 
     // git rev-list --count HEAD..ade/mission-1/ADE-T1 = 1
     const count = fixture.repo.git(['rev-list', '--count', 'HEAD..ade/mission-1/ADE-T1']).trim()
-    expect(count).toBe('1')
+    expect(count).toBe('0')
 
     const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
 
@@ -374,7 +374,7 @@ describe('engine', () => {
 
     const storyDone = events.find((e) => e.kind === 'story_done')
     expect(storyDone).toBeDefined()
-    expect((storyDone?.data as any)?.status).toBe('committed')
+    expect((storyDone?.data as any)?.status).toBe('delivered')
 
     // CA4: telemetry.data.maker_wall_ms >= 0
     const telemetry = events.find((e) => e.kind === 'telemetry')
@@ -444,7 +444,7 @@ describe('engine', () => {
     })
 
     const result = await runStory(fixtureWithCi.deps, fixtureWithCi.input)
-    expect(result.status).toBe('committed')
+    expect(result.status).toBe('delivered')
     expect(result.exitCode).toBe(0)
   }, 60_000)
 })
@@ -500,7 +500,7 @@ describe('S18 telemetria honesta', () => {
     }
 
     const result = await runStory(fixture.deps, fixture.input)
-    expect(result.status).toBe('committed')
+    expect(result.status).toBe('delivered')
     expect(result.exitCode).toBe(0)
 
     const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
@@ -527,7 +527,7 @@ describe('S18 telemetria honesta', () => {
     }
 
     const resultBackward = await runStory(fixtureBackward.deps, fixtureBackward.input)
-    expect(resultBackward.status).toBe('committed')
+    expect(resultBackward.status).toBe('delivered')
 
     const { events: eventsBackward } = readJournal(path.join(fixtureBackward.missionDir, 'journal.jsonl'))
     const telemetryBackward = eventsBackward.find((e) => e.kind === 'telemetry')
@@ -675,5 +675,4 @@ describe('S18 telemetria honesta', () => {
     })
   }, 60_000)
 })
-
 

@@ -5,6 +5,7 @@ import path from 'node:path'
 import { AdeError } from './journal/errors.js'
 import { readJournal } from './journal/journal.js'
 import { assertCallBudget, authorizePaidCall, checkUsdCap, observedUsd, reserveCalls } from './engine/budget.js'
+import { deliverStory, withDeliveryFlag } from './engine/deliver.js'
 import { authorizedStep } from './engine/paid-call.js'
 import { maybeEngineFault } from './engine/faults.js'
 import { findStoryCommitted, findStoryStarted } from './engine/resume.js'
@@ -67,7 +68,7 @@ export const CANARY_FAMILIES = ['claude', 'codex']
  * @param {NodeJS.ProcessEnv} [deps.env] Variáveis de ambiente da execução.
  * @param {() => number} [deps.now] Provedor de timestamp atual em ms.
  * @param {{ readReceipt: ({ family, now }: { family: string, now: number }) => Promise<any> }} deps.quotaPort Porta de recibos oficiais de cota.
- * @param {(opts: { story: any, loaded: any, repoDir: string, events: any[] }) => Promise<import('./engine/preflight.js').PreflightSummary>} [deps.preflight] Verificador de preflight.
+ * @param {(opts: { story: any, loaded: any, repoDir: string, events: any[] }) => Promise<{ ready: boolean, checks: any[], failures: any[], calls_avoided: number }>} [deps.preflight] Verificador de preflight.
  *
  * @param {Object} input Parâmetros de entrada da story e do plano.
  * @param {import('./engine/plan-load.js').LoadedPlan} input.loaded Plano e contratos carregados.
@@ -75,10 +76,21 @@ export const CANARY_FAMILIES = ['claude', 'codex']
  * @param {string} input.repoDir Diretório raiz do repositório alvo.
  * @param {string} input.missionDir Diretório de trabalho da missão em .ade/missions/<mission_id>.
  *
- * @returns {Promise<{ status: 'committed' | 'awaiting_operator', exitCode: 0 | 3, reason: string | null, commit: string | null }>}
+ * @returns {Promise<{ status: 'committed' | 'delivered' | 'awaiting_operator', exitCode: 0 | 3, reason: string | null, commit: string | null, delivered: boolean }>}
  */
 export async function runStory(deps, input) {
+  const result = await runStoryImpl({ ...deps, journal: withDeliveryFlag(deps.journal) }, input)
+  return { ...result, delivered: result.status === 'delivered' }
+}
+
+/**
+ * @param {any} deps
+ * @param {any} input
+ * @returns {Promise<{ status: 'committed' | 'delivered' | 'awaiting_operator', exitCode: 0 | 3, reason: string | null, commit: string | null }>}
+ */
+async function runStoryImpl(deps, input) {
   const { loaded, story, repoDir, missionDir } = input
+  const journal = deps.journal
   const missionId = loaded.plan.mission_id
   const storyId = story.id
   const contract = story.contract
@@ -350,11 +362,18 @@ export async function runStory(deps, input) {
   let wtPort
   /** @type {string} */
   let treeBefore
+  const basePort = deps.gitPortFor(repoDir)
+  /** @type {string | null} */
+  let baseRef = null
+  /** @type {string | null} */
+  let baseBefore = null
 
   const started = findStoryStarted(readEvents(), storyId)
   if (started && fs.existsSync(started.worktree_dir)) {
     worktreeDir = started.worktree_dir
     treeBefore = started.tree_before
+    baseRef = started.base_ref
+    baseBefore = started.base_before
     wtPort = deps.gitPortFor(worktreeDir)
     await deps.journal.append({
       kind: 'story_resumed',
@@ -367,6 +386,14 @@ export async function runStory(deps, input) {
       },
     })
   } else {
+    // Sem headInfo não há base observável: a story roda e fica sem alvo de fast-forward,
+    // em vez de a entrega escolher uma base calada (mesmo guarda de reconcileLocalMerge).
+    const baseHead = typeof basePort.headInfo === 'function'
+      ? await basePort.headInfo()
+      : { branch: null, commit: null }
+    baseRef = baseHead.branch
+    baseBefore = baseHead.commit
+
     // Step prepare
     const prepareStepResult = await deps.step(
       {
@@ -409,6 +436,8 @@ export async function runStory(deps, input) {
         unit: storyId,
         worktree_dir: worktreeDir,
         tree_before: treeBefore,
+        base_ref: baseRef,
+        base_before: baseBefore,
       },
     })
   }
@@ -999,11 +1028,23 @@ export async function runStory(deps, input) {
 
       const commitSha = /** @type {any} */ (commitStepResult.result)?.commit
 
-      await deps.journal.append({
+      const delivery = await deliverStory({
+        journal,
+        events: readEvents(),
+        gitPort: basePort,
+        storyId,
+        baseRef,
+        baseBefore,
+        reviewedCommit: commitSha,
+      })
+      const deliveryStatus = delivery.delivered ? 'delivered' : 'awaiting_operator'
+
+      await journal.append({
         kind: 'story_done',
         unit: storyId,
         data: {
-          status: 'committed',
+          status: deliveryStatus,
+          reason: delivery.delivered ? null : delivery.reason,
           commit: commitSha,
           spec_revision: story.spec_revision,
           unit: storyId,
@@ -1012,9 +1053,9 @@ export async function runStory(deps, input) {
       })
 
       return {
-        status: 'committed',
-        exitCode: 0,
-        reason: null,
+        status: deliveryStatus,
+        exitCode: delivery.delivered ? 0 : 3,
+        reason: delivery.delivered ? null : delivery.reason,
         commit: commitSha,
       }
     }

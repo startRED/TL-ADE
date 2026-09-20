@@ -903,7 +903,7 @@ describe('Integrar revisão e correção que convergem', () => {
     })
 
     const res = await runStory(fixture.deps, fixture.input)
-    expect(res.status).toBe('committed')
+    expect(res.status).toBe('delivered')
     expect(res.exitCode).toBe(0)
     expect(res.commit).toBeTruthy()
 

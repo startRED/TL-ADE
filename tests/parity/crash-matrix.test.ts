@@ -74,7 +74,7 @@ function verifyMatrixCell(point: (typeof POINTS)[number], actor: 'engine' | 'wor
   const { fixture, res1, res2, events } = runCell(point, actor)
 
   expect(res2.status).toBe(0)
-  expect(branchCount(fixture.repo.dir)).toBe('1')
+  expect(branchCount(fixture.repo.dir)).toBe('0')
   expect(readCounter(fixture.scenarioDir, 'maker')).toBe(1)
 
   const commitStepResults = events.filter(
@@ -85,7 +85,8 @@ function verifyMatrixCell(point: (typeof POINTS)[number], actor: 'engine' | 'wor
   expect(commitStepResults).toHaveLength(1)
 
   const storyDoneEvents = events.filter(
-    (e) => e.kind === 'story_done' && e.data?.status === 'committed',
+    (e) => e.kind === 'story_done' &&
+      (e.data?.status === 'committed' || e.data?.status === 'delivered'),
   )
   expect(storyDoneEvents).toHaveLength(1)
 

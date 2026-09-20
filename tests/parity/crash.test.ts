@@ -344,7 +344,8 @@ describe('crash durability (child process aborts)', () => {
     const makerCalls = readCounter(scenarioDir, 'maker')
     const branch = 'ade/mission-1/ADE-T1'
     const commits = Number(repo.git(['rev-list', '--count', 'HEAD..' + branch]).trim())
-    const storyDone = events.filter((e) => e.kind === 'story_done' && e.data?.status === 'committed').length
+    const storyDone = events.filter((e) => e.kind === 'story_done' &&
+      (e.data?.status === 'committed' || e.data?.status === 'delivered')).length
     const results = events.filter((e) => e.kind === 'step_result' && e.step_id === 'ADE-T1:r1:maker')
     expect(results).toHaveLength(1)
     expect(results[0]?.status).toBe('ok')
@@ -358,7 +359,7 @@ describe('crash durability (child process aborts)', () => {
     expect(repo.git(['show', branch + ':src/hello.txt'])).toBe(actions[0].files['src/hello.txt'])
     expect(events.filter((e) => e.kind === 'step_result' && e.step_id === 'ADE-T1:commit')).toHaveLength(1)
     expect(makerCalls).toBe(1)
-    expect(commits).toBe(1)
+    expect(commits).toBe(0)
     expect(storyDone).toBe(1)
   }, 120_000)
 })

@@ -176,7 +176,8 @@ export function checkProbeJournal(rawEvents: any): string[] {
   const missing: string[] = []
 
   const hasStoryDone = events.some(
-    (e: any) => e?.kind === 'story_done' && e?.data?.status === 'committed',
+    (e: any) => e?.kind === 'story_done' &&
+      (e?.data?.status === 'committed' || e?.data?.status === 'delivered'),
   )
   if (!hasStoryDone) {
     missing.push('story_done')

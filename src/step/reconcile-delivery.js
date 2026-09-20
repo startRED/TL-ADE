@@ -243,11 +243,33 @@ export async function reconcileLocalMerge({ intent, gitPort }) {
     (head.branch === baseRef ? head.commit : null)
 
   const hasMergeHead = mergeHead !== null
-  const headDiverged = currentHead !== reviewedCommit
+  const headDiverged = currentHead !== baseBefore && currentHead !== reviewedCommit
   const baseDiverged = baseCurrent !== null && baseCurrent !== baseBefore
 
+  // Queda depois do efeito: a base já aponta para o commit revisado. Repetir o fast-forward seria
+  // um segundo efeito sobre o mesmo commit, então o merge é dado por aplicado.
+  if (!hasMergeHead && baseCurrent !== null && baseCurrent === reviewedCommit) {
+    return {
+      verdict: 'ok',
+      reason: 'already_merged',
+      commit: baseCurrent,
+      evidence: {
+        base_ref: baseRef,
+        base_before: baseBefore,
+        base_current: baseCurrent,
+        reviewed_commit: reviewedCommit,
+        current_head: currentHead,
+        merge_head: null,
+        merged_commit: baseCurrent,
+      },
+      result: {
+        commit: baseCurrent,
+      },
+    }
+  }
+
   if (hasMergeHead || headDiverged || baseDiverged) {
-    const reason = hasMergeHead ? 'merge_in_progress' : (headDiverged ? 'head_diverged' : 'base_diverged')
+    const reason = hasMergeHead ? 'merge_in_progress' : (baseDiverged ? 'base_diverged' : 'head_diverged')
     return {
       verdict: 'ambiguous',
       reason,

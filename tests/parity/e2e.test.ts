@@ -48,7 +48,7 @@ describe('e2e parity', () => {
     expect(greenStep).toBeDefined()
 
     const storyDone = events.find((e) => e.kind === 'story_done')
-    expect(storyDone?.data?.status).toBe('committed')
+    expect(storyDone?.data?.status).toBe('delivered')
     expect(typeof storyDone?.data?.commit).toBe('string')
   }, 60_000)
 

@@ -5,7 +5,7 @@
  *
  * @param {Array<Record<string, any>>} events Lista de eventos do journal.
  * @param {string} unit Identificador da story/unidade.
- * @returns {{ worktree_dir: string, tree_before: string } | null}
+ * @returns {{ worktree_dir: string, tree_before: string, base_ref: string | null, base_before: string | null } | null}
  */
 export function findStoryStarted(events, unit) {
   if (!Array.isArray(events)) {
@@ -24,6 +24,8 @@ export function findStoryStarted(events, unit) {
         return {
           worktree_dir: ev.data.worktree_dir,
           tree_before: ev.data.tree_before,
+          base_ref: typeof ev.data.base_ref === 'string' ? ev.data.base_ref : null,
+          base_before: typeof ev.data.base_before === 'string' ? ev.data.base_before : null,
         }
       }
     }
@@ -48,7 +50,7 @@ export function findStoryCommitted(events, unit) {
       const eventUnit = ev.data?.unit ?? ev.unit
       if (
         eventUnit === unit &&
-        ev.data?.status === 'committed' &&
+        (ev.data?.status === 'committed' || ev.data?.status === 'delivered') &&
         typeof ev.data.commit === 'string'
       ) {
         return {

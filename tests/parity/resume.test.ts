@@ -22,6 +22,8 @@ describe('resume parity', () => {
     expect(findStoryStarted(events, 'ADE-T1')).toEqual({
       worktree_dir: '/w',
       tree_before: 't2',
+      base_ref: null,
+      base_before: null,
     })
 
     // Borda: events vazio
@@ -44,6 +46,8 @@ describe('resume parity', () => {
     ).toEqual({
       worktree_dir: '/w3',
       tree_before: 't3',
+      base_ref: null,
+      base_before: null,
     })
 
     // Incompleto: data sem worktree_dir ou tree_before válidos é ignorado
@@ -79,6 +83,8 @@ describe('resume parity', () => {
     ).toEqual({
       worktree_dir: '/w',
       tree_before: 't1',
+      base_ref: null,
+      base_before: null,
     })
   })
 
@@ -111,7 +117,8 @@ describe('resume parity', () => {
 
   // CA3 e CA4: Dado um primeiro ade run com ADE_FAULT='before_commit' (status diferente de 0),
   // quando um segundo ade run sem ADE_FAULT roda logo em seguida, então sai com 0 e
-  // git rev-list --count HEAD..ade/mission-1/ADE-T1 devolve '1'.
+  // git rev-list --count HEAD..ade/mission-1/ADE-T1 devolve '0' (a entrega aprovada
+  // já fez fast-forward da base para o commit da story).
   // No journal, há um lease_adopted com data.previous_owner.pid === res1.pid e
   // data.reason 'owner_dead', e um story_resumed com data.reason 'story_started_in_journal'.
   test('second_run_after_fault_adopts_lease_and_resumes', () => {
@@ -135,7 +142,7 @@ describe('resume parity', () => {
     expect(res2.status).toBe(0)
 
     const revCount = fixture.repo.git(['rev-list', '--count', 'HEAD..ade/mission-1/ADE-T1']).trim()
-    expect(revCount).toBe('1')
+    expect(revCount).toBe('0')
 
     const journalPath = path.join(fixture.missionDir, 'journal.jsonl')
     expect(fs.existsSync(journalPath)).toBe(true)

@@ -252,7 +252,7 @@ export function openJournal({
  * Lê e valida sequencialmente o diário e a cadeia de hash (s3).
  * @param {string} filePath
  * @returns {{
- *   events: Array<Record<string, unknown>>,
+ *   events: Array<Record<string, any>>,
  *   tornTail: null | { line: number, bytesDropped: number, validBytes: number }
  * }}
  */
@@ -341,6 +341,9 @@ export function readJournal(filePath) {
 
     events.push(ev)
     expectedPrev = digest16(ev)
+    if (ev.data && typeof ev.data === 'object' && 'reconciled' in ev.data) {
+      ev.reconciled = ev.data.reconciled
+    }
   }
 
   return { events, tornTail }
