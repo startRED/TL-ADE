@@ -46,7 +46,7 @@ export function findSuites(root) {
     for (const e of ECOSYSTEMS) {
       if (seen.has(e.group) || !e.when(d)) continue
       seen.add(e.group)
-      out.push({ cwd: rel.split(path.sep).join('/'), group: e.group, runner: e.runner, language: val(e.language, d), test_cmd: val(e.test_cmd, d) || null, report: val(e.report, d) || null, one: e.one || null, related: e.related || null, format: e.format || null, dir: e.dir || null })
+      out.push({ cwd: rel.split(path.sep).join('/'), group: e.group, runner: e.runner, language: val(e.language, d), test_cmd: val(e.test_cmd, d) || null, report: val(e.report, d) || null, one: e.one || null, related: e.related || null, slow: e.slow || null, format: e.format || null, dir: e.dir || null })
     }
     return out
   }
@@ -186,4 +186,18 @@ export async function runSuites(dir, suites, { run, python, timeoutMs = 15 * 60 
   if ((only || related) && !tests.length) return null
   const failed = tests.filter((t) => t.status !== 'passed').length
   return { ok: failed === 0 && tests.length > 0, total: tests.length, failed, tests, runner: live.map((s) => s.runner).join('+'), named, timeout, covered, output: tails.join('\n').slice(-2000), only: only || undefined, related: related ? true : undefined }
+}
+
+// Comando que roda SÓ as provas ligadas a um conjunto de arquivos, em forma legível para quem escreve (sem o relatório JSON,
+// que é só do motor). Vazio quando nenhuma suíte do projeto sabe fazer esse recorte.
+// O motor já roda esse recorte DEPOIS de quem escreve; o problema é que quem escreve editava às cegas e só descobria a
+// regressão quando a rodada já estava paga. Medido na m-mu8usf5z: o Codex deixou a suíte verde em 31% das escritas, o Gemini
+// em 43%, e o Gemini toca 6,6 arquivos por chamada — o maior raio de explosão dos três.
+export function relatedCommand(suites) {
+  const s = (suites || []).find((x) => x.related)
+  if (!s) return ''
+  return s.related
+    .filter((a) => !/\{out(dir)?\}/.test(a) && !/^--?(reporter|outputFile|json)\b/.test(a))
+    .map((a) => (a === '{files}' ? '<os arquivos que VOCÊ mudou>' : a === '{pkgs}' ? '<os pacotes que VOCÊ mudou>' : a))
+    .join(' ')
 }

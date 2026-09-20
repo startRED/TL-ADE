@@ -136,3 +136,26 @@ test('runner sem botão de limite por prova ignora slowMs', async () => {
   await runSuites(process.cwd(), [{ cwd: '', runner: 'cargo', test_cmd: 'x', report: ['cargo', 'test'], format: null }], { run, python: async () => 'py', slowMs: 90000 })
   assert.deepEqual(calls[0], ['cargo', 'test'])
 })
+
+test('comando das provas ligadas sai legível, sem o relatório JSON do motor', async () => {
+  const { relatedCommand } = await import('./runners.mjs')
+  const vitest = [{ related: ['node', 'node_modules/vitest/vitest.mjs', 'related', '--run', '--passWithNoTests', '--reporter=json', '--outputFile={out}', '{files}'] }]
+  assert.equal(relatedCommand(vitest), 'node node_modules/vitest/vitest.mjs related --run --passWithNoTests <os arquivos que VOCÊ mudou>')
+  const go = [{ related: ['go', 'test', '-json', '{pkgs}'] }]
+  assert.equal(relatedCommand(go), 'go test <os pacotes que VOCÊ mudou>')
+})
+
+test('suíte sem recorte de afetadas não devolve comando', async () => {
+  const { relatedCommand } = await import('./runners.mjs')
+  assert.equal(relatedCommand([{ test_cmd: 'cargo test' }]), '')
+  assert.equal(relatedCommand(null), '')
+})
+
+test('findSuites carrega o botão de limite por prova (senão slowMs nunca chega ao runner)', async () => {
+  const { findSuites } = await import('./runners.mjs')
+  const d = mkdtempSync(path.join(os.tmpdir(), 'ade-slow-'))
+  mkdirSync(path.join(d, 'node_modules', 'vitest'), { recursive: true })
+  writeFileSync(path.join(d, 'package.json'), '{"name":"x"}')
+  writeFileSync(path.join(d, 'node_modules', 'vitest', 'vitest.mjs'), '')
+  assert.equal(findSuites(d).find((s) => s.runner === 'vitest').slow, '--testTimeout={ms}')
+})

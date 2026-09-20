@@ -4,7 +4,7 @@
 // Sem durabilidade de verdade (estado em memória; journal só registra). Esse é o slice 1.
 
 import { SCOUT_SCHEMA, scoutPrompt, ENV_GUARD } from './scout.mjs'
-import { findSuites, runSuites, TOOLCHAINS } from './runners.mjs'
+import { findSuites, relatedCommand, runSuites, TOOLCHAINS } from './runners.mjs'
 import { laneCandidates, laneEngine, createLane, lanePatch, applyPatch, removeLane, LANES_DIR } from './lanes.mjs'
 import { chatWriteTurn, chatCommand, chatIntro, formatHistory, pendingProposal, PENDING_BLOCK, handleChatDecision, discardPending, pendingChatIds, pruneChatWorktrees } from './chat-changes.mjs'
 import http from 'node:http'
@@ -1532,12 +1532,17 @@ const IMPL_RULES = [
 // continua conferido pelo motor, que guarda o código de lado e roda a prova sem ele (redWithoutCode)
 // Tempo medido da prova da parte: quem escreve espera a saída em vez de repetir o comando (19/09, s3: prova de 35 s com espera de
 // 30 s no Codex voltava vazia e era rodada de novo, 5 vezes numa chamada de 8 min).
+// Quem escreve editava às cegas: via as provas vermelhas que tinha de consertar, mas nada sobre as VERDES que dependem dos
+// arquivos que ia mexer. Descobria o estrago só depois, quando o motor já tinha pago suíte, revisão e a rodada seguinte.
+// Medido na m-mu8usf5z: o Codex deixou a suíte verde em 31% das escritas, o Gemini em 43%, e o Gemini toca 6,6 arquivos por
+// chamada. O motor já sabe rodar esse recorte — agora entrega o comando pronto para quem escreve conferir antes de terminar.
+const blastTip = () => { const cmd = relatedCommand(state.project?.suites); return cmd ? `ANTES DE DIZER QUE TERMINOU, confira o seu estrago: rode \`${cmd}\` com os arquivos que você alterou e limite a saída (\`| tail -30\`). É um recorte curto, não a suíte inteira. Prova que estava VERDE e você derrubou volta como rodada paga, com outro modelo mais caro refazendo o seu trabalho: é mais barato você achar agora.` : '' }
 const testTimeTip = (st) => { const ms = state.mission?.test_ms?.[st.test_file]; return ms > 15000 ? `A prova da parte (${st.test_file}) levou ${Math.round(ms / 1000)} s na última vez aqui: ao rodá-la, espere ela terminar (tempo de espera de ${Math.ceil(ms / 500)} s ou mais) em vez de repetir o comando; saída vazia no meio quer dizer que ainda está rodando.` : '' }
 function testPrompt(st, pack, together = false) {
   if (together) return [`Pedido original do usuário: ${state.mission.request}`, ...common(st),
     `DUAS ETAPAS NESTA CHAMADA, nesta ordem. (1) PROVA: escreva as provas novas (testes automatizados) desta story: uma função de teste por critério de aceite, todas no mesmo arquivo, com nomes que digam o critério. ${st.test_file ? `Arquivo de prova: ${st.test_file}. ` : ''}${st.examples?.length ? 'Cada EXEMPLO acima vira uma asserção. ' : ''}Dica de prova: ${st.test_hint}. Rode o arquivo de prova uma vez e veja as provas novas falharem. (2) CÓDIGO: implemente o comportamento até o arquivo de prova passar. Depois de você, o motor guarda o código de lado e roda a prova sem ele: prova que passa sem o código novo não prova nada e a parte volta ao começo. Não rode a suíte inteira: o motor roda todas as provas depois. Provas NUNCA fazem chamada real de rede, CLI externa ou serviço: simule com dublês (stub/mock) e teste o comportamento observável.`,
     'QUALIDADE DA PROVA: se o arquivo de prova já existe, ACRESCENTE (nunca apague nem reescreva prova que já está lá); teste a interface pública e a saída observável; dublê só na fronteira do sistema (processo filho, relógio, sistema de arquivos, rede); determinística; valores concretos dos EXEMPLOS; pelo menos uma prova de borda ou de falha.',
-    ...IMPL_RULES, testTimeTip(st),
+    ...IMPL_RULES, testTimeTip(st), blastTip(),
     pack, 'Ao terminar, escreva uma frase com o nome do arquivo de prova, os nomes das provas novas e o que mudou no código.'].filter(Boolean).join('\n') + skillsBlock(skillsForStory(state.mission.skills.maker || [], st, state.settings.skills.forced || []))
   return [`Pedido original do usuário: ${state.mission.request}`, ...common(st),
     `FASE 1 de 2: escreva APENAS as provas novas (testes automatizados) desta story: uma função de teste por critério de aceite, todas no mesmo arquivo, com nomes que digam o critério. Todas devem FALHAR (ou nem carregar) no código atual, porque o comportamento ainda não existe. ${st.test_file ? `Arquivo de prova: ${st.test_file}. ` : ''}${st.examples?.length ? 'Cada EXEMPLO acima vira uma asserção. ' : ''}Dica de prova: ${st.test_hint}. Não implemente o comportamento ainda (a implementação é a fase 2, outra chamada; implementar agora só gasta cota e o harness não consegue conferir o vermelho). Não rode a suíte inteira: rode no máximo o arquivo de prova novo, uma vez. Provas NUNCA fazem chamada real de rede, CLI externa ou serviço: simule com dublês (stub/mock) e teste o comportamento observável; prova que depende do ambiente vira falha falsa e trava a parte.`,
@@ -1556,7 +1561,7 @@ function fixPrompt(st, round, review, visual, pack, turns = 30) {
     // orçamento que não tinha e morrer no meio das edições
     st.truncated ? `A sua tentativa anterior foi CORTADA no teto de turnos no meio do trabalho: a árvore já tem as edições parciais dela. Continue de onde parou, confira o que ficou incompleto antes de escrever mais, e feche a parte dentro de ${turns} ações. Não recomece do zero e não releia o que já leu.` : '',
     `Agora implemente o necessário para a prova passar e os critérios de aceite valerem. Não modifique a prova. Não toque em nada fora do escopo da story. Seja direto: você tem no máximo ${turns} ações e a chamada é cortada nesse número; não investigue ferramentas do harness, não reescreva provas antigas, não amplie o escopo.`,
-    ...IMPL_RULES, testTimeTip(st),
+    ...IMPL_RULES, testTimeTip(st), blastTip(),
     round > 1 && st.tests_after && !st.tests_after.ok ? `DEPURAÇÃO (rodada ${round}; a tentativa anterior não deixou as provas verdes): (1) antes de mudar qualquer linha, explique em uma frase POR QUE a prova falha; (2) reproduza rodando só o arquivo de prova; (3) uma hipótese por vez sobre a CAUSA, não o sintoma; teste com a menor mudança; hipótese refutada = desfaça a mudança antes da próxima; (4) correção mínima na causa provada, sem refatoração de carona; (5) depois de verde, procure o mesmo padrão errado nos outros arquivos do escopo.` : '',
     'Ao terminar, escreva no máximo 3 linhas dizendo o que mudou.']
   if (round > 1 && review) { base.push('Se um pedido do revisor contradiz uma DECISÃO DO PLANO, o contrato ou um critério de aceite, não o aplique: na frase final cite literalmente a decisão ou o critério que o impede (o revisor vai ler a sua resposta). Todo o resto, corrija.'); base.push(`Rodada ${round}. O revisor (outra IA) pediu mudanças: ${review.summary}`); for (const f of review.findings) base.push(`- [${f.severity}] ${f.file}: ${f.problem} Correção sugerida: ${f.fix}`) }
