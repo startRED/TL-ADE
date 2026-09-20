@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { skillDescription } from './skill-meta.mjs'
 import { brokeGreen, diffArgs, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
-import { PLANNING_POLICY, versionProgram, planIssues, needsPlanCritic, skillsForStory, canCombineProof } from './planning.mjs'
+import { PLANNING_POLICY, versionProgram, planIssues, needsPlanCritic, needsScout, scoutKey, skillsForStory, canCombineProof } from './planning.mjs'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
 const ADE_DIR = path.join(ROOT, '.ade')
@@ -1696,7 +1696,7 @@ async function runProgram() {
     const usd0 = m.cost.usd
     log('engine', `épico ${i + 1} de ${pg.epics.length}: ${ep.title}`)
     m.state = 'planning'; broadcast()
-    if (scoutWorth() && i > 0) { setStep('scout', 'running'); m.scout = await scout(`Épico "${ep.title}": ${ep.goal.slice(0, 400)}. O que quem vai planejar este épico precisa saber do estado atual do projeto (o que os épicos anteriores deixaram, onde ficam as partes envolvidas, provas existentes)?`); setStep('scout', m.scout ? 'done' : 'failed') }
+    if (scoutWorth() && needsScout(m.scout, ep.id, i, m.version_index || 0)) { setStep('scout', 'running'); m.scout = await scout(`Épico "${ep.title}": ${ep.goal.slice(0, 400)}. O que quem vai planejar este épico precisa saber do estado atual do projeto (o que os épicos anteriores deixaram, onde ficam as partes envolvidas, provas existentes)? Inclua os FORMATOS que o código já usa e que este épico vai consumir: nomes de campo dos objetos que atravessam as fronteiras, valores exatos de status e de enum, e quem chama quem.`); if (m.scout) m.scout.epic = scoutKey(ep.id, m.version_index || 0); setStep('scout', m.scout ? 'done' : 'failed') }
     m.map = await codeMap(state.project.dir, (await projectTree(state.project.dir)).filter((f) => TEXT_EXT.test(f)))
     const planned = await makePlan({ inProgram: true })
     ep.plan_usd = m.cost.usd - usd0

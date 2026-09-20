@@ -46,3 +46,17 @@ export function skillsForStory(skills, story, forced = []) {
   const visual = files.some(f => /\.(jsx|tsx|html|css|scss|vue|svelte)$|(^|\/)(ui|frontend|components)\//i.test(f)) || /\b(interface visual|layout|frontend|acessibilidade|tela|painel|botão)\b/i.test(`${story.title || ''} ${story.request || ''}`)
   return skills.filter(s => visual || forced.includes(s.id) || !['design-taste-frontend', 'impeccable'].includes(s.id))
 }
+
+// O relatório do scout é UMA vaga na missão inteira. A condição de renová-lo era `i > 0`, o índice do épico dentro do
+// programa da VERSÃO atual — então um programa de um épico só nunca renovava, e cada versão nova recomeça em i=0.
+// m-mu8usf5z: a v0.3 foi planejada com o relatório da v0.2, de doze horas antes e sobre outro subsistema (Checker e
+// adapters). O planejador ficou sem os fatos do código que ia mexer, e o revisor cobrou justamente isso — `story.guardrails`
+// que o motor não produz, `committed` onde o motor grava `delivered`, `evals[].cmd` onde o plan-load normaliza `argv`.
+// Renova por ÉPICO; não repete o mesmo épico; o primeiro épico da primeira versão segue coberto pelo scout da missão.
+// A chave leva a versão junto: cada programa numera os épicos a partir de e1, então "e1" da v0.3 colide com "e1" da v0.2 e
+// o relatório velho passaria por novo — a mesma colisão de ID que o revisor cobrou desta missão.
+export function scoutKey(epicId, versionIndex = 0) { return `${versionIndex}:${epicId}` }
+export function needsScout(scout, epicId, index = 0, versionIndex = 0) {
+  if (!epicId || scout?.epic === scoutKey(epicId, versionIndex)) return false
+  return index > 0 || versionIndex > 0
+}

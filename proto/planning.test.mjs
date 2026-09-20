@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { planIssues, versionProgram, needsPlanCritic, skillsForStory, canCombineProof } from './planning.mjs'
+import { planIssues, versionProgram, needsPlanCritic, needsScout, scoutKey, skillsForStory, canCombineProof } from './planning.mjs'
 import { planningSamples } from './planning-eval.mjs'
 
 const story = (id, extra = {}) => ({ id, request: 'Entregar o comportamento pedido', acceptance: ['O resultado é verificável'], scope_paths: ['src/a.js'], depends_on: [], ...extra })
@@ -55,4 +55,20 @@ test('real_planner_prompt_and_schema_allow_variable_story_counts', async () => {
     assert.match(sample.prompt, /PLANEJAMENTO PROPORCIONAL/)
     assert.doesNotMatch(sample.prompt, /decide mal|no máximo 160 palavras|até ~400 linhas|primeira fatia coerente/)
   }
+})
+
+test('needsScout: épico 1 da versão 1 fica com o scout da missão', () => {
+  assert.equal(needsScout({ summary: 'da missão' }, 'e1', 0, 0), false)
+})
+
+test('needsScout: épico 1 de uma versão seguinte renova o scout, apesar do id repetido', () => {
+  assert.equal(needsScout({ summary: 'da v0.2', epic: scoutKey('e1', 0) }, 'e1', 0, 1), true)
+})
+
+test('needsScout: mesmo épico da mesma versão não repete', () => {
+  assert.equal(needsScout({ epic: scoutKey('e2', 1) }, 'e2', 1, 1), false)
+})
+
+test('needsScout: épico seguinte dentro do mesmo programa renova', () => {
+  assert.equal(needsScout({ epic: scoutKey('e1', 0) }, 'e2', 1, 0), true)
 })
