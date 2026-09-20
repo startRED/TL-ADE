@@ -1742,7 +1742,10 @@ async function makePlan({ inProgram = false } = {}) {
   m.stories = plan.stories.map((s) => ({ ...s, state: 'queued', steps: [], round: 0, red_tests: [], tests_after: null, diff: '', review: null, visual: null }))
   setStep('plan', 'done')
   log('engine', `plano${m.epic ? ` do épico "${m.epic.title}"` : ''}: ${plan.title} · ${m.plan.complexity} · ${m.stories.length} story(s)`)
-  if (plan.questions?.length) { m.state = 'awaiting_plan'; m.reason = 'questions'; broadcast(); await persistMission().catch(() => {}); return inProgram ? true : undefined }
+  // Modo noturno responde as perguntas do plano com as recomendações, como já faz com as do briefing e as da entrevista. Era o
+  // único ponto que ainda parava a missão sem operador: a m-mu8usf5z dormiu aqui às 04:08 com uma pergunta de uma linha.
+  if (plan.questions?.length && state.settings.unattended) { m.answers = [...(m.answers || []), ...plan.questions.map((q) => ({ id: q.id, question: q.question, answer: q.options?.[0]?.label || 'não sei' }))]; log('engine', `modo noturno: perguntas do plano respondidas com as recomendações (${plan.questions.length})`, 'warn') }
+  else if (plan.questions?.length) { m.state = 'awaiting_plan'; m.reason = 'questions'; broadcast(); await persistMission().catch(() => {}); return inProgram ? true : undefined }
   if (inProgram) return true
   if (state.settings.unattended) log('engine', `modo noturno: plano com ${m.stories.length} parte(s) aprovado automaticamente`, 'warn')
   else if (m.user_feedback || m.stories.length > 2) { m.state = 'awaiting_plan'; m.reason = 'approve_plan'; broadcast(); await persistMission().catch(() => {}); return }
