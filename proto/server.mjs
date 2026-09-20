@@ -2123,10 +2123,13 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   // suíte vermelha depois de uma chamada CORTADA no teto de turnos é trabalho inacabado, não defeito: não vale como problema
   // grave, senão a parte sobe de modelo para consertar o que ninguém terminou de escrever (ver rounds.mjs)
   const grave = (previousReview?.findings || []).some((f) => f.severity === 'high') || (st.tests_after && !st.tests_after.ok && !st.truncated)
-  const repeat = repeatedFindings(st, previousReview)
+  // Achado repetido sobe a escada porque significa "este modelo não entendeu o pedido". Depois de uma chamada CORTADA no teto
+  // de turnos não significa nada disso: quem escreve nem chegou ao achado. Contar assim mandava a parte para o modelo mais
+  // caro por causa do corte, que é justo o que a correção do teto queria evitar (m-mu8usf5z, V02-R3f rodada 4).
+  const repeat = st.truncated ? 0 : repeatedFindings(st, previousReview)
   const pick = makerStep(st, round, grave, repeat), escalate = pick.key === 'fix'
   const turns = makerTurns({ wasTruncated: st.truncated, escalate })
-  if (st.truncated) log('engine', `a rodada anterior foi cortada no teto de turnos: repito no mesmo degrau com ${turns} turnos em vez de escalar para um modelo mais caro`, 'warn')
+  if (st.truncated) log('engine', `a rodada anterior foi cortada no teto de turnos: trabalho inacabado, não defeito. Não conta como problema grave nem como achado repetido, e a repetição tem ${turns} turnos`, 'warn')
   if (escalate) log('engine', `rodada ${round}: ${st.fix_of ? 'parte de correção' : grave ? 'problema grave' : 'revisor ainda pede mudanças'}${repeat ? `, ${repeat} achado(s) repetido(s)` : ''}; maker vai para a cadeia de correção, degrau ${pick.start + 1} de ${chainOf('fix').length}`)
   if (st.early_impl && round === 1) setStep('fix', 'skipped', { round })
   else { setStep('fix', 'running', { round }); const rf = await withChain(pick.key, { start: pick.start }, async (who) => makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st), turns), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: turns }))
