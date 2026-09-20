@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { makeRepo, removeRepo } from '../helpers/git-repo.js'
 import { UnexpectedTreeStateError } from '../../src/journal/errors.js'
 // Importações dos módulos da story (a implementar na fase 2)
@@ -19,6 +19,11 @@ afterEach(() => {
   }
   tmpDirs = []
 })
+
+// Cada prova deste arquivo dispara dezenas de subprocessos do Git; no Windows, com a suíte
+// inteira em paralelo, isso passa dos 5s padrão. Opção de timeout em describe() não é herdada
+// pelas provas no vitest 2.x, por isso o ajuste vale para o arquivo.
+vi.setConfig({ testTimeout: 30_000 })
 
 describe('prepare parity', () => {
   // AC1: Dado um repositório base com arquivo modificado fora de .ade/, quando prepareStory roda,

@@ -18,10 +18,16 @@ export function makeRepo(): { dir: string; git(args: string[]): string } {
     })
 
   git(['init', '-b', 'main'])
-  git(['config', 'user.name', 'ADE Test'])
-  git(['config', 'user.email', 'ade@test.local'])
-  git(['config', 'commit.gpgsign', 'false'])
-  git(['config', 'core.autocrlf', 'false'])
+  // Configuração pela interface suportada do Git: `git config` acha o arquivo certo mesmo quando
+  // `.git` é arquivo (worktree linkado), o que escrever em `.git/config` na mão não faz.
+  for (const [key, value] of [
+    ['user.name', 'ADE Test'],
+    ['user.email', 'ade@test.local'],
+    ['commit.gpgsign', 'false'],
+    ['core.autocrlf', 'false'],
+  ]) {
+    git(['config', key, value])
+  }
 
   return { dir, git }
 }

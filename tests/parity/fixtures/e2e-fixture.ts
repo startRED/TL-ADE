@@ -198,6 +198,46 @@ export function setupE2E(options: SetupE2EOptions = {}) {
     'utf8',
   )
 
+  // Checker independente (família codex) que aprova citando o eval executado. A árvore e o
+  // digest vêm em marcadores: só o motor conhece a revisão de insumos em tempo de execução.
+  const checkerActions = [
+    {
+      result: {
+        format_version: 2,
+        contract_revision: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+        input_revision: { tree: 'TRUE_TREE', digest: 'TRUE_DIGEST' },
+        verdict: 'approved',
+        action_items: [],
+        deferred: [],
+        rejected: [],
+        evidence: [
+          {
+            criterion: 'R1',
+            result_ref: 'eval:E1',
+            input_digest: 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+          },
+        ],
+        requested_action: 'verify',
+        sources: ['eval:E1'],
+        summary: 'eval E1 verde na árvore revisada',
+        handoff: {
+          claims: [],
+          unknowns: [],
+          questions_for_owner: [],
+          deltas: [],
+          next_action: 'verify',
+          notes: 'approved',
+        },
+      },
+      stdout: JSON.stringify({ total_cost_usd: 0.01 }),
+    },
+  ]
+  fs.writeFileSync(
+    path.join(scenarioDir, 'checker.json'),
+    JSON.stringify(checkerActions, null, 2),
+    'utf8',
+  )
+
   const adeHome = makeTmpDir('ade-e2e-home-')
   tmpDirs.push(adeHome)
 

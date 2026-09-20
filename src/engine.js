@@ -1,4 +1,5 @@
 // @ts-check
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { AdeError } from './journal/errors.js'
@@ -8,13 +9,39 @@ import { authorizedStep } from './engine/paid-call.js'
 import { maybeEngineFault } from './engine/faults.js'
 import { findStoryCommitted, findStoryStarted } from './engine/resume.js'
 import { dedupStorySection } from './pack/dedup.js'
+import { dispatchClaude } from './adapters/claude/index.js'
+import { dispatchCodex } from './adapters/codex/index.js'
 
 /**
- * Famílias de modelos com canário aprovado no Slice 1.
+ * Calcula o digest canônico dos insumos observados pelo runtime após contain/execução.
+ *
+ * @param {{ tree: string, changedPaths?: string[], contractRevision?: string }} opts
+ * @returns {string}
+ */
+export function computeObservedInputDigest({ tree, changedPaths, contractRevision }) {
+  const normalizedPaths = (changedPaths ?? []).slice().sort()
+  const payload = [
+    tree,
+    contractRevision ?? '',
+    ...normalizedPaths,
+  ].join(':')
+  return `sha256:${createHash('sha256').update(payload, 'utf8').digest('hex')}`
+}
+import {
+  buildReviewHandoff,
+  computeFindingsDigest,
+  detectUnresolvedFindings,
+  normalizeFinding,
+  isBlockingFinding,
+} from './review/handoff.js'
+import { isReviewApproved } from './review/validate.js'
+
+/**
+ * Famílias de modelos com canário aprovado no Slice 1 e v0.2.
  *
  * @type {readonly string[]}
  */
-export const CANARY_FAMILIES = ['claude']
+export const CANARY_FAMILIES = ['claude', 'codex']
 
 /**
  * Orquestra o ciclo durável de execução de uma story.
@@ -31,6 +58,8 @@ export const CANARY_FAMILIES = ['claude']
  * @param {(opts: { worktreeDir: string, outsideDir: string, unitId: string }) => Promise<any> | any} deps.plantCanary Planta canário fora do worktree.
  * @param {(canary: any) => Promise<any> | any} deps.checkCanary Verifica se o canário foi violado.
  * @param {(opts: any) => Promise<any>} deps.dispatchClaude Despacha execução do modelo para o Maker.
+ * @param {(opts: any) => Promise<any>} [deps.dispatchCodex] Despacha execução do modelo para o Checker.
+ * @param {{ exe: string, prefixArgs: string[] } | null} [deps.checkerResolved] Binário da família do Checker; `null` quando a fiação não o encontrou.
  * @param {any} [deps.reconcileAll] Reconciliador de intenções abertas.
  * @param {{ exe: string, prefixArgs: string[] }} deps.resolved Binário resolvido e prefixos.
  * @param {Record<string, string>} deps.workerEnv Variáveis de ambiente para o worker.
@@ -61,8 +90,22 @@ export async function runStory(deps, input) {
 
   // Guardas iniciais antes de qualquer step
   const makerFamily = contract.roles?.maker?.family
+  const makerModel = contract.roles?.maker?.model_id
   if (!makerFamily || !CANARY_FAMILIES.includes(makerFamily)) {
     throw new AdeError('family_without_canary', `família sem canário aprovado: ${makerFamily}`, 4)
+  }
+
+  const checkerRole = contract.roles?.checker_round
+  if (checkerRole) {
+    if (!checkerRole.family || !CANARY_FAMILIES.includes(checkerRole.family)) {
+      throw new AdeError('family_without_canary', `família sem canário aprovado: ${checkerRole.family}`, 4)
+    }
+    if (checkerRole.family === makerFamily || checkerRole.model_id === makerModel) {
+      throw new AdeError('same_family_review_is_refused', 'Maker e Checker não podem pertencer à mesma família ou vendor', 4)
+    }
+    if (checkerRole.sandbox && checkerRole.sandbox !== 'read-only') {
+      throw new AdeError('checker_has_write_permission', 'Checker não pode ter permissão de escrita; esperado sandbox read-only', 4)
+    }
   }
 
   if (!deps.quotaPort || typeof deps.quotaPort.readReceipt !== 'function') {
@@ -417,238 +460,135 @@ export async function runStory(deps, input) {
     data: packResult.manifest,
   })
 
-  // Canário fora da worktree
-  const canary = await deps.plantCanary({
-    worktreeDir,
-    outsideDir: path.join(missionDir, 'canary'),
-    unitId: storyId,
-  })
+  let round = 1
+  const maxReworkRounds = contract.budget?.max_rework_rounds ?? 2
+  let previousFindingsDigest = null
+  let previousFindings = []
+  let openFindings = []
+  let treeBeforeRound = treeBefore
 
-  maybeEngineFault('before_spawn', env)
-
-  const resultFile = path.join(missionDir, 'maker-result.json')
-  const workerEnv = {
-    ...deps.workerEnv,
-    ...(deps.workerEnv && !deps.workerEnv.ADE_FAKE_RESULT_FILE
-      ? { ADE_FAKE_RESULT_FILE: resultFile }
-      : {}),
-  }
-
-  const makerStartedAt = deps.now?.() ?? Date.now()
-  /** @type {import('./engine/paid-call.js').PaidCallAuthorization} */
-  const paidAuthorization = {
-    authorized: true,
-    family: makerFamily,
-    phase: 'implementation',
-    reservation: authorizedReservation,
-    quota_receipt: quotaReceipt,
-    context_bytes: contextBytes,
-    weekly_percent_cap: loaded.missionBudget.max_subscription_weekly_percent ?? 50,
-  }
-  const dispatch = await deps.dispatchClaude({
-    // O bloqueio da chamada paga fica no `step()` write-ahead: o efeito `model_call` só chega ao
-    // spawn se o teto despachado for exatamente a reserva autorizada.
-    step: authorizedStep(
-      deps.step,
-      paidAuthorization,
-      deps.now?.() ?? Date.now(),
-    ),
-    authorization: paidAuthorization,
-    unit: storyId,
-    stepId: `${storyId}:r1:maker`,
-    packPath: packResult.pack_path,
-    missionDir,
-    missionId,
-    cwd: worktreeDir,
-    resultFile,
-    maxBudgetUsd: authorizedReservation.usd,
-    resolved: deps.resolved,
-    env: workerEnv,
-  })
-  const makerWallMs = Math.max(0, (deps.now?.() ?? Date.now()) - makerStartedAt)
-
-  maybeEngineFault('after_maker_effect', env)
-
-  maybeEngineFault('before_contain', env)
-
-  const tree = await wtPort.worktreeTree()
-  const scopePaths = contract.guardrails?.scope_paths ?? []
-  const doNotTouch = contract.guardrails?.do_not_touch ?? []
-  const sensitivePaths = contract.guardrails?.sensitive_paths ?? []
-
-  const containStepResult = await deps.step(
-    {
-      unit: storyId,
-      id: `${storyId}:contain`,
-      effect_class: 'none',
-      input: { tree },
-    },
-    () =>
-      deps.contain({
-        git: wtPort,
-        unitId: storyId,
-        treeBefore,
-        scopePaths,
-        doNotTouch,
-        sensitivePaths,
-      }),
-  )
-
-  const containResult = /** @type {any} */ (containStepResult.result)
-  await deps.journal.append({
-    kind: 'contain_result',
-    unit: storyId,
-    data: containResult,
-  })
-
-  // Canário sempre é checado após o Maker, mesmo que a contenção também recuse:
-  // um escape para fora da worktree não pode ficar mascarado por uma violação de escopo.
-  const canaryResult = await deps.checkCanary(canary)
-  if (canaryResult.escaped) {
-    await deps.journal.append({
-      kind: 'story_done',
-      unit: storyId,
-      data: {
-        status: 'awaiting_operator',
-        reason: 'canary_escaped',
-        unit: storyId,
-        commit: null,
-      },
-    })
-    return {
-      status: 'awaiting_operator',
-      exitCode: 3,
-      reason: 'canary_escaped',
-      commit: null,
+  while (true) {
+    let currentPackPath = packResult.pack_path
+    if (round > 1) {
+      const reworkHandoff = buildReviewHandoff({
+        storyId,
+        contractRevision: /** @type {any} */ (story).contract_revision ?? 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+        treeBase: treeBefore,
+        openFindings,
+        deltas: [{ kind: 'changed', ref: `file:${storyId}` }],
+        round,
+        notes: `rework round ${round}`,
+      })
+      const storySection = dedupStorySection(/** @type {any} */ ({
+        ...story,
+        handoff: reworkHandoff,
+      }))
+      const reworkPack = deps.compilePack({
+        sections: {
+          contract: JSON.stringify(contract),
+          policy: 'rework',
+          story: storySection.text,
+        },
+        missionDir,
+        stepId: `${storyId}:r${round}:pack`,
+      })
+      currentPackPath = reworkPack.pack_path
     }
-  }
 
-  if (!containResult.ok) {
-    await deps.journal.append({
-      kind: 'story_done',
-      unit: storyId,
-      data: {
-        status: 'awaiting_operator',
-        reason: containResult.reason,
-        unit: storyId,
-        commit: null,
-      },
+    // Canário fora da worktree
+    const canary = await deps.plantCanary({
+      worktreeDir,
+      outsideDir: path.join(missionDir, `canary-r${round}`),
+      unitId: storyId,
     })
-    return {
-      status: 'awaiting_operator',
-      exitCode: 3,
-      reason: containResult.reason,
-      commit: null,
+
+    maybeEngineFault('before_spawn', env)
+
+    const resultFile = path.join(missionDir, `maker-result-r${round}.json`)
+    const workerEnv = {
+      ...deps.workerEnv,
+      ...(deps.workerEnv && !deps.workerEnv.ADE_FAKE_RESULT_FILE
+        ? { ADE_FAKE_RESULT_FILE: resultFile }
+        : {}),
     }
-  }
 
-  const changedPaths = containResult.changedPaths ?? []
-  await deps.journal.append({
-    kind: 'telemetry',
-    unit: storyId,
-    data: {
-      role: 'maker',
-      step_id: `${storyId}:r1:maker`,
-      maker_wall_ms: makerWallMs,
-      tokens: dispatch?.tokens ?? { source: 'unavailable' },
-    },
-  })
+    const makerStartedAt = deps.now?.() ?? Date.now()
+    /** @type {import('./engine/paid-call.js').PaidCallAuthorization} */
+    const paidAuthorization = {
+      authorized: true,
+      family: makerFamily,
+      phase: round === 1 ? 'implementation' : 'rework',
+      reservation: authorizedReservation,
+      quota_receipt: quotaReceipt,
+      context_bytes: contextBytes,
+      weekly_percent_cap: loaded.missionBudget.max_subscription_weekly_percent ?? 50,
+    }
 
-  const usdCap = checkUsdCap({
-    observed_usd: observedUsd(readEvents()).observed_usd,
-    max_usd: loaded.missionBudget.max_usd,
-  })
-  if (!usdCap.ok) {
-    await deps.journal.append({
-      kind: 'story_done',
+    const dispatch = await deps.dispatchClaude({
+      // O bloqueio da chamada paga fica no `step()` write-ahead: o efeito `model_call` só chega ao
+      // spawn se o teto despachado for exatamente a reserva autorizada.
+      step: authorizedStep(
+        deps.step,
+        paidAuthorization,
+        deps.now?.() ?? Date.now(),
+      ),
+      authorization: paidAuthorization,
       unit: storyId,
-      data: {
-        status: 'awaiting_operator',
-        reason: 'budget_usd_exceeded',
-        unit: storyId,
-        commit: null,
-      },
+      stepId: `${storyId}:r${round}:maker`,
+      packPath: currentPackPath,
+      missionDir,
+      missionId,
+      cwd: worktreeDir,
+      resultFile,
+      maxBudgetUsd: authorizedReservation.usd,
+      resolved: deps.resolved,
+      env: workerEnv,
     })
-    return {
-      status: 'awaiting_operator',
-      exitCode: 3,
-      reason: 'budget_usd_exceeded',
-      commit: null,
-    }
-  }
+    const makerWallMs = Math.max(0, (deps.now?.() ?? Date.now()) - makerStartedAt)
 
-  maybeEngineFault('after_contain', env)
+    maybeEngineFault('after_maker_effect', env)
 
-  // Gates
-  const { runGates } = deps.createGateRunner({
-    step: deps.step,
-    missionDir,
-    gitPort: wtPort,
-  })
+    maybeEngineFault('before_contain', env)
 
-  const treeAfterContain = await wtPort.worktreeTree()
+    const tree = await wtPort.worktreeTree()
+    const scopePaths = contract.guardrails?.scope_paths ?? []
+    const doNotTouch = contract.guardrails?.do_not_touch ?? []
+    const sensitivePaths = contract.guardrails?.sensitive_paths ?? []
 
-  const gateRes = await runGates({
-    gates: loaded.gates ?? [],
-    flags: [],
-    tree: treeAfterContain,
-    unit: storyId,
-    changedFiles: changedPaths,
-  })
-
-  await deps.journal.append({
-    kind: 'gates_done',
-    unit: storyId,
-    data: {
-      results: gateRes.results,
-    },
-  })
-
-  const gateFailed =
-    !gateRes.ok ||
-    gateRes.results.some(
-      (/** @type {any} */ r) => r.status !== 'passed' && r.status !== 'ok',
+    const containStepId = round === 1 ? `${storyId}:contain` : `${storyId}:r${round}:contain`
+    const containStepResult = await deps.step(
+      {
+        unit: storyId,
+        id: containStepId,
+        effect_class: 'none',
+        input: { tree },
+      },
+      () =>
+        deps.contain({
+          git: wtPort,
+          unitId: storyId,
+          treeBefore,
+          scopePaths,
+          doNotTouch,
+          sensitivePaths,
+        }),
     )
-  if (gateFailed) {
+
+    const containResult = /** @type {any} */ (containStepResult.result)
     await deps.journal.append({
-      kind: 'story_done',
+      kind: 'contain_result',
       unit: storyId,
-      data: {
-        status: 'awaiting_operator',
-        reason: 'gate_failed',
-        unit: storyId,
-        commit: null,
-      },
+      data: containResult,
     })
-    return {
-      status: 'awaiting_operator',
-      exitCode: 3,
-      reason: 'gate_failed',
-      commit: null,
-    }
-  }
 
-  // Eval verde
-  const { runEval: runGreenEval } = deps.createEvalRunner({
-    step: deps.step,
-    missionDir,
-    gitPort: wtPort,
-  })
-
-  for (const evalDef of story.evals) {
-    const evalRecord = await runGreenEval({
-      eval: evalDef,
-      phase: 'green',
-      tree: treeAfterContain,
-      unit: storyId,
-    })
-    if (evalRecord.verdict !== 'green') {
+    const canaryResult = await deps.checkCanary(canary)
+    if (canaryResult.escaped) {
       await deps.journal.append({
         kind: 'story_done',
         unit: storyId,
         data: {
           status: 'awaiting_operator',
-          reason: 'eval_green_failed',
+          reason: 'canary_escaped',
           unit: storyId,
           commit: null,
         },
@@ -656,43 +596,498 @@ export async function runStory(deps, input) {
       return {
         status: 'awaiting_operator',
         exitCode: 3,
-        reason: 'eval_green_failed',
+        reason: 'canary_escaped',
         commit: null,
       }
     }
-  }
 
-  maybeEngineFault('before_commit', env)
+    if (!containResult.ok) {
+      await deps.journal.append({
+        kind: 'story_done',
+        unit: storyId,
+        data: {
+          status: 'awaiting_operator',
+          reason: containResult.reason,
+          unit: storyId,
+          commit: null,
+        },
+      })
+      return {
+        status: 'awaiting_operator',
+        exitCode: 3,
+        reason: containResult.reason,
+        commit: null,
+      }
+    }
 
-  const commitStepResult = await deps.step(
-    {
+    const changedPaths = containResult.changedPaths ?? []
+
+    if (round > 1 && previousFindings.length > 0) {
+      const unresolvedCheck = detectUnresolvedFindings({
+        previousFindings,
+        treeBeforeRework: treeBeforeRound,
+        treeAfterRework: tree,
+        changedFiles: changedPaths,
+      })
+      if (unresolvedCheck.unresolved) {
+        await deps.journal.append({
+          kind: 'story_done',
+          unit: storyId,
+          data: {
+            status: 'awaiting_operator',
+            reason: 'unresolved_blocking_findings',
+            unit: storyId,
+            commit: null,
+          },
+        })
+        return {
+          status: 'awaiting_operator',
+          exitCode: 3,
+          reason: 'unresolved_blocking_findings',
+          commit: null,
+        }
+      }
+    }
+
+    await deps.journal.append({
+      kind: 'telemetry',
       unit: storyId,
-      id: `${storyId}:commit`,
-      effect_class: 'local_commit',
-      input: { tree: treeAfterContain },
-    },
-    () => wtPort.commit({ message: `ade(${storyId}): ${contract.title}` }),
-  )
+      data: {
+        role: 'maker',
+        step_id: `${storyId}:r${round}:maker`,
+        maker_wall_ms: makerWallMs,
+        tokens: dispatch?.tokens ?? { source: 'unavailable' },
+      },
+    })
 
-  maybeEngineFault('after_commit', env)
+    const usdCap = checkUsdCap({
+      observed_usd: observedUsd(readEvents()).observed_usd,
+      max_usd: loaded.missionBudget.max_usd,
+    })
+    if (!usdCap.ok) {
+      await deps.journal.append({
+        kind: 'story_done',
+        unit: storyId,
+        data: {
+          status: 'awaiting_operator',
+          reason: 'budget_usd_exceeded',
+          unit: storyId,
+          commit: null,
+        },
+      })
+      return {
+        status: 'awaiting_operator',
+        exitCode: 3,
+        reason: 'budget_usd_exceeded',
+        commit: null,
+      }
+    }
 
-  const commitSha = /** @type {any} */ (commitStepResult.result)?.commit
+    maybeEngineFault('after_contain', env)
 
-  await deps.journal.append({
-    kind: 'story_done',
-    unit: storyId,
-    data: {
-      status: 'committed',
-      commit: commitSha,
-      spec_revision: story.spec_revision,
+    // Gates
+    const { runGates } = deps.createGateRunner({
+      step: deps.step,
+      missionDir,
+      gitPort: wtPort,
+    })
+
+    const treeAfterContain = await wtPort.worktreeTree()
+
+    const gateRes = await runGates({
+      gates: loaded.gates ?? [],
+      flags: [],
+      tree: treeAfterContain,
       unit: storyId,
-    },
-  })
+      changedFiles: changedPaths,
+    })
 
-  return {
-    status: 'committed',
-    exitCode: 0,
-    reason: null,
-    commit: commitSha,
+    await deps.journal.append({
+      kind: 'gates_done',
+      unit: storyId,
+      data: {
+        results: gateRes.results,
+      },
+    })
+
+    const gateFailed =
+      !gateRes.ok ||
+      gateRes.results.some(
+        (/** @type {any} */ r) => r.status !== 'passed' && r.status !== 'ok',
+      )
+    if (gateFailed) {
+      await deps.journal.append({
+        kind: 'story_done',
+        unit: storyId,
+        data: {
+          status: 'awaiting_operator',
+          reason: 'gate_failed',
+          unit: storyId,
+          commit: null,
+        },
+      })
+      return {
+        status: 'awaiting_operator',
+        exitCode: 3,
+        reason: 'gate_failed',
+        commit: null,
+      }
+    }
+
+    // Eval verde
+    const { runEval: runGreenEval } = deps.createEvalRunner({
+      step: deps.step,
+      missionDir,
+      gitPort: wtPort,
+    })
+
+    const executedEvalRefs = []
+    for (let evalIdx = 0; evalIdx < story.evals.length; evalIdx++) {
+      const evalDef = story.evals[evalIdx]
+      const evalId = evalDef.id ?? `E${evalIdx + 1}`
+      executedEvalRefs.push(evalId)
+      const evalRecord = await runGreenEval({
+        eval: { ...evalDef, id: evalId },
+        phase: 'green',
+        tree: treeAfterContain,
+        unit: storyId,
+      })
+      if (evalRecord.verdict !== 'green') {
+        await deps.journal.append({
+          kind: 'story_done',
+          unit: storyId,
+          data: {
+            status: 'awaiting_operator',
+            reason: 'eval_green_failed',
+            unit: storyId,
+            commit: null,
+          },
+        })
+        return {
+          status: 'awaiting_operator',
+          exitCode: 3,
+          reason: 'eval_green_failed',
+          commit: null,
+        }
+      }
+    }
+
+    if (!checkerRole) {
+      await deps.journal.append({
+        kind: 'story_done',
+        unit: storyId,
+        data: {
+          status: 'awaiting_operator',
+          reason: 'no_checker_family_available',
+          unit: storyId,
+          commit: null,
+        },
+      })
+      return {
+        status: 'awaiting_operator',
+        exitCode: 3,
+        reason: 'no_checker_family_available',
+        commit: null,
+      }
+    }
+
+    // Checker dispatch
+    const checkerDispatchFn =
+      checkerRole.family === 'claude'
+        ? (deps.dispatchClaude ?? dispatchClaude)
+        : (deps.dispatchCodex ?? dispatchCodex)
+
+    // O Checker roda em outra família: usa o binário dela. Quem não fia `checkerResolved`
+    // (provas com dublê) fica com o resolvido do Maker; `null` explícito significa que a
+    // fiação tentou resolver e não achou, e aí não há revisão independente possível.
+    const checkerResolved =
+      deps.checkerResolved === undefined ? deps.resolved : deps.checkerResolved
+
+    if (!checkerDispatchFn || !checkerResolved) {
+      await deps.journal.append({
+        kind: 'story_done',
+        unit: storyId,
+        data: {
+          status: 'awaiting_operator',
+          reason: 'checker_dispatch_unavailable',
+          unit: storyId,
+          commit: null,
+        },
+      })
+      return {
+        status: 'awaiting_operator',
+        exitCode: 3,
+        reason: 'checker_dispatch_unavailable',
+        commit: null,
+      }
+    }
+
+    // Revisão de insumos que o Checker recebe para declarar o que revisou. A validação compara
+    // o que ele devolve com a árvore observada de novo depois da revisão, então um resultado
+    // reaproveitado de outra rodada (ou de uma retomada) continua caindo em stale_input_revision.
+    const observedDigest = computeObservedInputDigest({
+      tree: treeAfterContain,
+      changedPaths,
+      contractRevision: /** @type {any} */ (story).contract_revision,
+    })
+
+    const checkerResultFile = path.join(missionDir, `checker-result-r${round}.json`)
+    const checkerStepId = `${storyId}:r${round}:checker`
+    const checkerWorkerEnv = {
+      ...deps.workerEnv,
+      ADE_FAKE_ROLE: 'checker',
+      ADE_FAKE_RESULT_FILE: checkerResultFile,
+      ADE_INPUT_TREE: treeAfterContain,
+      ADE_INPUT_DIGEST: observedDigest,
+    }
+
+    let checkerDispatch
+    try {
+      checkerDispatch = await checkerDispatchFn({
+        step: authorizedStep(
+          deps.step,
+          paidAuthorization,
+          deps.now?.() ?? Date.now(),
+        ),
+        authorization: paidAuthorization,
+        unit: storyId,
+        stepId: checkerStepId,
+        packPath: currentPackPath,
+        missionDir,
+        missionId,
+        cwd: worktreeDir,
+        resultFile: checkerResultFile,
+        maxBudgetUsd: authorizedReservation.usd,
+        model: checkerRole.model_id,
+        resolved: checkerResolved,
+        env: checkerWorkerEnv,
+        role: 'checker_round',
+        sandbox: 'read-only',
+      })
+    } catch (err) {
+      const dispatchErrorReason = err instanceof AdeError ? err.code : 'checker_dispatch_failed'
+      await deps.journal.append({
+        kind: 'story_done',
+        unit: storyId,
+        data: {
+          status: 'awaiting_operator',
+          reason: dispatchErrorReason,
+          unit: storyId,
+          commit: null,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      })
+      return {
+        status: 'awaiting_operator',
+        exitCode: 3,
+        reason: dispatchErrorReason,
+        commit: null,
+      }
+    }
+
+    let reviewDoc = checkerDispatch?.review_result
+    if (!reviewDoc && fs.existsSync(checkerResultFile)) {
+      try {
+        reviewDoc = JSON.parse(fs.readFileSync(checkerResultFile, 'utf8'))
+      } catch (err) {
+        await deps.journal.append({
+          kind: 'review_error',
+          unit: storyId,
+          data: {
+            round,
+            envelope_error: 'not_json',
+            error: err instanceof Error ? err.message : String(err),
+          },
+        })
+      }
+    }
+
+    if (!reviewDoc) {
+      const failReason = checkerDispatch?.envelope_error ?? 'no_review_result'
+      await deps.journal.append({
+        kind: 'story_done',
+        unit: storyId,
+        data: {
+          status: 'awaiting_operator',
+          reason: failReason,
+          unit: storyId,
+          commit: null,
+        },
+      })
+      return {
+        status: 'awaiting_operator',
+        exitCode: 3,
+        reason: failReason,
+        commit: null,
+      }
+    }
+
+    const verifiedRefs = new Set()
+    for (const ref of executedEvalRefs) {
+      verifiedRefs.add(`eval:${ref}`)
+    }
+    for (const g of gateRes.results ?? []) {
+      if (g.id) verifiedRefs.add(`gate:${g.id}`)
+    }
+    for (const p of changedPaths) {
+      verifiedRefs.add(`file:${p}`)
+      const fullPath = path.join(worktreeDir, p)
+      try {
+        if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+          const lines = fs.readFileSync(fullPath, 'utf8').split('\n').length
+          verifiedRefs.add(`file:${p}#L1-L${lines}`)
+          verifiedRefs.add(`file:${p}#L1-L1`)
+        }
+      } catch {
+        // Arquivo ilegível agora (corrida/permissão): a ref com intervalo de linhas fica
+        // sem verificação e o Checker que a citar será recusado por unverified_reference.
+      }
+    }
+    for (const evalDef of story.evals ?? []) {
+      for (const evPath of evalDef.evidence ?? []) {
+        verifiedRefs.add(`file:${evPath}`)
+        const fullPath = path.join(worktreeDir, evPath)
+        try {
+          if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+            const lines = fs.readFileSync(fullPath, 'utf8').split('\n').length
+            verifiedRefs.add(`file:${evPath}#L1-L${lines}`)
+            verifiedRefs.add(`file:${evPath}#L1-L1`)
+          }
+        } catch {
+          // Mesmo caso do laço acima: evidência ilegível não vira ref verificada.
+        }
+      }
+    }
+
+    const reviewContext = {
+      contractRevision: /** @type {any} */ (story).contract_revision ?? 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+      inputRevision: {
+        tree: treeAfterContain,
+        digest: observedDigest,
+      },
+      verifiedRefs: Array.from(verifiedRefs),
+    }
+
+    const reviewApproval = isReviewApproved(reviewDoc, reviewContext)
+
+    await deps.journal.append({
+      kind: 'review_result',
+      unit: storyId,
+      data: {
+        round,
+        approved: reviewApproval.approved,
+        verdict: reviewDoc?.verdict ?? 'unknown',
+        errors: reviewApproval.errors,
+        result: reviewDoc,
+      },
+    })
+
+    if (reviewApproval.approved) {
+      maybeEngineFault('before_commit', env)
+
+      const commitStepResult = await deps.step(
+        {
+          unit: storyId,
+          id: `${storyId}:commit`,
+          effect_class: 'local_commit',
+          input: { tree: treeAfterContain },
+        },
+        () => wtPort.commit({ message: `ade(${storyId}): ${contract.title}` }),
+      )
+
+      maybeEngineFault('after_commit', env)
+
+      const commitSha = /** @type {any} */ (commitStepResult.result)?.commit
+
+      await deps.journal.append({
+        kind: 'story_done',
+        unit: storyId,
+        data: {
+          status: 'committed',
+          commit: commitSha,
+          spec_revision: story.spec_revision,
+          unit: storyId,
+          verified_tree: treeAfterContain,
+        },
+      })
+
+      return {
+        status: 'committed',
+        exitCode: 0,
+        reason: null,
+        commit: commitSha,
+      }
+    }
+
+    // Not approved
+    if (reviewDoc?.verdict !== 'changes_requested') {
+      const failReason = reviewApproval.errors[0]?.code ?? 'review_rejected'
+      await deps.journal.append({
+        kind: 'story_done',
+        unit: storyId,
+        data: {
+          status: 'awaiting_operator',
+          reason: failReason,
+          unit: storyId,
+          commit: null,
+        },
+      })
+      return {
+        status: 'awaiting_operator',
+        exitCode: 3,
+        reason: failReason,
+        commit: null,
+      }
+    }
+
+    // Verdict é changes_requested
+    const findings = (reviewDoc.action_items ?? reviewDoc.findings ?? []).map(normalizeFinding)
+    const currentFindingsDigest = computeFindingsDigest(findings)
+
+    // Orçamento de retrabalho esgotado tem precedência: depois da última rodada permitida o
+    // diagnóstico é o limite, não a repetição de achados.
+    if (round > maxReworkRounds) {
+      await deps.journal.append({
+        kind: 'story_done',
+        unit: storyId,
+        data: {
+          status: 'awaiting_operator',
+          reason: 'rework_exhausted',
+          unit: storyId,
+          commit: null,
+        },
+      })
+      return {
+        status: 'awaiting_operator',
+        exitCode: 3,
+        reason: 'rework_exhausted',
+        commit: null,
+      }
+    }
+
+    if (previousFindingsDigest !== null && currentFindingsDigest === previousFindingsDigest) {
+      await deps.journal.append({
+        kind: 'story_done',
+        unit: storyId,
+        data: {
+          status: 'awaiting_operator',
+          reason: 'stagnation',
+          unit: storyId,
+          commit: null,
+        },
+      })
+      return {
+        status: 'awaiting_operator',
+        exitCode: 3,
+        reason: 'stagnation',
+        commit: null,
+      }
+    }
+
+    previousFindingsDigest = currentFindingsDigest
+    previousFindings = findings
+    openFindings = findings.filter(isBlockingFinding)
+    treeBeforeRound = treeAfterContain
+    round++
   }
 }

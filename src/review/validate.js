@@ -201,7 +201,12 @@ export function validateEvidenceResult(schemaName, doc, context = {}) {
   function isRefVerified(ref) {
     if (isPathInsecure(ref)) return false
     if (!verifiedRefsList) return false
-    return verifiedRefs.has(ref)
+    if (verifiedRefs.has(ref)) return true
+    if (typeof ref === 'string' && ref.startsWith('file:')) {
+      const [baseFile] = ref.split('#')
+      if (verifiedRefs.has(baseFile)) return true
+    }
+    return false
   }
 
   // 1. Comparar contract_revision

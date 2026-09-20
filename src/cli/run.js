@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { createLocalPreflightPorts } from '../adapters/local/preflight.js'
 import { createLocalQuotaPort } from '../adapters/local/quota.js'
 import { dispatchClaude } from '../adapters/claude/index.js'
+import { dispatchCodex } from '../adapters/codex/index.js'
 import { checkCanary, plantCanary } from '../contain/canary.js'
 import { contain } from '../contain/contain.js'
 import { runStory } from '../engine.js'
@@ -119,6 +120,8 @@ export async function runCommand(options, deps = {}) {
     }
 
     let resolved
+    /** @type {{ exe: string, prefixArgs: string[] } | null} */
+    let checkerResolved
     /** @type {Record<string, string>} */
     let workerEnv = {}
     if (env.ADE_FAKE_CLI === '1') {
@@ -126,12 +129,24 @@ export async function runCommand(options, deps = {}) {
         exe: process.execPath,
         prefixArgs: [fileURLToPath(new URL('../adapters/fake/cli.js', import.meta.url))],
       }
+      checkerResolved = resolved
       workerEnv = {
         ADE_FAKE_SCENARIO: env.ADE_FAKE_SCENARIO ?? '',
         ADE_FAKE_ROLE: 'maker',
       }
     } else {
       resolved = resolveBinary('claude')
+      // O Checker é de outra família: precisa do próprio binário. Sem ele não há revisão
+      // independente possível, e o motor estaciona a unidade em vez de rodar o binário errado.
+      try {
+        checkerResolved = resolveBinary('codex')
+      } catch (err) {
+        checkerResolved = null
+        await journal.append({
+          kind: 'checker_binary_unavailable',
+          data: { family: 'codex', error: err instanceof Error ? err.message : String(err) },
+        })
+      }
       workerEnv = {}
     }
 
@@ -168,8 +183,10 @@ export async function runCommand(options, deps = {}) {
       plantCanary,
       checkCanary,
       dispatchClaude: deps.dispatchClaude ?? dispatchClaude,
+      dispatchCodex: deps.dispatchCodex ?? dispatchCodex,
       reconcileAll,
       resolved,
+      checkerResolved,
       workerEnv,
       quotaPort: deps.quotaPort ?? createLocalQuotaPort({
         receiptPath: path.join(homeDir, '.ade', 'quota-receipt.json'),

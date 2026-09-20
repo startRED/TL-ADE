@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { makeRepo, removeRepo } from '../helpers/git-repo.js'
 // Importações dos módulos da story (a implementar na fase 2)
 import { createGitPort } from '../../src/git/gitport.js'
@@ -34,6 +34,11 @@ afterEach(() => {
   }
   tmpDirs = []
 })
+
+// Cada prova deste arquivo dispara dezenas de subprocessos do Git; no Windows, com a suíte
+// inteira em paralelo, isso passa dos 5s padrão. Opção de timeout em describe() não é herdada
+// pelas provas no vitest 2.x, por isso o ajuste vale para o arquivo.
+vi.setConfig({ testTimeout: 30_000 })
 
 describe('git port parity', () => {
   // AC1, AC2 e exemplos de hooks, headInfo, run e validação de entrada

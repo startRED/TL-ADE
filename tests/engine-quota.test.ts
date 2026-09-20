@@ -286,7 +286,9 @@ test('CA1_recibo_oficial_valido_permite_despacho_do_cli_ao_runner_dentro_dos_lim
       dispatchClaude: subject.deps.dispatchClaude,
     },
   )
-  expect(exitCode).toBe(0)
+  // A revisão independente passou a ser obrigatória: sem binário da família do Checker
+  // (`codex`) a unidade estaciona depois do despacho do Maker, em vez de comitar.
+  expect(exitCode).toBe(3)
   expect(subject.dispatched).toHaveBeenCalledTimes(1)
   expect(subject.dispatched).toHaveBeenCalledWith(expect.objectContaining({
     maxBudgetUsd: 25,
@@ -349,7 +351,8 @@ test('CA3_reserva_e_duravel_e_nao_duplicada_na_retomada', async () => {
     },
   )
 
-  expect(exitCode).toBe(0)
+  // Idem CA1: o estacionamento por falta de Checker não pode duplicar a reserva já durável.
+  expect(exitCode).toBe(3)
   expect(subject.dispatched).toHaveBeenCalledTimes(1)
   expect(readReceiptMock).not.toHaveBeenCalled()
   const events = readJournal(path.join(subject.missionDir, 'journal.jsonl')).events

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import { createLocalPreflightPorts } from '../src/adapters/local/preflight.js'
 import { runPreflight } from '../src/engine/preflight.js'
 import { dispatchClaude } from '../src/adapters/claude/index.js'
+import { approvedReviewAction, makeCheckerDouble } from './helpers/checker-double.js'
 import { readCounter } from '../src/adapters/fake/cli.js'
 import { checkCanary, plantCanary } from '../src/contain/canary.js'
 import { contain } from '../src/contain/contain.js'
@@ -243,6 +244,12 @@ function setupStoryFixture(options: SetupFixtureOptions = {}) {
     JSON.stringify(makerActions, null, 2),
     'utf8',
   )
+  // O motor só comita depois de revisão independente: o cenário precisa de um Checker.
+  fs.writeFileSync(
+    path.join(scenarioDir, 'checker.json'),
+    JSON.stringify([approvedReviewAction()], null, 2),
+    'utf8',
+  )
 
   const missionDir = path.join(repo.dir, '.ade', 'missions', loaded.plan.mission_id)
   fs.mkdirSync(missionDir, { recursive: true })
@@ -264,6 +271,10 @@ function setupStoryFixture(options: SetupFixtureOptions = {}) {
     plantCanary,
     checkCanary,
     dispatchClaude,
+    dispatchCodex: makeCheckerDouble({
+      scenarioDir,
+      contractRevision: (story as any).contract_revision,
+    }),
     reconcileAll,
     resolved: {
       exe: process.execPath,
@@ -378,10 +389,10 @@ describe('engine', () => {
   // lança AdeError com code 'family_without_canary' e exit 4, e o journal não tem nenhum
   // step_intent com step_id terminando em ':maker'.
   test('family_without_canary_is_refused_before_dispatch', async () => {
-    expect(CANARY_FAMILIES).toEqual(['claude'])
+    expect(CANARY_FAMILIES).toEqual(['claude', 'codex'])
 
     const fixture = setupStoryFixture({
-      makerFamily: 'codex',
+      makerFamily: 'agy',
     })
 
     let error: any

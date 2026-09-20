@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import {
   assertCanaryIntact as rawAssertCanaryIntact,
   checkCanary as rawCheckCanary,
@@ -33,6 +33,11 @@ afterEach(() => {
   }
   tmpDirs = []
 })
+
+// Cada prova deste arquivo dispara dezenas de subprocessos do Git; no Windows, com a suíte
+// inteira em paralelo, isso passa dos 5s padrão. Opção de timeout em describe() não é herdada
+// pelas provas no vitest 2.x, por isso o ajuste vale para o arquivo.
+vi.setConfig({ testTimeout: 30_000 })
 
 describe('contain integrity', () => {
   // AC4: Dado um limite de buffer menor que a saída do git, quando contain roda,

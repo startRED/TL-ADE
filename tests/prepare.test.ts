@@ -17,11 +17,16 @@ afterEach(() => {
   tmpDirs = []
 })
 
+// Provas que criam repositório e worktree de verdade disparam dezenas de subprocessos do Git;
+// no Windows, com a suíte em paralelo, elas passam dos 5s padrão. O teto maior vale só para
+// essas provas (opção de timeout em describe() não é herdada no vitest 2.x), não para o arquivo.
+const slowTest = (name: string, fn: () => Promise<void>) => test(name, fn, 30_000)
+
 describe('prepare', () => {
   // AC1: Dado um worktree da story contendo .ade/takeover.json, quando prepareStory roda,
   // então devolve espera pelo operador com motivo de takeover aberto e código de saída 3,
   // sem despachar nada.
-  test('dispatch_into_open_takeover_is_refused', async () => {
+  slowTest('dispatch_into_open_takeover_is_refused', async () => {
     const repo = makeRepo()
     tmpDirs.push(repo.dir)
 
@@ -83,7 +88,7 @@ describe('prepare', () => {
   // AC1: Dado repositório base e worktree com package-lock.json idênticos e node_modules
   // presente só na base, quando prepareStory roda, então o worktree passa a enxergar os
   // arquivos de node_modules da base, o resultado diz que o vínculo foi criado e traz a duração em milissegundos.
-  test('prepare_links_node_modules_when_lockfile_matches', async () => {
+  slowTest('prepare_links_node_modules_when_lockfile_matches', async () => {
     const repo = makeRepo()
     tmpDirs.push(repo.dir)
 
@@ -132,7 +137,7 @@ describe('prepare', () => {
   // AC2: Dado um package-lock.json que existe só no repositório base (commitado depois da branch da unidade),
   // quando prepareStory roda, então devolve espera pelo operador com motivo de ambiente e código de saída 3,
   // sem instalar nada e sem criar vínculo.
-  test('divergent_lockfile_waits_for_operator', async () => {
+  slowTest('divergent_lockfile_waits_for_operator', async () => {
     const repo = makeRepo()
     tmpDirs.push(repo.dir)
 
@@ -176,7 +181,7 @@ describe('prepare', () => {
   })
 
   // Lockfiles com conteúdos divergentes em ambos os lados
-  test('different_lockfile_contents_waits_for_operator', async () => {
+  slowTest('different_lockfile_contents_waits_for_operator', async () => {
     const repo = makeRepo()
     tmpDirs.push(repo.dir)
 
@@ -220,7 +225,7 @@ describe('prepare', () => {
   // AC3: Dado nenhum package-lock.json nos dois lados, quando prepareStory roda,
   // então devolve estado pronto informando ausência de dependências vinculadas,
   // mesmo que já exista um node_modules no worktree.
-  test('no_lockfile_reports_absent_even_if_node_modules_exists_in_worktree', async () => {
+  slowTest('no_lockfile_reports_absent_even_if_node_modules_exists_in_worktree', async () => {
     const repo = makeRepo()
     tmpDirs.push(repo.dir)
 
@@ -259,7 +264,7 @@ describe('prepare', () => {
   // AC4: Dado lockfiles iguais e um node_modules real já existente dentro do worktree,
   // quando prepareStory roda, então o conteúdo desse diretório permanece intacto,
   // nada é acrescentado ao exclude e o resultado informa que ele já estava presente.
-  test('pre_existing_node_modules_in_worktree_is_preserved_when_lockfiles_match', async () => {
+  slowTest('pre_existing_node_modules_in_worktree_is_preserved_when_lockfiles_match', async () => {
     const repo = makeRepo()
     tmpDirs.push(repo.dir)
 

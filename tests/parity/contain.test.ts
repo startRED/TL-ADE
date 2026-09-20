@@ -32,6 +32,11 @@ afterEach(() => {
   tmpDirs = []
 })
 
+// Cada prova deste arquivo dispara dezenas de subprocessos do Git; no Windows, com a suíte
+// inteira em paralelo, isso passa dos 5s padrão. Opção de timeout em describe() não é herdada
+// pelas provas no vitest 2.x, por isso o ajuste vale para o arquivo.
+vi.setConfig({ testTimeout: 30_000 })
+
 describe('contain parity', () => {
   // AC1: Dado um texto com uma chave sintética de acesso da AWS, quando scanText roda,
   // então devolve um achado com pattern igual a aws_access_key_id e o deslocamento do casamento.

@@ -367,6 +367,23 @@ export async function runFakeCli(argv, env, deps = {}) {
     const resultDir = path.dirname(resultFile)
     fs.mkdirSync(resultDir, { recursive: true })
     const resultData = acao.result ?? { status: 'ok', role, call: i }
+    // A árvore e o digest que o Checker declara ter revisado só existem em tempo de execução;
+    // o cenário os escreve como marcadores e a CLI falsa os troca pelo que o motor informou,
+    // do mesmo jeito que uma CLI real leria essa revisão de insumos do pack.
+    const rev = /** @type {any} */ (resultData)?.input_revision
+    if (rev && typeof rev === 'object') {
+      for (const [campo, variavel] of [
+        ['tree', 'ADE_INPUT_TREE'],
+        ['digest', 'ADE_INPUT_DIGEST'],
+      ]) {
+        const marcador = campo === 'tree' ? 'TRUE_TREE' : 'TRUE_DIGEST'
+        if (rev[campo] !== marcador) continue
+        if (!env[variavel]) {
+          throw new AdeError('fake_scenario_invalid', `${variavel} ausente para ${marcador}`, 2)
+        }
+        rev[campo] = env[variavel]
+      }
+    }
     fs.writeFileSync(resultFile, JSON.stringify(resultData) + '\n', 'utf8')
   }
 

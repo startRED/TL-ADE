@@ -143,6 +143,7 @@ export function killTree(
  * @property {string} [heartbeatPath]
  * @property {number} [heartbeatTimeoutS]
  * @property {Record<string, string>} [env]
+ * @property {string} [stdinData] conteúdo entregue ao processo pela entrada padrão (prompt/pack)
  * @property {() => string} [now]
  * @property {Function} [spawnImpl]
  * @property {(pid: number) => Promise<string | null>} [getStartTime]
@@ -167,6 +168,7 @@ export async function runWorker(options) {
     heartbeatPath,
     heartbeatTimeoutS,
     env = {},
+    stdinData,
     now = () => new Date().toISOString(),
     spawnImpl = spawn,
     getStartTime = getProcessStartTime,
@@ -176,6 +178,10 @@ export async function runWorker(options) {
     if (typeof timeoutS !== 'number' || !Number.isFinite(timeoutS) || timeoutS <= 0) {
       throw new TypeError('timeoutS inválido')
     }
+  }
+
+  if (stdinData !== undefined && typeof stdinData !== 'string') {
+    throw new TypeError('stdinData inválido')
   }
 
   if (heartbeatTimeoutS !== undefined) {
@@ -283,7 +289,9 @@ export async function runWorker(options) {
         shell: false,
         detached: false,
         windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        // CLIs que leem o prompt pela entrada padrão (`codex exec -`) precisam de um cano aberto;
+        // sem `stdinData` a entrada continua fechada, para o worker nunca ficar esperando o operador.
+        stdio: [stdinData === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
       }
 
       const isCmd =
@@ -332,6 +340,19 @@ export async function runWorker(options) {
       child.stderr.on('data', (chunk) => {
         stderrChunks.push(String(chunk))
       })
+    }
+
+    if (stdinData !== undefined) {
+      if (!child.stdin) {
+        finalize('start_failed', 'spawn_error', null, 'environment', child.pid ?? null)
+        return
+      }
+      // Se o processo morrer antes de ler o prompt, a escrita quebra o cano; o motivo fica no
+      // stderr do recibo e o desfecho continua sendo o do processo (`close`).
+      child.stdin.on('error', (err) => {
+        stderrChunks.push(`\n[ade] falha ao entregar stdin: ${err instanceof Error ? err.message : String(err)}\n`)
+      })
+      child.stdin.end(stdinData, 'utf8')
     }
 
     child.once('error', () => {
