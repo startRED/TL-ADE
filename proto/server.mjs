@@ -94,10 +94,16 @@ async function plannerOnce(who, { role, prompt, schema, maxTurns, timeoutMs = 30
     if (!out) log('engine', `codex (${role}) não devolveu JSON (código ${r.code}): ${(last || r.err || r.out).trim().slice(0, 300)}`, 'error')
     return out ? { structured_output: out } : null
   }
+  if (who.family === 'compat') return claudeCall({ role, prompt, model: compatModel(who.model), effort: who.effort, tools: web ? ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'] : ['Read', 'Glob', 'Grep'], schema, maxTurns, base_url: who.base_url, token_env: who.token_env })
   if (who.family !== 'claude') { log('engine', `${who.model} (${who.family}) não sabe fazer ${role}; passo para o próximo modelo da sua cadeia`, 'warn'); return null }
   return claudeCall({ role, prompt, model: who.model, effort: who.effort, tools: web ? ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'] : ['Read', 'Glob', 'Grep'], schema, maxTurns })
 }
-const vendorOf = (family, model) => family === 'agy' && /^claude/.test(model) ? 'anthropic' : family === 'agy' && /^gpt/.test(model) ? 'openai' : family === 'claude' ? 'anthropic' : family === 'codex' ? 'openai' : 'google'
+// Família 'compat': qualquer endpoint que fale o protocolo da Anthropic (GLM da Z.ai, um LiteLLM local na frente de um
+// provedor OpenAI-compatível). O motor usa a MESMA CLI do Claude Code, só com outra base e outro token, então saída
+// estruturada, ferramentas, teto de turnos e telemetria continuam valendo. O id do modelo é "<fornecedor>/<modelo>": o
+// prefixo vira o fornecedor em vendorOf, e é assim que "quem escreve nunca revisa" passa a contar com um quarto nome.
+const compatModel = (id) => String(id || '').split('/').slice(1).join('/') || String(id || '')
+const vendorOf = (family, model) => family === 'compat' ? (String(model || '').split('/')[0] || 'compat') : family === 'agy' && /^claude/.test(model) ? 'anthropic' : family === 'agy' && /^gpt/.test(model) ? 'openai' : family === 'claude' ? 'anthropic' : family === 'codex' ? 'openai' : 'google'
 
 const DEFAULT_SETTINGS = {
   roles: {
@@ -799,7 +805,7 @@ function describeTool(c, dir) {
 }
 
 // ---------- chamada Claude (maker / planner) ----------
-async function claudeCall({ role, prompt, model, effort, tools, skipPermissions, schema, maxTurns = 40 }) {
+async function claudeCall({ role, prompt, model, effort, tools, skipPermissions, schema, maxTurns = 40, base_url = null, token_env = null }) {
   const m = state.mission, dir = state.project.dir
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--safe-mode', '--no-session-persistence', '--max-turns', String(maxTurns), '--model', model]
   if (EFFORTS.includes(effort)) args.push('--effort', effort)
@@ -823,7 +829,9 @@ async function claudeCall({ role, prompt, model, effort, tools, skipPermissions,
   const touched = new Set()
   const t0 = Date.now()
   const r = await run('claude', args, {
-    cwd: dir, stdin: prompt, env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
+    // O token NUNCA entra nas configurações nem no estado (o painel recebe o estado inteiro): fica numa variável de
+    // ambiente da máquina e o motor só guarda o NOME dela. Sem a variável, a chamada falha e a cadeia passa ao próximo.
+    cwd: dir, stdin: prompt, env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', ...(base_url ? { ANTHROPIC_BASE_URL: base_url, ANTHROPIC_AUTH_TOKEN: process.env[token_env || ''] || '' } : {}) },
     onLine: (line) => {
       let ev; try { ev = JSON.parse(line) } catch { return }
       if (ev.type === 'rate_limit_event') noteClaudeRate(ev)
@@ -1105,8 +1113,8 @@ async function checker(diff, tests, st) {
   const round = st.round || 1, start = Math.min(Math.max(0, chainOf('checker').length - 1), ladderStep(round, { repeat: repeatedFindings(st, st.last_review) }) + (st.fix_of ? 1 : 0))
   if (start) log('engine', `revisão da rodada ${round}: revisor do degrau ${start + 1} da cadeia, para não repetir rodadas`)
   return withChain('checker', { avoidVendor: avoid, start }, async (who) => {
-    if (who.family === 'claude') {
-      const r = await claudeCall({ role: 'revisão', prompt, model: who.model, effort: who.effort, tools: ['Read', 'Glob', 'Grep'], schema: REVIEW_JSON, maxTurns: 12 })
+    if (who.family === 'claude' || who.family === 'compat') {
+      const r = await claudeCall({ role: 'revisão', prompt, model: who.family === 'compat' ? compatModel(who.model) : who.model, effort: who.effort, tools: ['Read', 'Glob', 'Grep'], schema: REVIEW_JSON, maxTurns: 12, base_url: who.base_url, token_env: who.token_env })
       const review = r?.structured_output || null
       if (review) log('claude', `${review.verdict === 'approve' ? 'aprovou' : 'pediu mudanças'}: ${review.summary}`, 'text')
       return review
@@ -1934,7 +1942,7 @@ async function makerCall(who, opts) {
   const st = state.mission?.stories?.[state.mission.current]; if (st) st.last_maker = { family: who.family, model: who.model }
   const dir = state.project.dir, snap = async () => (await run('git', ['status', '--porcelain', '-uall'], { cwd: dir })).out + (await run('git', ['diff'], { cwd: dir })).out
   const before = await snap()
-  const r = await (who.family === 'agy' ? agyMaker({ ...opts, model: who.model, effort: who.effort }) : who.family === 'codex' ? codexMaker({ ...opts, model: who.model, effort: who.effort }) : claudeCall({ ...opts, model: who.model, effort: who.effort }))
+  const r = await (who.family === 'agy' ? agyMaker({ ...opts, model: who.model, effort: who.effort }) : who.family === 'codex' ? codexMaker({ ...opts, model: who.model, effort: who.effort }) : who.family === 'compat' ? claudeCall({ ...opts, model: compatModel(who.model), effort: who.effort, base_url: who.base_url, token_env: who.token_env }) : claudeCall({ ...opts, model: who.model, effort: who.effort }))
   if (r && ENV_BLOCK.test(String(r.result || '')) && (await snap()) === before) { log('engine', `${who.model} não alterou nada e disse que o ambiente bloqueou: ${String(r.result).trim().split('\n')[0].slice(0, 200)}. Passo ao próximo modelo da cadeia`, 'error'); return null }
   return r
 }
