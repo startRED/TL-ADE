@@ -32,13 +32,14 @@ const ROOT_ALLOWLIST = new Set([
   'tests',
   'tsconfig.json',
   'vitest.config.mjs',
-  // Locais ignorados (6)
+  // Locais ignorados (7)
   '.git',
   '.claude',
   '.ade',
   '.ade-attachments',
   '.ade-vitest.json',
   'node_modules',
+  'coverage',
 ])
 
 function unexpectedRootEntries(entries: string[]): string[] {
@@ -74,8 +75,16 @@ describe('root directory guard', () => {
   test('root_guard_reports_entries_outside_allowlist', () => {
     expect(unexpectedRootEntries(['src', 'tmp.txt'])).toEqual(['tmp.txt'])
     expect(unexpectedRootEntries([])).toEqual([])
-    expect(unexpectedRootEntries(['node_modules', '.git', '.claude'])).toEqual([])
+    expect(unexpectedRootEntries(['node_modules', '.git', '.claude', 'coverage'])).toEqual([])
     expect(unexpectedRootEntries(['Src', 'AGENTS.md'])).toEqual(['Src'])
+  })
+
+  test('coverage_entry_is_accepted_by_guard_and_ignored_by_git', () => {
+    expect(unexpectedRootEntries(['coverage'])).toEqual([])
+    expect(ROOT_ALLOWLIST.has('coverage')).toBe(true)
+    const gitignorePath = path.join(ROOT, '.gitignore')
+    const gitignore = readFileSync(gitignorePath, 'utf8')
+    expect(gitignore).toMatch(/^coverage\/?$/m)
   })
 })
 

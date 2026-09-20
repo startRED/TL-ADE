@@ -12,12 +12,14 @@
   "scripts": {
     "lint": "node node_modules/oxlint/bin/oxlint src tests",
     "test": "node node_modules/vitest/vitest.mjs run",
+    "test:durability-coverage": "node node_modules/vitest/vitest.mjs run --coverage.enabled=true --coverage.reporter=json-summary --coverage.reportsDirectory=coverage tests/parity/ tests/journal.test.ts tests/step.test.ts tests/lease.test.ts tests/contain.test.ts tests/receipt.test.ts tests/reconcile.test.ts && node scripts/check-durability-coverage.js",
     "test:parity": "node scripts/run-parity.js",
     "test:probes": "set ADE_PROBES=1&& node node_modules/vitest/vitest.mjs run",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
   },
   "devDependencies": {
     "@types/node": "^22.20.3",
+    "@vitest/coverage-v8": "2.1.9",
     "oxlint": "^1.83.0",
     "typescript": "5.9.3",
     "vitest": "^2.1.9"

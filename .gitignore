@@ -6,3 +6,4 @@ dist/
 __pycache__/
 .venv/
 .ade-attachments/
+coverage/

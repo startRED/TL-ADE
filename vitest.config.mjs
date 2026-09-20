@@ -36,5 +36,16 @@ export default defineConfig({
     ...selectTests(process.env),
     minWorkers: process.env.ADE_PARITY === '1' ? 4 : undefined,
     maxWorkers: process.env.ADE_PARITY === '1' ? 4 : undefined,
+    coverage: {
+      provider: 'v8',
+      include: [
+        'src/journal/**/*.js',
+        'src/step/**/*.js',
+        'src/lease/**/*.js',
+        'src/git/**/*.js',
+        'src/runner/**/*.js',
+        'src/contain/**/*.js',
+      ],
+    },
   },
 })
