@@ -17,9 +17,9 @@ const val = (v, d) => (typeof v === 'function' ? v(d) : v)
 // Na ordem; vale o primeiro de cada grupo por pasta. {out} = arquivo de relatório, {outdir} = pasta de relatório (ambos fora
 // do projeto), {python} = interpretador do .venv do projeto. Sem report = só código de saída; sem test_cmd = só a linguagem.
 const ECOSYSTEMS = [
-  { group: 'js', runner: 'vitest', language: 'js', when: (d) => has(d, 'package.json') && has(d, 'node_modules/vitest/vitest.mjs'), test_cmd: 'node node_modules/vitest/vitest.mjs run', report: ['node', 'node_modules/vitest/vitest.mjs', 'run', '--reporter=json', '--outputFile={out}'], one: ['node', 'node_modules/vitest/vitest.mjs', 'run', '{file}', '--passWithNoTests', '--reporter=json', '--outputFile={out}'], related: ['node', 'node_modules/vitest/vitest.mjs', 'related', '--run', '--passWithNoTests', '--reporter=json', '--outputFile={out}', '{files}'], format: 'jest' },
-  { group: 'js', runner: 'jest', language: 'js', when: (d) => has(d, 'package.json') && has(d, 'node_modules/jest/bin/jest.js'), test_cmd: 'node node_modules/jest/bin/jest.js', report: ['node', 'node_modules/jest/bin/jest.js', '--ci', '--json', '--outputFile={out}'], one: ['node', 'node_modules/jest/bin/jest.js', '--ci', '--json', '--outputFile={out}', '--passWithNoTests', '--runTestsByPath', '{file}'], related: ['node', 'node_modules/jest/bin/jest.js', '--ci', '--json', '--outputFile={out}', '--passWithNoTests', '--findRelatedTests', '{files}'], format: 'jest' },
-  { group: 'js', runner: 'node-test', language: 'js', when: (d) => /\bnode\s+--test\b/.test(pkg(d).scripts?.test || ''), test_cmd: 'node --test', report: ['node', '--test', '--test-reporter=junit', '--test-reporter-destination={out}'], one: ['node', '--test', '--test-reporter=junit', '--test-reporter-destination={out}', '{file}'], format: 'junit' },
+  { group: 'js', runner: 'vitest', language: 'js', when: (d) => has(d, 'package.json') && has(d, 'node_modules/vitest/vitest.mjs'), test_cmd: 'node node_modules/vitest/vitest.mjs run', report: ['node', 'node_modules/vitest/vitest.mjs', 'run', '--reporter=json', '--outputFile={out}'], one: ['node', 'node_modules/vitest/vitest.mjs', 'run', '{file}', '--passWithNoTests', '--reporter=json', '--outputFile={out}'], related: ['node', 'node_modules/vitest/vitest.mjs', 'related', '--run', '--passWithNoTests', '--reporter=json', '--outputFile={out}', '{files}'], format: 'jest', slow: '--testTimeout={ms}' },
+  { group: 'js', runner: 'jest', language: 'js', when: (d) => has(d, 'package.json') && has(d, 'node_modules/jest/bin/jest.js'), test_cmd: 'node node_modules/jest/bin/jest.js', report: ['node', 'node_modules/jest/bin/jest.js', '--ci', '--json', '--outputFile={out}'], one: ['node', 'node_modules/jest/bin/jest.js', '--ci', '--json', '--outputFile={out}', '--passWithNoTests', '--runTestsByPath', '{file}'], related: ['node', 'node_modules/jest/bin/jest.js', '--ci', '--json', '--outputFile={out}', '--passWithNoTests', '--findRelatedTests', '{files}'], format: 'jest', slow: '--testTimeout={ms}' },
+  { group: 'js', runner: 'node-test', language: 'js', when: (d) => /\bnode\s+--test\b/.test(pkg(d).scripts?.test || ''), test_cmd: 'node --test', report: ['node', '--test', '--test-reporter=junit', '--test-reporter-destination={out}'], one: ['node', '--test', '--test-reporter=junit', '--test-reporter-destination={out}', '{file}'], format: 'junit', slow: '--test-timeout={ms}' },
   { group: 'js', runner: 'npm', language: 'js', when: (d) => { const t = pkg(d).scripts?.test; return !!t && !/no test specified/.test(t) }, test_cmd: 'npm test' },
   { group: 'js', runner: 'none', language: 'js', when: (d) => has(d, 'package.json') },
   { group: 'python', runner: 'pytest', language: 'python', when: (d) => ['pyproject.toml', 'pytest.ini', 'requirements.txt', 'setup.py', 'setup.cfg'].some((f) => has(d, f)), test_cmd: '.venv\\Scripts\\python.exe -m pytest -q', report: ['{python}', '-m', 'pytest', '-q', '-p', 'no:cacheprovider', '--junitxml={out}'], one: ['{python}', '-m', 'pytest', '-q', '-p', 'no:cacheprovider', '--junitxml={out}', '{file}'], format: 'junit' },
@@ -133,7 +133,11 @@ const NO_TESTS = /no test files found|no tests found|no tests ran|collected 0 it
 // sem molde de afetadas roda inteira. Devolve null quando nada rodou. A suíte inteira fica para o fim do épico.
 // 15 min, não 5: a suíte cresce a cada parte e uma prova sozinha já leva 2 min (crash-matrix). Com 5 min a parte que liga
 // cobertura morria em "tests_timeout" sem ter defeito, e o épico inteiro parava (m-mu8usf5z, s2 e a correção dela).
-export async function runSuites(dir, suites, { run, python, timeoutMs = 15 * 60 * 1000, only = null, related = null }) {
+// slowMs: limite por prova, só na repetição depois de um vermelho que era só estouro de tempo. O aperto é a máquina (motor,
+// modelo e suíte ao mesmo tempo), não o código: com o limite padrão de 5 s do vitest a repetição voltava vermelha igual e a
+// parte abria rodada paga atrás de nada (m-mu8usf5z, V02-R3 rodada 2: 8 estouros de tempo, zero falha de asserção).
+// Só os runners que aceitam um limite POR PROVA entram; runner sem esse botão (pytest, cargo) ignora e repete como antes.
+export async function runSuites(dir, suites, { run, python, timeoutMs = 15 * 60 * 1000, only = null, related = null, slowMs = 0 }) {
   const target = only && path.resolve(dir, only)
   const inSuite = (s) => { const r = path.relative(path.join(dir, s.cwd), target); return !r.startsWith('..') && !path.isAbsolute(r) ? r.split(path.sep).join('/') : null }
   const mine = (s) => (related || []).map((f) => path.relative(path.join(dir, s.cwd), path.resolve(dir, f))).filter((r) => r && !r.startsWith('..') && !path.isAbsolute(r)).map((r) => r.split(path.sep).join('/'))
@@ -150,6 +154,7 @@ export async function runSuites(dir, suites, { run, python, timeoutMs = 15 * 60 
       if (changed && s.related.includes('{pkgs}') && !pkgs.length) continue // nenhum pacote Go mudou nesta suíte
       const argv = (file ? s.one : changed ? s.related : s.report || s.test_cmd.split(' ')).flatMap((a) => (a === '{files}' ? changed : a === '{pkgs}' ? pkgs : [a.replaceAll('{out}', out).replaceAll('{outdir}', tmp).replaceAll('{file}', file || '').replaceAll('{pkg}', file ? `./${path.posix.dirname(file)}` : '')]))
       if (argv[0] === '{python}') argv[0] = await python(cwd)
+      if (slowMs && s.slow) argv.push(s.slow.replaceAll('{ms}', String(slowMs)))
       // NODE_TEST_CONTEXT herdado de um node --test em volta faz o node --test filho ignorar o relatório; undefined tira do ambiente
       const r = await run(argv[0], argv.slice(1), { cwd, timeoutMs, env: { NODE_TEST_CONTEXT: undefined } })
       timeout ||= !!r.timedOut

@@ -116,3 +116,23 @@ test('provas afetadas: cada suíte recebe os arquivos mudados dela; sem arquivo 
   assert.deepEqual((await runSuites(d, suites.slice(1), { run, related: ['web/b.js'] })).tests.map((t) => t.name), ['web: b.js'])
   assert.equal(await runSuites(d, suites.slice(1), { run, related: ['docs/x.md'] }), null)
 })
+
+// slowMs: limite por prova na repetição depois de um vermelho que era só estouro de tempo
+test('slowMs acrescenta o limite por prova do runner, e sem slowMs nada muda', async () => {
+  const calls = []
+  const { runSuites } = await import('./runners.mjs')
+  const run = async (cmd, args) => { calls.push([cmd, ...args]); return { code: 0, out: '', err: '' } }
+  const suite = { cwd: '', runner: 'vitest', test_cmd: 'x', report: ['node', 'v.mjs', 'run'], slow: '--testTimeout={ms}', format: null }
+  await runSuites(process.cwd(), [suite], { run, python: async () => 'py', slowMs: 90000 })
+  await runSuites(process.cwd(), [suite], { run, python: async () => 'py' })
+  assert.ok(calls[0].includes('--testTimeout=90000'))
+  assert.ok(!calls[1].some((a) => String(a).startsWith('--testTimeout')))
+})
+
+test('runner sem botão de limite por prova ignora slowMs', async () => {
+  const calls = []
+  const { runSuites } = await import('./runners.mjs')
+  const run = async (cmd, args) => { calls.push([cmd, ...args]); return { code: 0, out: '', err: '' } }
+  await runSuites(process.cwd(), [{ cwd: '', runner: 'cargo', test_cmd: 'x', report: ['cargo', 'test'], format: null }], { run, python: async () => 'py', slowMs: 90000 })
+  assert.deepEqual(calls[0], ['cargo', 'test'])
+})

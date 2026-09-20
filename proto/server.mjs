@@ -677,8 +677,8 @@ function runTests(project, opts = {}) {
   if (opts.only) { const t0 = Date.now(); return runTestsNow(project, opts).then((r) => { if (r && state.mission) (state.mission.test_ms ||= {})[opts.only] = Date.now() - t0; return r }) }
   const p = suiteQueue.then(() => runTestsNow(project, opts)); suiteQueue = p.catch(() => {}); return p
 }
-async function runTestsNow(project, { only = null, related = null } = {}) {
-  const res = await runSuites(project.dir, project.suites || findSuites(project.dir), { run, python: ensurePython, only, related })
+async function runTestsNow(project, { only = null, related = null, slowMs = 0 } = {}) {
+  const res = await runSuites(project.dir, project.suites || findSuites(project.dir), { run, python: ensurePython, only, related, slowMs })
   const covered = new Set((res?.covered || []).map((f) => path.relative(project.dir, f).split(path.sep).join('/')))
   // prova avulsa (node:test fora do runner): só o arquivo da parte, só os arquivos mudados, ou todas as da missão
   const stray = res?.covered?.length || only || related ? await strayNodeTests(project.dir, covered, only ? [only] : related) : []
@@ -1871,7 +1871,7 @@ async function runStories() {
       // correção com as provas que quebraram (o código de todas as partes do épico no contrato); vermelha de novo para e mostra.
       if (state.settings.suite_scope === 'epic' && !m.stories.slice(i + 1).some((x) => !['done', 'skipped'].includes(x.state))) {
         log('engine', 'fim do épico: rodando a suíte inteira'); let full = acceptPreexisting(await runTests(state.project))
-        if (!full.ok && full.tests?.length && full.tests.filter((t) => t.status !== 'passed').every((t) => /timed out|timeout|tempo limite/i.test(t.message || ''))) { log('engine', 'fim do épico: só provas por tempo limite; repito a suíte uma vez', 'warn'); full = acceptPreexisting(await runTests(state.project)) }
+        if (!full.ok && full.tests?.length && full.tests.filter((t) => t.status !== 'passed').every((t) => /timed out|timeout|tempo limite/i.test(t.message || ''))) { log('engine', `fim do épico: só provas por tempo limite; repito a suíte com ${SLOW_TEST_MS / 1000} s por prova`, 'warn'); full = acceptPreexisting(await runTests(state.project, { slowMs: SLOW_TEST_MS })) }
         log('engine', `fim do épico: suíte inteira ${full.ok ? 'verde' : `com ${full.failed} vermelha(s)`} (${full.total} provas)`, full.ok ? 'info' : 'warn')
         if (full.tests?.length) m.tests_before = full
         if (!full.ok && m.stories.some((x) => x.id === 'suite')) { m.state = 'awaiting_operator'; m.reason = 'tests_red'; log('engine', 'a suíte inteira segue vermelha depois da parte de correção; paro para você ver', 'error'); await stopLanes(); finish(); return 'stopped' }
@@ -1898,6 +1898,9 @@ async function runStories() {
 }
 
 const MAX_ROUNDS = 6 // rodadas de correção por parte antes de parar e pedir decisão (Erick, 17/09: 4 era pouco)
+// Limite por prova na REPETIÇÃO depois de um vermelho que era só estouro de tempo. 2 min: a máquina roda motor, modelo e
+// suíte ao mesmo tempo, e o padrão do vitest é 5 s. Não muda a configuração do projeto; vale só para a repetição do motor.
+const SLOW_TEST_MS = 120 * 1000
 
 // ---------- quem escreve: Claude ou Gemini (Antigravity), com escada de subida por falha grave ----------
 // Degraus: maker configurado → (Gemini) mesmo modelo em esforço alto → Sonnet alto → modelo do planejador. Sobe um degrau por rodada
@@ -2154,10 +2157,13 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     const reds = st.tests_after.tests.filter((t) => t.status !== 'passed' && okBefore.has(t.name))
     if (reds.length && (sameDiff || reds.every((t) => /timed out|timeout|tempo limite/i.test(t.message || '')))) {
       st.flaky_retry = round
-      log('engine', `só prova(s) antiga(s) vermelha(s), por tempo limite (${reds.map((t) => t.name.slice(0, 80)).join(' | ')}); estavam verdes antes desta parte: repito a suíte uma vez antes de abrir rodada`, 'warn')
+      // estouro de tempo: a repetição vai com limite POR PROVA bem folgado. Repetir com o mesmo limite de 5 s numa máquina que
+      // segue carregada (motor + modelo + suíte juntos) voltava vermelha igual, e a parte abria rodada paga atrás de nada.
+      const slowMs = reds.every((t) => /timed out|timeout|tempo limite/i.test(t.message || '')) ? SLOW_TEST_MS : 0
+      log('engine', `só prova(s) antiga(s) vermelha(s), por tempo limite (${reds.map((t) => t.name.slice(0, 80)).join(' | ')}); estavam verdes antes desta parte: repito${slowMs ? ` com ${slowMs / 1000} s por prova` : ' a suíte uma vez'} antes de abrir rodada`, 'warn')
       // repete o mesmo recorte que ficou vermelho (arquivo da parte, provas afetadas ou suíte), não a suíte inteira
       const again = quick && !quick.ok ? { only: st.test_file } : byEpic && related ? { related: diffFiles(st.diff) } : {}
-      st.tests_after = (await runTests(state.project, again)) || st.tests_after
+      st.tests_after = (await runTests(state.project, { ...again, slowMs })) || st.tests_after
       if (st.tests_after.ok) log('engine', 'a repetição passou: prova instável, não defeito desta parte; sigo', 'warn')
     }
   }
