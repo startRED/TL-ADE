@@ -19,3 +19,14 @@ export function truncated(result, maxTurns) {
 export function makerTurns({ wasTruncated = false, escalate = false } = {}) {
   return wasTruncated ? 60 : escalate ? 36 : 30
 }
+
+// Nomes das provas que JÁ estavam vermelhas no ponto de partida da missão: essas não são da parte.
+// Os dois portões antigos eram tudo-ou-nada e se anulavam. "Já estava vermelha" só valia se TODAS as vermelhas fossem
+// antigas; "prova instável" só valia se TODAS fossem novas. Uma mistura das duas escapava dos dois portões e abria rodada
+// paga sem defeito algum (m-mu8usf5z, V02-R2f, rodadas 2 e 3: 4 vermelhas antigas + 6 estouros de 5 s com a máquina
+// carregada, zero falha de verdade, e a parte subiu para o degrau mais caro da cadeia).
+export function preexistingReds(tests, before) {
+  if (!tests?.tests?.length || !before?.length) return []
+  const redBefore = new Set(before.filter((t) => t.status !== 'passed').map((t) => t.name))
+  return tests.tests.filter((t) => t.status !== 'passed' && redBefore.has(t.name)).map((t) => t.name)
+}

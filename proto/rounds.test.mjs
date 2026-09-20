@@ -1,7 +1,25 @@
 // node --test proto/rounds.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { makerTurns, truncated } from './rounds.mjs'
+import { makerTurns, preexistingReds, truncated } from './rounds.mjs'
+
+const t = (name, status, message = '') => ({ name, status, message })
+
+test('vermelha antiga é reconhecida mesmo misturada com vermelha nova', () => {
+  const before = [t('a', 'failed'), t('b', 'passed'), t('c', 'passed')]
+  const after = { tests: [t('a', 'failed'), t('b', 'failed', 'Test timed out in 5000ms'), t('c', 'passed')] }
+  assert.deepEqual(preexistingReds(after, before), ['a'])
+})
+
+test('sem vermelha antiga devolve lista vazia', () => {
+  assert.deepEqual(preexistingReds({ tests: [t('b', 'failed')] }, [t('b', 'passed')]), [])
+  assert.deepEqual(preexistingReds({ tests: [] }, [t('a', 'failed')]), [])
+  assert.deepEqual(preexistingReds(null, [t('a', 'failed')]), [])
+})
+
+test('sem ponto de partida não acusa nada', () => {
+  assert.deepEqual(preexistingReds({ tests: [t('a', 'failed')] }, []), [])
+})
 
 test('erro de teto de turnos é corte, não defeito', () => {
   assert.equal(truncated({ subtype: 'error_max_turns', num_turns: 21 }, 20), true)

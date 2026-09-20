@@ -17,7 +17,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { skillDescription } from './skill-meta.mjs'
-import { makerTurns, truncated } from './rounds.mjs'
+import { makerTurns, preexistingReds, truncated } from './rounds.mjs'
 import { PLANNING_POLICY, versionProgram, planIssues, needsPlanCritic, skillsForStory, canCombineProof } from './planning.mjs'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
@@ -2010,13 +2010,16 @@ async function agyMaker({ role, prompt, model, effort }) {
 // Prova que JÁ estava vermelha no ponto de partida não é defeito da parte: não trava (fica o aviso). Só prova nova vermelha ou
 // antiga que quebrou agora abrem rodada. Épico 2, s1: uma prova instável que estourou 5 s no ponto de partida mandava toda
 // parte para a rodada 2. Runner sem resultado prova a prova fica de fora (o nome é a suíte inteira).
+// Prova vermelha desde o ponto de partida não é desta parte, esteja ela sozinha ou misturada com outras. Antes isto só
+// valia quando TODAS as vermelhas eram antigas: uma única prova já vermelha na largada desligava o portão e a parte pagava
+// rodada pelas outras (ver preexistingReds em rounds.mjs).
 function acceptPreexisting(tests, m = state.mission) {
   if (!tests || tests.ok || tests.named === false || !m?.tests_before?.tests?.length) return tests
-  const redBefore = new Set(m.tests_before.tests.filter((t) => t.status !== 'passed').map((t) => t.name))
-  const reds = tests.tests.filter((t) => t.status !== 'passed')
-  if (!reds.length || !reds.every((t) => redBefore.has(t.name))) return tests
-  log('engine', `só prova(s) que já estava(m) vermelha(s) no ponto de partida (${reds.map((t) => t.name.slice(0, 80)).join(' | ')}); não são desta parte e não a travam`, 'warn')
-  return { ...tests, ok: true, preexisting: reds.map((t) => t.name) }
+  const old = preexistingReds(tests, m.tests_before.tests)
+  if (!old.length) return tests
+  const failed = tests.tests.filter((t) => t.status !== 'passed' && !old.includes(t.name)).length
+  log('engine', `${old.length} prova(s) já estava(m) vermelha(s) no ponto de partida (${old.map((n) => n.slice(0, 80)).join(' | ')}); não são desta parte e não a travam${failed ? `; sobram ${failed} vermelha(s) desta parte` : ''}`, 'warn')
+  return { ...tests, ok: failed === 0, failed, preexisting: old }
 }
 // base de provas depois de um resultado parcial (só a prova da parte ou só as afetadas): atualiza por nome sem perder o resto
 const mergeTests = (base, part) => { const tests = [...new Map([...(base?.tests || []), ...part.tests].map((t) => [t.name, t])).values()]; return { ...(base || part), tests, total: tests.length } }
@@ -2138,11 +2141,13 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   // não defeito da parte (m-mu8usf5z, s1 e s2: 4 chamadas do Astra sem mudar uma linha, US$ 9,90 equivalentes)
   const sameDiff = !!st.diff.trim() && st.diff === st.last_round_diff
   st.last_round_diff = st.diff
-  const oldReds = () => !!m.tests_before?.tests?.length && st.tests_after.tests.filter((t) => t.status !== 'passed').every((t) => m.tests_before.tests.some((b) => b.name === t.name && b.status === 'passed'))
+  const oldReds = () => !!m.tests_before?.tests?.length && st.tests_after.tests.filter((t) => t.status !== 'passed' && !(st.tests_after.preexisting || []).includes(t.name)).every((t) => m.tests_before.tests.some((b) => b.name === t.name && b.status === 'passed'))
   if (!st.tests_after.ok && (st.flaky_retry !== round || sameDiff) && m.tests_before?.tests?.length) {
     const okBefore = new Set(m.tests_before.tests.filter((t) => t.status === 'passed').map((t) => t.name))
-    const reds = st.tests_after.tests.filter((t) => t.status !== 'passed')
-    if (reds.length && reds.every((t) => okBefore.has(t.name)) && (sameDiff || reds.every((t) => /timed out|timeout|tempo limite/i.test(t.message || '')))) {
+    // só as vermelhas por que ESTA parte responde (verdes na largada). Exigir que TODAS as vermelhas fossem dessas fazia
+    // uma única prova já vermelha na largada desligar o portão inteiro
+    const reds = st.tests_after.tests.filter((t) => t.status !== 'passed' && okBefore.has(t.name))
+    if (reds.length && (sameDiff || reds.every((t) => /timed out|timeout|tempo limite/i.test(t.message || '')))) {
       st.flaky_retry = round
       log('engine', `só prova(s) antiga(s) vermelha(s), por tempo limite (${reds.map((t) => t.name.slice(0, 80)).join(' | ')}); estavam verdes antes desta parte: repito a suíte uma vez antes de abrir rodada`, 'warn')
       // repete o mesmo recorte que ficou vermelho (arquivo da parte, provas afetadas ou suíte), não a suíte inteira
@@ -2172,7 +2177,8 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     const stuck = round >= 5 && st.last_red === redNow; st.last_red = redNow
     if (stuck) log('engine', 'as mesmas provas seguem vermelhas depois de duas rodadas no modelo mais forte: impasse (provável conflito no plano); paro de gastar rodadas nesta parte', 'warn')
     if (!stuck && round < MAX_ROUNDS && spentNow <= (state.settings.max_usd_per_story || 4)) {
-      st.red_tests = st.tests_after.tests.filter((t) => t.status !== 'passed').map((t) => ({ name: t.name, status: 'failed', message: t.message || (st.tests_after.output || '').slice(-300) }))
+      // prova já vermelha na largada não entra no pedido: quem escreve gastava turnos atrás de defeito que não é desta parte
+      st.red_tests = st.tests_after.tests.filter((t) => t.status !== 'passed' && !(st.tests_after.preexisting || []).includes(t.name)).map((t) => ({ name: t.name, status: 'failed', message: t.message || (st.tests_after.output || '').slice(-300) }))
       log('engine', `provas vermelhas depois da implementação; rodada ${round + 1} com o erro`, 'warn'); return runStory(st, round + 1, previousReview, null)
     }
     return stop('tests_red')
