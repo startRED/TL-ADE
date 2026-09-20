@@ -607,6 +607,19 @@ describe('review-result v2 contract evolution', () => {
       expect(currentRes.code).toBe(4)
     }
   })
+
+  test('task-contract accepts optional depends_on array of strings and rejects non-string items', () => {
+    const validDoc = loadFixture('task-contract', 'valid')
+    const withDeps = { ...validDoc, depends_on: ['ADE-S0', 'ADE-S1'] }
+    const res = validate('task-contract', withDeps)
+    expect(res.valid).toBe(true)
+
+    const withInvalidDeps = { ...validDoc, depends_on: [123] }
+    const resInvalid = validate('task-contract', withInvalidDeps)
+    expect(resInvalid.valid).toBe(false)
+    expect(resInvalid.errors.some((e) => e.path.includes('depends_on'))).toBe(true)
+  })
 })
+
 
 

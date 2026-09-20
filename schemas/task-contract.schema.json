@@ -26,6 +26,10 @@
     "title": { "type": "string" },
     "complexity": { "enum": ["trivial", "bounded", "feature", "subsystem", "project"] },
     "needs_ui": { "type": "boolean" },
+    "depends_on": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
     "task": { "type": "string" },
     "workspace": {
       "type": "object",

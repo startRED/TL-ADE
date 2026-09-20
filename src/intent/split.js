@@ -21,6 +21,16 @@ export function splitContract(contract, limits = {}) {
   const maxScenarios = limits.max_scenarios ?? Infinity
   const maxBytes = limits.max_contract_bytes ?? 32000
 
+  // Limite impossível (zero, negativo, fracionário) não vira parte de um cenário calada:
+  // nenhuma divisão cabe nele, então a missão aguarda recorte do operador.
+  for (const [name, value] of [['max_scenarios', maxScenarios], ['max_contract_bytes', maxBytes]]) {
+    if (value !== Infinity && !(Number.isInteger(value) && value > 0)) {
+      throw new Error(
+        `splitContract: limite ${name} impossível (${value}); declare um inteiro positivo ou aguarde recorte do operador`,
+      )
+    }
+  }
+
   const scenarios = contract.scenarios || []
   const verifiers = contract.verifiers || []
   const requirements = contract.requirements || []
@@ -78,7 +88,7 @@ function buildParts({ contract, scenarios, verifiers, requirements, chunkSize })
     for (const r of chunkRequirements) usedRequirementIds.add(r.id)
 
     const partNum = parts.length + 1
-    parts.push({
+    const part = {
       ...structuredClone(contract),
       id: `${contract.id}-p${partNum}`,
       title: `${contract.title} (Parte ${partNum})`,
@@ -86,7 +96,13 @@ function buildParts({ contract, scenarios, verifiers, requirements, chunkSize })
       scenarios: structuredClone(chunkScenarios),
       verifiers: structuredClone(chunkVerifiers),
       requirements: structuredClone(chunkRequirements),
-    })
+    }
+    if (partNum > 1) {
+      part.depends_on = [parts[parts.length - 1].id]
+    } else if (contract.depends_on) {
+      part.depends_on = structuredClone(contract.depends_on)
+    }
+    parts.push(part)
   }
 
   // Cobertura conservada: o que nenhum cenário reivindicou fica na primeira parte.

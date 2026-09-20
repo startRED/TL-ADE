@@ -183,12 +183,16 @@ export async function compileIntent({
   const questions = buildInterview({ unknowns, discovery, repoIr, maxQuestions: 5 })
   const refusedQuestions = getRefusedQuestions({ unknowns, discovery, repoIr })
 
+  const verifiers = buildVerifiers({ risk, discovery })
+  const verifierEvidence = verifiers.flatMap((v) => v.evidence || [])
+  const baseScopePaths = risk.sensitive_paths
+    ? risk.sensitive_paths
+    : (discovery.anchors || []).length > 0
+      ? discovery.anchors.map((a) => a.path)
+      : ['src/**']
+
   const guardrails = {
-    scope_paths: risk.sensitive_paths
-      ? risk.sensitive_paths
-      : (discovery.anchors || []).length > 0
-        ? discovery.anchors.map((a) => a.path)
-        : ['src/**'],
+    scope_paths: Array.from(new Set([...baseScopePaths, ...verifierEvidence])),
     do_not_touch: ['.ade/**', 'docs/specs/frontend-quality-engine.md', 'proto/**'],
     autonomy: 'safe',
     ...(risk.sensitive_paths ? { sensitive_paths: risk.sensitive_paths } : {}),
@@ -202,7 +206,6 @@ export async function compileIntent({
       : {}),
   }
 
-  const verifiers = buildVerifiers({ risk, discovery })
   const needsUi = Boolean(discovery.ui?.present || /bot[ãa]o|ui|tela|interface/i.test(request))
 
   const skills = selectEligibleSkills({
@@ -217,12 +220,17 @@ export async function compileIntent({
   const deliverables = splitDeliverables(request)
   const isBroad = BROAD_CLASSES.has(classification.complexity) && deliverables.length >= 3
 
-  const immediate = isBroad ? deliverables.slice(0, IMMEDIATE_SLICE) : [request]
+  const immediate = isBroad
+    ? deliverables.slice(0, IMMEDIATE_SLICE)
+    : (deliverables.length > 1 ? deliverables : [request])
   const futureIntent = isBroad ? deliverables.slice(IMMEDIATE_SLICE) : []
 
-  const contracts = immediate.map((deliverable, index) =>
-    buildContract({
-      id: `S${index + 1}`,
+  const contracts = immediate.map((deliverable, index) => {
+    const idMatch = deliverable.match(/^(S\d+)\b/i)
+    const id = idMatch ? idMatch[1].toUpperCase() : `S${index + 1}`
+    const num = id.replace(/\D/g, '') || String(index + 1)
+    return buildContract({
+      id,
       title: deliverable,
       task: deliverable,
       complexity: classification.complexity,
@@ -232,9 +240,9 @@ export async function compileIntent({
       verifiers,
       skills,
       discovery,
-      index,
-    }),
-  )
+      index: Number(num) - 1,
+    })
+  })
 
   // O schema do contrato é fechado: o briefing de UI vive no briefing do plano, por story.
   const designBriefs = {}

@@ -86,6 +86,71 @@ export function validateCompiledPlan(plan, contracts = []) {
         }
       }
     }
+
+    // Regra adicional: se depends_on estiver presente, cada story referenciada deve existir no plano
+    if (Array.isArray(contract.depends_on)) {
+      const allPlanStoryIds = new Set(
+        contracts
+          .map((c) => c?.id)
+          .filter(Boolean)
+          .concat(
+            (plan.phases || []).flatMap((p) => (p.epics || []).flatMap((e) => e.stories || [])),
+          ),
+      )
+      for (const dep of contract.depends_on) {
+        if (!allPlanStoryIds.has(dep)) {
+          errors.push({
+            path: `/contracts/${i}/depends_on`,
+            message: `Story ${contract.id} depende de story inexistente no plano: ${dep}`,
+            code: 'missing_dependency',
+          })
+        }
+      }
+    }
+  }
+
+  // Detecção de ciclos no grafo de dependências
+  const graph = new Map()
+  for (const c of contracts) {
+    if (c && typeof c.id === 'string') {
+      graph.set(c.id, Array.isArray(c.depends_on) ? c.depends_on : [])
+    }
+  }
+
+  const visitState = new Map()
+  /**
+   * @param {string} node
+   * @param {string[]} stack
+   * @returns {boolean}
+   */
+  function hasCycle(node, stack = []) {
+    visitState.set(node, 1)
+    stack.push(node)
+    const neighbors = graph.get(node) || []
+    for (const neighbor of neighbors) {
+      if (!graph.has(neighbor)) continue
+      const state = visitState.get(neighbor) || 0
+      if (state === 1) {
+        errors.push({
+          path: '/contracts/depends_on',
+          message: `Ciclo de dependências detectado: ${[...stack, neighbor].join(' -> ')}`,
+          code: 'dependency_cycle',
+        })
+        return true
+      }
+      if (state === 0) {
+        if (hasCycle(neighbor, stack)) return true
+      }
+    }
+    stack.pop()
+    visitState.set(node, 2)
+    return false
+  }
+
+  for (const id of graph.keys()) {
+    if ((visitState.get(id) || 0) === 0) {
+      hasCycle(id)
+    }
   }
 
   return {

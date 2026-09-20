@@ -10,6 +10,9 @@ import { main as showMain } from './show.js'
 import { main as statusMain } from './status.js'
 import { main as docsMain } from './docs.js'
 import { main as gcMain } from './gc.js'
+import { main as planMain } from './plan.js'
+import { main as validateMain } from './validate.js'
+import { main as approveMain } from './approve.js'
 
 /**
  * Ponto de entrada e dispatch de subcomandos da CLI.
@@ -42,8 +45,8 @@ export async function main(argv, deps = {}) {
   try {
     const [command, ...commandArgv] = argv
 
-    if (!command || !['run', 'status', 'journal', 'report', 'show', 'doctor', 'docs', 'gc'].includes(command)) {
-      stderr.write('uso: ade <run|status|journal|report|show|doctor|docs|gc> ...\n')
+    if (!command || !['run', 'status', 'journal', 'report', 'show', 'doctor', 'docs', 'gc', 'plan', 'validate', 'approve'].includes(command)) {
+      stderr.write('uso: ade <run|status|journal|report|show|doctor|docs|gc|plan|validate|approve> ...\n')
       return 4
     }
 
@@ -102,7 +105,19 @@ export async function main(argv, deps = {}) {
       return await gcMain(commandArgv, delegatedDeps)
     }
 
-    stderr.write('uso: ade <run|status|journal|report|show|doctor|docs|gc> ...\n')
+    if (command === 'plan') {
+      return await planMain(commandArgv, delegatedDeps)
+    }
+
+    if (command === 'validate') {
+      return await validateMain(commandArgv, delegatedDeps)
+    }
+
+    if (command === 'approve') {
+      return await approveMain(commandArgv, delegatedDeps)
+    }
+
+    stderr.write('uso: ade <run|status|journal|report|show|doctor|docs|gc|plan|validate|approve> ...\n')
     return 4
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

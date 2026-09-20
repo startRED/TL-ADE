@@ -42,6 +42,12 @@ Histórico: [`docs/specs/2026-09-16-ade-design.md`](docs/specs/2026-09-16-ade-de
 `docs/RUNTIME.md`, schemas JSON e `scripts/tests/test_tl_runtime.py` (93 casos; passam 93/93 no Windows).
 Os 66 invariantes de durabilidade estão catalogados em `docs/research/runtime-port-map.md`.
 
+## Superfície de planejamento (v0.3)
+
+- `ade plan [--request <pedido>] [--repo <pasta>] [--from <missao>] [--non-interactive]`: planeja a missão, gera contratos válidos e apresenta dúvidas necessárias.
+- `ade validate [--plan <arquivo>]`: valida deterministicamente planos e contratos sem efeitos colaterais.
+- `ade approve --mission <id> --digest <hex>`: aprova e congela duravelmente no journal os efeitos e skills autorizados.
+
 ## Próximo passo
 
 Decisões de `docs/architecture.md` §9 confirmadas por Erick em 2026-09-17; conferir as lacunas da matriz em [docs/plans/slice-1-fechamento.md](docs/plans/slice-1-fechamento.md) e responder à consulta única existente em [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md). A proposta de metade da cota ainda depende de fonte, janela semanal, consumo externo e tratamento de ausência aprovados; US$ 0,28 do dogfood não medem percentual da assinatura ([docs/operations/dogfood-d1.md](docs/operations/dogfood-d1.md) como fonte do valor e [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md) como consulta única cujas regras proíbem inferir percentual a partir de dólares).
