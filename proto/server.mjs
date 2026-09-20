@@ -2141,9 +2141,19 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   if (st.truncated) log('engine', `a rodada anterior foi cortada no teto de turnos: trabalho inacabado, não defeito. Não conta como problema grave nem como achado repetido, e a repetição tem ${turns} turnos`, 'warn')
   if (escalate) log('engine', `rodada ${round}: ${st.fix_of ? 'parte de correção' : grave ? 'problema grave' : 'revisor ainda pede mudanças'}${repeat ? `, ${repeat} achado(s) repetido(s)` : ''}; maker vai para a cadeia de correção, degrau ${pick.start + 1} de ${chainOf('fix').length}`)
   if (st.early_impl && round === 1) setStep('fix', 'skipped', { round })
-  else { setStep('fix', 'running', { round }); const rf = await withChain(pick.key, { start: pick.start }, async (who) => makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st), turns), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: turns }))
+  else { setStep('fix', 'running', { round }); const diffBefore = (await storyDiff(st)).trim()
+    const rf = await withChain(pick.key, { start: pick.start }, async (who) => makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st), turns), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: turns }))
     st.truncated = truncated(rf, turns)
     if (st.truncated) log('engine', `quem escreve gastou os ${turns} turnos sem terminar; o que já foi escrito fica e a próxima rodada continua daí`, 'warn')
+    // ESTA chamada não mudou uma linha: rodar a suíte inteira e pagar revisão em cima disso é dinheiro jogado fora. O portão
+    // antigo só olhava o diff da PARTE inteira, que na rodada 1 já contém o arquivo de prova, então a chamada que não escreveu
+    // nada passava batido e a rodada seguinte abria como "provas vermelhas", culpando quem escreve por um trabalho que ninguém
+    // fez (m-mu8usf5z, V02-R4 rodada 1: 82 s e 134k tokens gastos rodando provas e esperando, 0 arquivo alterado).
+    if (rf && !st.truncated && (await storyDiff(st)).trim() === diffBefore && !st.no_change_retry && round < MAX_ROUNDS) {
+      st.no_change_retry = true; setStep('fix', 'failed', { round })
+      log('engine', 'quem escreve terminou a chamada sem alterar uma linha (gastou o tempo rodando provas e esperando); repito a rodada pedindo para ir direto às edições, sem pagar suíte nem revisão por um diff que não mudou', 'warn')
+      return runStory(st, round + 1, previousReview, previousVisual)
+    }
     // nenhum modelo alterou nada (todos falharam ou bloquearam): revisar um diff vazio só gasta rodadas; para e mostra o motivo
     if (!rf) { setStep('fix', 'failed', { round }); throw new Error(`nenhum modelo da cadeia "${pick.key}" conseguiu alterar o código; o motivo de cada um está no log acima`) }
     remember(st, rf); await refreshProject(); setStep('fix', 'done', { round }) }
