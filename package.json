@@ -12,7 +12,7 @@
   "scripts": {
     "lint": "node node_modules/oxlint/bin/oxlint src tests",
     "test": "node node_modules/vitest/vitest.mjs run",
-    "test:parity": "set ADE_PARITY=1&& node node_modules/vitest/vitest.mjs run",
+    "test:parity": "node scripts/run-parity.js",
     "test:probes": "set ADE_PROBES=1&& node node_modules/vitest/vitest.mjs run",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
   },

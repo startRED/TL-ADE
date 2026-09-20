@@ -6,13 +6,14 @@ import { configDefaults, defineConfig } from 'vitest/config'
  * Caso contrário, executa a suíte padrão excluindo os testes de probes.
  *
  * @param {Record<string, string | undefined>} env - Variáveis de ambiente
- * @returns {{ include: string[], exclude: string[], maxWorkers?: number }} Padrões de include e exclude
+ * @returns {{ include: string[], exclude: string[], minWorkers?: number, maxWorkers?: number }} Padrões de include e exclude
  */
 export function selectTests(env) {
   if (env && env.ADE_PARITY === '1') {
     return {
       include: ['tests/parity/**/*.test.ts'],
       exclude: ['tests/probes/**'],
+      minWorkers: 4,
       maxWorkers: 4,
     }
   }
@@ -34,5 +35,6 @@ export default defineConfig({
   test: {
     ...selectTests(process.env),
     minWorkers: process.env.ADE_PARITY === '1' ? 4 : undefined,
+    maxWorkers: process.env.ADE_PARITY === '1' ? 4 : undefined,
   },
 })
