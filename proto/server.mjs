@@ -2108,6 +2108,15 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   const m = state.mission
   const stop = (reason) => { m.state = 'awaiting_operator'; m.reason = reason; st.state = 'blocked'; log('engine', `parada: ${reason}`, 'error'); return false }
   if (m.cost.usd > (state.settings.max_usd_per_mission || 60)) return stop('budget')
+  // Parte que RECOMEÇA (pausa, reinício do motor, orçamento) volta na rodada 1 com previousReview vazio, mesmo quando o
+  // revisor já tinha deixado achados pendentes e o trabalho continua na árvore. Quem escreve então recebe "implemente" sem
+  // nada a implementar: na m-mu8usf5z a v03-s4 recomeçou sobre 1993 linhas já provadas, quem escreve não sabia o que faltava
+  // e devolveu 0 arquivo alterado. O parecer está guardado em st.last_review; basta entregá-lo de novo. Achado já corrigido
+  // custa uma linha "FEITO:" no fechamento, muito mais barato que uma rodada às cegas.
+  if (round === 1 && !previousReview && st.last_review?.verdict !== 'approve' && st.last_review?.findings?.length) {
+    previousReview = st.last_review
+    log('engine', `a parte recomeça sobre o trabalho que já estava na árvore; devolvo a quem escreve os ${previousReview.findings.length} achado(s) que o revisor deixou pendentes`, 'warn')
+  }
   st.round = round
   if (round === 1 && st.no_test_phase) { // correção de provas vermelhas: as provas já existem; direto para a implementação
     st.usd_start = st.usd || 0; setStep('test', 'skipped'); setStep('red', 'skipped'); st.base = await gitHead(state.project.dir)
