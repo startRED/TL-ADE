@@ -4,6 +4,7 @@ import path from 'node:path'
 import { AdeError } from './journal/errors.js'
 import { readJournal } from './journal/journal.js'
 import { assertCallBudget, authorizePaidCall, checkUsdCap, observedUsd, reserveCalls } from './engine/budget.js'
+import { authorizedStep } from './engine/paid-call.js'
 import { maybeEngineFault } from './engine/faults.js'
 import { findStoryCommitted, findStoryStarted } from './engine/resume.js'
 import { dedupStorySection } from './pack/dedup.js'
@@ -156,6 +157,21 @@ export async function runStory(deps, input) {
   // Autoriza e reserva a chamada paga antes de preparar a worktree.
   assertCallBudget(loaded.plan.budget, 'plan')
   assertCallBudget(contract.budget, 'contract')
+  const dedup = dedupStorySection(story)
+  const packResult = deps.compilePack({
+    missionDir,
+    stepId: `${storyId}:r1:maker`,
+    sections: {
+      contract: typeof contract === 'string' ? contract : JSON.stringify(contract, null, 2),
+      policy: JSON.stringify(loaded.plan.authorization ?? {}, null, 2),
+      story: dedup.text,
+    },
+    savedBytes: dedup.saved_bytes,
+  })
+  const contextBytes = packResult.manifest?.bytes
+  if (typeof contextBytes !== 'number' || !Number.isSafeInteger(contextBytes) || contextBytes < 0) {
+    throw new AdeError('invalid_pack_manifest', 'manifesto do pack sem tamanho de contexto válido', 4)
+  }
   const eventsBeforeReservation = readEvents()
   const previousReservation = eventsBeforeReservation.find((event) => {
     const data = event.data
@@ -176,11 +192,19 @@ export async function runStory(deps, input) {
     now: deps.now?.() ?? Date.now(),
   })
   const hasPreviousReservation = Boolean(previousReservation)
-  const requestedUsd = hasPreviousReservation
-    ? 0
-    : contract.budget?.max_usd ?? loaded.missionBudget.max_usd
+  // Teto efetivo da chamada: o menor entre o teto da missão e o do contrato. A reserva é o que o
+  // despacho leva ao modelo, então reservar só o teto do contrato deixaria gastar acima da missão.
+  const usdCaps = [contract.budget?.max_usd, loaded.missionBudget.max_usd].filter(
+    (value) => typeof value === 'number' && Number.isFinite(value),
+  )
+  if (usdCaps.length === 0) {
+    throw new AdeError('invalid_budget_reservation', 'missão e contrato sem max_usd', 4)
+  }
+  const requestedUsd = hasPreviousReservation ? 0 : Math.min(...usdCaps)
   const paidCall = authorizePaidCall({
     events: eventsBeforeReservation,
+    // max_usd sai daqui porque o teto da missão já entrou no teto efetivo acima; a comparação `>=`
+    // desta checagem proibiria reservar exatamente o que a missão autoriza.
     mission_budget: { ...loaded.missionBudget, max_usd: undefined },
     story_budget: contract.budget,
     family: makerFamily,
@@ -188,11 +212,23 @@ export async function runStory(deps, input) {
     requested_usd: requestedUsd,
     requested_calls: hasPreviousReservation ? 0 : 1,
     requested_turns: hasPreviousReservation ? 0 : 1,
+    context_bytes: contextBytes,
     quota_receipt: quotaReceipt,
     now: deps.now?.() ?? Date.now(),
   })
 
   if (!paidCall.allowed) {
+    if (paidCall.reason === 'quota_unavailable' || paidCall.reason === 'quota_untrusted') {
+      await deps.journal.append({
+        kind: 'operational_block',
+        unit: storyId,
+        data: {
+          reason: paidCall.reason,
+          ready_for_autonomous_dispatch: false,
+          fabricated_percent: null,
+        },
+      })
+    }
     await deps.journal.append({
       kind: 'story_done',
       unit: storyId,
@@ -255,6 +291,15 @@ export async function runStory(deps, input) {
       },
     })
   }
+
+  const authorizedReservation = hasPreviousReservation
+    ? {
+        calls: /** @type {Record<string, any>} */ (previousReservationData).calls,
+        usd: /** @type {Record<string, any>} */ (previousReservationData).usd,
+        turns: /** @type {Record<string, any>} */ (previousReservationData).turns,
+        family: /** @type {Record<string, any>} */ (previousReservationData).family,
+      }
+    : paidCall.reservation
 
   /** @type {string} */
   let worktreeDir
@@ -366,19 +411,6 @@ export async function runStory(deps, input) {
     }
   }
 
-  // Compila pack e anexa pack_manifest
-  const dedup = dedupStorySection(story)
-  const packResult = deps.compilePack({
-    missionDir,
-    stepId: `${storyId}:r1:maker`,
-    sections: {
-      contract: typeof contract === 'string' ? contract : JSON.stringify(contract, null, 2),
-      policy: JSON.stringify(loaded.plan.authorization ?? {}, null, 2),
-      story: dedup.text,
-    },
-    savedBytes: dedup.saved_bytes,
-  })
-
   await deps.journal.append({
     kind: 'pack_manifest',
     unit: storyId,
@@ -403,8 +435,25 @@ export async function runStory(deps, input) {
   }
 
   const makerStartedAt = deps.now?.() ?? Date.now()
+  /** @type {import('./engine/paid-call.js').PaidCallAuthorization} */
+  const paidAuthorization = {
+    authorized: true,
+    family: makerFamily,
+    phase: 'implementation',
+    reservation: authorizedReservation,
+    quota_receipt: quotaReceipt,
+    context_bytes: contextBytes,
+    weekly_percent_cap: loaded.missionBudget.max_subscription_weekly_percent ?? 50,
+  }
   const dispatch = await deps.dispatchClaude({
-    step: deps.step,
+    // O bloqueio da chamada paga fica no `step()` write-ahead: o efeito `model_call` só chega ao
+    // spawn se o teto despachado for exatamente a reserva autorizada.
+    step: authorizedStep(
+      deps.step,
+      paidAuthorization,
+      deps.now?.() ?? Date.now(),
+    ),
+    authorization: paidAuthorization,
     unit: storyId,
     stepId: `${storyId}:r1:maker`,
     packPath: packResult.pack_path,
@@ -412,7 +461,7 @@ export async function runStory(deps, input) {
     missionId,
     cwd: worktreeDir,
     resultFile,
-    maxBudgetUsd: loaded.missionBudget.max_usd,
+    maxBudgetUsd: authorizedReservation.usd,
     resolved: deps.resolved,
     env: workerEnv,
   })

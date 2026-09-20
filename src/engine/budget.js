@@ -3,6 +3,9 @@ import { AdeError } from '../journal/errors.js'
 
 export const ABSOLUTE_USD_CAP = 300
 
+/** Teto de contexto por chamada paga quando o contrato não declara um menor. */
+export const DEFAULT_CONTEXT_LIMIT_BYTES = 120000
+
 export const PHASE_TURN_LIMITS = {
   proof: 14,
   implementation: 30,
@@ -576,7 +579,7 @@ export function authorizePaidCall(params = {}) {
   if (family !== undefined || quota_receipt !== undefined) {
     const quotaCheck = validateQuotaReceipt(quota_receipt, {
       family,
-      max_percent: 50,
+      max_percent: mission_budget?.max_subscription_weekly_percent ?? 50,
       now: nowMs,
     })
     if (!quotaCheck.ok) {
@@ -703,7 +706,7 @@ export function authorizePaidCall(params = {}) {
 
   // 6. Limite de contexto
   if (context_bytes !== undefined && context_bytes !== null) {
-    const maxCtx = context_limit ?? 120000
+    const maxCtx = context_limit ?? DEFAULT_CONTEXT_LIMIT_BYTES
     if (context_bytes >= maxCtx) {
       return {
         allowed: false,

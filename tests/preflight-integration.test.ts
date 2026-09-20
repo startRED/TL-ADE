@@ -243,7 +243,7 @@ describe('preflight integration', () => {
         runGates: async () => ({}),
       }),
       compilePack: () => ({
-        manifest: {},
+        manifest: { bytes: 1 },
         manifest_path: '',
         pack_path: '',
       }),

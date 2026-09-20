@@ -64,6 +64,13 @@ export function sumTokensByRole(events = []) {
  *   daily: Array<{ day: string, family: string, role: string, quota_tokens: number, unavailable_calls: number }>,
  *   windows: Array<{ family: string, role: string, last_5h: number, last_7d: number }>,
  *   receipts: Array<{ family: string, used_percent: number, reserved_percent: number, observed_at: string, weekly_reset_at: string }>,
+ *   governance_metrics: {
+ *     has_official_receipt: boolean,
+ *     fabricated_conversion: boolean,
+ *     official_used_percent: number | null,
+ *     total_quota_tokens: number,
+ *     total_cost_usd: number,
+ *   },
  * }}
  */
 export function sumQuotaUsage(events = [], nowMs = Date.now()) {
@@ -205,7 +212,32 @@ export function sumQuotaUsage(events = [], nowMs = Date.now()) {
     (a, b) => a.family.localeCompare(b.family),
   )
 
-  return { daily, windows, receipts }
+  let totalQuotaTokens = 0
+  let totalCostUsd = 0
+  for (const event of events ?? []) {
+    if (event?.kind === 'telemetry') {
+      const tokens = event.data?.tokens ?? event.tokens
+      if (tokens && tokens.source === 'reported') {
+        totalQuotaTokens += Number(tokens.input ?? 0) + Number(tokens.cache_read ?? 0) + Number(tokens.output ?? 0)
+        if (typeof tokens.usd === 'number' && Number.isFinite(tokens.usd)) {
+          totalCostUsd += tokens.usd
+        }
+      }
+    }
+  }
+
+  const hasOfficialReceipt = receipts.length > 0
+  const officialUsedPercent = hasOfficialReceipt ? receipts[0].used_percent : null
+
+  const governance_metrics = {
+    has_official_receipt: hasOfficialReceipt,
+    fabricated_conversion: false,
+    official_used_percent: officialUsedPercent,
+    total_quota_tokens: totalQuotaTokens,
+    total_cost_usd: Math.round(totalCostUsd * 10000) / 10000,
+  }
+
+  return { daily, windows, receipts, governance_metrics }
 }
 
 /**
@@ -218,6 +250,7 @@ export function sumQuotaUsage(events = [], nowMs = Date.now()) {
  *   daily?: Array<{ day: string, family: string, role: string, quota_tokens: number, unavailable_calls: number }>,
  *   windows?: Array<{ family: string, role: string, last_5h: number, last_7d: number }>,
  *   receipts?: Array<{ family: string, used_percent: number, reserved_percent: number, observed_at: string, weekly_reset_at: string }>,
+ *   governance_metrics?: any,
  * } | null} [quota]
  * @returns {string}
  */

@@ -24,6 +24,26 @@ function readTranscriptStdout(name: string): string {
   return readFileSync(path.join(TRANSCRIPTS_DIR, name, 'stdout.json'), 'utf8')
 }
 
+function paidAuthorization() {
+  const now = Date.now()
+  return {
+    authorized: true as const,
+    family: 'claude' as const,
+    phase: 'implementation',
+    context_bytes: 1,
+    weekly_percent_cap: 50,
+    reservation: { calls: 1, usd: 0.25, turns: 1, family: 'claude' as const },
+    quota_receipt: {
+      source: 'official',
+      family: 'claude',
+      used_percent: 0,
+      reserved_percent: 0,
+      observed_at: new Date(now).toISOString(),
+      weekly_reset_at: new Date(now + 86400000).toISOString(),
+    },
+  }
+}
+
 describe('claude argv', () => {
   // AC1: sessionId UUID, packPath e maxBudgetUsd 0.25 -> array na ordem fixa das flags,
   // --disallowedTools seguido do argumento único, sem --bare; e --model é acrescentado só quando informado.
@@ -300,6 +320,7 @@ describe('claude adapter dispatch', () => {
       cwd: missionDir,
       resultFile,
       maxBudgetUsd: 0.25,
+      authorization: paidAuthorization(),
       resolved: { exe: process.execPath, prefixArgs: [CLI_PATH] },
       env: { ADE_FAKE_SCENARIO: scenarioDir, ADE_FAKE_ROLE: 'maker' },
       runWorkerImpl: spyingRunWorkerImpl,
@@ -317,6 +338,9 @@ describe('claude adapter dispatch', () => {
     const sessionFlagIndex = capturedArgv.indexOf('--session-id')
     expect(sessionFlagIndex).toBeGreaterThan(-1)
     expect(capturedArgv[sessionFlagIndex + 1]).toBe(FIXED_UUID)
+    const budgetFlagIndex = capturedArgv.indexOf('--max-budget-usd')
+    expect(budgetFlagIndex).toBeGreaterThan(-1)
+    expect(capturedArgv[budgetFlagIndex + 1]).toBe('0.25')
 
     expect(result.session_ref).toBe(FIXED_UUID)
   })
@@ -338,6 +362,7 @@ describe('claude adapter dispatch', () => {
       cwd: missionDir,
       resultFile,
       maxBudgetUsd: 0.25,
+      authorization: paidAuthorization(),
       resolved: { exe: process.execPath, prefixArgs: [CLI_PATH] },
       env: { ADE_FAKE_SCENARIO: scenarioDir, ADE_FAKE_ROLE: 'maker' },
       randomUUID: () => FIXED_UUID,

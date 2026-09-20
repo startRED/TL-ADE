@@ -51,6 +51,9 @@ export function heartbeatAgeMs(missionDir) {
  *   env?: NodeJS.ProcessEnv,
  *   stdout?: ((s: string) => void) | { write: (s: string) => void },
  *   stderr?: ((s: string) => void) | { write: (s: string) => void },
+ *   quotaPort?: any,
+ *   dispatchClaude?: any,
+ *   [key: string]: any,
  * }} [deps]
  * @returns {Promise<number>}
  */
@@ -164,11 +167,11 @@ export async function runCommand(options, deps = {}) {
       contain,
       plantCanary,
       checkCanary,
-      dispatchClaude,
+      dispatchClaude: deps.dispatchClaude ?? dispatchClaude,
       reconcileAll,
       resolved,
       workerEnv,
-      quotaPort: createLocalQuotaPort({
+      quotaPort: deps.quotaPort ?? createLocalQuotaPort({
         receiptPath: path.join(homeDir, '.ade', 'quota-receipt.json'),
       }),
       capabilities,
@@ -185,6 +188,7 @@ export async function runCommand(options, deps = {}) {
           statfs: fs.promises.statfs,
           now: () => Date.now(),
           env,
+          credentialRequired: env.ADE_FAKE_CLI !== '1' && !deps.dispatchClaude,
         })
         const planned_paid_calls = Math.min(
           loaded.plan.budget.max_model_calls,

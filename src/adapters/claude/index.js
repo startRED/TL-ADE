@@ -3,6 +3,7 @@ import { buildClaudeArgs } from './argv.js'
 import { parseClaudeOutput, parseTokens, parseUnitResult, parseUsage } from './parse.js'
 import { runWorker } from '../../runner/spawn.js'
 import { safeId } from '../../gates/output.js'
+import { assertPaidAuthorization } from '../../engine/paid-call.js'
 
 /**
  * Cunha o session id antes do spawn, monta os args do `claude` e despacha o efeito `model_call`
@@ -24,6 +25,7 @@ import { safeId } from '../../gates/output.js'
  *   env?: Record<string, string>,
  *   runWorkerImpl?: typeof runWorker,
  *   randomUUID?: () => string,
+ *   authorization?: any,
  * }} opts
  * @returns {Promise<{
  *   step_id: string,
@@ -55,7 +57,12 @@ export async function dispatchClaude(opts) {
     env = {},
     runWorkerImpl = runWorker,
     randomUUID = crypto.randomUUID,
+    authorization,
   } = opts ?? {}
+
+  if (authorization) {
+    assertPaidAuthorization(authorization, maxBudgetUsd)
+  }
 
   const sessionId = randomUUID()
   const args = buildClaudeArgs({ sessionId, packPath, maxBudgetUsd, model })

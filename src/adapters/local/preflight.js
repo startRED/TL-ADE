@@ -17,6 +17,7 @@ import { validate } from '../../schema/index.js'
  * @property {number | (() => number)} [now]
  * @property {NodeJS.ProcessEnv} [env] Ponto de injeção para testes.
  * @property {any} [fs] Ponto de injeção para testes.
+ * @property {boolean} [credentialRequired] Falso apenas quando nenhuma chamada paga real será feita.
  */
 
 /**
@@ -36,6 +37,7 @@ export function createLocalPreflightPorts(options) {
     now = Date.now,
     env = process.env,
     fs = nodeFs,
+    credentialRequired = true,
   } = options
 
   return {
@@ -62,6 +64,10 @@ export function createLocalPreflightPorts(options) {
     dependencies: {
       check: async () => {
         try {
+          // Sem manifesto não há dependência declarada para instalar.
+          if (!fs.existsSync(path.join(repoDir, 'package.json'))) {
+            return { status: 'ready', reason: null }
+          }
           const nmPath = path.join(repoDir, 'node_modules')
           if (!fs.existsSync(nmPath)) {
             return { status: 'blocked', reason: 'dependências ausentes' }
@@ -130,7 +136,11 @@ export function createLocalPreflightPorts(options) {
             return { status: 'blocked', reason: 'não foi possível verificar estado da worktree' }
           }
           const dirty = await gitPort.dirtyPaths()
-          if (Array.isArray(dirty) && dirty.length === 0) {
+          // Artefatos do próprio motor em .ade/ não são alteração pendente do operador.
+          const pending = Array.isArray(dirty)
+            ? dirty.filter((p) => !String(p).replace(/\\/g, '/').startsWith('.ade/'))
+            : dirty
+          if (Array.isArray(pending) && pending.length === 0) {
             return { status: 'ready', reason: null }
           }
           return { status: 'blocked', reason: 'worktree com alterações pendentes' }
@@ -161,6 +171,10 @@ export function createLocalPreflightPorts(options) {
     credential: {
       check: async () => {
         try {
+          // Sem chamada paga real (CLI falsa ou despacho injetado) não há credencial a exigir.
+          if (credentialRequired === false) {
+            return { status: 'ready', reason: null }
+          }
           const apiKey = env?.ANTHROPIC_API_KEY
           if (typeof apiKey === 'string' && apiKey.trim().length > 0) {
             return { status: 'ready', reason: null }
