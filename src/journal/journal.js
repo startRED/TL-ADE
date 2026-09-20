@@ -27,6 +27,10 @@ const TOP_LEVEL_PROPERTIES = new Set([
   'status',
   'source',
   'data',
+  'artifact_ref',
+  'cache_hit',
+  'workspace',
+  'risk_escalated',
 ])
 
 /**
