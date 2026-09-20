@@ -69,9 +69,10 @@ export function priorStepResult(events, stepId) {
  *   worktree?: string,
  *   receiptPath?: string,
  *   session_ref?: string | null,
+ *   criticality?: 'required' | 'enhancement',
  * }, effectFn: () => Promise<unknown>) => Promise<{
  *   step_id: string,
- *   status: 'ok' | 'ambiguous',
+ *   status: 'ok' | 'ambiguous' | 'degraded',
  *   result: unknown,
  *   reused: boolean,
  *   reason?: string,
@@ -92,6 +93,7 @@ export function createStepRunner({ journal, missionDir, gitPort = null, remotePo
    *   worktree?: string,
    *   receiptPath?: string,
    *   session_ref?: string | null,
+   *   criticality?: 'required' | 'enhancement',
    * }} spec
    * @param {() => Promise<unknown>} effectFn
    */
@@ -105,6 +107,7 @@ export function createStepRunner({ journal, missionDir, gitPort = null, remotePo
       worktree = '',
       receiptPath = '',
       session_ref = null,
+      criticality: rawCriticality,
     } = spec ?? {}
 
     if (typeof unit !== 'string' || !UNIT_OR_ID_REGEX.test(unit)) {
@@ -118,6 +121,10 @@ export function createStepRunner({ journal, missionDir, gitPort = null, remotePo
     }
     if (typeof effectFn !== 'function') {
       throw new TypeError('effectFn inválido')
+    }
+    const criticality = rawCriticality === undefined ? 'required' : rawCriticality
+    if (criticality !== 'required' && criticality !== 'enhancement') {
+      throw new TypeError('criticality inválida')
     }
     if (intent_context === null || typeof intent_context !== 'object' || Array.isArray(intent_context)) {
       throw new TypeError('intent_context inválido')
@@ -154,6 +161,16 @@ export function createStepRunner({ journal, missionDir, gitPort = null, remotePo
         reused: true,
         reason: String(priorData.reason ?? ''),
         evidence: /** @type {Record<string, unknown>} */ (priorData.evidence ?? {}),
+      }
+    }
+
+    if (prior && prior.status === 'degraded' && (prior.input_digest === digest || effect_class === 'model_call')) {
+      const priorData = /** @type {Record<string, unknown>} */ (prior.data ?? {})
+      return {
+        step_id: id,
+        status: /** @type {'degraded'} */ ('degraded'),
+        result: priorData.result ?? null,
+        reused: true,
       }
     }
 
@@ -233,6 +250,7 @@ export function createStepRunner({ journal, missionDir, gitPort = null, remotePo
       receipt_path: receiptPath,
       unit,
       session_ref,
+      criticality,
     })
     maybeFault('after_intent', env)
 
@@ -240,13 +258,36 @@ export function createStepRunner({ journal, missionDir, gitPort = null, remotePo
     try {
       value = await effectFn()
     } catch (err) {
+      const errMessage = String(/** @type {{ message?: unknown }} */ (err)?.message ?? err)
+      const errPayload = { message: errMessage }
+
+      if (criticality === 'enhancement') {
+        await journal.append({
+          kind: 'step_result',
+          step_id: id,
+          effect_class,
+          input_digest: digest,
+          status: 'degraded',
+          error: errPayload,
+          criticality,
+        })
+        maybeFault('after_result', env)
+        return {
+          step_id: id,
+          status: /** @type {'degraded'} */ ('degraded'),
+          result: null,
+          reused: false,
+        }
+      }
+
       await journal.append({
         kind: 'step_result',
         step_id: id,
         effect_class,
         input_digest: digest,
         status: 'failed',
-        error: { message: String(/** @type {{ message?: unknown }} */ (err)?.message ?? err) },
+        error: errPayload,
+        criticality,
       })
       throw err
     }
@@ -267,6 +308,7 @@ export function createStepRunner({ journal, missionDir, gitPort = null, remotePo
           head_after: after.commit,
           branch_before: before.branch,
           branch_after: after.branch,
+          criticality,
         })
         throw new StateIntegrityError('head_moved', {
           step_id: id,
@@ -283,6 +325,7 @@ export function createStepRunner({ journal, missionDir, gitPort = null, remotePo
       input_digest: digest,
       status: 'ok',
       result: value,
+      criticality,
     })
     maybeFault('after_result', env)
 
@@ -299,6 +342,7 @@ export function createStepRunner({ journal, missionDir, gitPort = null, remotePo
    *   worktree?: string,
    *   receiptPath?: string,
    *   session_ref?: string | null,
+   *   criticality?: 'required' | 'enhancement',
    * }} spec
    * @param {() => Promise<unknown>} effectFn
    */
