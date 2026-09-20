@@ -119,10 +119,12 @@ export function killTree(
  * @property {'exited' | 'timeout' | 'crashed' | 'start_failed'} state
  * @property {'exit' | 'timeout' | 'dead_man' | 'spawn_error'} reason
  * @property {number | null} exitCode
+ * @property {number | null} exit_code
  * @property {number | null} pid
  * @property {'released' | 'charged'} charge
  * @property {'environment' | null} failureClass
  * @property {string} receiptFile
+ * @property {string} receipt_path
  * @property {string} stdout
  * @property {string} stderr
  * @property {number} durationMs
@@ -130,7 +132,7 @@ export function killTree(
 
 /**
  * @typedef {Object} RunWorkerOptions
- * @property {{ exe: string, prefixArgs: string[] }} resolved
+ * @property {{ exe: string, prefixArgs: string[], mode?: string, via?: string }} resolved
  * @property {string[]} [args]
  * @property {string} cwd
  * @property {string} missionDir
@@ -273,14 +275,14 @@ export async function runWorker(options) {
     let child
     try {
       let spawnArgs = launchArgs
-      /** @type {import('node:child_process').SpawnOptions} */
+      /** @type {import('node:child_process').SpawnOptions & { maxBuffer: number }} */
       const spawnOptions = {
         cwd,
         env: childEnv,
+        maxBuffer: 1 << 26,
         shell: false,
         detached: false,
         windowsHide: true,
-        maxBuffer: 1 << 26,
         stdio: ['ignore', 'pipe', 'pipe'],
       }
 

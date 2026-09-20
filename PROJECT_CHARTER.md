@@ -21,7 +21,7 @@ binários instalados já fazem nativamente (`claude`, `codex`); ela só escreve 
 o journal, o Task Contract com eval provado, e o Context Pack. A ADE não é um CI, não é um issue tracker,
 não é uma IDE, não é um provedor de modelo (nunca chama API HTTP de modelo; só CLI com assinatura), não é um framework de agentes.
 
-## Recorte ativo de governança da v0.2 (o que entra em `src/` neste épico)
+## Recorte ativo de governança da v0.2 (o que entra em `src/` nesta fatia e épico)
 
 `ade run --plan plan.json` executa uma story sob controle prévio de governança e preflight, família `claude`, `local_commit` local, zero rede além da CLI; código em JS ESM com JSDoc, ADR 0023.
 
@@ -37,7 +37,7 @@ não é uma IDE, não é um provedor de modelo (nunca chama API HTTP de modelo; 
 - `src/adapters/claude`: argv, `--session-id`, `--json-schema`, parser tolerante, `parse_usage`.
 - `src/adapters/fake`: CLI falsa para testes determinísticos sem rede.
 - `src/cli`: `node:util parseArgs`; `ade run --plan`, `ade doctor`, `ade show`.
-- `src/engine`: `preflight.js` (verificações determinísticas puras de preflight na ordem fixa, cálculo de chamadas pagas evitadas), `budget.js` (controles prévios, reservas e tetos), `loop.js`, `schedule.js`, `plan-load.js`, ciclo da story, `runtime_stamp`.
+- `src/engine.js`: ciclo da story, `runtime_stamp`; `src/engine`: `preflight.js` (verificações determinísticas puras de preflight na ordem fixa, cálculo de chamadas pagas evitadas), `budget.js` (controles prévios, reservas e tetos), `loop.js`, `schedule.js`, `plan-load.js`.
 - `src/schema`: carregador ajv compartilhado dos 8 schemas publicados.
 - `schemas/`: 8 arquivos `.schema.json` publicados (`journal-event`, `ade-config`, `plan`, `task-contract`, `eval`, `unit-result`, `review-result`, `capability-set`).
 - `fixtures/`: transcripts gravados, cenários da CLI falsa, vetores JCS.

@@ -1,12 +1,21 @@
 // @ts-check
+import fs from 'node:fs'
 
 /**
- * Cria a porta local enquanto não há fonte oficial de cota configurada.
+ * Lê o recibo oficial publicado no diretório local da ADE.
  *
- * @returns {{ readReceipt: ({ family, now }: { family: string, now: number }) => Promise<null> }}
+ * @param {{ receiptPath?: string }} [options]
+ * @returns {{ readReceipt: ({ family, now }: { family: string, now: number }) => Promise<any | null> }}
  */
-export function createUnavailableQuotaPort() {
+export function createLocalQuotaPort(options = {}) {
   return {
-    readReceipt: async () => null,
+    readReceipt: async () => {
+      if (!options.receiptPath) return null
+      try {
+        return JSON.parse(await fs.promises.readFile(options.receiptPath, 'utf8'))
+      } catch {
+        return null
+      }
+    },
   }
 }

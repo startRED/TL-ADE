@@ -113,8 +113,8 @@ export async function recordSlice1Evidence(options = {}) {
     const relOutputPath = path.relative(repoDir, resolvedOutputPath).replace(/\\/g, '/')
     const porcelainLines = statusRes.stdout
       .split('\n')
-      .map((line) => line.replace(/\r$/, ''))
-      .filter((line) => line.trim())
+      .map((/** @type {string} */ line) => line.replace(/\r$/, ''))
+      .filter((/** @type {string} */ line) => line.trim())
 
     for (const line of porcelainLines) {
       // Formato porcelain v1: "XY <caminho>" ou "XY <caminho_antigo> -> <caminho_novo>"
@@ -169,9 +169,11 @@ export async function recordSlice1Evidence(options = {}) {
         Object.assign(crashCells, crashRaw.cells)
       } else if (crashRaw && typeof crashRaw === 'object' && 'status' in crashRaw) {
         const report = JSON.parse(crashRaw.stdout)
-        const assertions = (report.testResults || []).flatMap((tr) => tr.assertionResults || [])
+        const assertions = (report.testResults || []).flatMap(
+          (/** @type {{ assertionResults?: Array<{ title?: string, status?: string }> }} */ tr) => tr.assertionResults || [],
+        )
         for (const cell of CRASH_MATRIX_CELLS) {
-          const match = assertions.find((a) => a.title === cell)
+          const match = assertions.find((/** @type {{ title?: string }} */ a) => a.title === cell)
           if (match && match.status === 'passed') {
             crashCells[cell] = 'passed'
             crashPassed++
@@ -204,9 +206,11 @@ export async function recordSlice1Evidence(options = {}) {
         )
       }
       const report = JSON.parse(crashExec.stdout)
-      const assertions = (report.testResults || []).flatMap((tr) => tr.assertionResults || [])
+      const assertions = (report.testResults || []).flatMap(
+        (/** @type {{ assertionResults?: Array<{ title?: string, status?: string }> }} */ tr) => tr.assertionResults || [],
+      )
       for (const cell of CRASH_MATRIX_CELLS) {
-        const match = assertions.find((a) => a.title === cell)
+        const match = assertions.find((/** @type {{ title?: string }} */ a) => a.title === cell)
         if (match && match.status === 'passed') {
           crashCells[cell] = 'passed'
           crashPassed++

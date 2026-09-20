@@ -71,9 +71,12 @@ export function matchesGlob(pattern, relPath) {
  * @property {boolean} ok
  * @property {'secret' | 'sensitive_path' | 'scope' | 'no_changes' | null} reason
  * @property {'security' | 'scope' | 'semantic' | null} failureClass
+ * @property {'stop' | 'restore' | 'park' | 'rework' | 'continue'} status
  * @property {'stop_batch' | 'restore' | 'park' | 'rework' | 'continue'} action
  * @property {ContainViolation[]} violations
+ * @property {ContainViolation[]} findings
  * @property {string[]} changedPaths
+ * @property {string[]} dirty_paths
  * @property {string | null} quarantineRef
  * @property {string | null} restoredTree
  */

@@ -147,7 +147,8 @@ describe('portão de cobertura durável', () => {
     const nanErr = thrownNan as AdeError
     expect(nanErr.code).toBe('coverage_below_threshold')
     expect(nanErr.exitCode).toBe(2)
-    expect(Number.isNaN((nanErr.details?.modules as Record<string, number>).runner)).toBe(true)
+    const nanModules = nanErr.details?.modules as Record<string, number> | undefined
+    expect(Number.isNaN(nanModules?.runner)).toBe(true)
 
     // Infinity
     let thrownInf: unknown = null
@@ -167,7 +168,8 @@ describe('portão de cobertura durável', () => {
     const infErr = thrownInf as AdeError
     expect(infErr.code).toBe('coverage_below_threshold')
     expect(infErr.exitCode).toBe(2)
-    expect((infErr.details?.modules as Record<string, number>).runner).toBe(Infinity)
+    const infModules = infErr.details?.modules as Record<string, number> | undefined
+    expect(infModules?.runner).toBe(Infinity)
 
     // Non-numeric
     let thrownStr: unknown = null
@@ -187,7 +189,8 @@ describe('portão de cobertura durável', () => {
     const strErr = thrownStr as AdeError
     expect(strErr.code).toBe('coverage_below_threshold')
     expect(strErr.exitCode).toBe(2)
-    expect((strErr.details?.modules as Record<string, number>).runner).toBe(0)
+    const strModules = strErr.details?.modules as Record<string, number> | undefined
+    expect(strModules?.runner).toBe(0)
   })
 
   // CA4 — Dada uma seleção contendo tests/probes/e2e.test.ts, quando a seleção for

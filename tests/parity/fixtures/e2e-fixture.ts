@@ -19,9 +19,11 @@ export function cleanupTmpDirs(): void {
 
 export interface SetupE2EOptions {
   permittedEffects?: string[] | unknown
+  now?: number
 }
 
 export function setupE2E(options: SetupE2EOptions = {}) {
+  const now = options.now ?? Date.now()
   const repo = makeRepo()
   tmpDirs.push(repo.dir)
 
@@ -227,11 +229,23 @@ export function setupE2E(options: SetupE2EOptions = {}) {
     probe_ok: true,
     probe_mode: 'fixture',
     bootstrap_cost_tokens: 0,
-    probed_at: '2026-09-18T00:00:00.000Z',
+    probed_at: new Date(now).toISOString(),
   }
   fs.writeFileSync(
     path.join(capsDir, 'capabilities.json'),
     JSON.stringify(defaultCaps, null, 2),
+    'utf8',
+  )
+  fs.writeFileSync(
+    path.join(capsDir, 'quota-receipt.json'),
+    JSON.stringify({
+      source: 'official',
+      family: 'claude',
+      used_percent: 0,
+      reserved_percent: 0,
+      observed_at: new Date(now).toISOString(),
+      weekly_reset_at: new Date(now + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    }),
     'utf8',
   )
 

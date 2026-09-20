@@ -9,11 +9,6 @@ import { validateEvidenceResult } from '../../src/review/validate.js'
 describe('policy parity', () => {
   // Parity sources: test_batch_runs_two_dependent_units_and_closes, test_continue_independent_after_block_runs_unrelated_unit
   test('ca1_graph_order_cycle_and_missing_dependencies', () => {
-    let portCalls = 0
-    const dispatchPort = () => {
-      portCalls++
-    }
-
     // Exemplo 1: [{id:'b',depends_on:['a']},{id:'a',depends_on:[]}] com states {} -> {id:'a'}
     const ready1 = nextReady(
       [
@@ -101,17 +96,10 @@ describe('policy parity', () => {
       }
     }).toThrow()
 
-    // Porta permanece com calls:0 em toda recusa anterior ao despacho
-    expect(portCalls).toBe(0)
   })
 
   // Parity sources: test_zero_model_call_budget_is_refused, test_budget_reserve_stops_before_an_unverifiable_unit
   test('ca2_budget_call_wall_clock_and_parked_units_limits', () => {
-    let portCalls = 0
-    const dispatchPort = () => {
-      portCalls++
-    }
-
     // Exemplo 1: {events:[],budget:{max_model_calls:0},now:1} -> {allowed:false,reason:'model_call_budget_exhausted'}
     const r1 = checkMissionBudget({
       events: [],
@@ -157,17 +145,10 @@ describe('policy parity', () => {
     })
     expect(rSeq).toEqual({ allowed: true, reason: null })
 
-    // Porta permanece com calls:0 em recusa anterior ao despacho
-    expect(portCalls).toBe(0)
   })
 
   // Parity sources: test_same_findings_twice_is_stagnation, test_loop_detector_parks_on_repeated_gate_signature, test_diff_oscillation_parks
   test('ca3_loop_detection_stagnation_and_oscillation', () => {
-    let portCalls = 0
-    const dispatchPort = () => {
-      portCalls++
-    }
-
     // Exemplo 1: ['erro 12:00','erro 13:00'] -> {kind:'stagnation',signature:'erro <t>'}
     const resStag = detectLoop(['erro 12:00', 'erro 13:00'])
     expect(resStag).toEqual({ kind: 'stagnation', signature: 'erro <t>' })
@@ -185,17 +166,10 @@ describe('policy parity', () => {
     const norm = normalize(raw)
     expect(norm).toBe('erro <t> no <path> commit <hex> linha <n>')
 
-    // Porta permanece com calls:0
-    expect(portCalls).toBe(0)
   })
 
   // Parity sources: test_non_boolean_optional_effects_are_refused, test_local_write_false_is_refused_before_any_dispatch, test_unauthorized_push_is_never_attempted
   test('ca4_unauthorized_and_non_boolean_effects_refusal', () => {
-    let portCalls = 0
-    const dispatchPort = () => {
-      portCalls++
-    }
-
     // Exemplo: {push:'false'} -> AdeError {exitCode:4,calls:0}
     expect(() => {
       try {
@@ -218,17 +192,10 @@ describe('policy parity', () => {
       }
     }).toThrow()
 
-    // Nenhuma porta externa foi chamada antes do erro
-    expect(portCalls).toBe(0)
   })
 
   // Parity sources: test_stale_runtime_version_stops_until_accepted, test_spec_drift_and_scope_drift_are_refused
   test('ca5_evidence_result_and_stale_revision_validation', () => {
-    let portCalls = 0
-    const dispatchPort = () => {
-      portCalls++
-    }
-
     // Exemplo: {input_revision:'old'} contra context {input_revision:'new'} -> erro stale_result
     const resStale = validateEvidenceResult(
       'review-result',
@@ -257,7 +224,5 @@ describe('policy parity', () => {
       expect(resNotes.errors.some((e) => e.code === 'notes_too_large')).toBe(true)
     }
 
-    // Nenhuma porta externa foi chamada
-    expect(portCalls).toBe(0)
   })
 })

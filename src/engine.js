@@ -157,13 +157,21 @@ export async function runStory(deps, input) {
   assertCallBudget(loaded.plan.budget, 'plan')
   assertCallBudget(contract.budget, 'contract')
   const eventsBeforeReservation = readEvents()
-  const previousReservation = eventsBeforeReservation.find(
-    (event) =>
-      event?.kind === 'budget_reserved' &&
-      (event.unit === storyId || event.data?.unit === storyId) &&
-      event.data?.quota_receipt,
-  )
-  const quotaReceipt = previousReservation?.data?.quota_receipt ?? await deps.quotaPort.readReceipt({
+  const previousReservation = eventsBeforeReservation.find((event) => {
+    const data = event.data
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return false
+    const reservationData = /** @type {Record<string, unknown>} */ (data)
+    return event.kind === 'budget_reserved' &&
+      (event.unit === storyId || reservationData.unit === storyId) &&
+      reservationData.quota_receipt
+  })
+  const previousReservationData = previousReservation?.data
+  const previousQuotaReceipt = previousReservationData &&
+    typeof previousReservationData === 'object' &&
+    !Array.isArray(previousReservationData)
+    ? /** @type {Record<string, unknown>} */ (previousReservationData).quota_receipt
+    : undefined
+  const quotaReceipt = previousQuotaReceipt ?? await deps.quotaPort.readReceipt({
     family: makerFamily,
     now: deps.now?.() ?? Date.now(),
   })

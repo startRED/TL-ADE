@@ -515,9 +515,13 @@ export function validateQuotaReceipt(receipt, { family, max_percent = 50, now = 
  * @param {number} [params.observed_usd]
  * @param {Array<any>} [params.open_reservations]
  * @returns {{
- *   allowed: boolean,
+ *   allowed: false,
  *   reason: string | null,
- *   reservation: { calls: number, usd: number, turns: number, family: string } | null,
+ *   reservation: null,
+ * } | {
+ *   allowed: true,
+ *   reason: null,
+ *   reservation: { calls: number, usd: number, turns: number, family: string },
  * }}
  */
 export function authorizePaidCall(params = {}) {

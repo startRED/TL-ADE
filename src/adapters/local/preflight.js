@@ -105,7 +105,7 @@ export function createLocalPreflightPorts(options) {
                   maxBuffer: 1048576,
                   timeout: 60000,
                 },
-                (err) => {
+                (/** @type {any} */ err) => {
                   if (err) {
                     resolve({ status: 'blocked', reason: 'falha na execução do build' })
                   } else {

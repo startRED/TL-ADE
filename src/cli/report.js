@@ -150,30 +150,32 @@ export function sumQuotaUsage(events = [], nowMs = Date.now()) {
 
       // Agrupamento diário: dia | família | papel
       const dailyKey = `${day}|${family}|${role}`
-      if (!dailyGroups.has(dailyKey)) {
-        dailyGroups.set(dailyKey, {
+      let dEntry = dailyGroups.get(dailyKey)
+      if (!dEntry) {
+        dEntry = {
           day,
           family,
           role,
           quota_tokens: 0,
           unavailable_calls: 0,
-        })
+        }
+        dailyGroups.set(dailyKey, dEntry)
       }
-      const dEntry = dailyGroups.get(dailyKey)
       dEntry.quota_tokens += quotaTokens
       dEntry.unavailable_calls += unavailableCall
 
       // Agrupamento por janela: família | papel
       const windowKey = `${family}|${role}`
-      if (!windowGroups.has(windowKey)) {
-        windowGroups.set(windowKey, {
+      let wEntry = windowGroups.get(windowKey)
+      if (!wEntry) {
+        wEntry = {
           family,
           role,
           last_5h: 0,
           last_7d: 0,
-        })
+        }
+        windowGroups.set(windowKey, wEntry)
       }
-      const wEntry = windowGroups.get(windowKey)
 
       if (Number.isFinite(eventTime)) {
         const elapsed = referenceNow - eventTime
@@ -216,7 +218,7 @@ export function sumQuotaUsage(events = [], nowMs = Date.now()) {
  *   daily?: Array<{ day: string, family: string, role: string, quota_tokens: number, unavailable_calls: number }>,
  *   windows?: Array<{ family: string, role: string, last_5h: number, last_7d: number }>,
  *   receipts?: Array<{ family: string, used_percent: number, reserved_percent: number, observed_at: string, weekly_reset_at: string }>,
- * }} [quota]
+ * } | null} [quota]
  * @returns {string}
  */
 export function renderReport(mission, units, costs = [], quota = null) {

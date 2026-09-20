@@ -88,7 +88,7 @@ function fixture(options: { receipt?: any; maxUsd?: number; quotaPort?: any } = 
 
 async function run(subject: ReturnType<typeof fixture>) {
   return runStory(subject.deps, {
-    loaded: subject.loaded,
+    loaded: subject.loaded as any,
     story: subject.story,
     repoDir: subject.repoDir,
     missionDir: subject.missionDir,
@@ -159,6 +159,14 @@ test('CA4_absolute_cap_parks_and_resume_reuses_official_reservation', async () =
 })
 
 test('CA3_unavailable_local_adapter_never_fabricates_a_receipt', async () => {
-  const { createUnavailableQuotaPort } = await import('../src/adapters/local/quota.js')
-  await expect(createUnavailableQuotaPort().readReceipt({ family: 'claude', now: NOW })).resolves.toBeNull()
+  const { createLocalQuotaPort } = await import('../src/adapters/local/quota.js')
+  await expect(createLocalQuotaPort().readReceipt({ family: 'claude', now: NOW })).resolves.toBeNull()
+
+  const subject = fixture()
+  const receiptPath = path.join(subject.repoDir, 'quota-receipt.json')
+  fs.writeFileSync(receiptPath, JSON.stringify(RECEIPT), 'utf8')
+  await expect(createLocalQuotaPort({ receiptPath }).readReceipt({ family: 'claude', now: NOW })).resolves.toEqual(RECEIPT)
+
+  fs.writeFileSync(receiptPath, '{', 'utf8')
+  await expect(createLocalQuotaPort({ receiptPath }).readReceipt({ family: 'claude', now: NOW })).resolves.toBeNull()
 })

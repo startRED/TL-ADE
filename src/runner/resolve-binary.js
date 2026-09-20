@@ -118,7 +118,7 @@ export function resolveBinary(command, deps = {}) {
     return {
       exe: found,
       prefixArgs: [],
-      via: mode === 'native' ? 'direct' : mode === 'npm_shim' ? 'shim' : 'cmd',
+      via: 'direct',
       mode,
       shim: null,
     }
@@ -151,7 +151,7 @@ export function resolveBinary(command, deps = {}) {
       return {
         exe: exeResolved,
         prefixArgs,
-        via: mode === 'native' ? 'direct' : mode === 'npm_shim' ? 'shim' : 'cmd',
+        via: 'shim',
         mode,
         shim: found,
       }
@@ -163,7 +163,7 @@ export function resolveBinary(command, deps = {}) {
   return {
     exe: comspec,
     prefixArgs: ['/d', '/s', '/c', found],
-    via: mode === 'native' ? 'direct' : mode === 'npm_shim' ? 'shim' : 'cmd',
+    via: 'cmd',
     mode,
     shim: found,
   }
