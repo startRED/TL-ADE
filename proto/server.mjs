@@ -1116,15 +1116,19 @@ async function checker(diff, tests, st) {
   const round = st.round || 1, start = Math.min(Math.max(0, chainOf('checker').length - 1), ladderStep(round, { repeat: repeatedFindings(st, st.last_review) }) + (st.fix_of ? 1 : 0))
   if (start) log('engine', `revisão da rodada ${round}: revisor do degrau ${start + 1} da cadeia, para não repetir rodadas`)
   return withChain('checker', { avoidVendor: avoid, start }, async (who) => {
+    // O parecer não guardava QUEM o fez: só o texto do log dizia, e o log é rolante. Sem isso não há como responder se um
+    // revisor acha defeito de verdade ou só aprova, e a escolha de degrau da cadeia vira opinião. `by` fica no parecer e
+    // segue com ele para o estado, o painel e o histórico.
+    const by = (r) => { if (r) r.by = { family: who.family, model: who.model, effort: who.effort }; return r }
     if (who.family === 'claude' || who.family === 'compat') {
       const r = await claudeCall({ role: 'revisão', prompt, model: who.family === 'compat' ? compatModel(who.model) : who.model, effort: who.effort, tools: ['Read', 'Glob', 'Grep'], schema: REVIEW_JSON, maxTurns: 12, base_url: who.base_url, token_env: who.token_env })
       const review = r?.structured_output || null
       if (review) log('claude', `${review.verdict === 'approve' ? 'aprovou' : 'pediu mudanças'}: ${review.summary}`, 'text')
-      return review
+      return by(review)
     }
-    if (who.family === 'agy') return checkerAgy(prompt, who.model, who.effort)
+    if (who.family === 'agy') return by(await checkerAgy(prompt, who.model, who.effort))
     if (who.family !== 'codex') { log('engine', `revisão em ${who.family} ainda não é suportada; próximo da cadeia`, 'warn'); return null }
-    return checkerCodex(prompt, who.model, who.effort)
+    return by(await checkerCodex(prompt, who.model, who.effort))
   })
 }
 // Revisão no Antigravity (19/09, plano Google AI Ultra): Gemini Pro ou Claude via Google pela cota do Google, só leitura (--mode plan
