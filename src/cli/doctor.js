@@ -9,6 +9,8 @@ import { parseClaudeOutput, parseUsage } from '../adapters/claude/parse.js'
 import { AdeError } from '../journal/errors.js'
 import { resolveBinary } from '../runner/resolve-binary.js'
 import { validate } from '../schema/index.js'
+import { diagnoseDocs } from '../docs/projection.js'
+import { exitCodeOf } from './exit-codes.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -330,6 +332,33 @@ export async function main(argv, deps = {}) {
   const env = deps.env ?? process.env
   const stdout = deps.stdout ?? process.stdout
   const stderr = deps.stderr ?? process.stderr
+
+  if (argv.includes('--docs')) {
+    let repoDir = process.cwd()
+    const repoIdx = argv.indexOf('--repo')
+    if (repoIdx !== -1 && argv[repoIdx + 1]) {
+      repoDir = argv[repoIdx + 1]
+    }
+    /** @type {ReturnType<typeof diagnoseDocs>} */
+    let diagnosis
+    try {
+      diagnosis = diagnoseDocs({ repoDir })
+    } catch (err) {
+      stderr.write((err instanceof Error ? err.message : String(err)) + '\n')
+      return exitCodeOf(err)
+    }
+    stdout.write(`Diagnóstico de documentação:\n`)
+    stdout.write(`- Arquivos escaneados: ${diagnosis.summary.scanned_files}\n`)
+    stdout.write(`- Referências inválidas: ${diagnosis.summary.invalid_count}\n`)
+    stdout.write(`- Documentos desatualizados: ${diagnosis.summary.stale_count}\n`)
+    for (const inv of diagnosis.invalid_references) {
+      stdout.write(`  [inválido] ${inv.file} -> ${inv.target}\n`)
+    }
+    for (const st of diagnosis.stale_documents) {
+      stdout.write(`  [desatualizado] ${st.file} (${st.reason})\n`)
+    }
+    return 0
+  }
 
   const offline = argv.includes('--offline') || env.CI === 'true'
 

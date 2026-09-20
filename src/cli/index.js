@@ -8,6 +8,8 @@ import { main as journalMain } from './journal.js'
 import { main as reportMain } from './report.js'
 import { main as showMain } from './show.js'
 import { main as statusMain } from './status.js'
+import { main as docsMain } from './docs.js'
+import { main as gcMain } from './gc.js'
 
 /**
  * Ponto de entrada e dispatch de subcomandos da CLI.
@@ -40,8 +42,8 @@ export async function main(argv, deps = {}) {
   try {
     const [command, ...commandArgv] = argv
 
-    if (!command || !['run', 'status', 'journal', 'report', 'show', 'doctor'].includes(command)) {
-      stderr.write('uso: ade <run|status|journal|report|show|doctor> ...\n')
+    if (!command || !['run', 'status', 'journal', 'report', 'show', 'doctor', 'docs', 'gc'].includes(command)) {
+      stderr.write('uso: ade <run|status|journal|report|show|doctor|docs|gc> ...\n')
       return 4
     }
 
@@ -92,7 +94,15 @@ export async function main(argv, deps = {}) {
       return await doctorMain(commandArgv, delegatedDeps)
     }
 
-    stderr.write('uso: ade <run|status|journal|report|show|doctor> ...\n')
+    if (command === 'docs') {
+      return await docsMain(commandArgv, delegatedDeps)
+    }
+
+    if (command === 'gc') {
+      return await gcMain(commandArgv, delegatedDeps)
+    }
+
+    stderr.write('uso: ade <run|status|journal|report|show|doctor|docs|gc> ...\n')
     return 4
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
