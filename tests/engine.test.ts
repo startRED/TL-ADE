@@ -1,7 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
+import { createLocalPreflightPorts } from '../src/adapters/local/preflight.js'
+import { runPreflight } from '../src/engine/preflight.js'
 import { dispatchClaude } from '../src/adapters/claude/index.js'
 import { readCounter } from '../src/adapters/fake/cli.js'
 import { checkCanary, plantCanary } from '../src/contain/canary.js'
@@ -66,6 +68,9 @@ interface SetupFixtureOptions {
   makerFamily?: string
   probeOk?: boolean | null
   env?: NodeJS.ProcessEnv
+  preflight?: any
+  planMaxModelCalls?: number
+  storyMaxModelCalls?: number
 }
 
 function setupStoryFixture(options: SetupFixtureOptions = {}) {
@@ -123,7 +128,7 @@ function setupStoryFixture(options: SetupFixtureOptions = {}) {
       max_parked_units: 3,
     },
     budget: {
-      max_model_calls: 6,
+      max_model_calls: options.planMaxModelCalls ?? 6,
       max_rework_rounds: 2,
     },
   }
@@ -177,7 +182,7 @@ function setupStoryFixture(options: SetupFixtureOptions = {}) {
       },
     },
     budget: {
-      max_model_calls: 6,
+      max_model_calls: options.storyMaxModelCalls ?? 6,
       max_rework_rounds: 2,
     },
   }
@@ -273,6 +278,23 @@ function setupStoryFixture(options: SetupFixtureOptions = {}) {
     },
     env: options.env ?? process.env,
     now: () => Date.now(),
+    preflight:
+      options.preflight ??
+      (async () => ({
+        ready: true,
+        failures: [],
+        checks: [
+          { id: 'proof_target', status: 'ready', reason: null },
+          { id: 'dependencies', status: 'ready', reason: null },
+          { id: 'build', status: 'ready', reason: null },
+          { id: 'worktree', status: 'ready', reason: null },
+          { id: 'input', status: 'ready', reason: null },
+          { id: 'credential', status: 'ready', reason: null },
+          { id: 'disk', status: 'ready', reason: null },
+          { id: 'external_access', status: 'ready', reason: null },
+        ],
+        calls_avoided: 0,
+      })),
   }
 
   const input = {
@@ -516,5 +538,125 @@ describe('S18 telemetria honesta', () => {
     const telemetryEvents = events.filter((e) => e.kind === 'telemetry')
     expect(telemetryEvents.length).toBe(0)
   }, 60_000)
+
+  // CA2: disk blocked → exitCode:3, zero budget_reserved/prepare/dispatch
+  test('preflight_disk_blocked_aborts_with_zero_budget_reserved_prepare_dispatch', async () => {
+    const fixture = setupStoryFixture({
+      preflight: async () => ({
+        ready: false,
+        failures: [{ id: 'disk', reason: 'espaço insuficiente' }],
+        checks: [
+          { id: 'proof_target', status: 'ready', reason: null },
+          { id: 'dependencies', status: 'ready', reason: null },
+          { id: 'build', status: 'ready', reason: null },
+          { id: 'worktree', status: 'ready', reason: null },
+          { id: 'input', status: 'ready', reason: null },
+          { id: 'credential', status: 'ready', reason: null },
+          { id: 'disk', status: 'blocked', reason: 'espaço insuficiente' },
+          { id: 'external_access', status: 'ready', reason: null },
+        ],
+        calls_avoided: 6,
+      }),
+    })
+
+    const prepareSpy = vi.fn()
+    fixture.deps.prepareStory = prepareSpy
+    const dispatchSpy = vi.fn()
+    fixture.deps.dispatchClaude = dispatchSpy
+
+    const result = await runStory(fixture.deps, fixture.input)
+    expect(result.status).toBe('awaiting_operator')
+    expect(result.reason).toBe('preflight')
+    expect(result.exitCode).toBe(3)
+
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    const budgetReserved = events.filter((e) => e.kind === 'budget_reserved')
+    expect(budgetReserved.length).toBe(0)
+    expect(prepareSpy).not.toHaveBeenCalled()
+    expect(dispatchSpy).not.toHaveBeenCalled()
+  }, 60_000)
+
+  // CA3: proof_target+dependencies blocked, max plano:6, max story:4, dois budget_reserved → calls_avoided:2
+  test('preflight_proof_target_and_dependencies_blocked_calculates_calls_avoided', async () => {
+    const fixture = setupStoryFixture({
+      planMaxModelCalls: 6,
+      storyMaxModelCalls: 4,
+    })
+
+    // Injetar dois budget_reserved
+    await fixture.deps.journal.append({
+      kind: 'budget_reserved',
+      unit: fixture.input.story.id,
+      data: { calls: 1, unit: fixture.input.story.id },
+    })
+    await fixture.deps.journal.append({
+      kind: 'budget_reserved',
+      unit: fixture.input.story.id,
+      data: { calls: 1, unit: fixture.input.story.id },
+    })
+
+    fixture.deps.preflight = async ({ story, loaded, events }: any) => {
+      const checks: any = {
+        proof_target: { check: () => ({ status: 'blocked', reason: 'alvo inexistente' }) },
+        dependencies: { check: () => ({ status: 'blocked', reason: 'dependências ausentes' }) },
+        build: { check: () => ({ status: 'ready', reason: null }) },
+        worktree: { check: () => ({ status: 'ready', reason: null }) },
+        input: { check: () => ({ status: 'ready', reason: null }) },
+        credential: { check: () => ({ status: 'ready', reason: null }) },
+        disk: { check: () => ({ status: 'ready', reason: null }) },
+        external_access: { check: () => ({ status: 'ready', reason: null }) },
+      }
+      const planned_paid_calls = Math.min(
+        loaded.plan.budget.max_model_calls,
+        story.contract.budget.max_model_calls,
+      )
+      const consumed_paid_calls = events.filter((e: any) => e.kind === 'budget_reserved').length
+      return runPreflight({
+        checks,
+        planned_paid_calls,
+        consumed_paid_calls,
+      })
+    }
+
+    const result = await runStory(fixture.deps, fixture.input)
+    expect(result.status).toBe('awaiting_operator')
+    expect(result.reason).toBe('preflight')
+    expect(result.exitCode).toBe(3)
+
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    const preflightEvent = events.find((e) => e.kind === 'preflight_result')
+    expect(preflightEvent).toBeDefined()
+    const data: any = preflightEvent?.data
+    expect(data.status).toBe('blocked')
+    expect(data.failures.map((f: any) => f.id)).toEqual(['proof_target', 'dependencies'])
+    expect(data.calls_avoided).toBe(2)
+  }, 60_000)
+
+  // CA4: statfs lança EPERM → {status:'blocked',reason:'não foi possível verificar espaço livre'}
+  test('preflight_statfs_throws_eperm_returns_blocked_with_portuguese_reason', async () => {
+    const fixture = setupStoryFixture()
+
+    const ports = createLocalPreflightPorts({
+      repoDir: fixture.repo.dir,
+      story: fixture.input.story,
+      loaded: fixture.input.loaded,
+      capabilities: { probe_ok: true, probed_at: Date.now() },
+      gitPort: { dirtyPaths: async () => [] },
+      statfs: () => {
+        const err: any = new Error('EPERM: operation not permitted')
+        err.code = 'EPERM'
+        throw err
+      },
+      now: () => Date.now(),
+      env: { ANTHROPIC_API_KEY: 'test-key' },
+    })
+
+    const diskResult = await ports.disk.check()
+    expect(diskResult).toEqual({
+      status: 'blocked',
+      reason: 'não foi possível verificar espaço livre',
+    })
+  }, 60_000)
 })
+
 

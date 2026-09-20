@@ -1,13 +1,16 @@
 // @ts-check
+import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createLocalPreflightPorts } from '../adapters/local/preflight.js'
 import { dispatchClaude } from '../adapters/claude/index.js'
 import { checkCanary, plantCanary } from '../contain/canary.js'
 import { contain } from '../contain/contain.js'
 import { runStory } from '../engine.js'
 import { loadPlan } from '../engine/plan-load.js'
+import { runPreflight } from '../engine/preflight.js'
 import { prepareStory } from '../engine/prepare.js'
 import { createEvalRunner } from '../evals/eval-runner.js'
 import { createGateRunner } from '../gates/gates.js'
@@ -167,6 +170,29 @@ export async function runCommand(options, deps = {}) {
       capabilities,
       env,
       now: () => Date.now(),
+      preflight: async (/** @type {{ story: any, loaded: any, repoDir: string, events: any[] }} */ { story, loaded, repoDir, events }) => {
+        const checks = createLocalPreflightPorts({
+          repoDir,
+          story,
+          loaded,
+          capabilities,
+          gitPort,
+          execFile,
+          statfs: fs.promises.statfs,
+          now: () => Date.now(),
+          env,
+        })
+        const planned_paid_calls = Math.min(
+          loaded.plan.budget.max_model_calls,
+          story.contract.budget.max_model_calls,
+        )
+        const consumed_paid_calls = events.filter((/** @type {any} */ e) => e.kind === 'budget_reserved').length
+        return runPreflight({
+          checks,
+          planned_paid_calls,
+          consumed_paid_calls,
+        })
+      },
     }
 
     const storyResult = await runStory(engineDeps, {

@@ -36,6 +36,7 @@ export const CANARY_FAMILIES = ['claude']
  * @param {{ probe_ok: boolean | null }} deps.capabilities Estado da sonda de capacidades do doctor.
  * @param {NodeJS.ProcessEnv} [deps.env] Variáveis de ambiente da execução.
  * @param {() => number} [deps.now] Provedor de timestamp atual em ms.
+ * @param {(opts: { story: any, loaded: any, repoDir: string, events: any[] }) => Promise<import('./engine/preflight.js').PreflightSummary>} [deps.preflight] Verificador de preflight.
  *
  * @param {Object} input Parâmetros de entrada da story e do plano.
  * @param {import('./engine/plan-load.js').LoadedPlan} input.loaded Plano e contratos carregados.
@@ -51,6 +52,10 @@ export async function runStory(deps, input) {
   const storyId = story.id
   const contract = story.contract
   const env = deps.env ?? process.env
+
+  if (typeof deps.preflight !== 'function') {
+    throw new AdeError('preflight_missing', 'preflight obrigatório não configurado', 4)
+  }
 
   // Guardas iniciais antes de qualquer step
   const makerFamily = contract.roles?.maker?.family
@@ -103,6 +108,44 @@ export async function runStory(deps, input) {
         spec_revision: story.spec_revision,
       },
     })
+  }
+
+  // Verificação de preflight antes de reservar chamadas ou preparar worktree
+  const preflight = await deps.preflight({
+    story,
+    loaded,
+    repoDir,
+    events: readEvents(),
+  })
+
+  await deps.journal.append({
+    kind: 'preflight_result',
+    unit: storyId,
+    data: {
+      status: preflight.ready ? 'ready' : 'blocked',
+      checks: preflight.checks,
+      failures: preflight.failures,
+      calls_avoided: preflight.calls_avoided,
+    },
+  })
+
+  if (!preflight.ready) {
+    await deps.journal.append({
+      kind: 'story_done',
+      unit: storyId,
+      data: {
+        status: 'awaiting_operator',
+        reason: 'preflight',
+        unit: storyId,
+        commit: null,
+      },
+    })
+    return {
+      status: 'awaiting_operator',
+      exitCode: 3,
+      reason: 'preflight',
+      commit: null,
+    }
   }
 
   // Reserva de chamadas de modelo
