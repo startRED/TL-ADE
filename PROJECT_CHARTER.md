@@ -21,9 +21,9 @@ binários instalados já fazem nativamente (`claude`, `codex`); ela só escreve 
 o journal, o Task Contract com eval provado, e o Context Pack. A ADE não é um CI, não é um issue tracker,
 não é uma IDE, não é um provedor de modelo (nunca chama API HTTP de modelo; só CLI com assinatura), não é um framework de agentes.
 
-## Escopo do Slice 1 (o que entra em `src/` nesta fatia)
+## Recorte ativo de governança da v0.2 (o que entra em `src/` neste épico)
 
-`ade run --plan plan.json` executa uma story `trivial` de plano escrito à mão, família `claude`, `local_commit` local, zero rede além da CLI; código em JS ESM com JSDoc, ADR 0023.
+`ade run --plan plan.json` executa uma story sob controle prévio de governança e preflight, família `claude`, `local_commit` local, zero rede além da CLI; código em JS ESM com JSDoc, ADR 0023.
 
 - `src/journal`: `canonical.js` (wrapper `canonicalize` + `digest16`), `journal.js` (append/read/fold, `prev`, fd aberto + `fsyncSync`).
 - `src/step`: `step.js` (write-ahead, `input_digest`, `intent_context`, fila serializada), `reconcile.js` (tabela por `effect_class`).
@@ -37,13 +37,22 @@ não é uma IDE, não é um provedor de modelo (nunca chama API HTTP de modelo; 
 - `src/adapters/claude`: argv, `--session-id`, `--json-schema`, parser tolerante, `parse_usage`.
 - `src/adapters/fake`: CLI falsa para testes determinísticos sem rede.
 - `src/cli`: `node:util parseArgs`; `ade run --plan`, `ade doctor`, `ade show`.
-- `src/engine.js`: ciclo da story, orçamento, `runtime_stamp`.
+- `src/engine`: `preflight.js` (verificações determinísticas puras de preflight na ordem fixa, cálculo de chamadas pagas evitadas), `budget.js` (controles prévios, reservas e tetos), `loop.js`, `schedule.js`, `plan-load.js`, ciclo da story, `runtime_stamp`.
 - `src/schema`: carregador ajv compartilhado dos 8 schemas publicados.
 - `schemas/`: 8 arquivos `.schema.json` publicados (`journal-event`, `ade-config`, `plan`, `task-contract`, `eval`, `unit-result`, `review-result`, `capability-set`).
 - `fixtures/`: transcripts gravados, cenários da CLI falsa, vetores JCS.
 - `tests/`: Vitest, um arquivo por módulo + `parity/` + `probes/`.
 
-**Fora do slice 1, sem exceção — nenhum destes entra em `src/`:** Intent Compiler, entrevista, classificação, Checker como componente da ADE (adapter `codex`, ingestão de `review-result` pelo engine, rework automático), Skill Fabric, FQE, pesquisa, painel, PTY, push/PR/merge/CI, N>1, `agy`, SQLite, Playwright, Fastify, WebSocket. `proto/` é a demo e fica intocada.
+Padrões provisórios de execução e custos fixados para o recorte ativo de governança da v0.2 ([docs/adr/0026-governanca-execucao-custos.md](docs/adr/0026-governanca-execucao-custos.md)):
+- Teto absoluto de US$ 300 (reserva >= 300 recusada antes do despacho);
+- Cota semanal de 50% por assinatura consultada por família via recibo oficial;
+- Tempo de parede máximo de 8 horas;
+- Limite de até 3 unidades estacionadas;
+- Turnos provisórios por classe: `proof: 14`, `implementation: 30`, `correction: 20` e `review: 10`;
+- Limites de contexto: contrato de 32000 bytes e pack de 120000 bytes;
+- Espaço em disco mínimo de 1 GiB e validade de capacidade de 24 horas.
+
+**Fora do slice 1 e fora do recorte ativo da v0.2, sem exceção — nenhum destes entra em `src/`:** Intent Compiler, entrevista, classificação, Checker como componente da ADE (adapter `codex`, ingestão de `review-result` pelo engine, rework automático), Skill Fabric, FQE, pesquisa, painel, PTY, push/PR/merge/CI, entrega remota, N>1, `agy`, SQLite, Playwright, Fastify, WebSocket. `proto/` é a demo e fica intocada.
 
 **Checker como passo do método.** O operador roda `codex exec` sobre o diff, fora do engine; o Codex é ferramenta de desenvolvimento, nunca importada pelo engine.
 
@@ -51,9 +60,10 @@ não é uma IDE, não é um provedor de modelo (nunca chama API HTTP de modelo; 
 
 ## Estado e autorização
 
-- Autorização até a v1: concedida por Erick em 2026-09-19 ([docs/adr/0024-autorizacao-roadmap-ate-v1.md](docs/adr/0024-autorizacao-roadmap-ate-v1.md)).
+- Autorização até a v1: concedida por Erick em 2026-09-19 ([docs/adr/0024-autorizacao-roadmap-ate-v1.md](docs/adr/0024-autorizacao-roadmap-ate-v1.md)) e confirmada para governança e custos em 2026-09-20 ([docs/adr/0026-governanca-execucao-custos.md](docs/adr/0026-governanca-execucao-custos.md)).
 - Sequência obrigatória dos marcos: v0.2 (durabilidade e paridade 93) -> v0.3 -> v0.4a -> v0.4b -> v0.5 -> v1.
 - Recorte ativo deste épico: v0.2 durável e base de paridade determinística (93 casos), sem Checker nem entrega remota pública nesta etapa.
+- Recorte ativo de governança da v0.2: preflight determinístico e padrões provisórios de US$ 300, 50%, 8 horas, 3 unidades, turnos (proof: 14, implementation: 30, correction: 20, review: 10) e contexto (contrato de 32000 bytes, pack de 120000 bytes) ([docs/adr/0026-governanca-execucao-custos.md](docs/adr/0026-governanca-execucao-custos.md)).
 - Slice 1: fechamento pendente ([docs/plans/slice-1-fechamento.md](docs/plans/slice-1-fechamento.md)).
 - Recorte local v0.2: autorizado sequencialmente ([docs/plans/v02-local-proposta.md](docs/plans/v02-local-proposta.md), [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md)).
 - Restante da v0.2: segue a ordem do roadmap.

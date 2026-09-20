@@ -48,6 +48,7 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | [0023](0023-js-esm-com-jsdoc-e-checkjs.md) | JS ESM com JSDoc e `checkJs`: portão de tipos sem build (emenda o ADR 0001) | proposto, pendente de confirmação do Erick |
 | [0024](0024-autorizacao-roadmap-ate-v1.md) | Autorização para execução sequencial do roadmap até a v1 | Aceito (confirmado por Erick em 2026-09-19) |
 | [0025](0025-fallback-da-arvore-de-processos-windows.md) | Fallback de encerramento da árvore de processos no Windows sob EPERM | Aceito (confirmado por Erick em 2026-09-20) |
+| [0026](0026-governanca-execucao-custos.md) | Governança de execução, controles de custos e preflight na v0.2 | Aceito (confirmado por Erick em 2026-09-20) |
 
 ## Mapa decisão → onde ela aparece
 
@@ -59,3 +60,7 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | Intenção, contrato e prova | 0007, 0008, 0016 | §4, §5, §11 E1–E4, E12, E18–E20 |
 | Contexto, skills e qualidade | 0009, 0010, 0011, 0018 | §7, §10 A1, A7, A11, A13, A14, §11 E8, E9, E13–E15, E33, E35, E39 |
 | Observação e método | 0013, 0017, 0019, 0020, 0024 | §3, §8, §10 A10, A12, §11 E11, E17, E30, E34, E37 |
+| Orçamento e execução | 0026 | §7, §9.8, §11 E20, E24 |
+
+O [ADR 0026](0026-governanca-execucao-custos.md) consolida a autorização até a v1 e define o recorte ativo de governança da v0.2, fixando os padrões provisórios de execução: teto absoluto de US$ 300, cota semanal de 50% por assinatura, máximo de 8 horas de parede, até 3 unidades estacionadas, turnos por classe (proof: 14, implementation: 30, correction: 20 e review: 10) e limites de contexto de 32000 bytes para contrato e 120000 bytes para pack.
+
