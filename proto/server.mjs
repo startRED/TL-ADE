@@ -2333,7 +2333,11 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     // revisão que rodou junto com a suíte: os achados dela vão para a próxima rodada com as provas vermelhas (uma rodada corrige os dois)
     const rv = early ? await early : null
     if (rv) { st.review = rv; st.prev_findings = (st.last_review?.findings || []).map(findingKey); st.last_review = rv; setStep('checker', rv.verdict === 'approve' ? 'done' : 'failed') }
-    if (rv?.verdict !== 'approve' && rv) previousReview = rv
+    // Revisão que APROVOU encerra o parecer antigo: a próxima rodada só conserta as provas. Manter o antigo devolvia a quem
+    // escreve achados que o revisor acabou de dar por corrigidos, e repeatedFindings comparava o parecer antigo com ele mesmo:
+    // "2 achados repetidos", escada acima. m-mu8usf5z, v03-s6f: o Sol deixou 11/11 verdes e aprovado na rodada 1, e a rodada 2
+    // saiu dele para o degrau seguinte.
+    if (rv) previousReview = rv.verdict === 'approve' ? null : rv
     const spentNow = (st.usd || 0) - (st.usd_start || 0)
     const redNow = st.tests_after.tests.filter((t) => t.status !== 'passed').map((t) => t.name).sort().join('|')
     // A alegação de contrato errado só vale se quem revisa confirmar. Sem isso quem escreve mata a própria parte sozinho: o
