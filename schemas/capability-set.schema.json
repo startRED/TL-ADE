@@ -57,6 +57,8 @@
     "probe_ok": { "type": ["boolean", "null"] },
     "probe_mode": { "type": "string", "enum": ["real", "help_only", "fixture"] },
     "bootstrap_cost_tokens": { "type": "integer" },
-    "probed_at": { "type": "string" }
+    "probed_at": { "type": "string" },
+    "skills_suppression": { "type": "boolean" },
+    "native_skills_suppressed": { "type": "boolean" }
   }
 }

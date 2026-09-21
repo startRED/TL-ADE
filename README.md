@@ -11,7 +11,7 @@ operacional mora no harness.
 
 - Autorização até a v1: concedida por Erick em 2026-09-19 ([docs/adr/0024-autorizacao-roadmap-ate-v1.md](docs/adr/0024-autorizacao-roadmap-ate-v1.md)).
 - Sequência obrigatória dos marcos: v0.2 (durabilidade e paridade 93) -> v0.3 -> v0.4a -> v0.4b -> v0.5 -> v1.
-- Recorte ativo deste épico: v0.3 — Intent Compiler, Task Contracts v0.3, governança durável e contratos auditáveis.
+- Recorte ativo deste épico: v0.4a — Skill Fabric (catálogo curado com 12 controles de segurança da cadeia de suprimento, BM25 top-8, seletor de até 3 skills com tetos de 7,5k/20k tokens, aprovação congelada e injeção sanitizada no Context Pack) e Frontend Quality Engine, conforme autorização até a v1 no [ADR 0024](docs/adr/0024-autorizacao-roadmap-ate-v1.md).
 - Slice 1: fechamento pendente ([docs/plans/slice-1-fechamento.md](docs/plans/slice-1-fechamento.md)).
 - Recorte local v0.2: autorizado sequencialmente ([docs/plans/v02-local-proposta.md](docs/plans/v02-local-proposta.md), [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md)).
 - Restante da v0.2: segue a ordem do roadmap.
@@ -42,11 +42,14 @@ Histórico: [`docs/specs/2026-09-16-ade-design.md`](docs/specs/2026-09-16-ade-de
 `docs/RUNTIME.md`, schemas JSON e `scripts/tests/test_tl_runtime.py` (93 casos; passam 93/93 no Windows).
 Os 66 invariantes de durabilidade estão catalogados em `docs/research/runtime-port-map.md`.
 
-## Superfície de planejamento (v0.3)
+## Superfície de planejamento e catálogo (v0.4a)
 
 - `ade plan [--request <pedido>] [--repo <pasta>] [--from <missao>] [--non-interactive]`: planeja a missão, gera contratos válidos e apresenta dúvidas necessárias.
 - `ade validate [--plan <arquivo>]`: valida deterministicamente planos e contratos sem efeitos colaterais.
 - `ade approve --mission <id> --digest <hex>`: aprova e congela duravelmente no journal os efeitos e skills autorizados.
+- `ade catalog sync [--rebuild-index]`: sincroniza fontes autorizadas pinadas por commit, executa o SkillGuard e reconstrói o índice atômico.
+- `ade catalog list [--domain <d>] [--trust <t>] [--source <s>]`: lista habilidades curadas com filtros de domínio, confiança e fonte.
+- `ade catalog inspect <id> [--body]`: inspeciona metadados, achados do SkillGuard e quarentena de uma habilidade sem expor scripts executáveis.
 
 ## Próximo passo
 

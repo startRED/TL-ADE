@@ -441,7 +441,7 @@ test('CA4_limites_de_chamadas_turnos_e_contexto_sao_aplicados_onde_suportados_co
     family: 'claude',
     phase: 'implementation',
     // A reserva mede as seções do contexto (o pack só é montado depois do worktree preparado).
-    context_bytes: 390,
+    context_bytes: 418,
   })
 })
 

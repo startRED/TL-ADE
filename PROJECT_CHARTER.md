@@ -21,7 +21,7 @@ binários instalados já fazem nativamente (`claude`, `codex`); ela só escreve 
 o journal, o Task Contract com eval provado, e o Context Pack. A ADE não é um CI, não é um issue tracker,
 não é uma IDE, não é um provedor de modelo (nunca chama API HTTP de modelo; só CLI com assinatura), não é um framework de agentes.
 
-## Recorte ativo de governança da v0.3 (o que entra em `src/` nesta fatia e épico)
+## Recorte ativo de governança da v0.4a (o que entra em `src/` nesta fatia e épico)
 
 `ade run --plan plan.json` executa uma story sob controle prévio de governança e preflight, família `claude`, `local_commit` local, zero rede além da CLI; código em JS ESM com JSDoc, ADR 0023.
 
@@ -33,15 +33,17 @@ não é uma IDE, não é um provedor de modelo (nunca chama API HTTP de modelo; 
 - `src/contain`: `contain.js` (precedência segurança > sensíveis > escopo, `maxBuffer` explícito), `secrets.js`, `canary.js`.
 - `src/gates`: `gates.js` (cache `gate:<id>:<tree>`, restauração de sobras).
 - `src/evals`: `eval-runner.js` (`phase: red|green`, `strictness`, evidência).
-- `src/pack`: `pack.js` (5 seções do slice, teto por seção com ponteiro, redação pós-montagem), `firewall.js`.
+- `src/pack`: `pack.js` (seções contract, policy, story e skills, teto por seção com ponteiro, redação pós-montagem), `firewall.js`.
+- `src/skills`: `catalog.js` (sync, list, inspect, lock atômico), `skillguard.js` (NFKC, 12 controles estáticos, quarentena), `bm25.js` (ranking ponderado sem dependências), `select.js` (filtro duro, BM25 top-8, seletor de até 3 skills com tetos de 7,5k/20k tokens).
 - `src/adapters/claude`: argv, `--session-id`, `--json-schema`, parser tolerante, `parse_usage`.
+- `src/adapters/codex`: argv, supressão de personalizações nativas (`--ephemeral`, `--ignore-rules`).
 - `src/adapters/fake`: CLI falsa para testes determinísticos sem rede.
-- `src/cli`: `node:util parseArgs`; `ade run --plan`, `ade doctor`, `ade show`.
+- `src/cli`: `node:util parseArgs`; `ade run --plan`, `ade doctor` (com suporte a `--skills`), `ade show`, `ade catalog` (`sync`, `list`, `inspect`).
 - `src/engine.js`: ciclo da story, `runtime_stamp`; `src/engine`: `preflight.js` (verificações determinísticas puras de preflight na ordem fixa, cálculo de chamadas pagas evitadas), `budget.js` (controles prévios, reservas e tetos), `loop.js`, `schedule.js`, `plan-load.js`.
 - `src/schema`: carregador ajv compartilhado dos 8 schemas publicados.
 - `schemas/`: 8 arquivos `.schema.json` publicados (`journal-event`, `ade-config`, `plan`, `task-contract`, `eval`, `unit-result`, `review-result`, `capability-set`).
-- `fixtures/`: transcripts gravados, cenários da CLI falsa, vetores JCS.
-- `tests/`: Vitest, um arquivo por módulo + `parity/` + `probes/`.
+- `fixtures/`: transcripts gravados, cenários da CLI falsa, vetores JCS, corpus do catálogo e SkillGuard (`fixtures/catalog/index-2026-09.json`, `fixtures/skillguard/`).
+- `tests/`: Vitest, um arquivo por módulo + `parity/` + `probes/` + `tests/skill-fabric.test.ts`.
 
 Padrões provisórios de execução e custos fixados para o recorte ativo de governança da v0.2 ([docs/adr/0026-governanca-execucao-custos.md](docs/adr/0026-governanca-execucao-custos.md)):
 - Teto absoluto de US$ 300 (reserva >= 300 recusada antes do despacho);
@@ -62,8 +64,8 @@ Padrões provisórios de execução e custos fixados para o recorte ativo de gov
 
 - Autorização até a v1: concedida por Erick em 2026-09-19 ([docs/adr/0024-autorizacao-roadmap-ate-v1.md](docs/adr/0024-autorizacao-roadmap-ate-v1.md)) e confirmada para governança e custos em 2026-09-20 ([docs/adr/0026-governanca-execucao-custos.md](docs/adr/0026-governanca-execucao-custos.md)).
 - Sequência obrigatória dos marcos: v0.2 (durabilidade e paridade 93) -> v0.3 -> v0.4a -> v0.4b -> v0.5 -> v1.
-- Recorte ativo deste épico: v0.3 — Intent Compiler, Task Contracts v0.3, governança e durabilidade sequencial conforme autorização até a v1 concedida no [ADR 0024](docs/adr/0024-autorizacao-roadmap-ate-v1.md).
-- Recorte ativo de governança da v0.3: preflight determinístico, contratos v0.3 (planejamento progressivo, workspace, verificadores, incógnitas, risco objetivo, proveniência e artefatos certificados) e padrões provisórios de US$ 300, 50%, 8 horas, 3 unidades, turnos (proof: 14, implementation: 30, correction: 20, review: 10) e contexto (contrato de 32000 bytes, pack de 120000 bytes) ([docs/adr/0024-autorizacao-roadmap-ate-v1.md](docs/adr/0024-autorizacao-roadmap-ate-v1.md), [docs/adr/0026-governanca-execucao-custos.md](docs/adr/0026-governanca-execucao-custos.md)).
+- Recorte ativo deste épico: v0.4a — Skill Fabric (catálogo curado, 12 controles de segurança da cadeia de suprimento, BM25 top-8, seletor de até 3 skills sob tetos de 7,5k/20k tokens, aprovação congelada e injeção sanitizada no Context Pack) e Frontend Quality Engine conforme autorização até a v1 concedida no [ADR 0024](docs/adr/0024-autorizacao-roadmap-ate-v1.md).
+- Recorte ativo de governança da v0.4a: catálogo sincronizado sob commit pinado e lock exclusivo, índice de seleção derivado, SkillGuard estático com quarentena, aprovação congelada de skills elegíveis, supressão de personalizações nativas em despacho e monitoramento de drift de memória via doctor ([docs/adr/0024-autorizacao-roadmap-ate-v1.md](docs/adr/0024-autorizacao-roadmap-ate-v1.md), [docs/adr/0026-governanca-execucao-custos.md](docs/adr/0026-governanca-execucao-custos.md)).
 - Slice 1: fechamento pendente ([docs/plans/slice-1-fechamento.md](docs/plans/slice-1-fechamento.md)).
 - Recorte local v0.2: autorizado sequencialmente ([docs/plans/v02-local-proposta.md](docs/plans/v02-local-proposta.md), [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md)).
 - Restante da v0.2: segue a ordem do roadmap.

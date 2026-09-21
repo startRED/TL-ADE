@@ -1,3 +1,5 @@
+import { selectStorySkills } from '../skills/select.js'
+
 /**
  * Seleciona identificadores de skills elegíveis correspondendo deterministamente por domínio e linguagem.
  * Nunca retorna skill fora do conjunto elegível.
@@ -8,6 +10,33 @@
 export function selectEligibleSkills({ story = {}, eligibleSkills = [] }) {
   if (!Array.isArray(eligibleSkills) || eligibleSkills.length === 0) {
     return []
+  }
+
+  // Quando houver skills estruturadas, utiliza o seletor Skill Fabric com BM25
+  const hasStructured = eligibleSkills.some((s) => s && typeof s === 'object' && s.id)
+  if (hasStructured) {
+    const candidates = eligibleSkills
+      .filter((s) => s && typeof s === 'object' && s.id)
+      .map((s) => ({
+        ...s,
+        id: s.id,
+        name: s.name || s.id,
+        domains: s.domains || (s.domain ? [s.domain] : []),
+        languages: s.languages || (s.language ? [s.language] : []),
+      }))
+
+    const selected = selectStorySkills({
+      story: {
+        ...story,
+        domains: story.domains || (story.domain ? [story.domain] : []),
+        languages: story.languages || (story.language ? [story.language] : []),
+      },
+      candidates,
+    })
+
+    if (selected.length > 0) {
+      return selected.map((s) => s.id)
+    }
   }
 
   const storyDomains = (story.domains || []).map((d) => d.toLowerCase())

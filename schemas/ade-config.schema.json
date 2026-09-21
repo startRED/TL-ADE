@@ -134,7 +134,27 @@
       "additionalProperties": false,
       "required": ["sources", "trust_default", "max_skills_per_story", "bm25_top_k", "local_skills_win"],
       "properties": {
-        "sources": { "type": "array", "items": { "type": "string" } },
+        "sources": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "required": ["name", "commit"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "repo": { "type": "string" },
+                  "url": { "type": "string" },
+                  "commit": { "type": "string" },
+                  "paths": { "type": "array", "items": { "type": "string" } },
+                  "license": { "type": "string" },
+                  "trust": { "type": "string" }
+                }
+              }
+            ]
+          }
+        },
         "trust_default": { "type": "string" },
         "max_skills_per_story": { "type": "integer" },
         "bm25_top_k": { "type": "integer" },

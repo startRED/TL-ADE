@@ -1,0 +1,13 @@
+{
+  "request": "quero melhorar o design do site",
+  "story": {
+    "id": "S01",
+    "task": "melhorar o design do site",
+    "domains": ["frontend", "ui"],
+    "files": ["src/app/page.tsx"]
+  },
+  "catalog_snapshot": "fixtures/catalog/index-2026-09.json",
+  "must_include": ["frontend-design"],
+  "should_include": ["tl-impeccable-design", "ui-typography"],
+  "must_not_include": ["springboot-security", "proxmox-readonly-audit"]
+}

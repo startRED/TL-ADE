@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
-import { randomUUID as nodeRandomUUID } from 'node:crypto'
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { createHash, randomUUID as nodeRandomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -228,6 +228,8 @@ export async function runDoctor(opts) {
   if (offline) {
     doc = readFixtureDoc(fixturePath)
     doc.probed_at = now()
+    doc.skills_suppression = true
+    doc.native_skills_suppressed = true
   } else {
     /** @type {{ exe: string, prefixArgs: string[] }} */
     let resolved
@@ -310,6 +312,123 @@ export async function runDoctor(opts) {
   return { capabilities: doc, path: capsPath, longpaths, warnings }
 }
 
+function listFilesRec(dir, base = '') {
+  if (!existsSync(dir)) return []
+  const results = []
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true })
+    for (const ent of entries) {
+      const rel = base ? `${base}/${ent.name}` : ent.name
+      if (ent.isDirectory()) {
+        results.push(...listFilesRec(path.join(dir, ent.name), rel))
+      } else if (ent.isFile()) {
+        results.push(rel)
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return results
+}
+
+/**
+ * Diagnóstico de habilidades, baseline e controle 11 (memória e configuração de agentes).
+ *
+ * @param {{ homeDir?: string, repoDir?: string, catalogDir?: string }} [opts]
+ * @returns {{ deltas: any[], oversizedDocs: any[], quarantineCount: number, currentHashes: Record<string, string> }}
+ */
+export function diagnoseSkills({ homeDir = os.homedir(), repoDir = process.cwd(), catalogDir = path.join(homeDir, '.ade', 'catalog') } = {}) {
+  const monitoredDirs = [
+    path.join(homeDir, '.claude'),
+    path.join(repoDir, '.claude'),
+    path.join(homeDir, '.codex'),
+    path.join(homeDir, '.agents'),
+  ]
+
+  const currentHashes = {}
+  for (const dir of monitoredDirs) {
+    if (existsSync(dir)) {
+      const files = listFilesRec(dir)
+      for (const rel of files) {
+        const full = path.join(dir, rel)
+        try {
+          const content = readFileSync(full)
+          const key = `${path.basename(dir)}/${rel.replace(/\\/g, '/')}`
+          currentHashes[key] = createHash('sha256').update(content).digest('hex')
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  const baselinePath = path.join(homeDir, '.ade', 'skills-baseline.json')
+  const deltas = []
+  if (existsSync(baselinePath)) {
+    try {
+      const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'))
+      for (const [key, hash] of Object.entries(currentHashes)) {
+        if (!baseline[key]) {
+          deltas.push({ file: key, type: 'added', current: hash })
+        } else if (baseline[key] !== hash) {
+          deltas.push({ file: key, type: 'modified', current: hash, previous: baseline[key] })
+        }
+      }
+      for (const key of Object.keys(baseline)) {
+        if (!currentHashes[key]) {
+          deltas.push({ file: key, type: 'removed', previous: baseline[key] })
+        }
+      }
+    } catch {
+      // ignore
+    }
+  } else {
+    try {
+      mkdirSync(path.dirname(baselinePath), { recursive: true })
+      writeFileSync(baselinePath, JSON.stringify(currentHashes, null, 2), 'utf8')
+    } catch {
+      // ignore
+    }
+  }
+
+  const oversizedDocs = []
+  for (const docName of ['CLAUDE.md', 'AGENTS.md']) {
+    for (const d of [repoDir, homeDir]) {
+      const p = path.join(d, docName)
+      if (existsSync(p)) {
+        try {
+          const sz = statSync(p).size
+          if (sz > 8192) {
+            oversizedDocs.push({ file: p, size: sz })
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  let quarantineCount = 0
+  const indexPath = path.join(catalogDir, 'index.json')
+  if (existsSync(indexPath)) {
+    try {
+      const idx = JSON.parse(readFileSync(indexPath, 'utf8'))
+      for (const e of idx.entries || []) {
+        if (e.trust === 'quarantine') quarantineCount++
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return {
+    deltas,
+    oversizedDocs,
+    quarantineCount,
+    currentHashes,
+  }
+}
+
 /**
  * @param {string[]} argv
  * @param {{
@@ -357,6 +476,27 @@ export async function main(argv, deps = {}) {
     for (const st of diagnosis.stale_documents) {
       stdout.write(`  [desatualizado] ${st.file} (${st.reason})\n`)
     }
+    return 0
+  }
+
+  if (argv.includes('--skills')) {
+    let repoDir = process.cwd()
+    const repoIdx = argv.indexOf('--repo')
+    if (repoIdx !== -1 && argv[repoIdx + 1]) {
+      repoDir = argv[repoIdx + 1]
+    }
+    const homeDir = deps.homeDir ?? os.homedir()
+    const diag = diagnoseSkills({ homeDir, repoDir })
+    stdout.write('Diagnóstico de habilidades e memória do agente:\n')
+    stdout.write(`- Deltas de memória/configuração detectados: ${diag.deltas.length}\n`)
+    for (const d of diag.deltas) {
+      stdout.write(`  [delta] ${d.file} (${d.type})\n`)
+    }
+    stdout.write(`- Documentos de instrução acima de 8 KB: ${diag.oversizedDocs.length}\n`)
+    for (const o of diag.oversizedDocs) {
+      stdout.write(`  [oversized] ${o.file} (${o.size} bytes)\n`)
+    }
+    stdout.write(`- Habilidades em quarentena: ${diag.quarantineCount}\n`)
     return 0
   }
 

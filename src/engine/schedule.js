@@ -348,6 +348,9 @@ export async function runSequentialMission(deps, { loaded, repoDir, missionDir }
     if (!approval) {
       return { valid: false, reason: 'approval_missing', nextAction: 'ade approve' }
     }
+    if (deps.skillCatalogError) {
+      return { valid: false, reason: 'approval_divergent', nextAction: 'ade catalog sync && ade approve' }
+    }
     if (!approval.data?.digest) {
       return { valid: false, reason: 'approval_divergent', nextAction: 'ade approve' }
     }
@@ -371,7 +374,11 @@ export async function runSequentialMission(deps, { loaded, repoDir, missionDir }
     }
     const assertApprovedPlanFn = deps.assertApprovedPlan || assertApprovedPlan
     try {
-      assertApprovedPlanFn({ missionDir: mDir, plan: loadedPlan.plan })
+      assertApprovedPlanFn({
+        missionDir: mDir,
+        plan: loadedPlan.plan,
+        skillSnapshot: deps.eligibleSkillSnapshot || [],
+      })
     } catch (err) {
       const msg = err?.message || String(err)
       const match = msg.match(/contrato\s+(\S+)\s+alterado/)
@@ -382,7 +389,11 @@ export async function runSequentialMission(deps, { loaded, repoDir, missionDir }
         nextAction: 'ade approve',
       }
     }
-    const expectedSummary = digest16({ plan: approval.data.digest, contracts: frozenContracts })
+    const expectedSummary = digest16({
+      plan: approval.data.digest,
+      contracts: frozenContracts,
+      ...(Array.isArray(approval.data?.eligible_skill_pins) ? { skills: approval.data.eligible_skill_pins } : {}),
+    })
     if (approval.data.summary_digest !== expectedSummary) {
       return { valid: false, reason: 'approval_divergent', nextAction: 'ade approve' }
     }

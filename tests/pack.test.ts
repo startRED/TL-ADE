@@ -39,11 +39,12 @@ function extractSectionBody(packText: string, section: string): string {
 
 describe('compilePack', () => {
   test('pack_section_order_and_caps_match_contract', () => {
-    expect(SECTION_ORDER).toEqual(['contract', 'policy', 'story'])
+    expect(SECTION_ORDER).toEqual(['contract', 'policy', 'story', 'skills'])
     expect(SECTION_CAPS).toEqual({
       contract: 32000,
       policy: 8000,
       story: 24000,
+      skills: 80000,
     })
   })
 
@@ -475,7 +476,7 @@ describe('S16 dedup', () => {
         story: 'S',
       } as any,
     } as any)
-    expect(okResult.manifest.sections.map((s) => s.section)).toEqual(['contract', 'policy', 'story'])
+    expect(okResult.manifest.sections.map((s) => s.section)).toEqual(['contract', 'policy', 'story', 'skills'])
     expect(okResult.manifest.dedup).toEqual({
       contract_bytes: 1,
       saved_bytes: 0,

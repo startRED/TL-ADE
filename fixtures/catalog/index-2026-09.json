@@ -1,0 +1,2080 @@
+{
+  "format_version": 1,
+  "built_at": "2026-09-21T00:00:00Z",
+  "engine_stamp": "ade-catalog-2026-09",
+  "entries": [
+    {
+      "id": "frontend-design",
+      "name": "frontend-design",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend",
+        "ui"
+      ],
+      "languages": [
+        "typescript",
+        "javascript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "design",
+        "css",
+        "html",
+        "layout",
+        "ui"
+      ],
+      "body_tokens": 280,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Diretrizes essenciais de frontend design, estética limpa e layout responsivo.",
+      "when_to_use": "Use ao projetar ou melhorar componentes visuais e páginas web.",
+      "sha256": "0f3b1cbb1631e8899ababd27f223063ec0cc526e3ad1aa6d897316612f9be114"
+    },
+    {
+      "id": "tl-impeccable-design",
+      "name": "tl-impeccable-design",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "Apache-2.0",
+      "domains": [
+        "frontend",
+        "ui"
+      ],
+      "languages": [
+        "typescript",
+        "javascript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "design",
+        "impeccable",
+        "visual",
+        "polish",
+        "typography"
+      ],
+      "body_tokens": 320,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Padrões de design impecável, ritmo vertical, consistência de espaçamento e polimento estético.",
+      "when_to_use": "Use para refinamento e qualidade visual de telas e interfaces.",
+      "sha256": "13675b4fb9ecb45da71a952befd6aa7cd4bb42364de9a817ef05e7e620a37262"
+    },
+    {
+      "id": "ui-typography",
+      "name": "ui-typography",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend",
+        "ui"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "typography",
+        "design",
+        "fonts",
+        "scale",
+        "text"
+      ],
+      "body_tokens": 220,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Design de tipografia, escalas de fontes e legibilidade para melhorar sites e interfaces.",
+      "when_to_use": "Use ao definir o design de tipografia ou melhorar fontes do site.",
+      "sha256": "49d1f8a2bc1259e73bcccc93da9dddf9c0c109bbfdaf808c0c933526316a01be"
+    },
+    {
+      "id": "ui-accessibility",
+      "name": "ui-accessibility",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend",
+        "ui",
+        "accessibility"
+      ],
+      "languages": [
+        "typescript",
+        "javascript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "wcag",
+        "a11y",
+        "contrast",
+        "aria",
+        "accessibility"
+      ],
+      "body_tokens": 350,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Conformidade com WCAG AA, contraste adequado, suporte a leitores de tela e navegação por teclado.",
+      "when_to_use": "Use em qualquer desenvolvimento ou auditoria de interface acessível.",
+      "sha256": "f51e8017f63b759ff8a857b5cbdf744f712516ac9f7e77fbc04ecd57d4ca6ac6"
+    },
+    {
+      "id": "responsive-grid",
+      "name": "responsive-grid",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend",
+        "ui"
+      ],
+      "languages": [
+        "css"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "grid",
+        "flexbox",
+        "responsive",
+        "breakpoints",
+        "layout"
+      ],
+      "body_tokens": 240,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Layouts responsivos com CSS Grid e Flexbox com quebras fluidas.",
+      "when_to_use": "Use ao estruturar grids de páginas ou painéis responsivos.",
+      "sha256": "02ca617cd9a723e2df4e1858864b54d15a5e788026b9e541bf83203a07d48519"
+    },
+    {
+      "id": "design-system-tokens",
+      "name": "design-system-tokens",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "Apache-2.0",
+      "domains": [
+        "frontend",
+        "ui"
+      ],
+      "languages": [
+        "typescript",
+        "css"
+      ],
+      "families": [
+        "claude"
+      ],
+      "tags": [
+        "tokens",
+        "variables",
+        "theme"
+      ],
+      "body_tokens": 310,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Tokens semânticos para cores, espaçamentos e raios de borda.",
+      "when_to_use": "Use na criação ou consumo de tokens em componentes.",
+      "sha256": "a34c6db3713a8662f8a58445135fe6d53605ce5629c5ecc855befeaa3785a33b"
+    },
+    {
+      "id": "dark-mode-theme",
+      "name": "dark-mode-theme",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend",
+        "ui"
+      ],
+      "languages": [
+        "css",
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "dark-mode",
+        "theme",
+        "color-scheme",
+        "contrast"
+      ],
+      "body_tokens": 210,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de tema escuro e alternância suave de temas com variáveis CSS.",
+      "when_to_use": "Use ao implementar suporte a modo escuro.",
+      "sha256": "8ed1522a9411798ed9b555b3880a30ed5fa42177a495e339aeac77357308dbb5"
+    },
+    {
+      "id": "color-contrast-ratio",
+      "name": "color-contrast-ratio",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend",
+        "ui",
+        "accessibility"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude"
+      ],
+      "tags": [
+        "contrast",
+        "colors",
+        "wcag-aa",
+        "palette"
+      ],
+      "body_tokens": 230,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Validação e cálculo de contraste de cores atendendo ao mínimo de 4.5:1 para texto normal.",
+      "when_to_use": "Use ao escolher ou auditar paletas de cores de UI.",
+      "sha256": "cb1f0622d73daa3d1cecfacd4fd51a17129c0552cabbef88a21696a66b411f29"
+    },
+    {
+      "id": "font-loading-strategies",
+      "name": "font-loading-strategies",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend",
+        "ui"
+      ],
+      "languages": [
+        "javascript",
+        "css"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "fonts",
+        "fout",
+        "preload",
+        "webfonts",
+        "performance"
+      ],
+      "body_tokens": 260,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Otimização de carregamento de fontes web evitando FOUT/FOIT e CLS.",
+      "when_to_use": "Use ao integrar webfonts em projetos web.",
+      "sha256": "512c2a102a1888f0bbcf360cd3593d6d0e712700093607b161cbe4bb69312f08"
+    },
+    {
+      "id": "micro-interactions-css",
+      "name": "micro-interactions-css",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend",
+        "ui"
+      ],
+      "languages": [
+        "css"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "animations",
+        "transitions",
+        "micro-interactions",
+        "hover"
+      ],
+      "body_tokens": 250,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Transições suaves para botões, inputs e micro-interações sem jank.",
+      "when_to_use": "Use para dar feedback visual tátil aos elementos interativos.",
+      "sha256": "ea18a7b557807640ee98a43eb4cad6528dfbe6cf60fa376334599dfa633aaf0a"
+    },
+    {
+      "id": "semantic-html5-structure",
+      "name": "semantic-html5-structure",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend",
+        "ui"
+      ],
+      "languages": [
+        "html"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "html5",
+        "semantics",
+        "landmarks",
+        "structure"
+      ],
+      "body_tokens": 200,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Estrutura semântica com tags main, nav, section, article e header.",
+      "when_to_use": "Use ao planejar a hierarquia HTML da página.",
+      "sha256": "681b8b821accfc959cb8ec6493a885ded0b5e59616a55aea1a27f07564576a0c"
+    },
+    {
+      "id": "css-animations",
+      "name": "css-animations",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend",
+        "ui"
+      ],
+      "languages": [
+        "css"
+      ],
+      "families": [
+        "claude"
+      ],
+      "tags": [
+        "animation",
+        "keyframes",
+        "motion",
+        "reduced-motion"
+      ],
+      "body_tokens": 290,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Animações CSS performáticas respeitando prefers-reduced-motion.",
+      "when_to_use": "Use ao criar animações complexas em CSS.",
+      "sha256": "27d769019b9e722c3f9e49fb749abca6b88b868528320bf8151a4304682635df"
+    },
+    {
+      "id": "springboot-security",
+      "name": "springboot-security",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "Apache-2.0",
+      "domains": [
+        "backend",
+        "security"
+      ],
+      "languages": [
+        "java"
+      ],
+      "families": [
+        "codex"
+      ],
+      "tags": [
+        "spring",
+        "security",
+        "oauth",
+        "jwt",
+        "backend"
+      ],
+      "body_tokens": 450,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Configuração de Spring Security, filtros de autenticação e proteção CSRF.",
+      "when_to_use": "Use em serviços backend Spring Boot.",
+      "sha256": "f9c785901ad910f57c5e22f675c297a25d7d1e94934b7d1624be4994fa7c9d3c"
+    },
+    {
+      "id": "proxmox-readonly-audit",
+      "name": "proxmox-readonly-audit",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "GPL-3.0",
+      "domains": [
+        "devops",
+        "audit"
+      ],
+      "languages": [
+        "bash",
+        "python"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "proxmox",
+        "virtualization",
+        "audit",
+        "pve",
+        "infrastructure"
+      ],
+      "body_tokens": 320,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Auditoria somente-leitura de clusters Proxmox VE e instâncias LXC/QEMU.",
+      "when_to_use": "Use para inspeção de infraestrutura Proxmox.",
+      "sha256": "309799849e54ab2154d78cf554a96d2f004e5bbad22697fd475ac34ab995d229"
+    },
+    {
+      "id": "postgres-tuning",
+      "name": "postgres-tuning",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "PostgreSQL",
+      "domains": [
+        "database",
+        "backend"
+      ],
+      "languages": [
+        "sql"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "postgres",
+        "tuning",
+        "indexes",
+        "vacuum",
+        "sql"
+      ],
+      "body_tokens": 510,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Ajuste fino de parâmetros de PostgreSQL, buffers de memória e índices parciais.",
+      "when_to_use": "Use para otimização de consultas e servidor Postgres.",
+      "sha256": "fd2081acabc313b8b91e16af783f40a8934ccd55334c407ea279c9ea2221c8be"
+    },
+    {
+      "id": "kubernetes-deployments",
+      "name": "kubernetes-deployments",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "Apache-2.0",
+      "domains": [
+        "devops"
+      ],
+      "languages": [
+        "yaml"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "k8s",
+        "kubernetes",
+        "helm",
+        "manifests",
+        "cloud"
+      ],
+      "body_tokens": 550,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Manifestos de deployment Kubernetes, probes de liveness/readiness e ingress.",
+      "when_to_use": "Use ao implantar contêineres em clusters K8s.",
+      "sha256": "abe44c5c15c1d1471d7ed282ae55d3ed456990259e62c30a5ea1bde80be35340"
+    },
+    {
+      "id": "docker-containerization",
+      "name": "docker-containerization",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "Apache-2.0",
+      "domains": [
+        "devops"
+      ],
+      "languages": [
+        "dockerfile"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "docker",
+        "containers",
+        "dockerfile",
+        "multi-stage"
+      ],
+      "body_tokens": 310,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Builds multi-stage otimizados em Docker com imagens mínimas.",
+      "when_to_use": "Use para criar Dockerfiles seguros e leves.",
+      "sha256": "cec2255ad773f204d54e6ea5f950d03412fa090a77279b48d5403f7c76f72601"
+    },
+    {
+      "id": "terraform-iac",
+      "name": "terraform-iac",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MPL-2.0",
+      "domains": [
+        "devops",
+        "infrastructure"
+      ],
+      "languages": [
+        "hcl"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "terraform",
+        "iac",
+        "aws",
+        "infrastructure"
+      ],
+      "body_tokens": 480,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Infraestrutura como código com módulos reutilizáveis Terraform.",
+      "when_to_use": "Use para provisionamento declarativo de infraestrutura.",
+      "sha256": "2986889eefd09a1752fcf5ee054e6d69a00a3934f8c3bf7fdfebf78481b5fc65"
+    },
+    {
+      "id": "aws-iam-least-privilege",
+      "name": "aws-iam-least-privilege",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "Apache-2.0",
+      "domains": [
+        "security",
+        "cloud"
+      ],
+      "languages": [
+        "json"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "aws",
+        "iam",
+        "roles",
+        "policies",
+        "least-privilege"
+      ],
+      "body_tokens": 420,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Políticas IAM do menor privilégio para serviços e papéis de execução.",
+      "when_to_use": "Use ao criar permissões e regras de acesso na AWS.",
+      "sha256": "f9612f22c090d715b4f77040054218c683b06564a2584762a9f51ffaabbcaa8b"
+    },
+    {
+      "id": "oauth2-oidc",
+      "name": "oauth2-oidc",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "security",
+        "backend"
+      ],
+      "languages": [
+        "typescript",
+        "python"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "oauth2",
+        "oidc",
+        "jwt",
+        "auth",
+        "tokens"
+      ],
+      "body_tokens": 360,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Fluxos OAuth2 Authorization Code com PKCE e validação de tokens OIDC.",
+      "when_to_use": "Use ao autenticar usuários via provedores externos.",
+      "sha256": "5b9dc51e4874a429f02082be76b25b7961e370b7c799b0e75dcf24bcec49f7a9"
+    },
+    {
+      "id": "redis-caching",
+      "name": "redis-caching",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "BSD-3-Clause",
+      "domains": [
+        "backend",
+        "database"
+      ],
+      "languages": [
+        "typescript",
+        "python"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "redis",
+        "cache",
+        "invalidation",
+        "kv"
+      ],
+      "body_tokens": 280,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Estratégias de cache com Redis, expiração TTL e invalidação consistente.",
+      "when_to_use": "Use para acelerar leitura de dados com camada de cache.",
+      "sha256": "d8a26d27cca20b437a48370757eddb1c1584e6efe142a449bf0fb20333dc17da"
+    },
+    {
+      "id": "kafka-streaming",
+      "name": "kafka-streaming",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "Apache-2.0",
+      "domains": [
+        "backend",
+        "streaming"
+      ],
+      "languages": [
+        "java",
+        "go"
+      ],
+      "families": [
+        "codex"
+      ],
+      "tags": [
+        "kafka",
+        "events",
+        "pubsub",
+        "partitions"
+      ],
+      "body_tokens": 530,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Processamento de fluxos de eventos com Apache Kafka e semântica exactly-once.",
+      "when_to_use": "Use em arquiteturas orientadas a eventos de alto volume.",
+      "sha256": "089540562087f274f2db008b8ab1e717012c3febd7bf874fe98d1b6c608440d1"
+    },
+    {
+      "id": "linux-kernel-tuning",
+      "name": "linux-kernel-tuning",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "GPL-2.0",
+      "domains": [
+        "systems",
+        "os"
+      ],
+      "languages": [
+        "bash"
+      ],
+      "families": [
+        "codex"
+      ],
+      "tags": [
+        "linux",
+        "kernel",
+        "sysctl",
+        "network",
+        "limits"
+      ],
+      "body_tokens": 620,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Ajuste de descritores de arquivo, buffers TCP e escalonadores de I/O no Linux.",
+      "when_to_use": "Use para servidores de alta concorrência bare metal.",
+      "sha256": "acae928bb065a80f150c17f7022a58cf7c5e40370a054b40b314fa2898c96427"
+    },
+    {
+      "id": "quarantined-script-sample",
+      "name": "quarantined-script-sample",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend"
+      ],
+      "languages": [
+        "javascript"
+      ],
+      "families": [
+        "claude"
+      ],
+      "tags": [
+        "sample",
+        "test"
+      ],
+      "body_tokens": 120,
+      "has_scripts": true,
+      "trust": "quarantine",
+      "description": "Habilidade de teste contendo scripts não permitidos em quarentena.",
+      "when_to_use": "Nunca em produção.",
+      "sha256": "cd6422c449eda8fabdc5a49e1a1fd3d70fe9363c1f07c0af147ac1193e691efc"
+    },
+    {
+      "id": "oversized-skill-sample",
+      "name": "oversized-skill-sample",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude"
+      ],
+      "tags": [
+        "oversized",
+        "tokens"
+      ],
+      "body_tokens": 8500,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Habilidade de teste que excede o limite individual de 7.5k tokens.",
+      "when_to_use": "Teste de limites de contexto.",
+      "sha256": "1cce03b4eab17715f1536ecfbaff74096d70bbe9d19ad672f8801d3810e0c3ad"
+    },
+    {
+      "id": "collision-primary",
+      "name": "collision-primary",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend",
+        "ui"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude"
+      ],
+      "tags": [
+        "collision",
+        "ui"
+      ],
+      "body_tokens": 150,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Padrão idêntico para testar colisão e precedência.",
+      "when_to_use": "Teste de colisão.",
+      "sha256": "99cbc2f2ea743d9f73179e51aaf3485edc2c01f7bcdd70f0bd3be519c7360cb9"
+    },
+    {
+      "id": "collision-shadowed",
+      "name": "collision-shadowed",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend",
+        "ui"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude"
+      ],
+      "tags": [
+        "collision",
+        "ui"
+      ],
+      "body_tokens": 150,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "shadowed_by": "collision-primary",
+      "description": "Padrão idêntico para testar colisão e precedência.",
+      "when_to_use": "Teste de colisão.",
+      "sha256": "18ccc4962e467fb913111544f8cee16e5c04e2869b4bd2d55711145c6300a13e"
+    },
+    {
+      "id": "fe-state-machine-xstate",
+      "name": "fe-state-machine-xstate",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "state",
+        "machine",
+        "frontend"
+      ],
+      "body_tokens": 207,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de state machine xstate seguindo práticas modernas de frontend.",
+      "when_to_use": "Use quando necessitar de soluções de state machine xstate no domínio frontend.",
+      "sha256": "5e64e6f78faaceb2ca343252bb106884e09a56d635153e3be60aab784b886bab"
+    },
+    {
+      "id": "be-component-driven-dev",
+      "name": "be-component-driven-dev",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "backend"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "component",
+        "driven",
+        "backend"
+      ],
+      "body_tokens": 214,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de component driven dev seguindo práticas modernas de backend.",
+      "when_to_use": "Use quando necessitar de soluções de component driven dev no domínio backend.",
+      "sha256": "f0d297bf7f921099b05ea0a94aedb2c0db116588f4fa2df9b233e7a3ab652dc5"
+    },
+    {
+      "id": "db-web-vitals-monitoring",
+      "name": "db-web-vitals-monitoring",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "database"
+      ],
+      "languages": [
+        "sql"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "web",
+        "vitals",
+        "database"
+      ],
+      "body_tokens": 221,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de web vitals monitoring seguindo práticas modernas de database.",
+      "when_to_use": "Use quando necessitar de soluções de web vitals monitoring no domínio database.",
+      "sha256": "8fffbbdfbf98bad974760caaab7480de37313c0da107c4e474a808bf1c815668"
+    },
+    {
+      "id": "ops-svg-icon-system",
+      "name": "ops-svg-icon-system",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "devops"
+      ],
+      "languages": [
+        "yaml"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "svg",
+        "icon",
+        "devops"
+      ],
+      "body_tokens": 228,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de svg icon system seguindo práticas modernas de devops.",
+      "when_to_use": "Use quando necessitar de soluções de svg icon system no domínio devops.",
+      "sha256": "b14cde2aac04909ed9ef3e59095251a80aaa3989af1938cec054cd8f0eec65e1"
+    },
+    {
+      "id": "test-api-contract-openapi",
+      "name": "test-api-contract-openapi",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "testing"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "api",
+        "contract",
+        "testing"
+      ],
+      "body_tokens": 235,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de api contract openapi seguindo práticas modernas de testing.",
+      "when_to_use": "Use quando necessitar de soluções de api contract openapi no domínio testing.",
+      "sha256": "a546e59b061229e693575af5683be425b691d941568b956dd3de7ac552a748fb"
+    },
+    {
+      "id": "sec-clean-code-solid",
+      "name": "sec-clean-code-solid",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "security"
+      ],
+      "languages": [
+        "python"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "clean",
+        "code",
+        "security"
+      ],
+      "body_tokens": 242,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de clean code solid seguindo práticas modernas de security.",
+      "when_to_use": "Use quando necessitar de soluções de clean code solid no domínio security.",
+      "sha256": "83f9844a7bf5f93b34d013a2e986c4b755747b111bce725c1ce120d28e461be8"
+    },
+    {
+      "id": "arch-domain-driven-entities",
+      "name": "arch-domain-driven-entities",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "architecture"
+      ],
+      "languages": [
+        "markdown"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "domain",
+        "driven",
+        "architecture"
+      ],
+      "body_tokens": 249,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de domain driven entities seguindo práticas modernas de architecture.",
+      "when_to_use": "Use quando necessitar de soluções de domain driven entities no domínio architecture.",
+      "sha256": "4c5d4282e7480c826a9fa07ce07501ab4a55ff347f5b6cb9a5029b2fb48deb7e"
+    },
+    {
+      "id": "obs-event-sourcing-pattern",
+      "name": "obs-event-sourcing-pattern",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "observability"
+      ],
+      "languages": [
+        "json"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "event",
+        "sourcing",
+        "observability"
+      ],
+      "body_tokens": 256,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de event sourcing pattern seguindo práticas modernas de observability.",
+      "when_to_use": "Use quando necessitar de soluções de event sourcing pattern no domínio observability.",
+      "sha256": "b1d3fbbd00f0410e9e448b8dc51e8a2890c0bf00483901644437ed2574563945"
+    },
+    {
+      "id": "tools-graphql-federation",
+      "name": "tools-graphql-federation",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "tooling"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "graphql",
+        "federation",
+        "tooling"
+      ],
+      "body_tokens": 263,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de graphql federation seguindo práticas modernas de tooling.",
+      "when_to_use": "Use quando necessitar de soluções de graphql federation no domínio tooling.",
+      "sha256": "7965b466e24132ca812a22fb1c6bfbba6854a38eb514409d30ebb13047cd4c46"
+    },
+    {
+      "id": "fe-grpc-service-mesh",
+      "name": "fe-grpc-service-mesh",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "grpc",
+        "service",
+        "frontend"
+      ],
+      "body_tokens": 270,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de grpc service mesh seguindo práticas modernas de frontend.",
+      "when_to_use": "Use quando necessitar de soluções de grpc service mesh no domínio frontend.",
+      "sha256": "8c6f0bd80e4836582959119916f68210526cba23dbbd0bb911e2428d6144e441"
+    },
+    {
+      "id": "be-sqlite-embedded-store",
+      "name": "be-sqlite-embedded-store",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "backend"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "sqlite",
+        "embedded",
+        "backend"
+      ],
+      "body_tokens": 277,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de sqlite embedded store seguindo práticas modernas de backend.",
+      "when_to_use": "Use quando necessitar de soluções de sqlite embedded store no domínio backend.",
+      "sha256": "32bfa960e73a3ea573862c86013fb2e41bec220e39d20beeba54bdff9099d536"
+    },
+    {
+      "id": "db-clickhouse-analytics",
+      "name": "db-clickhouse-analytics",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "database"
+      ],
+      "languages": [
+        "sql"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "clickhouse",
+        "analytics",
+        "database"
+      ],
+      "body_tokens": 284,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de clickhouse analytics seguindo práticas modernas de database.",
+      "when_to_use": "Use quando necessitar de soluções de clickhouse analytics no domínio database.",
+      "sha256": "5722b699f2a8f79801520ca402a3d4c9f413e90b36d4c5e1c7b07388435c1866"
+    },
+    {
+      "id": "ops-mongodb-aggregation",
+      "name": "ops-mongodb-aggregation",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "devops"
+      ],
+      "languages": [
+        "yaml"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "mongodb",
+        "aggregation",
+        "devops"
+      ],
+      "body_tokens": 291,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de mongodb aggregation seguindo práticas modernas de devops.",
+      "when_to_use": "Use quando necessitar de soluções de mongodb aggregation no domínio devops.",
+      "sha256": "fd8a9472355dc8152f3c8d4d084fdf2a61c4e6757d95dea5f2e01cc753176726"
+    },
+    {
+      "id": "test-redis-rate-limiter",
+      "name": "test-redis-rate-limiter",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "testing"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "redis",
+        "rate",
+        "testing"
+      ],
+      "body_tokens": 298,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de redis rate limiter seguindo práticas modernas de testing.",
+      "when_to_use": "Use quando necessitar de soluções de redis rate limiter no domínio testing.",
+      "sha256": "5b663df45c06423ac378914da5397956b12e2c3988f642b0dc8406f067d897b2"
+    },
+    {
+      "id": "sec-rabbitmq-dead-letter",
+      "name": "sec-rabbitmq-dead-letter",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "security"
+      ],
+      "languages": [
+        "python"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "rabbitmq",
+        "dead",
+        "security"
+      ],
+      "body_tokens": 305,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de rabbitmq dead letter seguindo práticas modernas de security.",
+      "when_to_use": "Use quando necessitar de soluções de rabbitmq dead letter no domínio security.",
+      "sha256": "a5d63242156a5eb433a79b0abc357ef58a3ec0f9caf0aeeed6040ecb87c640c9"
+    },
+    {
+      "id": "arch-nats-jetstream-broker",
+      "name": "arch-nats-jetstream-broker",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "architecture"
+      ],
+      "languages": [
+        "markdown"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "nats",
+        "jetstream",
+        "architecture"
+      ],
+      "body_tokens": 312,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de nats jetstream broker seguindo práticas modernas de architecture.",
+      "when_to_use": "Use quando necessitar de soluções de nats jetstream broker no domínio architecture.",
+      "sha256": "462bf79658984571afdaf9e90b807469e8a9000d71f3529537e1fe04c55784e7"
+    },
+    {
+      "id": "obs-ci-pipeline-security",
+      "name": "obs-ci-pipeline-security",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "observability"
+      ],
+      "languages": [
+        "json"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "ci",
+        "pipeline",
+        "observability"
+      ],
+      "body_tokens": 319,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de ci pipeline security seguindo práticas modernas de observability.",
+      "when_to_use": "Use quando necessitar de soluções de ci pipeline security no domínio observability.",
+      "sha256": "6044472275ec4beaac3c49334dda1fb867ff83d0b6c9d6aa1b76cc2a68c182bb"
+    },
+    {
+      "id": "tools-gitops-argocd",
+      "name": "tools-gitops-argocd",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "tooling"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "gitops",
+        "argocd",
+        "tooling"
+      ],
+      "body_tokens": 326,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de gitops argocd seguindo práticas modernas de tooling.",
+      "when_to_use": "Use quando necessitar de soluções de gitops argocd no domínio tooling.",
+      "sha256": "e0cb9d60fb718fce02249399e8d10250213a5cea7b2940e0e562585d2e829323"
+    },
+    {
+      "id": "fe-terraform-terragrunt",
+      "name": "fe-terraform-terragrunt",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "terraform",
+        "terragrunt",
+        "frontend"
+      ],
+      "body_tokens": 333,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de terraform terragrunt seguindo práticas modernas de frontend.",
+      "when_to_use": "Use quando necessitar de soluções de terraform terragrunt no domínio frontend.",
+      "sha256": "8bf073102f017ea5da12ab7931e136baff47b8cf27915007deb4e5cb64058e98"
+    },
+    {
+      "id": "be-helmfile-orchestration",
+      "name": "be-helmfile-orchestration",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "backend"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "helmfile",
+        "orchestration",
+        "backend"
+      ],
+      "body_tokens": 340,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de helmfile orchestration seguindo práticas modernas de backend.",
+      "when_to_use": "Use quando necessitar de soluções de helmfile orchestration no domínio backend.",
+      "sha256": "cd824ca10fd0c8538e4fafee14715bcf61fc9db8fa3aed3b67388f6951d67999"
+    },
+    {
+      "id": "db-e2e-playwright-flows",
+      "name": "db-e2e-playwright-flows",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "database"
+      ],
+      "languages": [
+        "sql"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "e2e",
+        "playwright",
+        "database"
+      ],
+      "body_tokens": 347,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de e2e playwright flows seguindo práticas modernas de database.",
+      "when_to_use": "Use quando necessitar de soluções de e2e playwright flows no domínio database.",
+      "sha256": "bea4f0c350e46650e9f845da218ee6968c8533d49c68c9fcd74cd43984a9c08f"
+    },
+    {
+      "id": "ops-unit-testing-vitest",
+      "name": "ops-unit-testing-vitest",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "devops"
+      ],
+      "languages": [
+        "yaml"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "unit",
+        "testing",
+        "devops"
+      ],
+      "body_tokens": 354,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de unit testing vitest seguindo práticas modernas de devops.",
+      "when_to_use": "Use quando necessitar de soluções de unit testing vitest no domínio devops.",
+      "sha256": "01c45a60919f3e4bd9d98b96469940c171b85e70dbe1130915df3b256623a690"
+    },
+    {
+      "id": "test-property-testing-fastcheck",
+      "name": "test-property-testing-fastcheck",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "testing"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "property",
+        "testing",
+        "testing"
+      ],
+      "body_tokens": 361,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de property testing fastcheck seguindo práticas modernas de testing.",
+      "when_to_use": "Use quando necessitar de soluções de property testing fastcheck no domínio testing.",
+      "sha256": "2ee3036c5a70b9fe5390abb06d5dbd42354acf9129eafc6c77251203911c6809"
+    },
+    {
+      "id": "sec-mutation-testing-rules",
+      "name": "sec-mutation-testing-rules",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "security"
+      ],
+      "languages": [
+        "python"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "mutation",
+        "testing",
+        "security"
+      ],
+      "body_tokens": 368,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de mutation testing rules seguindo práticas modernas de security.",
+      "when_to_use": "Use quando necessitar de soluções de mutation testing rules no domínio security.",
+      "sha256": "1e02c61e2406e71907abe3437cca2d163606719986322454a3e254b2be282b81"
+    },
+    {
+      "id": "arch-security-sast-semgrep",
+      "name": "arch-security-sast-semgrep",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "architecture"
+      ],
+      "languages": [
+        "markdown"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "security",
+        "sast",
+        "architecture"
+      ],
+      "body_tokens": 375,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de security sast semgrep seguindo práticas modernas de architecture.",
+      "when_to_use": "Use quando necessitar de soluções de security sast semgrep no domínio architecture.",
+      "sha256": "391a9dee56d9b2ad50b65c4e6bd3be0c65b7874dc5097271a65a8b55e9834105"
+    },
+    {
+      "id": "obs-owasp-dependency-check",
+      "name": "obs-owasp-dependency-check",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "observability"
+      ],
+      "languages": [
+        "json"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "owasp",
+        "dependency",
+        "observability"
+      ],
+      "body_tokens": 382,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de owasp dependency check seguindo práticas modernas de observability.",
+      "when_to_use": "Use quando necessitar de soluções de owasp dependency check no domínio observability.",
+      "sha256": "a782e3b423fe75e7ce232a1fe4fb11145e03b1d4c6a26f586d5cf2eb3e1382f1"
+    },
+    {
+      "id": "tools-secret-scanning-trufflehog",
+      "name": "tools-secret-scanning-trufflehog",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "tooling"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "secret",
+        "scanning",
+        "tooling"
+      ],
+      "body_tokens": 389,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de secret scanning trufflehog seguindo práticas modernas de tooling.",
+      "when_to_use": "Use quando necessitar de soluções de secret scanning trufflehog no domínio tooling.",
+      "sha256": "80d179b08771101721e395e71428eba379519879e81a6da593a64a0f5fbb1bfe"
+    },
+    {
+      "id": "fe-zero-trust-boundary",
+      "name": "fe-zero-trust-boundary",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "zero",
+        "trust",
+        "frontend"
+      ],
+      "body_tokens": 396,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de zero trust boundary seguindo práticas modernas de frontend.",
+      "when_to_use": "Use quando necessitar de soluções de zero trust boundary no domínio frontend.",
+      "sha256": "dd21ae03a76af172bd451edbf02ba288f0048cd1af8de78e8db75ed084df1b10"
+    },
+    {
+      "id": "be-opentelemetry-collector",
+      "name": "be-opentelemetry-collector",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "backend"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "opentelemetry",
+        "collector",
+        "backend"
+      ],
+      "body_tokens": 403,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de opentelemetry collector seguindo práticas modernas de backend.",
+      "when_to_use": "Use quando necessitar de soluções de opentelemetry collector no domínio backend.",
+      "sha256": "5bdbe8492630c888c5af4d4987a0cdaadad2def00f9df9a893120e39ac8269a3"
+    },
+    {
+      "id": "db-prometheus-alert-rules",
+      "name": "db-prometheus-alert-rules",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "database"
+      ],
+      "languages": [
+        "sql"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "prometheus",
+        "alert",
+        "database"
+      ],
+      "body_tokens": 410,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de prometheus alert rules seguindo práticas modernas de database.",
+      "when_to_use": "Use quando necessitar de soluções de prometheus alert rules no domínio database.",
+      "sha256": "e8b85d6599296a3c5961167c9ba3cb2a3e9121c41e14d4a76f7871b5aece5f79"
+    },
+    {
+      "id": "ops-grafana-dashboards",
+      "name": "ops-grafana-dashboards",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "devops"
+      ],
+      "languages": [
+        "yaml"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "grafana",
+        "dashboards",
+        "devops"
+      ],
+      "body_tokens": 417,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de grafana dashboards seguindo práticas modernas de devops.",
+      "when_to_use": "Use quando necessitar de soluções de grafana dashboards no domínio devops.",
+      "sha256": "361ebe97595836b25b5c26a29777fe4304d6c54a9095668e74a4e65a15ff3be8"
+    },
+    {
+      "id": "test-loki-log-aggregation",
+      "name": "test-loki-log-aggregation",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "testing"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "loki",
+        "log",
+        "testing"
+      ],
+      "body_tokens": 424,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de loki log aggregation seguindo práticas modernas de testing.",
+      "when_to_use": "Use quando necessitar de soluções de loki log aggregation no domínio testing.",
+      "sha256": "f24cef092e6ea9c55ee3299cbd4c6f95b404e523c1633bb0e97a12722aca78a7"
+    },
+    {
+      "id": "sec-turborepo-monorepo",
+      "name": "sec-turborepo-monorepo",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "security"
+      ],
+      "languages": [
+        "python"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "turborepo",
+        "monorepo",
+        "security"
+      ],
+      "body_tokens": 431,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de turborepo monorepo seguindo práticas modernas de security.",
+      "when_to_use": "Use quando necessitar de soluções de turborepo monorepo no domínio security.",
+      "sha256": "44534251ebf2a0b53d51d61687b54ebbd39a72b10ce35d62e21ec210b16f5a5f"
+    },
+    {
+      "id": "arch-pnpm-workspace-cache",
+      "name": "arch-pnpm-workspace-cache",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "architecture"
+      ],
+      "languages": [
+        "markdown"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "pnpm",
+        "workspace",
+        "architecture"
+      ],
+      "body_tokens": 438,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de pnpm workspace cache seguindo práticas modernas de architecture.",
+      "when_to_use": "Use quando necessitar de soluções de pnpm workspace cache no domínio architecture.",
+      "sha256": "317b24e0a48dd481b1b6f1fd0d9b42863854a2480632e8b1df6c00ff8aca02e5"
+    },
+    {
+      "id": "obs-biome-linter-rules",
+      "name": "obs-biome-linter-rules",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "observability"
+      ],
+      "languages": [
+        "json"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "biome",
+        "linter",
+        "observability"
+      ],
+      "body_tokens": 445,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de biome linter rules seguindo práticas modernas de observability.",
+      "when_to_use": "Use quando necessitar de soluções de biome linter rules no domínio observability.",
+      "sha256": "505b9a2be80558b24ed93ac10954743e84e5a7bd06a3768597b87ce41240ab71"
+    },
+    {
+      "id": "tools-changesets-release-flow",
+      "name": "tools-changesets-release-flow",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "tooling"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "changesets",
+        "release",
+        "tooling"
+      ],
+      "body_tokens": 452,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de changesets release flow seguindo práticas modernas de tooling.",
+      "when_to_use": "Use quando necessitar de soluções de changesets release flow no domínio tooling.",
+      "sha256": "5bf629618c1c1b720e36a587af5a819d009efe9a1ea6d9b455b66e4abb73ff23"
+    },
+    {
+      "id": "fe-resilient-circuit-breaker",
+      "name": "fe-resilient-circuit-breaker",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "frontend"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "resilient",
+        "circuit",
+        "frontend"
+      ],
+      "body_tokens": 459,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de resilient circuit breaker seguindo práticas modernas de frontend.",
+      "when_to_use": "Use quando necessitar de soluções de resilient circuit breaker no domínio frontend.",
+      "sha256": "90dd981b30d77976e9888f4a4a31285a99c5497b59235d3bed81b0d03536d18f"
+    },
+    {
+      "id": "be-bulkhead-concurrency",
+      "name": "be-bulkhead-concurrency",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "backend"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "bulkhead",
+        "concurrency",
+        "backend"
+      ],
+      "body_tokens": 466,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de bulkhead concurrency seguindo práticas modernas de backend.",
+      "when_to_use": "Use quando necessitar de soluções de bulkhead concurrency no domínio backend.",
+      "sha256": "315e108623ef52f1700e640e52b27ba6518142d9ee6d683b0cc0933909137a5c"
+    },
+    {
+      "id": "db-idempotent-api-keys",
+      "name": "db-idempotent-api-keys",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "database"
+      ],
+      "languages": [
+        "sql"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "idempotent",
+        "api",
+        "database"
+      ],
+      "body_tokens": 473,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de idempotent api keys seguindo práticas modernas de database.",
+      "when_to_use": "Use quando necessitar de soluções de idempotent api keys no domínio database.",
+      "sha256": "c2d1567f525d28a62f908adbafc6611b3fbd807aa7e49d511efe61bb24442fe4"
+    },
+    {
+      "id": "ops-distributed-locks",
+      "name": "ops-distributed-locks",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "devops"
+      ],
+      "languages": [
+        "yaml"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "distributed",
+        "locks",
+        "devops"
+      ],
+      "body_tokens": 480,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de distributed locks seguindo práticas modernas de devops.",
+      "when_to_use": "Use quando necessitar de soluções de distributed locks no domínio devops.",
+      "sha256": "d1c48bc98bd2ac0a2209ad2a74f0d65fdb4c174d0b48a56dc7d5e6b5c4e83ca3"
+    },
+    {
+      "id": "test-data-masking-pii",
+      "name": "test-data-masking-pii",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "testing"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "data",
+        "masking",
+        "testing"
+      ],
+      "body_tokens": 487,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de data masking pii seguindo práticas modernas de testing.",
+      "when_to_use": "Use quando necessitar de soluções de data masking pii no domínio testing.",
+      "sha256": "0dc53eb5dbfc1ec606dfdb665290aa0ad281dd96927e239c856d64f7cea16c0d"
+    },
+    {
+      "id": "sec-gdpr-erasure-flow",
+      "name": "sec-gdpr-erasure-flow",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "security"
+      ],
+      "languages": [
+        "python"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "gdpr",
+        "erasure",
+        "security"
+      ],
+      "body_tokens": 494,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de gdpr erasure flow seguindo práticas modernas de security.",
+      "when_to_use": "Use quando necessitar de soluções de gdpr erasure flow no domínio security.",
+      "sha256": "d7f6c4b6093fb3dcfe52c78bc5a3304a4a0d83b823f1fab475c815adc3be5967"
+    },
+    {
+      "id": "arch-audit-trail-tamperproof",
+      "name": "arch-audit-trail-tamperproof",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "architecture"
+      ],
+      "languages": [
+        "markdown"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "audit",
+        "trail",
+        "architecture"
+      ],
+      "body_tokens": 201,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de audit trail tamperproof seguindo práticas modernas de architecture.",
+      "when_to_use": "Use quando necessitar de soluções de audit trail tamperproof no domínio architecture.",
+      "sha256": "b93de4a0c3e1a7cbf92b35704b0831e87899abcefbce9660c7e75dcda2d826bb"
+    },
+    {
+      "id": "obs-canary-release-routing",
+      "name": "obs-canary-release-routing",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "observability"
+      ],
+      "languages": [
+        "json"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "canary",
+        "release",
+        "observability"
+      ],
+      "body_tokens": 208,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de canary release routing seguindo práticas modernas de observability.",
+      "when_to_use": "Use quando necessitar de soluções de canary release routing no domínio observability.",
+      "sha256": "a216aad49406326cd02ad2dc0dd4e8cf45f8aa31f0393fd93c618a5704ca8893"
+    },
+    {
+      "id": "tools-blue-green-switcher",
+      "name": "tools-blue-green-switcher",
+      "source": "catalog@34040c9",
+      "commit": "34040c9",
+      "license": "MIT",
+      "domains": [
+        "tooling"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "families": [
+        "claude",
+        "codex"
+      ],
+      "tags": [
+        "blue",
+        "green",
+        "tooling"
+      ],
+      "body_tokens": 215,
+      "has_scripts": false,
+      "trust": "allowlisted",
+      "description": "Implementação de blue green switcher seguindo práticas modernas de tooling.",
+      "when_to_use": "Use quando necessitar de soluções de blue green switcher no domínio tooling.",
+      "sha256": "fc4f7fac7956274cdf01d3cf91abd4274ff3adcbd826e94408e27a4ce6ef1027"
+    }
+  ]
+}

@@ -10,7 +10,7 @@ import { redactText } from './redact.js'
  * Ordem fixa das seções do Context Pack.
  * @type {readonly string[]}
  */
-export const SECTION_ORDER = Object.freeze(['contract', 'policy', 'story'])
+export const SECTION_ORDER = Object.freeze(['contract', 'policy', 'story', 'skills'])
 
 /**
  * Tetos por seção, em bytes UTF-8.
@@ -20,6 +20,7 @@ export const SECTION_CAPS = Object.freeze({
   contract: 32000,
   policy: 8000,
   story: 24000,
+  skills: 80000,
 })
 
 const DEFAULT_MAX_PACK_BYTES = 120000
@@ -124,7 +125,11 @@ function validateSections(sections) {
     }
   }
   for (const name of SECTION_ORDER) {
-    const body = record[name]
+    let body = record[name]
+    if (body === undefined && name === 'skills') {
+      body = ''
+      record[name] = ''
+    }
     if (typeof body !== 'string' || body.includes('=== ade:section ') || LONE_SURROGATE.test(body)) {
       throw new AdeError('invalid_pack_section', `seção inválida: ${name}`, 2)
     }
@@ -257,9 +262,11 @@ function writeFileAtomic(filePath, text) {
  * @typedef {Object} CompilePackOptions
  * @property {string} missionDir
  * @property {string} stepId
- * @property {{contract: string, policy: string, story: string}} sections
+ * @property {{contract: string, policy: string, story: string, skills?: string}} sections
  * @property {{max_pack_bytes?: number, section_bytes?: Partial<Record<string, number>>}} [limits]
  * @property {number} [savedBytes]
+ * @property {Array<{name: string, source: string, sha256: string, bytes: number, cited?: boolean}>} [skills]
+ * @property {string[]} [artifactRefs]
  */
 
 /**

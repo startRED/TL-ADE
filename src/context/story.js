@@ -11,6 +11,19 @@ import { FolderWorkspace } from '../workspace/folder.js'
 import { measurePackBytes } from '../pack/pack.js'
 export { compileDomainContext } from './domain.js'
 
+const EXECUTABLE_REFERENCE = /(?:^|[\\/])(?:scripts?|hooks?)(?:[\\/]|$)|(?:^|[\\/])install\.(?:sh|bash|py|js|mjs|bat|cmd|ps1)\b|\.(?:sh|bash|py|js|mjs|exe|bat|cmd|ps1)\b/i
+
+/** @param {string} text */
+function sanitizeSkillText(text) {
+  let body = String(text || '').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '')
+  body = body.replace(/```[\s\S]*?```/g, (block) => EXECUTABLE_REFERENCE.test(block) ? '' : block)
+  return body
+    .split(/\r?\n/)
+    .filter((line) => !EXECUTABLE_REFERENCE.test(line))
+    .join('\n')
+    .trim()
+}
+
 /**
  * Converte um padrão glob simples em expressão regular.
  *
@@ -168,9 +181,9 @@ function extractRecentOperatorNotes(operatorNotes) {
  *   limits?: { max_pack_bytes?: number, section_bytes?: Record<string, number> },
  * }} [deps]
  * @returns {Promise<{
- *   sections: { contract: string, policy: string, story: string },
+ *   sections: { contract: string, policy: string, story: string, skills: string },
  *   artifactRefs: string[],
- *   selectedSkills: Array<{ name: string, source: string, sha256: string, bytes: number, domain?: string, language?: string }>,
+ *   selectedSkills: Array<{ name: string, source: string, sha256: string, bytes: number, domain?: string, language?: string, content: string, references: any[] }>,
  *   bytes: number,
  *   cacheHit: boolean,
  * }>}
@@ -186,7 +199,9 @@ export async function buildStoryContext(input, deps = {}) {
   const doNotTouch = contract.guardrails?.do_not_touch || []
 
   // Allowlist fail-closed das skills: com os dois conjuntos declarados só entra quem está nos dois.
-  const planApproved = Array.isArray(loaded?.plan?.approved_skills) ? loaded.plan.approved_skills : null
+  const planApproved = Array.isArray(loaded?.plan?.authorization?.eligible_skills)
+    ? loaded.plan.authorization.eligible_skills
+    : (Array.isArray(loaded?.plan?.approved_skills) ? loaded.plan.approved_skills : null)
   const contractSkills = Array.isArray(contract.skills) ? contract.skills : null
   const approvedSkills = planApproved && contractSkills
     ? contractSkills.filter((name) => planApproved.includes(name))
@@ -306,8 +321,28 @@ export async function buildStoryContext(input, deps = {}) {
         content: sk.content,
         domain: sk.domain,
         language: sk.language,
+        references: sk.references || [],
       })
     }
+  }
+
+  let skillTokens = 0
+  for (const skill of selectedSkills) {
+    let content = sanitizeSkillText(skill.content || '')
+    for (const reference of skill.references) {
+      const cleanReference = sanitizeSkillText(reference.content || '')
+      if (!cleanReference) continue
+      const candidate = `${content}\n\n#### Referência: ${reference.path}\n\n${cleanReference}`.trim()
+      const candidateTokens = Math.ceil(candidate.length / 4)
+      if (candidateTokens <= 7500 && skillTokens + candidateTokens <= 20000) content = candidate
+    }
+    const tokens = Math.ceil(content.length / 4)
+    if (tokens > 7500 || skillTokens + tokens > 20000) {
+      throw new AdeError('skill_budget_exceeded', `Habilidade '${skill.name}' excede o orçamento de contexto`, 4)
+    }
+    skill.content = content
+    skill.bytes = Buffer.byteLength(content, 'utf8')
+    skillTokens += tokens
   }
 
   // 6. Registro de notas do operador (até 600 bytes, drenadas da fila)
@@ -353,6 +388,7 @@ export async function buildStoryContext(input, deps = {}) {
           source: s.source,
           sha256: s.sha256,
           bytes: s.bytes,
+          cited: false,
         })),
         artifact_refs: artifactRefs,
       },
@@ -361,6 +397,16 @@ export async function buildStoryContext(input, deps = {}) {
 
   // 8. Construção das seções
   const policySection = JSON.stringify(loaded?.plan?.authorization ?? {}, null, 2)
+
+  // Sanitização das skills para injeção no pack (sem frontmatter)
+  const skillBodies = []
+  for (const sk of selectedSkills) {
+    const cleanBody = sk.content.trim()
+    if (cleanBody) {
+      skillBodies.push(`### Skill: ${sk.name}\n\n${cleanBody}`)
+    }
+  }
+  const skillsSection = skillBodies.join('\n\n')
 
   const maxPackBytes = deps.limits?.max_pack_bytes ?? 120000
 
@@ -411,6 +457,7 @@ export async function buildStoryContext(input, deps = {}) {
     contract: contractSection,
     policy: policySection,
     story: storySection,
+    skills: skillsSection,
   }
   let totalBytes = measurePackBytes(currentSections)
 

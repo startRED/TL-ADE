@@ -1,5 +1,6 @@
 // @ts-check
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { compileIntent } from '../intent/compiler.js'
 import { applyInterviewAnswer } from '../intent/interview.js'
@@ -7,6 +8,7 @@ import { validateCompiledPlan } from '../intent/validate.js'
 import { digest16 } from '../journal/canonical.js'
 import { openJournal, readJournal } from '../journal/journal.js'
 import { buildRuntimeStamp } from '../journal/stamp.js'
+import { loadApprovedSkills } from '../skills/catalog.js'
 
 /**
  * Escreve um arquivo de forma atômica utilizando arquivo temporário e renomeação.
@@ -383,12 +385,15 @@ export function validateMissionPlan(planPath) {
  *   repoDir?: string,
  *   missionId: string,
  *   expectedDigest: string,
+ *   source?: string,
+ *   reason?: string,
  * }} options
  * @param {any} [deps]
  * @returns {Promise<{
  *   approved: boolean,
  *   digest?: string,
  *   eligibleSkills?: string[],
+ *   eligibleSkillPins?: Array<{ id: string, sha256: string }>,
  *   permittedEffects?: string[],
  *   reason?: string,
  *   errors?: any[],
@@ -406,7 +411,10 @@ export async function approveMission(
   }
 
   const resolvedRepoDir = path.resolve(repoDir || process.cwd())
-  const missionDir = path.join(resolvedRepoDir, '.ade', 'missions', missionId)
+  let missionDir = path.join(resolvedRepoDir, '.ade', 'missions', missionId)
+  if (!fs.existsSync(missionDir) && fs.existsSync(path.join(resolvedRepoDir, 'plan.json'))) {
+    missionDir = resolvedRepoDir
+  }
   const planPath = path.join(missionDir, 'plan.json')
 
   if (!fs.existsSync(planPath)) {
@@ -445,11 +453,21 @@ export async function approveMission(
 
   const eligibleSkills = planObj.authorization?.eligible_skills || []
   const permittedEffects = planObj.authorization?.permitted_effects || []
+  /** @type {Array<{ id: string, sha256: string }>} */
+  let eligibleSkillPins = []
+  if (eligibleSkills.length > 0) {
+    const catalogDir = deps.catalogDir || path.join(deps.env?.ADE_HOME || os.homedir(), '.ade', 'catalog')
+    try {
+      eligibleSkillPins = loadApprovedSkills({ catalogDir, approvedSkills: eligibleSkills }).snapshot
+    } catch (err) {
+      return { approved: false, reason: err instanceof Error ? err.message : String(err) }
+    }
+  }
 
   // O congelamento cobre o plano e cada contrato referenciado: alterar uma story depois
   // da aprovação não muda o digest do plano, mas muda este conjunto.
   const frozenContracts = contractDigests({ missionDir, plan: planObj })
-  const summaryDigest = digest16({ plan: expectedDigest, contracts: frozenContracts })
+  const summaryDigest = digest16({ plan: expectedDigest, contracts: frozenContracts, skills: eligibleSkillPins })
 
   // Consulta e gravação na mesma seção crítica: duas aprovações concorrentes não podem
   // observar o journal vazio e gravar duas decisões com o mesmo seq/prev.
@@ -475,6 +493,7 @@ export async function approveMission(
             approved: true,
             digest: expectedDigest,
             eligibleSkills: existingApproval.data?.eligible_skills || eligibleSkills,
+            eligibleSkillPins: existingApproval.data?.eligible_skill_pins || eligibleSkillPins,
             permittedEffects: existingApproval.data?.permitted_effects || permittedEffects,
           }
         }
@@ -495,6 +514,7 @@ export async function approveMission(
         summary_digest: summaryDigest,
         contract_digests: frozenContracts,
         eligible_skills: eligibleSkills,
+        eligible_skill_pins: eligibleSkillPins,
         permitted_effects: permittedEffects,
         ...(reason ? { reason } : {}),
       },
@@ -509,6 +529,7 @@ export async function approveMission(
     approved: true,
     digest: expectedDigest,
     eligibleSkills,
+    eligibleSkillPins,
     permittedEffects,
   }
 }
@@ -519,14 +540,16 @@ export async function approveMission(
  * @param {{
  *   missionDir: string,
  *   plan: any,
+ *   skillSnapshot?: Array<{ id: string, sha256: string }>,
  * }} options
  * @returns {{
  *   digest: string,
  *   eligibleSkills: string[],
+ *   eligibleSkillPins: Array<{ id: string, sha256: string }>,
  *   permittedEffects: string[],
  * }}
  */
-export function assertApprovedPlan({ missionDir, plan }) {
+export function assertApprovedPlan({ missionDir, plan, skillSnapshot }) {
   if (!missionDir || !plan) {
     throw new TypeError('assertApprovedPlan: missionDir e plan são obrigatórios')
   }
@@ -565,9 +588,28 @@ export function assertApprovedPlan({ missionDir, plan }) {
     }
   }
 
+  // Skills também são congeladas: nenhuma skill fora do conjunto aprovado pode ser introduzida
+  const frozenSkills = new Set(approvalEvent.data?.eligible_skills || [])
+  const currentSkills = plan.authorization?.eligible_skills || []
+  for (const sk of currentSkills) {
+    if (!frozenSkills.has(sk)) {
+      throw new Error(`assertApprovedPlan: skill ${sk} não aprovada encontrada no plano (digest alterado / mismatch)`)
+    }
+  }
+
+  const frozenPins = approvalEvent.data?.eligible_skill_pins
+  if (Array.isArray(frozenPins) && frozenPins.length > 0) {
+    if (!Array.isArray(skillSnapshot) || digest16(frozenPins) !== digest16(skillSnapshot)) {
+      throw new Error('assertApprovedPlan: hashes das skills aprovadas divergiram do catálogo (mismatch)')
+    }
+  } else if (frozenSkills.size > 0) {
+    throw new Error('assertApprovedPlan: aprovação antiga não congela hashes das skills (mismatch)')
+  }
+
   return {
     digest: currentDigest,
     eligibleSkills: approvalEvent.data?.eligible_skills || plan.authorization?.eligible_skills || [],
+    eligibleSkillPins: frozenPins || [],
     permittedEffects: approvalEvent.data?.permitted_effects || plan.authorization?.permitted_effects || [],
   }
 }

@@ -242,6 +242,7 @@ async function runStoryImpl(deps, input) {
     contract: typeof contract === 'string' ? contract : JSON.stringify(contract, null, 2),
     policy: JSON.stringify(loaded.plan.authorization ?? {}, null, 2),
     story: dedup.text,
+    skills: '',
   }
   const contextBytes = measurePackBytes(baseSections)
   const eventsBeforeReservation = readEvents()
@@ -508,7 +509,7 @@ async function runStoryImpl(deps, input) {
   const packResult = deps.compilePack({
     missionDir,
     stepId: `${storyId}:r1:maker`,
-    sections: { ...baseSections, story: contextStorySection },
+    sections: { ...baseSections, story: contextStorySection, skills: storyContext.sections?.skills || '' },
     savedBytes: contextSavedBytes,
     skills: storyContext.selectedSkills.map((s) => ({
       name: s.name,

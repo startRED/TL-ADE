@@ -28,6 +28,7 @@ import { compilePack } from '../pack/pack.js'
 import { resolveBinary } from '../runner/resolve-binary.js'
 import { reconcileAll } from '../step/reconcile.js'
 import { createStepRunner } from '../step/step.js'
+import { loadApprovedSkills } from '../skills/catalog.js'
 
 const LEASE_TTL_MS = 15_000
 
@@ -171,6 +172,23 @@ export async function runCommand(options, deps = {}) {
       throw new AdeError('plan_without_stories', 'plano sem stories', 4)
     }
 
+    const approvedSkillIds = loaded.plan.authorization?.eligible_skills || []
+    let eligibleSkills = []
+    let eligibleSkillSnapshot = []
+    let skillCatalogError = null
+    if (approvedSkillIds.length > 0) {
+      try {
+        const loadedSkills = loadApprovedSkills({
+          catalogDir: deps.catalogDir || path.join(homeDir, '.ade', 'catalog'),
+          approvedSkills: approvedSkillIds,
+        })
+        eligibleSkills = loadedSkills.skills
+        eligibleSkillSnapshot = loadedSkills.snapshot
+      } catch (err) {
+        skillCatalogError = err instanceof Error ? err.message : String(err)
+      }
+    }
+
     const { step } = createStepRunner({ journal, missionDir })
     const engineDeps = {
       journal,
@@ -223,12 +241,15 @@ export async function runCommand(options, deps = {}) {
       replanRemaining: deps.replanRemaining ?? replanRemaining,
       loadPlan: deps.loadPlan ?? loadPlan,
       runtimeStamp,
+      eligibleSkills,
+      eligibleSkillSnapshot,
+      skillCatalogError,
     }
 
     const hasApproval = existingEvents.some(
       (e) => e.kind === 'decision' && e.data?.decision === 'plan_approved',
     )
-    if (loaded.stories.length === 1 && !hasApproval) {
+    if (loaded.stories.length === 1 && !hasApproval && approvedSkillIds.length === 0) {
       const story = loaded.stories[0]
       const storyResult = await (deps.runStory ?? runStory)(engineDeps, {
         loaded,
