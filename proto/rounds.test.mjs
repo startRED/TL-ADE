@@ -1,7 +1,7 @@
 // node --test proto/rounds.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { AGY_NO_TESTS, agyPrompt, brokeGreen, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
+import { AGY_NO_TESTS, agyPrompt, brokeGreen, climbLast, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
 
 test('parte de correção herda os arquivos que a parte anterior já tinha alterado', () => {
   const stories = [{ id: 'R2', diff: 'diff --git a/src/lease/process-info.js b/src/lease/process-info.js\n', files: ['src\\adapters\\claude\\index.js'] }]
@@ -125,4 +125,11 @@ test('server.mjs não tem caractere de controle perdido', async () => {
   const { readFile } = await import('node:fs/promises')
   const src = await readFile(new URL('./server.mjs', import.meta.url), 'utf8')
   assert.equal(/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(src), false)
+})
+
+test('climbLast: a escada não sobe para degrau de reserva', () => {
+  assert.equal(climbLast([{ model: 'sol' }, { model: 'opus' }, { model: 'flash', reserve: true }]), 1)
+  assert.equal(climbLast([{ model: 'sol' }, { model: 'opus' }]), 1)
+  assert.equal(climbLast([{ model: 'flash', reserve: true }]), 0)
+  assert.equal(climbLast([]), 0)
 })

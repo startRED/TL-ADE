@@ -18,7 +18,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { skillDescription } from './skill-meta.mjs'
-import { agyPrompt, brokeGreen, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
+import { agyPrompt, brokeGreen, climbLast, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
 import { PLANNING_POLICY, versionProgram, planIssues, needsPlanCritic, needsScout, scoutKey, skillsForStory, canCombineProof } from './planning.mjs'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
@@ -499,6 +499,10 @@ async function resumeMission() {
   const m = state.mission
   if (!m || m.state !== 'paused') return 'Esta missão não está pausada.'
   const fresh = await discover(state.project.dir)
+  // Correção que parou sem saída pausou justamente para NÃO desfazer a árvore. Continuar sem recolocá-la na fila não achava
+  // parte na fila, lia a árvore como alheia e descartava tudo — o trabalho que a pausa existia para guardar (m-mu8usf5z, v03-s6f).
+  // Continuar = dar a ela outra série de rodadas sobre a árvore como está; o último parecer do revisor volta na rodada 1.
+  if (m.reason === 'fix_failed') for (const x of m.stories || []) if (x.fix_of && x.state === 'blocked') { Object.assign(x, { state: 'queued', round: 0, steps: [], tests_after: null, review: null, visual: null, maker_committed: false }); log('engine', `a correção "${x.title}" volta para a fila sobre a árvore como está`, 'warn') }
   const next = (m.stories || []).find((x) => x.state === 'queued'), nextFix = next?.fix_of
   // alterações só nos arquivos do contrato da parte que recomeça ficam: ela recomeça sobre elas e o vermelho segue conferido
   // guardando o código de lado. Pausar para reiniciar o motor jogava fora parte já aprovada pelo revisor (épico 2, s1).
@@ -1996,7 +2000,7 @@ function repeatedFindings(st, review) { const prev = new Set(st.prev_findings ||
 function ladderStep(round, { grave = false, repeat = 0 } = {}) { return Math.floor((round - 1) / 2) + (repeat ? 1 : 0) + (grave && round >= 3 ? 1 : 0) }
 function makerStep(st, round, grave, repeat = 0) {
   if (round <= 2 && !grave && !st.fix_of) return { key: { light: 'impl_light', normal: 'impl', hard: 'impl_hard' }[storyTier(st)], start: 0 }
-  const last = Math.max(0, chainOf('fix').length - 1)
+  const last = climbLast(chainOf('fix'))
   return { key: 'fix', start: Math.min(last, ladderStep(round, { grave, repeat })) }
 }
 // Maker que não mudou nada e diz que o ambiente o impediu não conta como tentativa: devolve null e a cadeia passa ao próximo
@@ -2349,7 +2353,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     st.test_fix_allowed = st.wrong_test && /PROVA-PROCEDE:\s*sim\b/i.test(st.review?.summary || '') ? st.wrong_test : null
     if (st.test_fix_allowed) log('engine', `quem escreve diz que a prova está errada e quem revisa confirmou: ${st.test_fix_allowed.slice(0, 200)}. A próxima rodada pode corrigir só essa prova`, 'warn')
     const stuck = round >= 5 && st.last_red === redNow && !st.test_fix_allowed; st.last_red = redNow
-    if (stuck) log('engine', 'as mesmas provas seguem vermelhas depois de duas rodadas no modelo mais forte: impasse (provável conflito no plano); paro de gastar rodadas nesta parte', 'warn')
+    if (stuck) log('engine', 'as mesmas provas seguem vermelhas depois de duas rodadas no último degrau da escada: impasse (provável conflito no plano); paro de gastar rodadas nesta parte', 'warn')
     if (!stuck && round < MAX_ROUNDS && spentNow <= (state.settings.max_usd_per_story || 4)) {
       // prova já vermelha na largada não entra no pedido: quem escreve gastava turnos atrás de defeito que não é desta parte
       st.red_tests = st.tests_after.tests.filter((t) => t.status !== 'passed' && !(st.tests_after.preexisting || []).includes(t.name)).map((t) => ({ name: t.name, status: 'failed', message: t.message || (st.tests_after.output || '').slice(-300) }))

@@ -98,3 +98,13 @@ export function agyPrompt(prompt, minutes, dropPrefixes = []) {
   const kept = String(prompt || '').split('\n').filter((l) => !dropPrefixes.some((p) => l.startsWith(p)))
   return [...kept, AGY_NO_TESTS].join('\n').replace(/\b\d+ ações\b/g, `${minutes} minutos`).replace(/cortada nesse número/g, 'cortada nesse tempo')
 }
+
+// Último degrau que a escada de rodadas sobe. Degrau marcado `reserve` não é escalada: só entra quando os de cima ficam sem
+// cota ou falham (withChain segue a cadeia). m-mu8usf5z, v03-s6f: a cadeia fix era Sol → Opus → Gemini com o Gemini de
+// reserva, mas a escada tratava posição como força e deu as rodadas 4 a 6 ao Gemini — que levou a parte de 1 prova
+// vermelha para 5 e desistiu na última rodada esperando a prova terminar.
+export function climbLast(chain) {
+  let i = (chain?.length || 0) - 1
+  while (i > 0 && chain[i]?.reserve) i--
+  return Math.max(0, i)
+}
