@@ -12,7 +12,8 @@ export function callRow(e) {
     story: e.story_id ?? (e.story == null ? null : String(e.story)),
     input, cache, output, quota: input + cache + output, usd: num(e.usd),
     // o maker do Codex grava duration_ms; os demais, wall_ms
-    wall_s: (e.wall_ms ?? e.duration_ms) ? Math.round((e.wall_ms ?? e.duration_ms) / 1000) : null, files: Number.isInteger(e.files) ? e.files : null,
+    wall_s: (e.wall_ms ?? e.duration_ms) ? Math.round((e.wall_ms ?? e.duration_ms) / 1000) : null, // o maker do Codex gravava só touched antes de 21/09
+    files: Number.isInteger(e.files ?? e.touched) ? (e.files ?? e.touched) : null,
   }
 }
 
