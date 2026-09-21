@@ -78,3 +78,10 @@ export function brokeGreen(after, before) {
   const pre = after.preexisting || []
   return after.tests.some((t) => t.status !== 'passed' && green.has(t.name) && !pre.includes(t.name))
 }
+
+// Linhas `@caminho` sozinhas são imports de CLAUDE.md (o CLAUDE.md deste repositório é só `@AGENTS.md`). O motor roda o
+// Claude com --safe-mode — que desliga TODAS as personalizações, o CLAUDE.md do projeto junto — e reinjeta as regras do
+// repositório à mão; estes dois expandem um nível de import.
+const IMPORT_RX = /^[ \t]*@(\S+)[ \t]*$/gm
+export function importsOf(text) { return [...String(text || '').matchAll(IMPORT_RX)].map((x) => x[1]) }
+export function expandImports(text, contents = {}) { return String(text || '').replace(IMPORT_RX, (line, f) => contents[f] ?? line) }

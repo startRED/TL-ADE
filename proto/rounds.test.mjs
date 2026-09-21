@@ -1,7 +1,7 @@
 // node --test proto/rounds.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { brokeGreen, diffArgs, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
+import { brokeGreen, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
 
 test('parte de correção herda os arquivos que a parte anterior já tinha alterado', () => {
   const stories = [{ id: 'R2', diff: 'diff --git a/src/lease/process-info.js b/src/lease/process-info.js\n', files: ['src\\adapters\\claude\\index.js'] }]
@@ -97,4 +97,14 @@ test('brokeGreen: vermelha já vermelha na largada não conta', () => {
   const before = { tests: [{ name: 'antiga', status: 'failed' }] }
   const after = { ok: false, tests: [{ name: 'antiga', status: 'failed' }] }
   assert.equal(brokeGreen(after, before), false)
+})
+
+test('expandImports: linha @arquivo vira o conteúdo do arquivo', () => {
+  assert.deepEqual(importsOf('@AGENTS.md\n'), ['AGENTS.md'])
+  assert.equal(expandImports('@AGENTS.md', { 'AGENTS.md': '# regras' }), '# regras')
+})
+
+test('expandImports: import desconhecido fica como estava, e @ no meio da frase não é import', () => {
+  assert.equal(expandImports('@sumiu.md', {}), '@sumiu.md')
+  assert.deepEqual(importsOf('fale com @erick sobre isso'), [])
 })

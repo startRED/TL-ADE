@@ -17,7 +17,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { skillDescription } from './skill-meta.mjs'
-import { brokeGreen, diffArgs, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
+import { brokeGreen, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
 import { PLANNING_POLICY, versionProgram, planIssues, needsPlanCritic, needsScout, scoutKey, skillsForStory, canCombineProof } from './planning.mjs'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
@@ -807,6 +807,17 @@ function describeTool(c, dir) {
   return `${c.name} ${f || i.command || ''}`.trim()
 }
 
+// CLAUDE.md do projeto com um nível de @import expandido; sem CLAUDE.md, o AGENTS.md (o que Codex e Gemini leem). Import
+// que aponta para fora da pasta do projeto não entra.
+async function repoRules(dir) {
+  const read = async (f) => { const p = path.resolve(dir, f); if (!p.startsWith(path.resolve(dir) + path.sep)) return null; try { return (await readFile(p, 'utf8')).trim() } catch { return null } }
+  const claude = await read('CLAUDE.md')
+  let text = claude, from = 'CLAUDE.md'
+  if (claude) { const contents = {}; for (const f of importsOf(claude)) { const c = await read(f); if (c != null) contents[f] = c }; text = expandImports(claude, contents) }
+  else { text = await read('AGENTS.md'); from = 'AGENTS.md' }
+  return text ? `REGRAS DO REPOSITÓRIO (${from} do projeto; valem para esta chamada):\n${text.slice(0, 12000)}` : ''
+}
+
 // ---------- chamada Claude (maker / planner) ----------
 async function claudeCall({ role, prompt, model, effort, tools, skipPermissions, schema, maxTurns = 40, base_url = null, token_env = null }) {
   const m = state.mission, dir = state.project.dir
@@ -816,9 +827,15 @@ async function claudeCall({ role, prompt, model, effort, tools, skipPermissions,
   // com as skills dentro do prompt do usuário, ~37k tokens eram REESCRITOS no cache a cada chamada (US$ 0,15). Com a parte estável (skills) no
   // system prompt por arquivo e as seções dinâmicas (cwd, git status) fora do system, a chamada seguinte LÊ 40k do cache (US$ 0,013).
   args.push('--exclude-dynamic-system-prompt-sections')
+  // --safe-mode tira do caminho as regras GLOBAIS do usuário (RTK, estilo de resposta, ganchos), que quebrariam o motor —
+  // mas desliga também o CLAUDE.md do REPOSITÓRIO. Codex e Gemini leem o AGENTS.md do projeto sozinhos; o Claude escrevia e
+  // revisava sem ele (m-mu8usf5z: o Opus das rodadas 3 a 5 nunca viu "nunca use npx", "erros são AdeError", "maxBuffer
+  // explícito"). As regras do repositório voltam no começo do prefixo estável: não mudam na missão, então ficam no cache.
+  const rules = await repoRules(dir)
   const cut = prompt.indexOf(SKILLS_MARK)
-  if (cut >= 0) {
-    const stable = prompt.slice(cut).trim(); prompt = prompt.slice(0, cut) + '\nAs skills ativas deste papel estão no system prompt; siga-as.'
+  let stable = rules
+  if (cut >= 0) { stable = [rules, prompt.slice(cut).trim()].filter(Boolean).join('\n\n'); prompt = prompt.slice(0, cut) + '\nAs skills ativas deste papel estão no system prompt; siga-as.' }
+  if (stable) {
     const file = path.join(ADE_DIR, 'sysprompts', createHash('sha1').update(stable).digest('hex').slice(0, 16) + '.md')
     await mkdir(path.dirname(file), { recursive: true }); if (!(await exists(file))) await writeFile(file, stable)
     args.push('--append-system-prompt-file', file)
