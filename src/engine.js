@@ -14,6 +14,7 @@ import { measurePackBytes } from './pack/pack.js'
 import { buildStoryContext, guardStoryContext } from './context/story.js'
 import { dispatchClaude } from './adapters/claude/index.js'
 import { dispatchCodex } from './adapters/codex/index.js'
+export { nextReady, runSequentialMission } from './engine/schedule.js'
 
 /**
  * Calcula o digest canônico dos insumos observados pelo runtime após contain/execução.
@@ -272,12 +273,28 @@ async function runStoryImpl(deps, input) {
     throw new AdeError('invalid_budget_reservation', 'missão e contrato sem max_usd', 4)
   }
   const requestedUsd = hasPreviousReservation ? 0 : Math.min(...usdCaps)
+  const effectiveMaxCalls = Math.min(
+    loaded.plan.budget.max_model_calls,
+    contract.budget.max_model_calls,
+    loaded.lineageCallsRemaining ?? Infinity,
+  )
+  const makerBudgetEvents = eventsBeforeReservation.filter((event) => {
+    const stepId = event.step_id ?? event.data?.step_id
+    return event.kind !== 'step_result' || typeof stepId !== 'string' || stepId.endsWith(':maker')
+  })
   const paidCall = authorizePaidCall({
-    events: eventsBeforeReservation,
-    // max_usd sai daqui porque o teto da missão já entrou no teto efetivo acima; a comparação `>=`
-    // desta checagem proibiria reservar exatamente o que a missão autoriza.
-    mission_budget: { ...loaded.missionBudget, max_usd: undefined },
-    story_budget: contract.budget,
+    events: makerBudgetEvents,
+    observed_usd: observedUsd(eventsBeforeReservation).observed_usd,
+    mission_budget: {
+      ...loaded.missionBudget,
+      // `authorizePaidCall` inclui a reserva prospectiva e usa limite exclusivo.
+      max_model_calls: Number.isFinite(effectiveMaxCalls) ? effectiveMaxCalls + 1 : undefined,
+      max_usd: undefined,
+    },
+    story_budget: {
+      ...contract.budget,
+      max_model_calls: Number.isFinite(effectiveMaxCalls) ? effectiveMaxCalls + 1 : undefined,
+    },
     family: makerFamily,
     phase: 'implementation',
     requested_usd: requestedUsd,
@@ -318,10 +335,7 @@ async function runStoryImpl(deps, input) {
     }
   }
 
-  const maxModelCalls = Math.min(
-    loaded.plan.budget.max_model_calls,
-    contract.budget.max_model_calls,
-  )
+  const maxModelCalls = effectiveMaxCalls
   const reservation = reserveCalls({
     events: readEvents(),
     storyId,

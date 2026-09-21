@@ -14,6 +14,8 @@ import { runStory } from '../engine.js'
 import { loadPlan } from '../engine/plan-load.js'
 import { runPreflight } from '../engine/preflight.js'
 import { prepareStory } from '../engine/prepare.js'
+import { runSequentialMission } from '../engine/schedule.js'
+import { replanRemaining } from '../mission/plan-lifecycle.js'
 import { createEvalRunner } from '../evals/eval-runner.js'
 import { createGateRunner } from '../gates/gates.js'
 import { createGitPort } from '../git/gitport.js'
@@ -165,8 +167,7 @@ export async function runCommand(options, deps = {}) {
       })
     }
 
-    const story = loaded.stories[0]
-    if (!story) {
+    if (!loaded.stories || loaded.stories.length === 0) {
       throw new AdeError('plan_without_stories', 'plano sem stories', 4)
     }
 
@@ -184,7 +185,6 @@ export async function runCommand(options, deps = {}) {
       checkCanary,
       dispatchClaude: deps.dispatchClaude ?? dispatchClaude,
       dispatchCodex: deps.dispatchCodex ?? dispatchCodex,
-      reconcileAll,
       resolved,
       checkerResolved,
       workerEnv,
@@ -193,7 +193,7 @@ export async function runCommand(options, deps = {}) {
       }),
       capabilities,
       env,
-      now: () => Date.now(),
+      now: deps.now ?? (() => Date.now()),
       preflight: async (/** @type {{ story: any, loaded: any, repoDir: string, events: any[] }} */ { story, loaded, repoDir, events }) => {
         const checks = createLocalPreflightPorts({
           repoDir,
@@ -203,13 +203,14 @@ export async function runCommand(options, deps = {}) {
           gitPort,
           execFile,
           statfs: fs.promises.statfs,
-          now: () => Date.now(),
+          now: deps.now ?? (() => Date.now()),
           env,
           credentialRequired: env.ADE_FAKE_CLI !== '1' && !deps.dispatchClaude,
         })
         const planned_paid_calls = Math.min(
           loaded.plan.budget.max_model_calls,
           story.contract.budget.max_model_calls,
+          loaded.lineageCallsRemaining ?? Infinity,
         )
         const consumed_paid_calls = events.filter((/** @type {any} */ e) => e.kind === 'budget_reserved').length
         return runPreflight({
@@ -218,16 +219,33 @@ export async function runCommand(options, deps = {}) {
           consumed_paid_calls,
         })
       },
+      runStory: deps.runStory ?? runStory,
+      replanRemaining: deps.replanRemaining ?? replanRemaining,
+      loadPlan: deps.loadPlan ?? loadPlan,
+      runtimeStamp,
     }
 
-    const storyResult = await runStory(engineDeps, {
+    const hasApproval = existingEvents.some(
+      (e) => e.kind === 'decision' && e.data?.decision === 'plan_approved',
+    )
+    if (loaded.stories.length === 1 && !hasApproval) {
+      const story = loaded.stories[0]
+      const storyResult = await (deps.runStory ?? runStory)(engineDeps, {
+        loaded,
+        story,
+        repoDir,
+        missionDir,
+      })
+      return storyResult.exitCode
+    }
+
+    const missionResult = await runSequentialMission(engineDeps, {
       loaded,
-      story,
       repoDir,
       missionDir,
     })
 
-    return storyResult.exitCode
+    return missionResult.exitCode
   } finally {
     if (lease) {
       try {

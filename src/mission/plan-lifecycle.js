@@ -395,7 +395,7 @@ export function validateMissionPlan(planPath) {
  * }>}
  */
 export async function approveMission(
-  { repoDir, missionId, expectedDigest },
+  { repoDir, missionId, expectedDigest, source, reason },
   deps = {},
 ) {
   if (!missionId || !expectedDigest) {
@@ -488,7 +488,7 @@ export async function approveMission(
     const journal = openJournal({ missionDir, runtimeStamp: planningRuntimeStamp() })
     await journal.append({
       kind: 'decision',
-      source: 'operator',
+      source: source || 'operator',
       data: {
         decision: 'plan_approved',
         digest: expectedDigest,
@@ -496,6 +496,7 @@ export async function approveMission(
         contract_digests: frozenContracts,
         eligible_skills: eligibleSkills,
         permitted_effects: permittedEffects,
+        ...(reason ? { reason } : {}),
       },
     })
     await journal.close()
