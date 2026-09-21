@@ -1098,6 +1098,7 @@ async function checker(diff, tests, st) {
     `Pedido do usuário: ${m.request}`, `Story em revisão: ${st.title}. Critérios de aceite: ${(st.acceptance || []).map((a, i) => `(${i + 1}) ${a}`).join(' ')}`,
     st.assumptions?.length ? `SUPOSIÇÕES que quem escreveu declarou (faltava decisão no plano). Julgue cada uma: cabe no contrato e nos critérios = aceite e não comente; fixa comportamento que um critério ou decisão cobre de outro jeito = achado citando o critério:\n${st.assumptions.map((a) => `- ${a}`).join('\n')}` : '',
     st.contract_issue ? `Quem escreveu alegou CONTRATO ERRADO: ${st.contract_issue}. Confira antes de julgar: arquivo que o plano manda CRIAR ainda não existir NÃO é contrato errado, e lista fechada de casos a portar (artefato de entrada) não é contrato errado. Comece o summary com "CONTRATO-PROCEDE: sim" se a alegação procede, ou "CONTRATO-PROCEDE: nao" se não procede.` : '',
+    st.wrong_test ? `Quem escreveu alegou PROVA ERRADA: ${st.wrong_test}. Confira contra os critérios de aceite e as DECISÕES do plano: a prova cobra algo que o contrato não pede, ou contradiz outra prova ou decisão? Prova que só está difícil de passar NÃO é prova errada. Escreva no summary "PROVA-PROCEDE: sim" ou "PROVA-PROCEDE: nao".` : '',
     st.scope_paths?.length ? `Contrato da story: só podia alterar ${st.scope_paths.join(', ')}${st.do_not_touch?.length ? `; proibido alterar ${st.do_not_touch.join(', ')}` : ''}${st.interfaces?.length ? `; interfaces: ${st.interfaces.join(' | ')}` : ''}${st.out_of_scope?.length ? `; FORA DO ESCOPO desta story (outra story faz): ${st.out_of_scope.join('; ')} — NÃO cobre isso nem como low, mesmo que uma decisão do plano cite o tema: o contrato da story é o que esta parte deve entregar` : ''}. Alteração fora do contrato ou interface quebrada = achado high. EXCEÇÃO legítima (não é achado): atualizar asserções de provas antigas que afirmavam o formato ou comportamento que esta story manda mudar, mesmo em arquivo da lista proibida, desde que a mudança se limite a essas asserções.` : '',
     `Skills que o autor tinha de seguir: ${(m.skills.maker || []).map((s) => s.id).join(', ') || 'nenhuma'}.`,
     `O harness JÁ RODOU as provas fora da sandbox: ${tests.failed} falharam de ${tests.total} (runner: ${tests.runner}${tests.only ? `; só o arquivo de prova desta parte: a suíte inteira roda em paralelo com esta revisão e a parte só é aceita se ela também passar` : ''}); a prova nova falhou antes da implementação e passou depois. Não tente rodar provas nem instalar nada (sua sandbox é somente leitura e isso vai falhar); avalie o código e o diff. Julgue pelo DIFF e pelos arquivos que ele toca; leia no máximo 6 arquivos além deles (cada leitura gasta cota do revisor) e não explore o repositório. Arquivos de lock (package-lock.json, go.sum, Cargo.lock e similares) e dependências não fazem parte do escopo revisado.`,
@@ -1525,7 +1526,7 @@ function common(st) {
     m.plan.decisions?.length ? `DECISÕES DO PLANO (já tomadas; não rediscuta nem troque):\n${m.plan.decisions.map((d) => `- ${d}`).join('\n')}` : '',
     `Story atual: ${st.title}. Instrução: ${st.request}`,
     st.recipe?.length ? `RECEITA (siga na ordem; um passo de cada vez):\n${st.recipe.map((x, i) => `${i + 1}. ${x}`).join('\n')}` : '',
-    st.recipe?.some((x) => /(commit|push|npm (run |test)|vitest|tsc)/i.test(x)) ? 'ATENÇÃO: se um passo da receita mandar commitar, dar push, ou rodar a suíte inteira, o typecheck ou o lint, IGNORE esse trecho do passo: o motor faz isso depois de você. Vale a regra de PROVAS abaixo.' : '',
+    st.recipe?.some((x) => /b(commit|push|npm (run |test)|vitest|tsc\b)/i.test(x)) ? 'ATENÇÃO: se um passo da receita mandar commitar, dar push, ou rodar a suíte inteira, o typecheck ou o lint, IGNORE esse trecho do passo: o motor faz isso depois de você. Vale a regra de PROVAS abaixo.' : '',
     st.examples?.length ? `EXEMPLOS que têm de valer (entrada → saída):\n${st.examples.map((x) => `- ${x}`).join('\n')}` : '',
     'DECISÃO FALTANDO: confira se a story, as DECISÕES e os EXEMPLOS dizem de onde vem cada valor que você precisa produzir. Escolha entre opções que o contrato já permite (nome de variável, ordem de um laço) é detalhe seu. Se a escolha fixa a origem de um dado ou um comportamento cobrado num critério, NÃO adivinhe calado: adote a opção mais simples que satisfaz os exemplos e escreva no fim uma linha `SUPOSIÇÃO: <o que faltava> -> <o que você adotou>` para cada uma (o revisor vai julgar). Na dúvida, é suposição.',
     'Siga o padrão que o código já usa (erros, nomes, estrutura de módulo); introduzir padrão novo é decisão, não detalhe.',
@@ -1604,7 +1605,7 @@ function fixPrompt(st, round, review, visual, pack, turns = 30) {
     // o número aqui é o teto real da chamada (maxTurns): dizer 30 e cortar em 20 fazia quem escreve planejar para um
     // orçamento que não tinha e morrer no meio das edições
     st.truncated ? `A sua tentativa anterior foi CORTADA no teto de turnos no meio do trabalho: a árvore já tem as edições parciais dela. Continue de onde parou, confira o que ficou incompleto antes de escrever mais, e feche a parte dentro de ${turns} ações. Não recomece do zero e não releia o que já leu.` : '',
-    `Agora implemente o necessário para a prova passar e os critérios de aceite valerem. Não modifique a prova. Não toque em nada fora do escopo da story. Seja direto: você tem no máximo ${turns} ações e a chamada é cortada nesse número; não investigue ferramentas do harness, não reescreva provas antigas, não amplie o escopo.`,
+    `Agora implemente o necessário para a prova passar e os critérios de aceite valerem. ${st.test_fix_allowed ? `Quem revisa CONFIRMOU que uma prova está errada: ${st.test_fix_allowed}. Nesta chamada você PODE alterar essa prova, e só ela, só no que a alegação descreve; isto vale acima da regra "não mexa nela" abaixo. Não enfraqueça nem apague a asserção do critério.` : 'Não modifique a prova.'} Não toque em nada fora do escopo da story. Seja direto: você tem no máximo ${turns} ações e a chamada é cortada nesse número; não investigue ferramentas do harness, não reescreva provas antigas, não amplie o escopo.`,
     ...IMPL_RULES, testTimeTip(st), blastTip(),
     round > 1 && st.tests_after && !st.tests_after.ok ? `DEPURAÇÃO (rodada ${round}; a tentativa anterior não deixou as provas verdes): (1) antes de mudar qualquer linha, explique em uma frase POR QUE a prova falha; (2) reproduza rodando só o arquivo de prova; (3) uma hipótese por vez sobre a CAUSA, não o sintoma; teste com a menor mudança; hipótese refutada = desfaça a mudança antes da próxima; (4) correção mínima na causa provada, sem refatoração de carona; (5) depois de verde, procure o mesmo padrão errado nos outros arquivos do escopo.` : '',
     ...CLOSING]
@@ -2135,6 +2136,9 @@ function remember(st, r) {
   if (found.length) { st.assumptions = [...new Set([...(st.assumptions || []), ...found])].slice(0, 8); for (const a of found) log('engine', `suposição de quem escreve em "${st.title}": ${a}`, 'warn') }
   const wrong = /^[\s>*`-]*CONTRATO ERRADO:\s*(.+)$/im.exec(st.last_summary)
   st.contract_issue = wrong ? wrong[1].replace(/`+$/, '').trim().slice(0, 400) : null // vale a última resposta: alegação não repetida caduca
+  const badTest = /^[\s>*`-]*PROVA ERRADA:\s*(.+)$/im.exec(st.last_summary)
+  st.wrong_test = badTest ? badTest[1].replace(/`+$/, '').trim().slice(0, 600) : null
+  st.test_fix_allowed = null // a permissão de alterar a prova vale para UMA chamada: esta, que acabou de terminar
 }
 async function runStory(st, round = 1, previousReview = null, previousVisual = null) {
   const m = state.mission
@@ -2294,7 +2298,18 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     // de casos a portar como contrato quebrado). Sem confirmação a parte segue nas rodadas normais, que já têm teto e impasse.
     if (st.contract_issue && round >= 2 && /CONTRATO-PROCEDE:\s*sim\b/i.test(st.review?.summary || '')) { log('engine', `quem escreve diz que o contrato da parte está errado e quem revisa confirmou: ${st.contract_issue}. Paro de gastar rodadas; a parte volta ao planejador com esse motivo`, 'warn'); return stop('contract_wrong') }
     if (sameDiff && oldReds()) { log('engine', 'a rodada de correção não mudou uma linha e as vermelhas são provas antigas: instabilidade da máquina, não defeito desta parte. Paro de gastar rodadas nesta parte em vez de subir para um modelo mais caro', 'warn'); return stop('tests_red') }
-    const stuck = round >= 5 && st.last_red === redNow; st.last_red = redNow
+    // PROVA ERRADA: a regra manda quem escreve declarar e NÃO mexer na prova, mas nada lia a declaração, e a revisão em
+    // paralelo só roda com a prova da parte verde — com ela vermelha, ninguém julgava. m-mu8usf5z, v03-s6: o Opus
+    // diagnosticou na rodada 3 que dois cenários do mesmo arquivo se contradiziam e propôs o conserto; as rodadas 4 e 5
+    // voltaram a ele com a mesma prova vermelha e a mesma proibição. Agora uma revisão julga; confirmada, a próxima chamada
+    // pode corrigir só essa prova.
+    if (st.wrong_test && !rv && round >= 2) {
+      const jr = await checker(st.diff, st.tests_after, st).catch(() => null)
+      if (jr) { st.prev_findings = (st.last_review?.findings || []).map(findingKey); st.review = jr; st.last_review = jr; if (jr.verdict !== 'approve') previousReview = jr }
+    }
+    st.test_fix_allowed = st.wrong_test && /PROVA-PROCEDE:\s*sim\b/i.test(st.review?.summary || '') ? st.wrong_test : null
+    if (st.test_fix_allowed) log('engine', `quem escreve diz que a prova está errada e quem revisa confirmou: ${st.test_fix_allowed.slice(0, 200)}. A próxima rodada pode corrigir só essa prova`, 'warn')
+    const stuck = round >= 5 && st.last_red === redNow && !st.test_fix_allowed; st.last_red = redNow
     if (stuck) log('engine', 'as mesmas provas seguem vermelhas depois de duas rodadas no modelo mais forte: impasse (provável conflito no plano); paro de gastar rodadas nesta parte', 'warn')
     if (!stuck && round < MAX_ROUNDS && spentNow <= (state.settings.max_usd_per_story || 4)) {
       // prova já vermelha na largada não entra no pedido: quem escreve gastava turnos atrás de defeito que não é desta parte

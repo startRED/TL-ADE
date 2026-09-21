@@ -119,3 +119,10 @@ test('agyPrompt: tira as instruções de rodar provas e acrescenta a proibição
 test('agyPrompt: o teto dito é o de verdade, em minutos', () => {
   assert.equal(agyPrompt('você tem no máximo 30 ações e a chamada é cortada nesse número.', 20), `você tem no máximo 20 minutos e a chamada é cortada nesse tempo.\n${AGY_NO_TESTS}`)
 })
+
+// Remendo feito por script Python escreveu "\b" como backspace (0x08) dentro de regex, duas vezes: `tsc\b` nunca casava.
+test('server.mjs não tem caractere de controle perdido', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const src = await readFile(new URL('./server.mjs', import.meta.url), 'utf8')
+  assert.equal(/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(src), false)
+})
