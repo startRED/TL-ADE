@@ -1898,6 +1898,23 @@ async function runStories() {
       for (const [st, { job, fresh }] of lanes) { const r = await job; if (r.lane) await removeLane(run, r.lane).catch(() => {}); restore(st, fresh); st.state = 'queued' }
       lanes.clear()
     }
+    // Suíte inteira do fim do épico. m.suite_due fica gravado enquanto ela roda: pausa no meio (reinício do motor) voltava
+    // com todas as partes "done", o laço pulava todas e o épico fechava SEM a suíte (m-mu8usf5z, v0.3, 21/09).
+    const epicSuite = async () => {
+      m.suite_due = true; await persistMission().catch(() => {})
+      log('engine', 'fim do épico: rodando a suíte inteira'); let full = acceptPreexisting(await runTests(state.project))
+      if (!full.ok && full.tests?.length && full.tests.filter((t) => t.status !== 'passed').every((t) => TIMEOUT_RX.test(t.message || ''))) { log('engine', `fim do épico: só provas por tempo limite; repito a suíte com ${SLOW_TEST_MS / 1000} s por prova`, 'warn'); full = acceptPreexisting(await runTests(state.project, { slowMs: SLOW_TEST_MS })) }
+      log('engine', `fim do épico: suíte inteira ${full.ok ? 'verde' : `com ${full.failed} vermelha(s)`} (${full.total} provas)`, full.ok ? 'info' : 'warn')
+      if (full.tests?.length) m.tests_before = full
+      if (!full.ok && m.stories.some((x) => x.id === 'suite')) { m.state = 'awaiting_operator'; m.reason = 'tests_red'; log('engine', 'a suíte inteira segue vermelha depois da parte de correção; paro para você ver', 'error'); await stopLanes(); finish(); return 'stopped' }
+      if (!full.ok) {
+        const reds = full.tests.filter((t) => t.status !== 'passed').slice(0, 6)
+        m.stories.push({ id: 'suite', title: 'Corrigir: suíte inteira no fim do épico', request: `A suíte inteira ficou vermelha no fim do épico (cada parte rodou só as provas ligadas aos arquivos dela). Corrija o código das partes deste épico para estas provas voltarem a passar; não apague nem enfraqueça provas:\n${reds.map((t) => `- ${t.name}: ${(t.message || '').slice(0, 300)}`).join('\n')}`, acceptance: reds.slice(0, 4).map((t) => `A prova "${t.name.slice(0, 100)}" passa`), test_hint: 'as provas vermelhas listadas já existem; não escreva novas', depends_on: [], no_test_phase: true, scope_paths: [...new Set(m.stories.flatMap((x) => [...(x.scope_paths || []), x.test_file].filter(Boolean)))], do_not_touch: [], out_of_scope: [], interfaces: [], state: 'queued', steps: [], round: 0, red_tests: [], tests_after: null, diff: '', review: null, visual: null })
+        broadcast()
+      }
+      m.suite_due = false
+    }
+    if (m.suite_due && state.settings.suite_scope === 'epic' && m.stories.every((x) => ['done', 'skipped'].includes(x.state))) { log('engine', 'a suíte do fim do épico foi interrompida; rodo de novo antes de fechar', 'warn'); const r = await epicSuite(); if (r) return r }
     for (let i = 0; i < m.stories.length; i++) {
       const st = m.stories[i]
       if (st.state === 'done' || st.state === 'skipped') continue
@@ -1955,16 +1972,7 @@ async function runStories() {
       // suite_scope 'epic': cada parte rodou só as provas afetadas; depois da última, a suíte inteira. Vermelha vira UMA parte de
       // correção com as provas que quebraram (o código de todas as partes do épico no contrato); vermelha de novo para e mostra.
       if (state.settings.suite_scope === 'epic' && !m.stories.slice(i + 1).some((x) => !['done', 'skipped'].includes(x.state))) {
-        log('engine', 'fim do épico: rodando a suíte inteira'); let full = acceptPreexisting(await runTests(state.project))
-        if (!full.ok && full.tests?.length && full.tests.filter((t) => t.status !== 'passed').every((t) => TIMEOUT_RX.test(t.message || ''))) { log('engine', `fim do épico: só provas por tempo limite; repito a suíte com ${SLOW_TEST_MS / 1000} s por prova`, 'warn'); full = acceptPreexisting(await runTests(state.project, { slowMs: SLOW_TEST_MS })) }
-        log('engine', `fim do épico: suíte inteira ${full.ok ? 'verde' : `com ${full.failed} vermelha(s)`} (${full.total} provas)`, full.ok ? 'info' : 'warn')
-        if (full.tests?.length) m.tests_before = full
-        if (!full.ok && m.stories.some((x) => x.id === 'suite')) { m.state = 'awaiting_operator'; m.reason = 'tests_red'; log('engine', 'a suíte inteira segue vermelha depois da parte de correção; paro para você ver', 'error'); await stopLanes(); finish(); return 'stopped' }
-        if (!full.ok) {
-          const reds = full.tests.filter((t) => t.status !== 'passed').slice(0, 6)
-          m.stories.push({ id: 'suite', title: 'Corrigir: suíte inteira no fim do épico', request: `A suíte inteira ficou vermelha no fim do épico (cada parte rodou só as provas ligadas aos arquivos dela). Corrija o código das partes deste épico para estas provas voltarem a passar; não apague nem enfraqueça provas:\n${reds.map((t) => `- ${t.name}: ${(t.message || '').slice(0, 300)}`).join('\n')}`, acceptance: reds.slice(0, 4).map((t) => `A prova "${t.name.slice(0, 100)}" passa`), test_hint: 'as provas vermelhas listadas já existem; não escreva novas', depends_on: [], no_test_phase: true, scope_paths: [...new Set(m.stories.flatMap((x) => [...(x.scope_paths || []), x.test_file].filter(Boolean)))], do_not_touch: [], out_of_scope: [], interfaces: [], state: 'queued', steps: [], round: 0, red_tests: [], tests_after: null, diff: '', review: null, visual: null })
-          broadcast()
-        }
+        const r = await epicSuite(); if (r) return r
       }
     }
     if (m.program && m.epic) { // fim de um épico: quem fecha é a fila
