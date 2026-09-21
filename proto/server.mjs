@@ -403,7 +403,7 @@ async function guard(fn) {
     if (err === PAUSE || (m.reason === 'budget' && state.settings.unattended)) {
       const byQuota = !m.pause_requested && !!m.quota_until
       m.pause_requested = false; m.state = 'paused'; m.reason = byQuota ? 'quota' : null
-      if (m.current != null && m.stories[m.current] && m.stories[m.current].state !== 'done') { const st = m.stories[m.current]; Object.assign(st, { state: 'queued', round: 0, steps: [], red_tests: [], tests_after: null, diff: '', review: null, visual: null, base: null, maker_committed: false }); if (state.project && !st.fix_of) await gitDiscard(state.project.dir).catch(() => {}); else if (st.fix_of) log('engine', 'parte de correção pausada: os arquivos da parte anterior ficam na árvore para a correção continuar', 'warn'); await refreshProject().catch(() => {}) }
+      if (m.current != null && m.stories[m.current] && m.stories[m.current].state !== 'done') { const st = m.stories[m.current]; Object.assign(st, { state: 'queued', round: 0, steps: [], red_tests: [], tests_after: null, diff: '', review: null, visual: null, base: null, maker_committed: false }); if (state.project && !st.fix_of && await dirtyInScope(st, state.project.dir).catch(() => false)) log('engine', 'parte pausada: as alterações são só dos arquivos do contrato dela e ficam na árvore; ela recomeça sobre elas', 'warn'); else if (state.project && !st.fix_of) await gitDiscard(state.project.dir).catch(() => {}); else if (st.fix_of) log('engine', 'parte de correção pausada: os arquivos da parte anterior ficam na árvore para a correção continuar', 'warn'); await refreshProject().catch(() => {}) }
       state.live = null; log('operador', 'pausou; a parte em andamento volta do começo quando continuar')
       await persistMission().catch(() => {}); return finish()
     }
@@ -495,6 +495,14 @@ async function pauseMission() {
 }
 // caminho do contrato (glob de scope_paths) → regex; caminho que é pasta cobre o que está dentro
 const scopeRx = (g) => new RegExp('^' + String(g).replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '').replace(/[.+^${}()|[\]]/g, '\\$&').replace(/\*\*\/?/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*') + '(/.*)?$')
+// Árvore suja só com arquivos do contrato da parte. Pausa e continuar usam a MESMA regra: a pausa descartava o que o continuar
+// guardaria, e cada reinício do motor no meio de uma parte jogava o trabalho fora (m-mu8usf5z, v0.4a S01, 21/09: 32 arquivos,
+// recuperados da ref de descarte).
+async function dirtyInScope(st, dir) {
+  const allow = st ? [...(st.scope_paths || []), st.test_file].filter(Boolean).map(scopeRx) : []
+  if (!allow.length) return false
+  return (await run('git', ['status', '--porcelain', '-uall'], { cwd: dir })).out.split('\n').map((l) => l.slice(3).trim()).filter(Boolean).every((f) => allow.some((r) => r.test(f)))
+}
 async function resumeMission() {
   const m = state.mission
   if (!m || m.state !== 'paused') return 'Esta missão não está pausada.'
@@ -506,8 +514,7 @@ async function resumeMission() {
   const next = (m.stories || []).find((x) => x.state === 'queued'), nextFix = next?.fix_of
   // alterações só nos arquivos do contrato da parte que recomeça ficam: ela recomeça sobre elas e o vermelho segue conferido
   // guardando o código de lado. Pausar para reiniciar o motor jogava fora parte já aprovada pelo revisor (épico 2, s1).
-  const allow = next ? [...(next.scope_paths || []), next.test_file].filter(Boolean).map(scopeRx) : []
-  const mine = fresh.dirty && allow.length && (await run('git', ['status', '--porcelain', '-uall'], { cwd: fresh.dir })).out.split('\n').map((l) => l.slice(3).trim()).filter(Boolean).every((f) => allow.some((r) => r.test(f)))
+  const mine = fresh.dirty && await dirtyInScope(next, fresh.dir)
   if (fresh.dirty && !nextFix && mine) log('engine', `árvore com alterações mantida: são só arquivos do contrato de "${next.title}", que recomeça sobre elas`, 'warn')
   else if (fresh.dirty && nextFix) log('engine', `árvore com alterações mantida: a próxima parte é a correção de "${nextFix}" e trabalha sobre elas`, 'warn')
   else if (fresh.dirty) { log('engine', `árvore com alterações fora do contrato${next ? ` de "${next.title}"` : ''}; descarto para recomeçar limpo`, 'warn'); await gitDiscard(fresh.dir) }
