@@ -36,3 +36,16 @@ test('parseJournal: só model_call, e linha cortada não derruba', () => {
   const text = `${JSON.stringify(call('agy', 'x', 1, 0, 0))}\n{"type":"model_call","fam\n${JSON.stringify({ type: 'log' })}\n`
   assert.equal(parseJournal(text).length, 1)
 })
+
+test('usageReport: tempo por chamada e por arquivo, lendo também o duration_ms do Codex', () => {
+  const rep = usageReport([
+    call('agy', 'implementação', 1, 0, 0, { files: 2, wall_ms: 600000 }),
+    call('codex', 'implementação', 1, 0, 0, { files: 1, duration_ms: 120000 }),
+    call('codex', 'revisão', 1, 0, 0),
+  ])
+  const agy = rep.by_family.find((g) => g.key === 'agy'), codex = rep.by_family.find((g) => g.key === 'codex')
+  assert.equal(agy.min_per_call, 10)
+  assert.equal(agy.min_per_file, 5)
+  assert.equal(codex.min_per_call, 2)
+  assert.equal(codex.min_per_file, null) // uma chamada sem tempo: não inventa média por arquivo
+})

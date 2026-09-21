@@ -1068,11 +1068,12 @@ Confira também: critério do épico que nenhuma story entrega vira issue com st
   else {
     log('engine', `codex (crítica do plano, ${model})`); setLive({ source: 'codex', kind: 'thinking', text: 'lendo o plano como quem vai implementar…' })
     let last = null, usage = null
+    const t0 = Date.now()
     r = await run('codex', ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${who.effort || effortOf('checker')}`, '-C', dir, '-m', model, '--output-schema', PLANCRITIC_SCHEMA, '-'], { cwd: dir, stdin: prompt, onLine: (line) => { let ev; try { ev = JSON.parse(line) } catch { return } if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') last = ev.item.text; if (ev.type === 'turn.completed') usage = ev.usage } })
     setLive(null); m.cost.calls += 1
     if (usage) { m.cost.tokens_in += usage.input_tokens || 0; m.cost.tokens_out += usage.output_tokens || 0 }
     try { crit = JSON.parse(last) } catch {}
-    journal({ type: 'model_call', family: 'codex', role: 'plan_critic', model, tokens_in: usage?.input_tokens || 0, cache_read: usage?.cached_input_tokens || 0, tokens_out: usage?.output_tokens || 0, prompt_chars: prompt.length, verdict: crit?.verdict || null, issues: crit?.issues?.length || 0 }).catch(() => {})
+    journal({ type: 'model_call', family: 'codex', role: 'plan_critic', model, tokens_in: usage?.input_tokens || 0, cache_read: usage?.cached_input_tokens || 0, tokens_out: usage?.output_tokens || 0, prompt_chars: prompt.length, verdict: crit?.verdict || null, issues: crit?.issues?.length || 0, wall_ms: Date.now() - t0 }).catch(() => {})
   }
   if (!crit) { log('engine', `crítica do plano falhou (código ${r.code}); sigo com o plano como está`, 'warn'); return null }
   log(who.family, `plano ${crit.verdict === 'ready' ? 'executável' : 'precisa de detalhe'}: ${crit.summary}`, 'text')
@@ -1176,6 +1177,7 @@ async function checkerCodex(prompt, model, effort) {
   const args = ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${effort}`, '-C', dir, '-m', model, '--output-schema', REVIEW_SCHEMA, '-']
   log('engine', `codex (revisão, ${model}, esforço ${effort})`)
   let lastMessage = null, usage = null
+  const t0 = Date.now()
   const r = await run('codex', args, {
     cwd: dir, stdin: prompt,
     onLine: (line) => {
@@ -1201,7 +1203,7 @@ async function checkerCodex(prompt, model, effort) {
     }
   }
   m.cost.calls += 1
-  journal({ type: 'model_call', family: 'codex', role: 'checker', model, story: m.current, tokens_in: usage?.input_tokens || 0, cache_read: usage?.cached_input_tokens || 0, tokens_out: usage?.output_tokens || 0, prompt_chars: prompt.length, verdict: review?.verdict || null }).catch(() => {})
+  journal({ type: 'model_call', family: 'codex', role: 'checker', model, story: m.current, tokens_in: usage?.input_tokens || 0, cache_read: usage?.cached_input_tokens || 0, tokens_out: usage?.output_tokens || 0, prompt_chars: prompt.length, verdict: review?.verdict || null, wall_ms: Date.now() - t0 }).catch(() => {})
   readQuota().then(broadcastSoon)
   if (usage) { m.cost.tokens_in += usage.input_tokens || 0; m.cost.tokens_out += usage.output_tokens || 0 }
   if (review) log('codex', `${review.verdict === 'approve' ? 'aprovou' : 'pediu mudanças'}: ${review.summary}`, 'text')

@@ -11,7 +11,8 @@ export function callRow(e) {
     ts: e.ts, mission: e.mission ?? null, family: e.family, role: e.role, model: e.model, effort: e.effort ?? null,
     story: e.story_id ?? (e.story == null ? null : String(e.story)),
     input, cache, output, quota: input + cache + output, usd: num(e.usd),
-    wall_s: e.wall_ms ? Math.round(e.wall_ms / 1000) : null, files: Number.isInteger(e.files) ? e.files : null,
+    // o maker do Codex grava duration_ms; os demais, wall_ms
+    wall_s: (e.wall_ms ?? e.duration_ms) ? Math.round((e.wall_ms ?? e.duration_ms) / 1000) : null, files: Number.isInteger(e.files) ? e.files : null,
   }
 }
 
@@ -19,8 +20,9 @@ function group(rows, key) {
   const m = new Map()
   for (const r of rows) {
     const k = key(r)
-    const g = m.get(k) || { key: k, calls: 0, input: 0, cache: 0, output: 0, quota: 0, usd: 0, files: 0, file_calls: 0, zero_file_calls: 0 }
+    const g = m.get(k) || { key: k, calls: 0, input: 0, cache: 0, output: 0, quota: 0, usd: 0, files: 0, file_calls: 0, zero_file_calls: 0, wall_s: 0, timed_calls: 0 }
     g.calls++; g.input += r.input; g.cache += r.cache; g.output += r.output; g.quota += r.quota; g.usd += r.usd
+    if (r.wall_s != null) { g.timed_calls++; g.wall_s += r.wall_s }
     if (r.files != null) { g.file_calls++; g.files += r.files; if (r.files === 0) g.zero_file_calls++ }
     m.set(k, g)
   }
@@ -31,6 +33,9 @@ function group(rows, key) {
       cache_share: g.input + g.cache ? +(g.cache / (g.input + g.cache)).toFixed(3) : 0,
       quota_per_call: Math.round(g.quota / g.calls),
       // só chamadas de quem escreve sabem quantos arquivos mudaram; as outras ficam fora desta conta
+      // no Gemini Flash o token é barato: o que pesa é o tempo até terminar
+      min_per_call: g.timed_calls ? +(g.wall_s / g.timed_calls / 60).toFixed(1) : null,
+      min_per_file: g.files && g.timed_calls === g.calls ? +(g.wall_s / g.files / 60).toFixed(1) : null,
       quota_per_file: g.files ? Math.round(g.quota / g.files) : null,
     }))
     .sort((a, b) => b.quota - a.quota)
