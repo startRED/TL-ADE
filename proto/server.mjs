@@ -1270,6 +1270,10 @@ async function visualGate() {
     const key = `${file}|${rule}|${snippet}`
     if (seen.has(key)) continue
     seen.add(key)
+    // página de prova (fixture) é feia de propósito: o validador visual da própria TL-ADE precisa de páginas ruins para
+    // reprovar. m-mu8usf5z, v0.4a S02: o portão cobrou contraste de fixtures/visual/bad-contrast e abriu rodada de retoque
+    // com a parte aprovada e a suíte verde — consertar a fixture quebraria a prova que exige que ela reprove.
+    if (/(^|[\\/])(tests?|__tests__|specs?|fixtures|__fixtures__|__mocks__)[\\/]/i.test(file)) continue
     out.push({ key, file, line: f.line || null, rule, severity: f.severity || '', message: `${f.name || f.message || f.description || rule}${snippet ? ' — ' + snippet : ''}${f.name && f.description ? ' (' + f.description + ')' : ''}`.slice(0, 400) })
   }
   return { available: true, findings: out.slice(0, 40) }
@@ -2257,7 +2261,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   const pick = makerStep(st, round, grave, repeat), escalate = pick.key === 'fix'
   const turns = makerTurns({ wasTruncated: st.truncated, escalate })
   if (st.truncated) log('engine', `a rodada anterior foi cortada no teto de turnos: trabalho inacabado, não defeito. Não conta como problema grave nem como achado repetido, e a repetição tem ${turns} turnos`, 'warn')
-  if (escalate) log('engine', `rodada ${round}: ${st.fix_of ? 'parte de correção' : grave ? 'problema grave' : 'revisor ainda pede mudanças'}${repeat ? `, ${repeat} achado(s) repetido(s)` : ''}; maker vai para a cadeia de correção, degrau ${pick.start + 1} de ${chainOf('fix').length}`)
+  if (escalate) log('engine', `rodada ${round}: ${st.fix_of ? 'parte de correção' : grave ? 'problema grave' : previousVisual?.length ? 'retoque visual' : 'revisor ainda pede mudanças'}${repeat ? `, ${repeat} achado(s) repetido(s)` : ''}; maker vai para a cadeia de correção, degrau ${pick.start + 1} de ${chainOf('fix').length}`)
   if (st.early_impl && round === 1) setStep('fix', 'skipped', { round })
   else { setStep('fix', 'running', { round }); const diffBefore = (await storyDiff(st)).trim()
     const rf = await withChain(pick.key, { start: pick.start }, async (who) => makerCall(who, { role: 'implementação', prompt: fixPrompt(st, round, previousReview, previousVisual, await contextPack(st), turns), tools: ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep'], skipPermissions: m.allow_commands, maxTurns: turns }))
