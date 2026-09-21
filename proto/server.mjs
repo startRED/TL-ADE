@@ -18,7 +18,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { skillDescription } from './skill-meta.mjs'
-import { agyPrompt, brokeGreen, climbLast, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
+import { agyPrompt, brokeGreen, climbLast, putBack, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
 import { PLANNING_POLICY, versionProgram, planIssues, needsPlanCritic, needsScout, scoutKey, skillsForStory, canCombineProof } from './planning.mjs'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
@@ -2146,7 +2146,7 @@ async function redWithoutCode(st, diff, fresh) {
     res = (st.test_file && await runTests(state.project, { only: st.test_file })) || await runTests(state.project)
   } finally {
     // devolve sem run(): numa pausa pedida no meio, run() recusa rodar, e o código da parte não pode ficar de fora
-    for (const [abs, body] of saved) await (body == null ? rm(abs, { force: true }) : writeFile(abs, body)).catch(() => {})
+    const lost = await putBack(saved); if (lost.length) log('engine', `ATENÇÃO: não consegui devolver ${lost.length} arquivo(s) da parte depois de guardá-los de lado: ${lost.join(', ')}`, 'error')
   }
   if (!res || res.timeout) return 'skip'
   return res.ok ? 'green' : 'red' // arquivo de prova que nem carrega sem o código conta como vermelho
@@ -2167,7 +2167,7 @@ async function redsWithoutPart(st, names) {
     for (const f of files) { if ((await run('git', ['restore', '--source=HEAD', '--worktree', '--', f], { cwd: root })).code === 0) kept.push(f); else await rm(path.join(root, f), { force: true }) }
     if (kept.length) res = await runTests(state.project, { related: kept.map((f) => path.relative(state.project.dir, path.join(root, f)).split(path.sep).join('/')) })
   } finally {
-    for (const [abs, body] of saved) await (body == null ? rm(abs, { force: true }) : writeFile(abs, body)).catch(() => {})
+    const lost = await putBack(saved); if (lost.length) log('engine', `ATENÇÃO: não consegui devolver ${lost.length} arquivo(s) da parte depois de guardá-los de lado: ${lost.join(', ')}`, 'error')
   }
   if (!res || res.timeout) return []
   const red = new Set(res.tests.filter((t) => t.status !== 'passed').map((t) => t.name))

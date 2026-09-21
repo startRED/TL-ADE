@@ -1,7 +1,7 @@
 // node --test proto/rounds.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { AGY_NO_TESTS, agyPrompt, brokeGreen, climbLast, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
+import { AGY_NO_TESTS, agyPrompt, brokeGreen, climbLast, putBack, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
 
 test('parte de correção herda os arquivos que a parte anterior já tinha alterado', () => {
   const stories = [{ id: 'R2', diff: 'diff --git a/src/lease/process-info.js b/src/lease/process-info.js\n', files: ['src\\adapters\\claude\\index.js'] }]
@@ -132,4 +132,15 @@ test('climbLast: a escada não sobe para degrau de reserva', () => {
   assert.equal(climbLast([{ model: 'sol' }, { model: 'opus' }]), 1)
   assert.equal(climbLast([{ model: 'flash', reserve: true }]), 0)
   assert.equal(climbLast([]), 0)
+})
+
+test('putBack: recria a pasta que o git apagou e devolve o arquivo', async () => {
+  const { mkdtemp, readFile, rm } = await import('node:fs/promises')
+  const os = await import('node:os'), path = await import('node:path')
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'putback-'))
+  const novo = path.join(dir, 'src', 'skills', 'catalog.js')
+  const lost = await putBack([[novo, Buffer.from('export const x = 1\n')], [path.join(dir, 'fora.js'), null]])
+  assert.deepEqual(lost, [])
+  assert.equal(await readFile(novo, 'utf8'), 'export const x = 1\n')
+  await rm(dir, { recursive: true, force: true })
 })

@@ -108,3 +108,20 @@ export function climbLast(chain) {
   while (i > 0 && chain[i]?.reserve) i--
   return Math.max(0, i)
 }
+
+// Devolve arquivos guardados em memória ([caminho absoluto, conteúdo | null]). `git restore --source=<base>` num arquivo
+// novo (intent-to-add) apaga o arquivo E a pasta que ficou vazia; o writeFile de volta falhava com ENOENT e o .catch calado
+// engolia o erro. m-mu8usf5z, v0.4a S01, 21/09: src/skills/{catalog,skillguard,bm25,select}.js sumiram depois da conferência
+// do vermelho, e a rodada seguinte recebeu "Does the file exist?". Recria a pasta e devolve os caminhos que não voltaram.
+export async function putBack(saved) {
+  const { mkdir, rm, writeFile } = await import('node:fs/promises')
+  const path = await import('node:path')
+  const lost = []
+  for (const [abs, body] of saved) {
+    try {
+      if (body == null) await rm(abs, { force: true })
+      else { await mkdir(path.dirname(abs), { recursive: true }); await writeFile(abs, body) }
+    } catch { lost.push(abs) }
+  }
+  return lost
+}
