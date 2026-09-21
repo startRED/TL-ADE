@@ -85,3 +85,16 @@ export function brokeGreen(after, before) {
 const IMPORT_RX = /^[ \t]*@(\S+)[ \t]*$/gm
 export function importsOf(text) { return [...String(text || '').matchAll(IMPORT_RX)].map((x) => x[1]) }
 export function expandImports(text, contents = {}) { return String(text || '').replace(IMPORT_RX, (line, f) => contents[f] ?? line) }
+
+// O Gemini (CLI agy) não tem teto de turnos — só --print-timeout — e roda comando de terminal em segundo plano. Mandado
+// rodar provas, ele dispara, espera e consulta de novo, e cada consulta reenvia o contexto inteiro. m-mu8usf5z: as chamadas
+// que rodaram provas gastaram 820k, 849k, 875k e 2356k tokens de entrada em 15 a 20 min, todas depois de "I have launched
+// the test execution and will wait"; as que não rodaram ficaram entre 174k e 471k, em 2 a 8 min. Uma frase pedindo para
+// não esperar (fix 21) não segurou: é comportamento da ferramenta, não escolha do modelo. Então o Gemini não recebe
+// instrução nenhuma de rodar provas — o motor roda logo depois e confere o vermelho sozinho — e o teto no prompt passa a
+// ser o de verdade, em minutos, em vez de um número de ações que ninguém aplica.
+export const AGY_NO_TESTS = 'NÃO rode provas, suíte, typecheck, lint, build nem servidor: nesta ferramenta o comando roda em segundo plano e esperar por ele consome a chamada inteira. O motor roda as provas logo depois de você e devolve o resultado na próxima rodada. Leia, edite e termine.'
+export function agyPrompt(prompt, minutes, dropPrefixes = []) {
+  const kept = String(prompt || '').split('\n').filter((l) => !dropPrefixes.some((p) => l.startsWith(p)))
+  return [...kept, AGY_NO_TESTS].join('\n').replace(/\b\d+ ações\b/g, `${minutes} minutos`).replace(/cortada nesse número/g, 'cortada nesse tempo')
+}

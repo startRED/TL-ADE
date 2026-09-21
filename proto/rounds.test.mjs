@@ -1,7 +1,7 @@
 // node --test proto/rounds.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { brokeGreen, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
+import { AGY_NO_TESTS, agyPrompt, brokeGreen, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
 
 test('parte de correção herda os arquivos que a parte anterior já tinha alterado', () => {
   const stories = [{ id: 'R2', diff: 'diff --git a/src/lease/process-info.js b/src/lease/process-info.js\n', files: ['src\\adapters\\claude\\index.js'] }]
@@ -107,4 +107,15 @@ test('expandImports: linha @arquivo vira o conteúdo do arquivo', () => {
 test('expandImports: import desconhecido fica como estava, e @ no meio da frase não é import', () => {
   assert.equal(expandImports('@sumiu.md', {}), '@sumiu.md')
   assert.deepEqual(importsOf('fale com @erick sobre isso'), [])
+})
+
+test('agyPrompt: tira as instruções de rodar provas e acrescenta a proibição', () => {
+  const p = agyPrompt('Implemente X.\nAo rodar provas, rode só o arquivo.\nCONTRATO: src/a.js', 20, ['Ao rodar provas'])
+  assert.equal(p.includes('Ao rodar provas'), false)
+  assert.equal(p.includes('CONTRATO: src/a.js'), true)
+  assert.equal(p.endsWith(AGY_NO_TESTS), true)
+})
+
+test('agyPrompt: o teto dito é o de verdade, em minutos', () => {
+  assert.equal(agyPrompt('você tem no máximo 30 ações e a chamada é cortada nesse número.', 20), `você tem no máximo 20 minutos e a chamada é cortada nesse tempo.\n${AGY_NO_TESTS}`)
 })

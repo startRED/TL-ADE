@@ -17,7 +17,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { skillDescription } from './skill-meta.mjs'
-import { brokeGreen, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
+import { agyPrompt, brokeGreen, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
 import { PLANNING_POLICY, versionProgram, planIssues, needsPlanCritic, needsScout, scoutKey, skillsForStory, canCombineProof } from './planning.mjs'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
@@ -2050,13 +2050,16 @@ async function codexMaker({ role, prompt, model, effort }) {
   return { result: last || '', touched, num_turns: 0, total_cost_usd: 0 }
 }
 // Antigravity como maker: o prompt é grande demais para a linha de comando do Windows, então vai num arquivo ignorado pelo git.
+// Linhas do prompt de quem escreve que mandam rodar provas: o Gemini não as recebe (ver agyPrompt em rounds.mjs).
+const AGY_MINUTES = 20
+const AGY_DROP = ['NUNCA ESPERE:', 'Ao rodar provas, rode', 'ANTES DE DIZER QUE TERMINOU, confira o seu estrago', 'A prova da parte (', 'DEPURAÇÃO (rodada']
 async function agyMaker({ role, prompt, model, effort }) {
   const m = state.mission, dir = state.project.dir, id = agyModel(model, effort)
   const rel = `${ATTACH_DIR}/prompt-${Date.now().toString(36)}.md`
-  await mkdir(path.join(dir, ATTACH_DIR), { recursive: true }); await ensureIgnore(dir); await writeFile(path.join(dir, rel), prompt)
+  await mkdir(path.join(dir, ATTACH_DIR), { recursive: true }); await ensureIgnore(dir); await writeFile(path.join(dir, rel), agyPrompt(prompt, AGY_MINUTES, AGY_DROP))
   const before = await dirtyFiles(dir), t0 = Date.now()
   log('engine', `agy (${role}, ${id})`); setLive({ source: 'agy', kind: 'thinking', text: `${role}: Gemini trabalhando (sem transmissão ao vivo)…` })
-  let r; try { r = await run('agy', [`--print=Leia o arquivo ${path.join(dir, rel).split(path.sep).join('/')} e execute exatamente as instruções dele neste projeto. Não altere nem apague esse arquivo. Não use git. Termine com uma frase dizendo o que mudou.`, '--output-format', 'json', '--model', id, '--mode', 'accept-edits', '--dangerously-skip-permissions', '--print-timeout', '20m'], { cwd: dir, timeoutMs: 22 * 60 * 1000 }) }
+  let r; try { r = await run('agy', [`--print=Leia o arquivo ${path.join(dir, rel).split(path.sep).join('/')} e execute exatamente as instruções dele neste projeto. Não altere nem apague esse arquivo. Não use git. Termine com uma frase dizendo o que mudou.`, '--output-format', 'json', '--model', id, '--mode', 'accept-edits', '--dangerously-skip-permissions', '--print-timeout', `${AGY_MINUTES}m`], { cwd: dir, timeoutMs: (AGY_MINUTES + 2) * 60 * 1000 }) }
   finally { setLive(null); await rm(path.join(dir, rel), { force: true }).catch(() => {}) }
   m.cost.calls += 1
   let j = null; try { j = JSON.parse(r.out) } catch {}
