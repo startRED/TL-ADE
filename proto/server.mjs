@@ -5,6 +5,7 @@
 
 import { SCOUT_SCHEMA, scoutPrompt, ENV_GUARD } from './scout.mjs'
 import { findSuites, relatedCommand, runSuites, TOOLCHAINS } from './runners.mjs'
+import { parseJournal, usageReport } from './usage.mjs'
 import { laneCandidates, laneEngine, createLane, lanePatch, applyPatch, removeLane, LANES_DIR } from './lanes.mjs'
 import { chatWriteTurn, chatCommand, chatIntro, formatHistory, pendingProposal, PENDING_BLOCK, handleChatDecision, discardPending, pendingChatIds, pruneChatWorktrees } from './chat-changes.mjs'
 import http from 'node:http'
@@ -309,7 +310,9 @@ function trackModelCost(event) {
 async function journal(event) {
   trackModelCost(event)
   await mkdir(ADE_DIR, { recursive: true })
-  await appendFile(path.join(ADE_DIR, 'journal.jsonl'), JSON.stringify({ ts: now(), project: state.project?.dir, mission: state.mission?.id, ...event }) + '\n')
+  // a parte vai pelo NOME além do índice: o índice recomeça a cada épico, e sozinho não diz de que parte foi a chamada
+  const story_id = Number.isInteger(event.story) ? state.mission?.stories?.[event.story]?.id : undefined
+  await appendFile(path.join(ADE_DIR, 'journal.jsonl'), JSON.stringify({ ts: now(), project: state.project?.dir, mission: state.mission?.id, ...(story_id ? { story_id } : {}), ...event }) + '\n')
 }
 function log(source, text, kind = 'info') {
   const line = { ts: now(), source, text: String(text).slice(0, 4000), kind, phase: state.phase, story: state.mission?.current ?? null }
@@ -2037,7 +2040,7 @@ async function codexMaker({ role, prompt, model, effort }) {
   if (usage) { m.cost.tokens_in += usage.input_tokens || 0; m.cost.tokens_out += usage.output_tokens || 0; m.cost.cache_read += usage.cached_input_tokens || 0 }
   m.cost.by_model[model] = m.cost.by_model[model] || 0
   const touched = changedSince(before, await dirtyFiles(dir))
-  journal({ type: 'model_call', family: 'codex', role, model, effort, story: m.current, usd: 0, tokens_in: usage?.input_tokens || 0, cache_read: usage?.cached_input_tokens || 0, tokens_out: usage?.output_tokens || 0, prompt_chars: prompt.length, touched: touched.length, duration_ms: Date.now() - t0 }).catch(() => {})
+  journal({ type: 'model_call', family: 'codex', role, model, effort, story: m.current, files: touched.length, usd: 0, tokens_in: usage?.input_tokens || 0, cache_read: usage?.cached_input_tokens || 0, tokens_out: usage?.output_tokens || 0, prompt_chars: prompt.length, touched: touched.length, duration_ms: Date.now() - t0 }).catch(() => {})
   readQuota().then(broadcastSoon)
   const msg = (last || r.err || r.out || '').trim()
   if (r.code !== 0 && /usage limit|quota|rate limit/i.test(msg)) {
@@ -2068,7 +2071,7 @@ async function agyMaker({ role, prompt, model, effort }) {
   const u = j?.usage || {}
   m.cost.tokens_in += u.input_tokens || 0; m.cost.tokens_out += u.output_tokens || 0; m.cost.cache_read += u.cache_read_tokens || 0
   m.cost.by_model[id] = m.cost.by_model[id] || 0
-  journal({ type: 'model_call', family: 'agy', role, model: id, effort, story: m.current, turns: j?.num_turns || 0, usd: 0, tokens_in: u.input_tokens || 0, cache_read: u.cache_read_tokens || 0, tokens_out: u.output_tokens || 0, prompt_chars: prompt.length, wall_ms: Date.now() - t0 }).catch(() => {})
+  journal({ type: 'model_call', family: 'agy', role, model: id, effort, story: m.current, files: touched.length, turns: j?.num_turns || 0, usd: 0, tokens_in: u.input_tokens || 0, cache_read: u.cache_read_tokens || 0, tokens_out: u.output_tokens || 0, prompt_chars: prompt.length, wall_ms: Date.now() - t0 }).catch(() => {})
   // status diferente de SUCCESS com código 0 e resposta completa não é falha (visto em 17/09: a prova tinha sido escrita e o resumo era jogado fora, junto com as suposições declaradas)
   const soft = j && j.status !== 'SUCCESS' && r.code === 0 && String(j.response || '').trim().length > 40 && !/quota reached|rate limit|RESOURCE_EXHAUSTED/i.test(String(j.response))
   if (soft) log('engine', `agy terminou com status "${j.status}" em vez de SUCCESS, mas saiu com código 0 e resposta completa; sigo com a resposta`, 'warn')
@@ -2485,6 +2488,12 @@ http.createServer(async (req, res) => {
       res.write(`data: ${JSON.stringify(pub())}\n\n`); clients.add(res); req.on('close', () => clients.delete(res)); return
     }
     if (url.pathname === '/api/state') return json(res, 200, pub())
+    // uso de modelo organizado: ?mission=<id> (padrão: a missão aberta; "todas" = todas), ?since=AAAA-MM-DD, ?last=N
+    if (url.pathname === '/api/usage') {
+      const q = url.searchParams, mission = q.get('mission') === 'todas' ? null : q.get('mission') || state.mission?.id || null
+      const text = await readFile(path.join(ADE_DIR, 'journal.jsonl'), 'utf8').catch(() => '')
+      return json(res, 200, { mission, ...usageReport(parseJournal(text), { mission, since: q.get('since'), last: Math.min(200, Number(q.get('last')) || 20) }) })
+    }
     if (url.pathname === '/api/settings' && req.method === 'POST') {
       const patch = await body(req)
       state.settings = { ...state.settings, ...patch, roles: { ...state.settings.roles, ...(patch.roles || {}) }, chains: { ...state.settings.chains, ...(patch.chains || {}) }, skills: { ...state.settings.skills, ...(patch.skills || {}) } }
