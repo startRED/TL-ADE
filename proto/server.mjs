@@ -2127,6 +2127,28 @@ async function redWithoutCode(st, diff, fresh) {
   if (!res || res.timeout) return 'skip'
   return res.ok ? 'green' : 'red' // arquivo de prova que nem carrega sem o código conta como vermelho
 }
+// Prova antiga (verde no ponto de partida) que fica vermelha é cobrada da parte. Mas o ponto de partida é tirado uma vez, e
+// prova que depende do relógio estoura sozinha quando vira o dia. m-mu8usf5z, 21/09: dois casos de tests/engine-quota.test.ts
+// com recibo datado de 20/09 caíram à meia-noite; a correção da v03-s6 herdou as duas, fora do contrato, e o Gemini gastou a
+// rodada tentando consertá-las. Antes de cobrar, roda as provas ligadas aos arquivos da parte com esses arquivos de volta ao
+// último commit: a que falha assim não é desta parte. Devolve os nomes que falham sem ela.
+async function redsWithoutPart(st, names) {
+  const root = state.project.root || state.project.dir
+  if (st.maker_committed || !names.length || !st.diff?.trim()) return []
+  const files = [...new Set([...st.diff.matchAll(/^diff --git a\/(\S+)/gm)].map((x) => x[1]))]
+  const saved = await Promise.all(files.map(async (f) => [path.join(root, f), await readFile(path.join(root, f)).catch(() => null)]))
+  const kept = [] // arquivos que existem no último commit: é por eles que o runner acha as provas ligadas
+  let res = null
+  try {
+    for (const f of files) { if ((await run('git', ['restore', '--source=HEAD', '--worktree', '--', f], { cwd: root })).code === 0) kept.push(f); else await rm(path.join(root, f), { force: true }) }
+    if (kept.length) res = await runTests(state.project, { related: kept.map((f) => path.relative(state.project.dir, path.join(root, f)).split(path.sep).join('/')) })
+  } finally {
+    for (const [abs, body] of saved) await (body == null ? rm(abs, { force: true }) : writeFile(abs, body)).catch(() => {})
+  }
+  if (!res || res.timeout) return []
+  const red = new Set(res.tests.filter((t) => t.status !== 'passed').map((t) => t.name))
+  return names.filter((n) => red.has(n))
+}
 function remember(st, r) {
   if (!r) return
   st.files = [...new Set([...(st.files || []), ...(r.touched || [])])]
@@ -2279,6 +2301,18 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
       st.tolerated = mine.map((t) => t.name)
       st.tests_after = { ...st.tests_after, ok: true, failed: 0, tolerated: st.tolerated }
       log('engine', `${mine.length} prova(s) seguem vermelha(s) SÓ por estouro de tempo mesmo na repetição folgada (${st.tolerated.map((n) => n.slice(0, 60)).join(' | ')}); estavam verdes na largada, então é a máquina e não esta parte: tolero e sigo para a revisão. A suíte de fim de épico reconfere`, 'warn')
+    }
+  }
+  if (!st.tests_after.ok && m.tests_before?.tests?.length) {
+    const okBefore = new Set(m.tests_before.tests.filter((t) => t.status === 'passed').map((t) => t.name))
+    const pre = st.tests_after.preexisting || []
+    const old = st.tests_after.tests.filter((t) => t.status !== 'passed' && okBefore.has(t.name) && !pre.includes(t.name)).map((t) => t.name)
+    const env = old.length ? await redsWithoutPart(st, old) : []
+    if (env.length) {
+      // o ponto de partida estava velho: corrige nele, e vale para esta parte e para as seguintes
+      m.tests_before = { ...m.tests_before, tests: m.tests_before.tests.map((t) => (env.includes(t.name) ? { ...t, status: 'failed', message: 'vermelha também sem o trabalho da parte (conferido pelo motor)' } : t)) }
+      st.tests_after = acceptPreexisting(st.tests_after)
+      log('engine', `${env.length} prova(s) antiga(s) vermelha(s) falham também no último commit, sem o trabalho desta parte (${env.map((n) => n.slice(-70)).join(' | ')}): não são desta parte. Marco no ponto de partida e sigo`, 'warn')
     }
   }
   log('engine', `provas depois: ${st.tests_after.total} no total, ${st.tests_after.failed} vermelha(s)`); setStep('tests', st.tests_after.ok ? 'done' : 'failed')
