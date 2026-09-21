@@ -1,0 +1,110 @@
+{
+  "macrostructures": [
+    {
+      "id": "persuade-hero-features",
+      "name": "Hero com Prova Social e Grid de Recursos",
+      "surface_mode": "persuade",
+      "keywords": ["landing", "produto", "conversao", "marketing", "apresentacao"],
+      "description": "Hero direto com proposta de valor, CTA claro, prova de valor e grid de recursos assimétrico.",
+      "tokens": {
+        "spacing": ["16px", "24px", "48px", "96px"],
+        "radii": ["8px", "16px"]
+      }
+    },
+    {
+      "id": "operate-dense-dashboard",
+      "name": "Dashboard Operacional Denso",
+      "surface_mode": "operate",
+      "keywords": ["dashboard", "admin", "gestao", "tabela", "metricas", "monitoramento"],
+      "description": "Layout de alta densidade sem ornamentos vazios, focado em estados claros, tabelas ordenáveis e ações rápidas.",
+      "tokens": {
+        "spacing": ["8px", "12px", "16px", "24px"],
+        "radii": ["4px", "8px"]
+      }
+    },
+    {
+      "id": "read-focused-article",
+      "name": "Leitura Focada com Medida Controlada",
+      "surface_mode": "read",
+      "keywords": ["documentacao", "artigo", "blog", "leitura", "guia", "manual"],
+      "description": "Coluna de texto controlada em 65-75ch, hierarquia tipográfica evidente e notas laterais.",
+      "tokens": {
+        "spacing": ["16px", "32px", "48px"],
+        "radii": ["4px"]
+      }
+    },
+    {
+      "id": "experience-interactive-flow",
+      "name": "Fluxo Experiencial Autorado",
+      "surface_mode": "experience",
+      "keywords": ["interativo", "onboarding", "showcase", "apresentacao", "jogo"],
+      "description": "Momento autorado de transição com movimento intencional e hierarquia dinâmica.",
+      "tokens": {
+        "spacing": ["20px", "40px", "80px"],
+        "radii": ["12px", "24px"]
+      }
+    }
+  ],
+  "components": [
+    {
+      "id": "hero-card",
+      "name": "Hero Card",
+      "surface_mode": "persuade",
+      "keywords": ["hero", "destaque", "chamada"],
+      "description": "Elemento de entrada com título display e ação primária visível acima da dobra.",
+      "css_rules": "display: flex; flex-direction: column; gap: 24px; max-width: 1200px;"
+    },
+    {
+      "id": "stat-metric-row",
+      "name": "Metric Row",
+      "surface_mode": "operate",
+      "keywords": ["metrica", "kpi", "stat", "resumo"],
+      "description": "Grade de números com rótulo semântico e delta de variação.",
+      "css_rules": "display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;"
+    },
+    {
+      "id": "reading-column",
+      "name": "Reading Column",
+      "surface_mode": "read",
+      "keywords": ["coluna", "texto", "conteudo", "prosa"],
+      "description": "Contêiner de texto com max-width 70ch e entrelinha confortável.",
+      "css_rules": "max-width: 70ch; line-height: 1.65; margin: 0 auto;"
+    }
+  ],
+  "palettes": [
+    {
+      "id": "slate-indigo",
+      "name": "Slate Indigo",
+      "surface_mode": "operate",
+      "dominant": "#0f172a",
+      "accent": "#6366f1",
+      "background": "#ffffff",
+      "surface": "#f8fafc",
+      "text": "#0f172a"
+    },
+    {
+      "id": "emerald-warm",
+      "name": "Emerald Warm",
+      "surface_mode": "persuade",
+      "dominant": "#064e3b",
+      "accent": "#10b981",
+      "background": "#fafaf9",
+      "surface": "#f5f5f4",
+      "text": "#1c1917"
+    },
+    {
+      "id": "paper-ink",
+      "name": "Paper & Ink",
+      "surface_mode": "read",
+      "dominant": "#18181b",
+      "accent": "#2563eb",
+      "background": "#fdfdfc",
+      "surface": "#f4f4f5",
+      "text": "#27272a"
+    }
+  ],
+  "guidance": {
+    "heroGuidance": "hero cabe em 1280x800/100svh",
+    "spacingGuidance": "80-160 px entre seções"
+  }
+}

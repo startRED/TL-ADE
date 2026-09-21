@@ -698,5 +698,27 @@ describe('S18 telemetria honesta', () => {
       reason: 'não foi possível verificar espaço livre',
     })
   }, 60_000)
+
+  test('engine_executa_fqe_para_historia_com_ui_e_para_em_visual_cut_not_met', async () => {
+    const fixture = setupStoryFixture()
+    fixture.input.story.contract.needs_ui = true
+
+    const mockRunFQE = vi.fn().mockResolvedValue({
+      status: 'awaiting_operator',
+      reason: 'visual_cut_not_met',
+      evaluation: { final: 6.8, verdict: 'rework' },
+    })
+
+    const depsWithFQE = {
+      ...fixture.deps,
+      runFrontendQuality: mockRunFQE,
+    }
+
+    const result = await runStory(depsWithFQE, fixture.input)
+    expect(result.status).toBe('awaiting_operator')
+    expect(result.reason).toBe('visual_cut_not_met')
+    expect(result.exitCode).toBe(3)
+    expect(mockRunFQE).toHaveBeenCalled()
+  }, 60_000)
 })
 

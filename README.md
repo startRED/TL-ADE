@@ -50,6 +50,7 @@ Os 66 invariantes de durabilidade estão catalogados em `docs/research/runtime-p
 - `ade catalog sync [--rebuild-index]`: sincroniza fontes autorizadas pinadas por commit, executa o SkillGuard e reconstrói o índice atômico.
 - `ade catalog list [--domain <d>] [--trust <t>] [--source <s>]`: lista habilidades curadas com filtros de domínio, confiança e fonte.
 - `ade catalog inspect <id> [--body]`: inspeciona metadados, achados do SkillGuard e quarentena de uma habilidade sem expor scripts executáveis.
+- **Frontend Quality Engine (FQE)**: portões determinísticos D1–D6 (console, rede, contraste AA com axe-core, estados, detector estético e responsividade), juiz multimodal independente com rubrica calibrada em 6 critérios, limite estrito de 2 rodadas de rework e paradas auditáveis (`visual_cut_not_met`, `visual_degraded`, `fqe_unavailable`).
 
 ## Próximo passo
 

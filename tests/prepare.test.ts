@@ -313,4 +313,26 @@ describe('prepare', () => {
       expect(excludeContent).not.toContain('/node_modules')
     }
   })
+
+  slowTest('prepare_reserva_uma_rodada_para_fqe_e_para_quando_esgotado', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+
+    writeFileSync(path.join(repo.dir, 'main.txt'), 'conteúdo base\n')
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'commit inicial'])
+
+    const res = await prepareStory({
+      repoDir: repo.dir,
+      missionId: 'm1',
+      storyId: 's1',
+      contract: {
+        needs_ui: true,
+        budget: { max_rework_rounds: 0 },
+      },
+    } as any)
+
+    expect(res.status).toBe('awaiting_operator')
+    expect((res as any).reason).toBe('visual_rework_budget_exhausted')
+  })
 })

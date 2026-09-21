@@ -11,6 +11,7 @@ import { resolveBinary } from '../runner/resolve-binary.js'
 import { validate } from '../schema/index.js'
 import { diagnoseDocs } from '../docs/projection.js'
 import { exitCodeOf } from './exit-codes.js'
+import { probeImpeccable, PINNED_ENGINE_VERSION } from '../visual/impeccable.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -305,9 +306,30 @@ export async function runDoctor(opts) {
     }
   }
 
+  // Sonda e verificação fail-closed do Impeccable para qualidade visual (critério 13)
+  const { longpaths, warnings } = await computeLongpathsWarnings(platform, gitConfigImpl)
+
+  if (!opts.offline || opts.probeImpeccableImpl || opts.failClosedOnVisual) {
+    const probeImpeccableFn = opts.probeImpeccableImpl ?? probeImpeccable
+    const impeccableRes = await probeImpeccableFn({
+      bin: opts.impeccableBin,
+      expectedVersion: opts.expectedEngineVersion ?? PINNED_ENGINE_VERSION,
+      execFn: opts.impeccableExecFn,
+    })
+    doc.impeccable = { engine_version: impeccableRes.engine_version, url_mode: impeccableRes.url_mode, bin: opts.impeccableBin ?? null }
+    doc.impeccable_version_match = Boolean(impeccableRes.version_match)
+    if (!impeccableRes.version_match) {
+      doc.fqe_unavailable = true
+      warnings.push(`aviso: ENGINE_VERSION do Impeccable (${impeccableRes.engine_version}) divergente do pin (${PINNED_ENGINE_VERSION}); FQE entrará em modo degradado`)
+      if (opts.failClosedOnVisual) {
+        throw new AdeError('doctor_probe_failed', `ENGINE_VERSION divergente do pin: detectado ${impeccableRes.engine_version}, esperado ${PINNED_ENGINE_VERSION}`, 1)
+      }
+    }
+    if (impeccableRes.url_mode === 'unsupported') warnings.push('aviso: modo de endereço do detector não suportado; fallback definido registrado')
+  }
+
   validateCapabilitySet(doc)
   const capsPath = writeCapabilitiesFile(homeDir, doc)
-  const { longpaths, warnings } = await computeLongpathsWarnings(platform, gitConfigImpl)
 
   return { capabilities: doc, path: capsPath, longpaths, warnings }
 }

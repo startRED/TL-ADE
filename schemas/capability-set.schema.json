@@ -59,6 +59,17 @@
     "bootstrap_cost_tokens": { "type": "integer" },
     "probed_at": { "type": "string" },
     "skills_suppression": { "type": "boolean" },
-    "native_skills_suppressed": { "type": "boolean" }
+    "native_skills_suppressed": { "type": "boolean" },
+    "impeccable": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "engine_version": { "type": ["string", "null"] },
+        "url_mode": { "type": "string", "enum": ["ok", "unsupported"] },
+        "bin": { "type": ["string", "null"] }
+      }
+    },
+    "fqe_unavailable": { "type": "boolean" },
+    "impeccable_version_match": { "type": "boolean" }
   }
 }

@@ -7,6 +7,8 @@ import { runResearchStep } from './research.js'
 import { selectEligibleSkills } from './skills.js'
 import { splitContract } from './split.js'
 import { validateCompiledPlan } from './validate.js'
+import { discoverDesignSignals } from '../visual/design-discovery.js'
+import { buildDesignBrief } from '../visual/design-brief.js'
 
 export {
   classifyIntent,
@@ -16,6 +18,8 @@ export {
   selectEligibleSkills,
   splitContract,
   validateCompiledPlan,
+  discoverDesignSignals,
+  buildDesignBrief,
 }
 
 /** Classes de complexidade que admitem plano progressivo em fatias. */
@@ -206,7 +210,19 @@ export async function compileIntent({
       : {}),
   }
 
-  const needsUi = Boolean(discovery.ui?.present || /bot[ãa]o|ui|tela|interface/i.test(request))
+  const designSignals = discoverDesignSignals({
+    request,
+    discovery,
+    paths: (discovery.modules || []).map((m) => m.path),
+    packageJson: discovery.packageJson,
+    scopePaths: (discovery.anchors || []).map((a) => a.path),
+  })
+
+  const needsUi = Boolean(
+    discovery.ui?.present ||
+      designSignals.has_ui ||
+      /bot[ãa]o|ui|tela|interface|design|frontend|responsiv[oa]/i.test(request),
+  )
 
   const skills = selectEligibleSkills({
     story: {
@@ -248,10 +264,11 @@ export async function compileIntent({
   const designBriefs = {}
   for (const contract of contracts) {
     if (!contract.needs_ui) continue
-    designBriefs[contract.id] = {
-      components: (discovery.anchors || []).map((a) => a.path),
-      description: `Briefing de interface para: ${contract.task.slice(0, 60)}`,
-    }
+    designBriefs[contract.id] = buildDesignBrief({
+      request: contract.task,
+      discovery,
+      repoSignals: designSignals,
+    })
   }
 
   const planBriefing = {

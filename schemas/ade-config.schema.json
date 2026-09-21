@@ -115,7 +115,72 @@
       "additionalProperties": false,
       "required": ["enabled"],
       "properties": {
-        "enabled": { "type": "boolean" }
+        "enabled": { "type": "boolean" },
+        "serve_command": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "url": { "type": "string" },
+        "ready_timeout_s": { "type": "integer" },
+        "routes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path"],
+            "properties": {
+              "path": { "type": "string" },
+              "mode": { "enum": ["persuade", "operate", "read", "experience"] },
+              "states": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          }
+        },
+        "widths": {
+          "type": "array",
+          "items": { "type": "integer" }
+        },
+        "themes": {
+          "type": "array",
+          "items": { "enum": ["light", "dark"] }
+        },
+        "console_allowlist": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "network_allowlist": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "gates": {
+          "type": "array",
+          "items": { "enum": ["D1", "D2", "D3", "D4", "D5", "D6"] }
+        },
+        "imagegen": { "type": "boolean" },
+        "max_rounds": { "type": "integer" },
+        "cut": { "type": "number" },
+        "specificity_min": { "type": "number" },
+        "criterion_min": { "type": "number" },
+        "judge": {
+          "type": "object",
+          "required": ["family", "model_id"],
+          "properties": {
+            "family": { "type": "string" },
+            "model_id": { "type": "string" },
+            "pinned_at": { "type": "string" }
+          }
+        },
+        "generator": { "enum": ["impeccable", "frontend-design"] },
+        "two_stage": { "type": "boolean" },
+        "impeccable": {
+          "type": "object",
+          "properties": {
+            "engine_version": { "type": "string" },
+            "bin": { "type": ["string", "null"] },
+            "url_mode": { "type": "string", "enum": ["ok", "unsupported"] }
+          }
+        }
       }
     },
     "research": {

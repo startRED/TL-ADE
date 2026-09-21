@@ -125,6 +125,26 @@ export async function prepareStory(options) {
     }
   }
 
+  // Reserva de 1 rodada de rework para o FQE em histórias visuais (critério 3)
+  const isVisual = Boolean(
+    /** @type {any} */ (options).contract?.needs_ui || /** @type {any} */ (options).needsUi,
+  )
+  if (isVisual) {
+    const reworkLimit =
+      /** @type {any} */ (options).contract?.budget?.max_rework_rounds ??
+      /** @type {any} */ (options).budget?.max_rework_rounds
+    const callLimit = /** @type {any} */ (options).contract?.budget?.max_model_calls
+    if ((reworkLimit !== undefined && reworkLimit < 1) || (callLimit !== undefined && callLimit < 2)) {
+      return {
+        status: 'awaiting_operator',
+        reason: 'visual_rework_budget_exhausted',
+        exitCode: 3,
+        worktreeDir,
+        branch,
+      }
+    }
+  }
+
   const excludePath = await basePort.gitPath('info/exclude')
   fs.mkdirSync(path.dirname(excludePath), { recursive: true })
   const excludeContent = fs.existsSync(excludePath) ? fs.readFileSync(excludePath, 'utf8') : ''

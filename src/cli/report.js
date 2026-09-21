@@ -252,9 +252,10 @@ export function sumQuotaUsage(events = [], nowMs = Date.now()) {
  *   receipts?: Array<{ family: string, used_percent: number, reserved_percent: number, observed_at: string, weekly_reset_at: string }>,
  *   governance_metrics?: any,
  * } | null} [quota]
+ * @param {Array<Record<string, any>>} [events]
  * @returns {string}
  */
-export function renderReport(mission, units, costs = [], quota = null) {
+export function renderReport(mission, units, costs = [], quota = null, events = []) {
   let report = `# Relatório da missão ${mission}\n\n`
   if (units.length === 0) {
     report += 'Nenhuma unidade registrada.\n'
@@ -320,7 +321,56 @@ export function renderReport(mission, units, costs = [], quota = null) {
     }
   }
 
+  report += renderVisualComparison(events)
+
   return report
+}
+
+/**
+ * Renderiza a tabela de capturas e notas lado a lado das duas rodadas visuais (critério 11).
+ *
+ * @param {Array<Record<string, any>>} [events]
+ * @returns {string}
+ */
+export function renderVisualComparison(events = []) {
+  const visualEvents = (events || []).filter(
+    (e) => e?.kind === 'visual_eval_done' || e?.data?.kind === 'visual_eval_done',
+  )
+  if (visualEvents.length === 0) return ''
+
+  const r1Event = visualEvents.find((e) => (e.data?.round ?? e.round) === 1)
+  const r2Event = visualEvents.find((e) => (e.data?.round ?? e.round) === 2)
+
+  const r1Eval = r1Event?.data?.evaluation ?? r1Event?.evaluation
+  const r2Eval = r2Event?.data?.evaluation ?? r2Event?.evaluation
+
+  let section = '\n## Avaliação visual e capturas comparáveis\n\n'
+  section += '| rota | largura | tema | captura r1 | captura r2 | nota r1 | nota r2 |\n| --- | --- | --- | --- | --- | --- | --- |\n'
+
+  const r1Caps = r1Eval?.captures || []
+  const r2Caps = r2Eval?.captures || []
+
+  if (r1Caps.length === 0 && r2Caps.length === 0) {
+    section += '| - | - | - | indisponível | indisponível | - | - |\n'
+  } else {
+    const allKeys = new Set([
+      ...r1Caps.map((c) => `${c.route}:${c.width}:${c.theme}`),
+      ...r2Caps.map((c) => `${c.route}:${c.width}:${c.theme}`),
+    ])
+
+    for (const key of allKeys) {
+      const [route, width, theme] = key.split(':')
+      const c1 = r1Caps.find((c) => `${c.route}:${c.width}:${c.theme}` === key)
+      const c2 = r2Caps.find((c) => `${c.route}:${c.width}:${c.theme}` === key)
+      const p1 = c1?.path ? `\`${c1.path}\`` : 'indisponível'
+      const p2 = c2?.path ? `\`${c2.path}\`` : 'indisponível'
+      const score1 = r1Eval?.final !== undefined ? String(r1Eval.final) : '-'
+      const score2 = r2Eval?.final !== undefined ? String(r2Eval.final) : '-'
+      section += `| ${route} | ${width} | ${theme} | ${p1} | ${p2} | ${score1} | ${score2} |\n`
+    }
+  }
+
+  return section
 }
 
 /**
@@ -381,9 +431,9 @@ export async function main(argv, deps = {}) {
   let reportContent
   if (values.quota) {
     const quota = sumQuotaUsage(events, nowMs)
-    reportContent = renderReport(mission, projectUnits(events), costs, quota)
+    reportContent = renderReport(mission, projectUnits(events), costs, quota, events)
   } else {
-    reportContent = renderReport(mission, projectUnits(events), costs)
+    reportContent = renderReport(mission, projectUnits(events), costs, null, events)
   }
 
   fs.writeFileSync(outPath, reportContent, 'utf8')

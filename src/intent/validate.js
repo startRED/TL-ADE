@@ -37,12 +37,25 @@ export function validateCompiledPlan(plan, contracts = []) {
     // Regra adicional: se needs_ui === true, o plano deve trazer o briefing de design da story
     // (o schema do contrato é fechado, então o briefing vive em plan.briefing.design_briefs)
     const designBrief = plan.briefing?.design_briefs?.[contract.id]
-    if (contract.needs_ui && (!designBrief || typeof designBrief !== 'object')) {
-      errors.push({
-        path: `/briefing/design_briefs/${contract.id}`,
-        message: 'Contrato com needs_ui exige design_brief detalhado no briefing do plano',
-        code: 'ui_missing_design_brief',
-      })
+    if (contract.needs_ui) {
+      if (!designBrief || typeof designBrief !== 'object') {
+        errors.push({
+          path: `/briefing/design_briefs/${contract.id}`,
+          message: 'Contrato com needs_ui exige design_brief detalhado no briefing do plano',
+          code: 'ui_missing_design_brief',
+        })
+      } else if (
+        designBrief.direction &&
+        (!designBrief.direction.self_critique ||
+          typeof designBrief.direction.self_critique !== 'string' ||
+          designBrief.direction.self_critique.trim() === '')
+      ) {
+        errors.push({
+          path: `/briefing/design_briefs/${contract.id}/direction/self_critique`,
+          message: 'DesignBrief exige self_critique preenchido na direção',
+          code: 'ui_missing_self_critique',
+        })
+      }
     }
 
     // Regra adicional: todo verificador citado por cenário precisa existir no contrato

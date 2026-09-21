@@ -26,6 +26,7 @@ import { assertPaidAuthorization } from '../../engine/paid-call.js'
  *   runWorkerImpl?: typeof runWorker,
  *   randomUUID?: () => string,
  *   authorization?: any,
+ *   mcpConfigPath?: string,
  * }} opts
  * @returns {Promise<{
  *   step_id: string,
@@ -58,6 +59,7 @@ export async function dispatchClaude(opts) {
     runWorkerImpl = runWorker,
     randomUUID = crypto.randomUUID,
     authorization,
+    mcpConfigPath,
   } = opts ?? {}
 
   if (authorization) {
@@ -65,7 +67,7 @@ export async function dispatchClaude(opts) {
   }
 
   const sessionId = randomUUID()
-  const args = buildClaudeArgs({ sessionId, packPath, maxBudgetUsd, model })
+  const args = buildClaudeArgs({ sessionId, packPath, maxBudgetUsd, model, mcpConfigPath })
   const input = { pack_path: packPath, max_budget_usd: maxBudgetUsd, model: model ?? null }
 
   const r = await step({ unit, id: stepId, effect_class: 'model_call', input, session_ref: sessionId }, async () => {

@@ -62,5 +62,12 @@ export function buildClaudeArgs(opts) {
     args.push('--model', model)
   }
 
+  if (opts?.mcpConfigPath !== undefined) {
+    if (typeof opts.mcpConfigPath !== 'string' || opts.mcpConfigPath === '') {
+      throw new AdeError('invalid_claude_args', 'mcpConfigPath inválido', 2)
+    }
+    args.push('--mcp-config', opts.mcpConfigPath)
+  }
+
   return args
 }

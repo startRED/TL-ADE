@@ -14,6 +14,8 @@ import { measurePackBytes } from './pack/pack.js'
 import { buildStoryContext, guardStoryContext } from './context/story.js'
 import { dispatchClaude } from './adapters/claude/index.js'
 import { dispatchCodex } from './adapters/codex/index.js'
+import { runFrontendQuality } from './visual/evaluate.js'
+import { createDesignToolServer } from './visual/design-server.js'
 export { nextReady, runSequentialMission } from './engine/schedule.js'
 
 /**
@@ -298,8 +300,8 @@ async function runStoryImpl(deps, input) {
     },
     family: makerFamily,
     phase: 'implementation',
+    requested_calls: hasPreviousReservation ? 0 : (contract.needs_ui ? 2 : 1),
     requested_usd: requestedUsd,
-    requested_calls: hasPreviousReservation ? 0 : 1,
     requested_turns: hasPreviousReservation ? 0 : 1,
     context_bytes: contextBytes,
     quota_receipt: quotaReceipt,
@@ -433,7 +435,7 @@ async function runStoryImpl(deps, input) {
         effect_class: 'prepare',
         input: { storyId, missionId },
       },
-      () => deps.prepareStory({ repoDir, missionId, storyId }),
+      () => deps.prepareStory({ repoDir, missionId, storyId, contract }),
     )
 
     const prepResult = /** @type {any} */ (prepareStepResult.result)
@@ -655,26 +657,57 @@ async function runStoryImpl(deps, input) {
       weekly_percent_cap: loaded.missionBudget.max_subscription_weekly_percent ?? 50,
     }
 
-    const dispatch = await deps.dispatchClaude({
-      // O bloqueio da chamada paga fica no `step()` write-ahead: o efeito `model_call` só chega ao
-      // spawn se o teto despachado for exatamente a reserva autorizada.
-      step: authorizedStep(
-        deps.step,
-        paidAuthorization,
-        deps.now?.() ?? Date.now(),
-      ),
-      authorization: paidAuthorization,
-      unit: storyId,
-      stepId: `${storyId}:r${round}:maker`,
-      packPath: currentPackPath,
-      missionDir,
-      missionId,
-      cwd: worktreeDir,
-      resultFile,
-      maxBudgetUsd: authorizedReservation.usd,
-      resolved: deps.resolved,
-      env: workerEnv,
-    })
+    let designServer = null
+    let mcpConfigPath
+    if (contract.needs_ui) {
+      try {
+        designServer = await createDesignToolServer({
+          toolNames: ['recommend_design', 'compare_design', 'slop_test', 'pre_critique'],
+        })
+        mcpConfigPath = path.join(missionDir, `design-tools-r${round}.json`)
+        fs.writeFileSync(mcpConfigPath, JSON.stringify({
+          mcpServers: { ade_design: { type: 'http', url: designServer.url } },
+        }), 'utf8')
+        await deps.journal.append({
+          kind: 'mcp_manifest',
+          unit: storyId,
+          data: designServer.manifest,
+        })
+      } catch (err) {
+        await deps.journal.append({ kind: 'story_done', unit: storyId, data: { status: 'awaiting_operator', reason: 'fqe_unavailable', error: err instanceof Error ? err.message : String(err) } })
+        return { status: 'awaiting_operator', exitCode: 3, reason: 'fqe_unavailable', commit: null }
+      }
+    }
+
+    /** @type {any} */
+    let dispatch
+    try {
+      dispatch = await deps.dispatchClaude({
+        // O bloqueio da chamada paga fica no `step()` write-ahead: o efeito `model_call` só chega ao
+        // spawn se o teto despachado for exatamente a reserva autorizada.
+        step: authorizedStep(
+          deps.step,
+          paidAuthorization,
+          deps.now?.() ?? Date.now(),
+        ),
+        authorization: paidAuthorization,
+        unit: storyId,
+        stepId: `${storyId}:r${round}:maker`,
+        packPath: currentPackPath,
+        missionDir,
+        missionId,
+        cwd: worktreeDir,
+        resultFile,
+        maxBudgetUsd: authorizedReservation.usd,
+        resolved: deps.resolved,
+        env: workerEnv,
+        mcpConfigPath,
+      })
+    } finally {
+      if (designServer) {
+        await designServer.close()
+      }
+    }
     const makerWallMs = Math.max(0, (deps.now?.() ?? Date.now()) - makerStartedAt)
 
     maybeEngineFault('after_maker_effect', env)
@@ -900,6 +933,81 @@ async function runStoryImpl(deps, input) {
           reason: 'eval_green_failed',
           commit: null,
         }
+      }
+    }
+
+    // Portão do Frontend Quality Engine (FQE) entre gates/evals e Checker
+    if (contract.needs_ui) {
+      const fqeStepResult = await deps.step(
+        {
+          unit: storyId,
+          id: round === 1 ? `${storyId}:visual_eval` : `${storyId}:r${round}:visual_eval`,
+          effect_class: 'none',
+          input: { tree: treeAfterContain, round },
+        },
+        () =>
+          (deps.runFrontendQuality ?? runFrontendQuality)({
+            story: {
+              ...story,
+              worktreeDir,
+              design_brief: loaded.plan?.briefing?.design_briefs?.[storyId],
+            },
+            tree: treeAfterContain,
+            config: loaded.config ?? {},
+            capabilities: deps.capabilities ?? {},
+            round: /** @type {1 | 2} */ (round),
+            missionDir,
+            deps,
+          }),
+      )
+
+      const fqeRes = /** @type {any} */ (fqeStepResult.result)
+      await deps.journal.append({
+        kind: 'visual_eval_done',
+        unit: storyId,
+        data: {
+          round,
+          status: fqeRes.status,
+          reason: fqeRes.reason,
+          evaluation: fqeRes.evaluation,
+          defects: fqeRes.defects,
+        },
+      })
+
+      if (fqeRes.status === 'awaiting_operator') {
+        await deps.journal.append({
+          kind: 'story_done',
+          unit: storyId,
+          data: {
+            status: 'awaiting_operator',
+            reason: fqeRes.reason ?? 'visual_cut_not_met',
+            unit: storyId,
+            commit: null,
+            evaluation: fqeRes.evaluation,
+          },
+        })
+        return {
+          status: 'awaiting_operator',
+          exitCode: 3,
+          reason: fqeRes.reason ?? 'visual_cut_not_met',
+          commit: null,
+        }
+      }
+
+      if (fqeRes.status === 'rework') {
+        const visualFindings = (fqeRes.defects || []).map((d) => ({
+          severity: d.severity,
+          message: `${d.criterion}: ${d.fix} (${d.where})`,
+          path: d.where,
+        }))
+        if (round >= 2 || round > maxReworkRounds) {
+          await deps.journal.append({ kind: 'story_done', unit: storyId, data: { status: 'awaiting_operator', reason: 'visual_cut_not_met', unit: storyId, commit: null } })
+          return { status: 'awaiting_operator', exitCode: 3, reason: 'visual_cut_not_met', commit: null }
+        }
+        openFindings = visualFindings
+        previousFindings = visualFindings
+        round++
+        continue
       }
     }
 

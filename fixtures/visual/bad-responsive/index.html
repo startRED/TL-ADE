@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TL-ADE — Fixture Responsividade Ruim</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 16px;
+      font-family: 'Manrope', sans-serif;
+      color: #111827;
+      background: #ffffff;
+    }
+    .wide-box {
+      width: 2500px; /* Estouro horizontal explícito em 390px e 1280px */
+      height: 100px;
+      background: #fee2e2;
+      color: #991b1b;
+      padding: 16px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Título da Página com Estouro Horizontal</h1>
+  <div class="wide-box">
+    Caixa fixa de 2500px que força barra de rolagem horizontal e viola D6.
+  </div>
+</body>
+</html>
