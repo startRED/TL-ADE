@@ -54,12 +54,13 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | [0027](0027-ativacao-da-v04b-painel-local.md) | Ativação da v0.4b: Painel local, índice SQLite descartável e interface acessível sem compilação | Aceito (confirmado por Erick em 2026-09-21) |
 | [0028](0028-ativacao-da-v05-pesquisa-telemetria-intervencao.md) | Ativação da v0.5: Pesquisa externa controlada, telemetria auditável e intervenção do operador (pausa, retomada, takeover) | Aceito (confirmado por Erick em 2026-09-21) |
 | [0029](0029-ativacao-da-v1-noite-desatendida-e-dogfood.md) | Ativação da v1: Noite desatendida, dogfood e calibração por telemetria | Aceito (confirmado por Erick em 2026-09-22) |
+| [0030](0030-typescript-no-motor-e-build-do-painel.md) | TypeScript estrito no motor sem build e build do painel em `packages/web` (emenda os ADRs 0023 e 0027) | Aceito (confirmado por Erick em 2026-09-22) |
 
 ## Mapa decisão → onde ela aparece
 
 | Tema | ADRs | Seção de `architecture.md` |
 | :--- | :--- | :--- |
-| Stack e repositório | 0001, 0022, 0023, 0027 | §2, §6, §11 E29 |
+| Stack e repositório | 0001, 0022, 0023, 0027, 0030 | §2, §6, §11 E29 |
 | Durabilidade e recuperação | 0002, 0003, 0012, 0014, 0021, 0025, 0027, 0028, 0029 | §6, §11 E6, E7, E21, E25–E27 |
 | Modelos, transporte e papéis | 0004, 0005, 0006, 0015, 0028 | §7, §11 E10, E16, E23, E24 |
 | Intenção, contrato e prova | 0007, 0008, 0016, 0028 | §4, §5, §11 E1–E4, E12, E18–E20 |
@@ -67,5 +68,5 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | Observação e método | 0013, 0017, 0019, 0020, 0024, 0027, 0028, 0029 | §3, §8, §10 A10, A12, §11 E11, E17, E30, E34, E37 |
 | Orçamento e execução | 0026, 0028, 0029 | §7, §9.8, §11 E20, E24 |
 
-O [ADR 0024](0024-autorizacao-roadmap-ate-v1.md) registra a autorização contínua até a v1 e define o recorte sequencial dos marcos, o [ADR 0027](0027-ativacao-da-v04b-painel-local.md) ativou a v0.4b, o [ADR 0028](0028-ativacao-da-v05-pesquisa-telemetria-intervencao.md) formalizou a v0.5 e o [ADR 0029](0029-ativacao-da-v1-noite-desatendida-e-dogfood.md) formaliza a ativação do recorte ativo v1 (noite desatendida sob precondições duras, suíte de dogfood runs: 3 e pass^3 em Vitest, calibração por telemetria e fechamento documental).
+O [ADR 0024](0024-autorizacao-roadmap-ate-v1.md) registra a autorização contínua até a v1 e define o recorte sequencial dos marcos, o [ADR 0027](0027-ativacao-da-v04b-painel-local.md) ativou a v0.4b, o [ADR 0028](0028-ativacao-da-v05-pesquisa-telemetria-intervencao.md) formalizou a v0.5 e o [ADR 0029](0029-ativacao-da-v1-noite-desatendida-e-dogfood.md) formaliza a ativação do recorte ativo v1 (noite desatendida sob precondições duras, suíte de dogfood runs: 3 e pass^3 em Vitest, calibração por telemetria e fechamento documental). O [ADR 0030](0030-typescript-no-motor-e-build-do-painel.md) emenda o 0023 e o 0027: produção em TypeScript estrito executado pelo Node 24 sem build e build do painel só em `packages/web`.
 

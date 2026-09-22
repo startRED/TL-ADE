@@ -17,7 +17,8 @@ Nunca use `npx`: `spawn('npx.cmd')` sem shell falha com EINVAL no Windows (ADR 0
 
 ## Convenções
 
-- Produção em `src/**/*.js` ESM com JSDoc (ADR 0023); onde os planos dizem `src/...ts`, leia `.js`.
+- Produção em `src/**/*.ts` ESM com TypeScript estrito, executado direto pelo Node 24 sem build, imports relativos terminando em `.ts` e só sintaxe apagável (`erasableSyntaxOnly`) (ADR 0030, emenda o ADR 0023). Durante a migração, os `.js` restantes em `src/` seguem com JSDoc; `bin/ade.js` fica `.js`.
+- Build só no front: React 19 + TypeScript + Vite em `packages/web`; o build do front é portão (ADR 0030, emenda o ADR 0027).
 - Testes em `tests/**/*.test.ts`, um arquivo por módulo, nomes snake_case em inglês.
 - Eval antes do código (a prova nasce vermelha).
 - Todo `execFile`/`spawnSync` com `maxBuffer` explícito e sem `shell`.
@@ -30,7 +31,7 @@ Nunca use `npx`: `spawn('npx.cmd')` sem shell falha com EINVAL no Windows (ADR 0
 - Tocar `proto/**`; a demo fica intocada.
   - Exceção do épico "Servidor: chat escreve na cópia e rotas aprovar/recusar": podem ser alterados somente proto/chat-changes.mjs, proto/server.mjs, proto/chat-routes.test.mjs e proto/README.md.
   - Exceção do épico "Tela: cartão de permissão, travas e textos": podem ser criados ou alterados somente proto/src/diff-lines.mjs, proto/src/diff-lines.test.mjs, proto/src/PermissionCard.jsx, proto/src/permission-card.test.mjs, proto/src/App.jsx, proto/src/index.css e proto/README.md.
-- Converter arquivo para `.ts` ou criar passo de build.
+- Criar passo de build fora de `packages/web` (o backend roda sem build).
 - Criar novos workspaces além de `packages/web` (v0.4b, ADR 0027).
 - Suprimir regra de tipo ou lint (diretivas ts-ignore, ts-expect-error, ts-nocheck, oxlint-disable) ou afrouxar `strict`.
 - Editar ADR aceito (abrir um novo que emenda).

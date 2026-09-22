@@ -39,12 +39,12 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: [
-        'src/journal/**/*.js',
-        'src/step/**/*.js',
-        'src/lease/**/*.js',
-        'src/git/**/*.js',
-        'src/runner/**/*.js',
-        'src/contain/**/*.js',
+        'src/journal/**/*.{js,ts}',
+        'src/step/**/*.{js,ts}',
+        'src/lease/**/*.{js,ts}',
+        'src/git/**/*.{js,ts}',
+        'src/runner/**/*.{js,ts}',
+        'src/contain/**/*.{js,ts}',
       ],
     },
   },

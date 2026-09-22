@@ -13,6 +13,7 @@ operacional mora no harness.
 - Sequência obrigatória dos marcos: v0.2 (durabilidade e paridade 93) -> v0.3 -> v0.4a -> v0.4b -> v0.5 -> v1.
 - Recorte ativo deste épico: v1 — Noite desatendida sob precondições duras (`ade run --unattended`), suíte de dogfood (runs: 3, pass^3 em Vitest), calibração de corte visual e tetos de contexto pela telemetria, e consolidação documental de operações, segurança e evals, formalizado no [ADR 0029](docs/adr/0029-ativacao-da-v1-noite-desatendida-e-dogfood.md); v0.5 entregue ([ADR 0028](docs/adr/0028-ativacao-da-v05-pesquisa-telemetria-intervencao.md)). Itens do backlog pós-v1 continuam proibidos em src/.
 - Slice 1: fechamento pendente ([docs/plans/slice-1-fechamento.md](docs/plans/slice-1-fechamento.md)).
+- Stack da versão definitiva: backend em TypeScript estrito executado pelo Node 24 sem build e build do painel só em `packages/web` ([ADR 0030](docs/adr/0030-typescript-no-motor-e-build-do-painel.md), emenda os ADRs 0023 e 0027).
 - Recorte local v0.2: autorizado sequencialmente ([docs/plans/v02-local-proposta.md](docs/plans/v02-local-proposta.md), [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md)).
 - Restante da v0.2: segue a ordem do roadmap.
 Implementação dependente: autorizada sequencialmente até a v1 conforme o épico ativo.
@@ -28,7 +29,7 @@ Trabalho novo entra por branch + PR contra `main`; convenções em [`docs/develo
 4. [`docs/roadmap.md`](docs/roadmap.md) — vertical slices (slice 1 → v0.2 → v0.3 → v0.4a/b → v0.5 → v1 → futuro) com aceite, evals, calendário e escada de dogfood.
 5. [`docs/plans/slice-1.md`](docs/plans/slice-1.md) — plano executável do primeiro slice (~3 semanas): stories como Task Contracts, testes nomeados, CLI falsa, método de execução.
 6. [`docs/journeys.md`](docs/journeys.md) — as 6 jornadas obrigatórias validadas contra a arquitetura.
-7. [`docs/adr/README.md`](docs/adr/README.md) — 29 ADRs (decisão, evidência, trade-offs, reversão).
+7. [`docs/adr/README.md`](docs/adr/README.md) — 30 ADRs (decisão, evidência, trade-offs, reversão).
 8. [`docs/evals/README.md`](docs/evals/README.md), [`docs/security/README.md`](docs/security/README.md), [`docs/operations/autonomy-and-permissions.md`](docs/operations/autonomy-and-permissions.md), [`docs/operations/usar-em-outro-projeto.md`](docs/operations/usar-em-outro-projeto.md), [`docs/operations/dogfood-d1.md`](docs/operations/dogfood-d1.md), [`docs/development-method.md`](docs/development-method.md).
 9. [`docs/research/README.md`](docs/research/README.md) — índice e digest da pesquisa (40 premissas derrubadas, confirmações, hipóteses a medir); [`docs/catalog-sources.md`](docs/catalog-sources.md) — fontes do catálogo com licença e decisão.
 

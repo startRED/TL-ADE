@@ -7,11 +7,14 @@
     "checkJs": true,
     "strict": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
     "skipLibCheck": true,
     "types": ["node"],
     "forceConsistentCasingInFileNames": true
   },
   "include": [
+    "src/**/*.ts",
     "src/**/*.js",
     "tests/**/*.ts"
   ]
