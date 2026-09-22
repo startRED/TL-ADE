@@ -1,4 +1,8 @@
+import { execFileSync } from 'node:child_process'
 import path from 'node:path'
+import fs from 'node:fs'
+import os from 'node:os'
+import { AdeError } from '../journal/errors.js'
 import { runContained } from '../gates/command.js'
 import { EXTRACT_CAPS, safeId, writeRawArtifact } from '../gates/output.js'
 import { classifyGreen, classifyRed, parseReporterJson } from './classify.js'
@@ -505,4 +509,199 @@ export function createEvalRunner({ step, missionDir, gitPort }) {
   }
 
   return { runEval }
+}
+
+/** Grupos da suíte de dogfood da v1, na ordem do relatório. */
+export const DOGFOOD_GROUPS = ['tradutor', 'jornadas', 'visual', 'estritez', 'durabilidade']
+
+const DOGFOOD_RUNS = 3
+
+/**
+ * @typedef {Object} DogfoodTask
+ * @property {string} id
+ * @property {'tradutor' | 'jornadas' | 'visual' | 'estritez' | 'durabilidade'} grupo
+ * @property {3} runs
+ * @property {string[]} argv
+ * @property {number} [timeout_s]
+ */
+
+/**
+ * @typedef {Object} DogfoodResult
+ * @property {string} id
+ * @property {string} grupo
+ * @property {Array<{ run: number, status: 'green' | 'red', exit_code: number | null }>} runs
+ * @property {'approved' | 'rejected'} status
+ * @property {number[]} divergent_runs
+ * @property {string} message
+ */
+
+/**
+ * Valida uma tarefa de dogfood; tarefa malformada é entrada inválida (exit 4).
+ *
+ * @param {any} task
+ * @returns {DogfoodTask}
+ */
+function assertDogfoodTask(task) {
+  const id = typeof task?.id === 'string' && task.id.trim() ? task.id : null
+  if (!id) {
+    throw new AdeError('dogfood_task_invalid', 'tarefa de dogfood sem id', 4)
+  }
+  if (!DOGFOOD_GROUPS.includes(task.grupo)) {
+    throw new AdeError('dogfood_task_invalid', `tarefa ${id}: grupo inválido: ${task.grupo}`, 4)
+  }
+  if (task.runs !== DOGFOOD_RUNS) {
+    throw new AdeError('dogfood_task_invalid', `tarefa ${id}: runs precisa ser ${DOGFOOD_RUNS}`, 4)
+  }
+  if (!Array.isArray(task.argv) || !task.argv.every((/** @type {any} */ a) => typeof a === 'string')) {
+    throw new AdeError('dogfood_task_invalid', `tarefa ${id}: argv precisa ser array de strings`, 4)
+  }
+  if (task.argv[0] !== 'node' || task.argv.length < 2) {
+    throw new AdeError('dogfood_task_invalid', `tarefa ${id}: argv precisa ser node <script>`, 4)
+  }
+  return task
+}
+
+/**
+ * Lê e valida o catálogo versionado da suíte: 20 a 50 tarefas, ids únicos, os cinco grupos.
+ *
+ * @param {string} catalogPath
+ * @returns {DogfoodTask[]}
+ */
+export function loadDogfoodCatalog(catalogPath) {
+  let doc
+  try {
+    doc = JSON.parse(fs.readFileSync(catalogPath, 'utf8'))
+  } catch (err) {
+    throw new AdeError('dogfood_catalog_invalid', `catálogo de dogfood ilegível: ${catalogPath}: ${err instanceof Error ? err.message : String(err)}`, 4)
+  }
+  /** @type {DogfoodTask[]} */
+  const tasks = Array.isArray(doc?.tasks) ? doc.tasks.map(assertDogfoodTask) : []
+  if (tasks.length < 20 || tasks.length > 50) {
+    throw new AdeError('dogfood_catalog_invalid', `catálogo de dogfood precisa de 20 a 50 tarefas, tem ${tasks.length}`, 4)
+  }
+  if (new Set(tasks.map((/** @type {DogfoodTask} */ t) => t.id)).size !== tasks.length) {
+    throw new AdeError('dogfood_catalog_invalid', 'catálogo de dogfood com id repetido', 4)
+  }
+  const missing = DOGFOOD_GROUPS.filter((g) => !tasks.some((/** @type {DogfoodTask} */ t) => t.grupo === g))
+  if (missing.length > 0) {
+    throw new AdeError('dogfood_catalog_invalid', `catálogo de dogfood sem o grupo: ${missing.join(', ')}`, 4)
+  }
+  return tasks
+}
+
+/**
+ * Recusa remoto de entrega fora da pasta temporária do sistema ou que não seja repositório bare:
+ * a suíte nunca entrega em repositório real.
+ *
+ * @param {unknown} remote
+ * @returns {string}
+ */
+export function assertTempRemote(remote) {
+  const tmpRoot = path.resolve(os.tmpdir()) + path.sep
+  const resolved = typeof remote === 'string' ? path.resolve(remote) : ''
+  const isLexicalInside =
+    process.platform === 'win32'
+      ? resolved.toLowerCase().startsWith(tmpRoot.toLowerCase())
+      : resolved.startsWith(tmpRoot)
+  if (!resolved || !isLexicalInside || !fs.existsSync(resolved)) {
+    throw new AdeError('dogfood_remote_invalid', `remoto de dogfood precisa ser repositório bare existente em ${tmpRoot}: ${String(remote)}`, 4)
+  }
+
+  let realResolved
+  let realTmpRoot
+  try {
+    realResolved = fs.realpathSync(resolved)
+    realTmpRoot = fs.realpathSync(os.tmpdir())
+  } catch {
+    throw new AdeError('dogfood_remote_invalid', `remoto de dogfood precisa ser repositório bare existente em ${tmpRoot}: ${String(remote)}`, 4)
+  }
+
+  const realTmpPrefix = realTmpRoot.endsWith(path.sep) ? realTmpRoot : realTmpRoot + path.sep
+  const isRealInside =
+    process.platform === 'win32'
+      ? realResolved.toLowerCase().startsWith(realTmpPrefix.toLowerCase())
+      : realResolved.startsWith(realTmpPrefix)
+  if (!isRealInside) {
+    throw new AdeError('dogfood_remote_invalid', `remoto de dogfood precisa ser repositório bare existente em ${realTmpPrefix}: ${String(remote)}`, 4)
+  }
+
+  let isBare = false
+  try {
+    const out = execFileSync('git', ['--git-dir', realResolved, 'rev-parse', '--is-bare-repository'], {
+      encoding: 'utf8',
+      maxBuffer: 1 << 20,
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim()
+    isBare = out === 'true'
+  } catch {
+    isBare = false
+  }
+
+  if (!isBare) {
+    throw new AdeError('dogfood_remote_invalid', `remoto de dogfood precisa ser repositório Git bare existente em ${realTmpPrefix}: ${String(remote)}`, 4)
+  }
+
+  return realResolved
+}
+
+/**
+ * Executa a tarefa três vezes; aprovada só quando as três passam. A execução divergente é a
+ * minoria quando o resultado se divide.
+ *
+ * @param {DogfoodTask} task
+ * @param {{ cwd: string, remote: string }} options
+ * @returns {Promise<DogfoodResult>}
+ */
+export async function runDogfoodTask(task, { cwd, remote }) {
+  assertDogfoodTask(task)
+  const remoteDir = assertTempRemote(remote)
+
+  /** @type {DogfoodResult['runs']} */
+  const runs = []
+  for (let run = 1; run <= DOGFOOD_RUNS; run++) {
+    const contained = await runContained({
+      argv: task.argv,
+      cwd,
+      timeoutS: task.timeout_s ?? 60,
+      // git só fala o transporte file: nenhuma entrega sai da máquina
+      env: { ADE_DOGFOOD_RUN: String(run), ADE_DOGFOOD_REMOTE: remoteDir, GIT_ALLOW_PROTOCOL: 'file' },
+    })
+    runs.push({ run, status: contained.exitCode === 0 ? 'green' : 'red', exit_code: contained.exitCode })
+  }
+
+  const green = runs.filter((r) => r.status === 'green').length
+  const minority = green * 2 > DOGFOOD_RUNS ? 'red' : 'green'
+  const divergent_runs = green === 0 || green === DOGFOOD_RUNS ? [] : runs.filter((r) => r.status === minority).map((r) => r.run)
+  const status = green === DOGFOOD_RUNS ? 'approved' : 'rejected'
+  const message =
+    status === 'approved'
+      ? `APROVADA ${task.id} (grupo ${task.grupo}): verde 3/3`
+      : divergent_runs.length > 0
+        ? `REPROVADA ${task.id} (grupo ${task.grupo}): instável, verde ${green}/3, execução ${divergent_runs.join(', ')} divergiu`
+        : `REPROVADA ${task.id} (grupo ${task.grupo}): vermelha nas 3 execuções`
+
+  return { id: task.id, grupo: task.grupo, runs, status, divergent_runs, message }
+}
+
+/**
+ * Roda a suíte inteira; aprovada só quando todas as tarefas são aprovadas.
+ *
+ * @param {DogfoodTask[]} tasks
+ * @param {{ cwd: string, remote: string }} options
+ * @returns {Promise<{ approved: boolean, results: DogfoodResult[], report: string }>}
+ */
+export async function runDogfoodSuite(tasks, options) {
+  tasks.forEach(assertDogfoodTask)
+  assertTempRemote(options?.remote)
+  /** @type {DogfoodResult[]} */
+  const results = []
+  for (const task of tasks) {
+    results.push(await runDogfoodTask(task, options))
+  }
+  return {
+    approved: results.every((r) => r.status === 'approved'),
+    results,
+    report: results.map((r) => r.message).join('\n'),
+  }
 }

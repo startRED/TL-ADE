@@ -1,0 +1,205 @@
+{
+  "format_version": 1,
+  "tasks": [
+    {
+      "id": "DF-tradutor-pedido-trivial-sem-modelo",
+      "grupo": "tradutor",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/tradutor.mjs",
+        "pedido-trivial-sem-modelo"
+      ]
+    },
+    {
+      "id": "DF-tradutor-superficie-critica-auth",
+      "grupo": "tradutor",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/tradutor.mjs",
+        "superficie-critica-auth"
+      ]
+    },
+    {
+      "id": "DF-tradutor-entrevista-descarta-pergunta-respondivel",
+      "grupo": "tradutor",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/tradutor.mjs",
+        "entrevista-descarta-pergunta-respondivel"
+      ]
+    },
+    {
+      "id": "DF-tradutor-pedido-vazio-recusado",
+      "grupo": "tradutor",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/tradutor.mjs",
+        "pedido-vazio-recusado"
+      ]
+    },
+    {
+      "id": "DF-jornadas-maker-falso-edita-worktree",
+      "grupo": "jornadas",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/jornadas.mjs",
+        "maker-falso-edita-worktree"
+      ]
+    },
+    {
+      "id": "DF-jornadas-maker-falso-transitorio-depois-ok",
+      "grupo": "jornadas",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/jornadas.mjs",
+        "maker-falso-transitorio-depois-ok"
+      ]
+    },
+    {
+      "id": "DF-jornadas-entrega-no-bare-temporario",
+      "grupo": "jornadas",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/jornadas.mjs",
+        "entrega-no-bare-temporario"
+      ]
+    },
+    {
+      "id": "DF-jornadas-entrega-sem-rede-recusada",
+      "grupo": "jornadas",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/jornadas.mjs",
+        "entrega-sem-rede-recusada"
+      ]
+    },
+    {
+      "id": "DF-visual-corte-aprova-nota-alta",
+      "grupo": "visual",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/visual.mjs",
+        "corte-aprova-nota-alta"
+      ]
+    },
+    {
+      "id": "DF-visual-corte-refaz-especificidade-baixa",
+      "grupo": "visual",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/visual.mjs",
+        "corte-refaz-especificidade-baixa"
+      ]
+    },
+    {
+      "id": "DF-visual-corte-refaz-defeito-critico",
+      "grupo": "visual",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/visual.mjs",
+        "corte-refaz-defeito-critico"
+      ]
+    },
+    {
+      "id": "DF-visual-modo-da-superficie-pelo-pedido",
+      "grupo": "visual",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/visual.mjs",
+        "modo-da-superficie-pelo-pedido"
+      ]
+    },
+    {
+      "id": "DF-estritez-aditivo-sozinho-recusado",
+      "grupo": "estritez",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/estritez.mjs",
+        "aditivo-sozinho-recusado"
+      ]
+    },
+    {
+      "id": "DF-estritez-aditivo-com-negativo-aceito",
+      "grupo": "estritez",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/estritez.mjs",
+        "aditivo-com-negativo-aceito"
+      ]
+    },
+    {
+      "id": "DF-estritez-vermelho-por-assercao",
+      "grupo": "estritez",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/estritez.mjs",
+        "vermelho-por-assercao"
+      ]
+    },
+    {
+      "id": "DF-estritez-verde-sem-alvo-recusado",
+      "grupo": "estritez",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/estritez.mjs",
+        "verde-sem-alvo-recusado"
+      ]
+    },
+    {
+      "id": "DF-durabilidade-cadeia-de-hash-encadeada",
+      "grupo": "durabilidade",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/durabilidade.mjs",
+        "cadeia-de-hash-encadeada"
+      ]
+    },
+    {
+      "id": "DF-durabilidade-cauda-rasgada-detectada",
+      "grupo": "durabilidade",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/durabilidade.mjs",
+        "cauda-rasgada-detectada"
+      ]
+    },
+    {
+      "id": "DF-durabilidade-adulteracao-no-meio-recusada",
+      "grupo": "durabilidade",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/durabilidade.mjs",
+        "adulteracao-no-meio-recusada"
+      ]
+    },
+    {
+      "id": "DF-durabilidade-canonico-independe-da-ordem",
+      "grupo": "durabilidade",
+      "runs": 3,
+      "argv": [
+        "node",
+        "fixtures/dogfood/checks/durabilidade.mjs",
+        "canonico-independe-da-ordem"
+      ]
+    }
+  ]
+}

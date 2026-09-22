@@ -1,0 +1,9 @@
+{
+  "id": "DF-instavel-duble",
+  "grupo": "durabilidade",
+  "runs": 3,
+  "argv": [
+    "node",
+    "fixtures/dogfood/checks/flaky.mjs"
+  ]
+}

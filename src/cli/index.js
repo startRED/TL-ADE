@@ -17,6 +17,7 @@ import { main as catalogMain } from './catalog.js'
 import { main as initMain } from './init.js'
 import { main as serveMain } from './serve.js'
 import { main as indexMain } from './index-command.js'
+import { main as evalMain } from './eval.js'
 
 /**
  * Ponto de entrada e dispatch de subcomandos da CLI.
@@ -49,8 +50,8 @@ export async function main(argv, deps = {}) {
   try {
     const [command, ...commandArgv] = argv
 
-    if (!command || !['run', 'status', 'journal', 'report', 'show', 'doctor', 'docs', 'gc', 'plan', 'validate', 'approve', 'catalog', 'init', 'serve', 'index'].includes(command)) {
-      stderr.write('uso: ade <run|status|journal|report|show|doctor|docs|gc|plan|validate|approve|catalog|init|serve|index> ...\n')
+    if (!command || !['run', 'status', 'journal', 'report', 'show', 'doctor', 'docs', 'gc', 'plan', 'validate', 'approve', 'catalog', 'init', 'serve', 'index', 'eval'].includes(command)) {
+      stderr.write('uso: ade <run|status|journal|report|show|doctor|docs|gc|plan|validate|approve|catalog|init|serve|index|eval> ...\n')
       return 4
     }
 
@@ -135,11 +136,15 @@ export async function main(argv, deps = {}) {
       return await serveMain(commandArgv, delegatedDeps)
     }
 
+    if (command === 'eval') {
+      return await evalMain(commandArgv, delegatedDeps)
+    }
+
     if (command === 'index') {
       return await indexMain(commandArgv, delegatedDeps)
     }
 
-    stderr.write('uso: ade <run|status|journal|report|show|doctor|docs|gc|plan|validate|approve|catalog|init|serve|index> ...\n')
+    stderr.write('uso: ade <run|status|journal|report|show|doctor|docs|gc|plan|validate|approve|catalog|init|serve|index|eval> ...\n')
     return 4
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
