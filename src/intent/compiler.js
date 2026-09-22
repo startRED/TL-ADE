@@ -42,11 +42,12 @@ function splitDeliverables(request) {
     .filter((part) => part.length > 8)
 }
 
+/** @param {{ risk: any, discovery: any }} input */
 function buildVerifiers({ risk, discovery }) {
   const testCmd = discovery.scripts?.test
     ? discovery.scripts.test.split(' ')
     : ['node', 'node_modules/vitest/vitest.mjs', 'run']
-  const anchorPaths = (discovery.anchors || []).map((a) => a.path)
+  const anchorPaths = (discovery.anchors || []).map((/** @type {any} */ a) => a.path)
   const evidence = anchorPaths.length > 0 ? anchorPaths : ['package.json']
 
   const base = {
@@ -83,7 +84,11 @@ function buildVerifiers({ risk, discovery }) {
   ]
 }
 
-/** Cenário negativo correspondente ao verificador de recuperação da superfície crítica. */
+/**
+ * Cenário negativo correspondente ao verificador de recuperação da superfície crítica.
+ *
+ * @param {{ n: number, risk: any, verifiers: any[] }} input
+ */
 function criticalScenario({ n, risk, verifiers }) {
   const surface = risk.surfaces[0]
   const negative = verifiers.filter((v) => v.id.startsWith('V2-neg-'))
@@ -99,6 +104,7 @@ function criticalScenario({ n, risk, verifiers }) {
   ]
 }
 
+/** @param {Record<string, any> & { verifiers: any[] }} input */
 function buildContract({
   id,
   title,
@@ -335,7 +341,7 @@ export async function compileIntent({
   const baseScopePaths = risk.sensitive_paths
     ? risk.sensitive_paths
     : (discovery.anchors || []).length > 0
-      ? discovery.anchors.map((a) => a.path)
+      ? discovery.anchors.map((/** @type {any} */ a) => a.path)
       : ['src/**']
 
   const guardrails = {
@@ -355,10 +361,9 @@ export async function compileIntent({
 
   const designSignals = discoverDesignSignals({
     request,
-    discovery,
-    paths: (discovery.modules || []).map((m) => m.path),
+    paths: (discovery.modules || []).map((/** @type {any} */ m) => m.path),
     packageJson: discovery.packageJson,
-    scopePaths: (discovery.anchors || []).map((a) => a.path),
+    scopePaths: (discovery.anchors || []).map((/** @type {any} */ a) => a.path),
   })
 
   const needsUi = Boolean(
@@ -370,7 +375,7 @@ export async function compileIntent({
   const skills = selectEligibleSkills({
     story: {
       domains: classification.domains || (risk.surfaces.includes('auth') ? ['security', 'auth'] : ['backend']),
-      languages: (discovery.languages || []).map((l) => l.name),
+      languages: (discovery.languages || []).map((/** @type {any} */ l) => l.name),
       task: request,
     },
     eligibleSkills,
@@ -409,6 +414,7 @@ export async function compileIntent({
     return c
   })
 
+  /** @type {Record<string, any>} */
   const designBriefs = {}
   for (const contract of contracts) {
     if (!contract.needs_ui) continue

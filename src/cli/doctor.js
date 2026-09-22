@@ -209,6 +209,11 @@ async function computeLongpathsWarnings(platform, gitConfigImpl) {
  *   probeImpl?: (resolved: { exe: string, prefixArgs: string[] }, args: string[]) => Promise<{ stdout: string, exitCode: number | null }>,
  *   helpImpl?: (resolved: { exe: string, prefixArgs: string[] }) => Promise<{ exitCode: number | null }>,
  *   randomUUID?: () => string,
+ *   probeImpeccableImpl?: typeof probeImpeccable,
+ *   failClosedOnVisual?: boolean,
+ *   impeccableBin?: string,
+ *   expectedEngineVersion?: string,
+ *   impeccableExecFn?: NonNullable<Parameters<typeof probeImpeccable>[0]>['execFn'],
  * }} opts
  * @returns {Promise<{ capabilities: Record<string, any>, path: string, longpaths: string | null, warnings: string[] }>}
  */
@@ -337,8 +342,14 @@ export async function runDoctor(opts) {
   return { capabilities: doc, path: capsPath, longpaths, warnings }
 }
 
+/**
+ * @param {string} dir
+ * @param {string} [base]
+ * @returns {string[]}
+ */
 function listFilesRec(dir, base = '') {
   if (!existsSync(dir)) return []
+  /** @type {string[]} */
   const results = []
   try {
     const entries = readdirSync(dir, { withFileTypes: true })
@@ -370,6 +381,7 @@ export function diagnoseSkills({ homeDir = os.homedir(), repoDir = process.cwd()
     path.join(homeDir, '.agents'),
   ]
 
+  /** @type {Record<string, string>} */
   const currentHashes = {}
   for (const dir of monitoredDirs) {
     if (existsSync(dir)) {
@@ -495,6 +507,10 @@ export function diagnoseHarness(repoDir) {
   return { ...auditHarness(events, config), pruning: evaluateDefaultPruning({ events, config }) }
 }
 
+/**
+ * @param {string[]} argv
+ * @param {Record<string, any>} [deps]
+ */
 export async function main(argv, deps = {}) {
   const env = deps.env ?? process.env
   const stdout = deps.stdout ?? process.stdout

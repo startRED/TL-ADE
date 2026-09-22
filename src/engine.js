@@ -1039,7 +1039,7 @@ async function runStoryImpl(deps, input) {
       }
 
       if (fqeRes.status === 'rework') {
-        const visualFindings = (fqeRes.defects || []).map((d) => ({
+        const visualFindings = (fqeRes.defects || []).map((/** @type {any} */ d) => ({
           severity: d.severity,
           message: `${d.criterion}: ${d.fix} (${d.where})`,
           path: d.where,

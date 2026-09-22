@@ -326,17 +326,17 @@ describe('v0.3 Intent Compiler Acceptance Criteria', () => {
     expect(badEarsRes.errors.some((e) => e.code === 'ears_form_rejected')).toBe(true)
 
     // depends_on com story inexistente
-    const missingDepContract = structuredClone(baseContract)
+    const missingDepContract: typeof baseContract & { depends_on?: string[] } = structuredClone(baseContract)
     missingDepContract.depends_on = ['NON_EXISTENT_STORY']
     const missingDepRes = validateCompiledPlan(validPlan, [missingDepContract])
     expect(missingDepRes.valid).toBe(false)
     expect(missingDepRes.errors.some((e) => e.code === 'missing_dependency')).toBe(true)
 
     // depends_on com ciclo
-    const cycleContractA = structuredClone(baseContract)
+    const cycleContractA: typeof baseContract & { depends_on?: string[] } = structuredClone(baseContract)
     cycleContractA.id = 'S1'
     cycleContractA.depends_on = ['S2']
-    const cycleContractB = structuredClone(baseContract)
+    const cycleContractB: typeof baseContract & { depends_on?: string[] } = structuredClone(baseContract)
     cycleContractB.id = 'S2'
     cycleContractB.depends_on = ['S1']
     const cyclePlan = structuredClone(validPlan)

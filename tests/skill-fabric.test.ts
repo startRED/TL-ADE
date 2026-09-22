@@ -443,9 +443,6 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
 
     expect(SECTION_ORDER).toContain('skills')
 
-    const rawSkillContent =
-      '---\nname: complex-skill\nallowed-tools:\n  - Bash\n---\nCorpo limpo da skill\n```bash\nscripts/helper.sh\n```'
-
     const result = compilePack({
       missionDir,
       stepId: 'S01:r1:maker',

@@ -1,4 +1,3 @@
-/* eslint-disable unicorn/no-thenable */
 import fs, { rmSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'

@@ -37,6 +37,7 @@ const STOPWORDS = new Set([
 ])
 
 /** Sinônimos em português dos fatos descobríveis expostos por discovery/IR. */
+/** @type {Record<string, string[]>} */
 const FACT_ALIASES = {
   database: ['banco', 'bd', 'database', 'dados'],
   test_runner: ['runner', 'teste', 'testes'],
@@ -46,6 +47,7 @@ const FACT_ALIASES = {
   package_manager: ['gerenciador', 'pacotes'],
 }
 
+/** @param {unknown} text */
 function normalizeText(text) {
   return String(text || '')
     .normalize('NFD')
@@ -56,10 +58,15 @@ function normalizeText(text) {
     .trim()
 }
 
+/** @param {unknown} text */
 function contentTokens(text) {
   return new Set(normalizeText(text).split(' ').filter((t) => t.length > 2 && !STOPWORDS.has(t)))
 }
 
+/**
+ * @param {Set<string>} a
+ * @param {Set<string>} b
+ */
 function jaccard(a, b) {
   if (a.size === 0 || b.size === 0) return 0
   let inter = 0
@@ -137,7 +144,7 @@ export function getRefusedQuestions({ unknowns = [], discovery = {}, repoIr = {}
   const answerable = discovery.answerable || []
   const facts = buildFactIndex(discovery, repoIr)
 
-  const findFact = (text) => facts.find((f) => f.aliases.some((alias) => matchesAlias(text, alias)))
+  const findFact = (/** @type {string} */ text) => facts.find((f) => f.aliases.some((alias) => matchesAlias(text, alias)))
 
   // Itens declarados explicitamente em discovery.answerable
   for (const item of answerable) {
@@ -154,7 +161,7 @@ export function getRefusedQuestions({ unknowns = [], discovery = {}, repoIr = {}
     const normalized = normalizeText(text)
     if (refused.some((r) => normalizeText(r.question) === normalized)) continue
 
-    const inAnswerable = answerable.some((a) => {
+    const inAnswerable = answerable.some((/** @type {any} */ a) => {
       const na = normalizeText(a)
       return na.includes(normalized) || normalized.includes(na)
     })
@@ -188,6 +195,7 @@ export function buildInterview({ unknowns = [], discovery = {}, repoIr = {}, max
   const refused = getRefusedQuestions({ unknowns, discovery, repoIr })
   const refusedNormalized = refused.map((r) => normalizeText(r.question))
 
+  /** @type {any[]} */
   const candidates = []
   const seenRefs = new Set()
 
@@ -244,7 +252,7 @@ export function buildInterview({ unknowns = [], discovery = {}, repoIr = {}, max
       kind: u.kind || 'product_choice',
       text,
       options,
-      default_if_unknown: u.default_if_unknown || options.find((o) => o.recommended)?.id || options[0]?.id,
+      default_if_unknown: u.default_if_unknown || options.find((/** @type {any} */ o) => o.recommended)?.id || options[0]?.id,
       tokens,
     })
   }
@@ -274,6 +282,7 @@ export function applyInterviewAnswer(contract, question, answer) {
   const isDontKnow = !answer || normalizedAnswer === 'nao sei' || normalizedAnswer === 'dont know' || answer === 'dont_know'
 
   const unknownId = question.unknown_ref || question.id
+  /** @type {{ id: any, question: any, kind: any, resolved_by?: string }} */
   const unknownEntry = {
     id: unknownId,
     question: question.text || question.question,
@@ -284,8 +293,8 @@ export function applyInterviewAnswer(contract, question, answer) {
 
   if (isDontKnow) {
     const recommendedOpt =
-      (question.options || []).find((o) => o.recommended) ||
-      (question.options || []).find((o) => o.id === question.default_if_unknown) ||
+      (question.options || []).find((/** @type {any} */ o) => o.recommended) ||
+      (question.options || []).find((/** @type {any} */ o) => o.id === question.default_if_unknown) ||
       (question.options || [])[0]
 
     const defaultValue = question.default_if_unknown || recommendedOpt?.id || 'default'

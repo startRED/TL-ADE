@@ -313,13 +313,16 @@ describe('budget controls', () => {
     })
 
     // Recibo com soma used_percent + reserved_percent >= 50
-    const exhaustedReceipt = validateQuotaReceipt({
-      source: 'official',
-      used_percent: 45,
-      reserved_percent: 5,
-      observed_at: '2026-09-20T00:00:00.000Z',
-      weekly_reset_at: '2026-09-27T00:00:00.000Z',
-    })
+    const exhaustedReceipt = validateQuotaReceipt(
+      {
+        source: 'official',
+        used_percent: 45,
+        reserved_percent: 5,
+        observed_at: '2026-09-20T00:00:00.000Z',
+        weekly_reset_at: '2026-09-27T00:00:00.000Z',
+      },
+      { now: new Date('2026-09-20T01:00:00.000Z').getTime() },
+    )
     expect(exhaustedReceipt).toEqual({
       ok: false,
       reason: 'quota_exhausted',

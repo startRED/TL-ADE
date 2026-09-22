@@ -59,7 +59,7 @@ export function validateCompiledPlan(plan, contracts = []) {
     }
 
     // Regra adicional: todo verificador citado por cenário precisa existir no contrato
-    const verifierIds = new Set((contract.verifiers || []).map((v) => v?.id))
+    const verifierIds = new Set((contract.verifiers || []).map((/** @type {any} */ v) => v?.id))
     for (const scenario of contract.scenarios || []) {
       for (const ref of scenario?.verifiers || []) {
         if (!verifierIds.has(ref)) {
@@ -107,7 +107,7 @@ export function validateCompiledPlan(plan, contracts = []) {
           .map((c) => c?.id)
           .filter(Boolean)
           .concat(
-            (plan.phases || []).flatMap((p) => (p.epics || []).flatMap((e) => e.stories || [])),
+            (plan.phases || []).flatMap((/** @type {any} */ p) => (p.epics || []).flatMap((/** @type {any} */ e) => e.stories || [])),
           ),
       )
       for (const dep of contract.depends_on) {

@@ -35,7 +35,7 @@ const HOSTILE_PATTERNS = [
  *   hashes: Record<string, string>,
  * }}
  */
-export function scanSkill({ files = {}, allowedUrls = [] }) {
+export function scanSkill({ files = {} }) {
   /** @type {string[]} */
   const findings = []
   let hasScripts = false

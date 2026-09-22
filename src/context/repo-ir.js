@@ -75,6 +75,7 @@ export async function buildRepoIr({
     provenance: 'fact',
   }))
 
+  /** @type {any[]} */
   let inferences = []
   if (typeof producer === 'function') {
     const raw = await producer(discovery.ambiguities || [])

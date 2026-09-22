@@ -79,8 +79,8 @@ export function selectEligibleSkills({ story, eligibleSkills = [], approvedSkill
 
   const storyId = (story?.id || '').toLowerCase()
   const storyTask = (story?.task || '').toLowerCase()
-  const surfaces = (story?.risk?.surfaces || []).map((s) => String(s).toLowerCase())
-  const scopePaths = (story?.guardrails?.scope_paths || []).map((p) => String(p).toLowerCase())
+  const surfaces = /** @type {unknown[]} */ /** @type {unknown[]} */ (story?.risk?.surfaces || []).map((s) => String(s).toLowerCase())
+  const scopePaths = /** @type {unknown[]} */ /** @type {unknown[]} */ (story?.guardrails?.scope_paths || []).map((p) => String(p).toLowerCase())
 
   const filtered = eligibleSkills.filter((skill) => {
     // Nenhuma skill fora do conjunto aprovado entra
@@ -204,7 +204,7 @@ export async function buildStoryContext(input, deps = {}) {
     : (Array.isArray(loaded?.plan?.approved_skills) ? loaded.plan.approved_skills : null)
   const contractSkills = Array.isArray(contract.skills) ? contract.skills : null
   const approvedSkills = planApproved && contractSkills
-    ? contractSkills.filter((name) => planApproved.includes(name))
+    ? contractSkills.filter((/** @type {string} */ name) => planApproved.includes(name))
     : (planApproved ?? contractSkills ?? [])
 
   // Conteúdo imutável do contrato: entra na chave do cache e na seção contract.
@@ -278,26 +278,23 @@ export async function buildStoryContext(input, deps = {}) {
 
   // 4. Símbolos e relações relevantes
   let rawSymbols = []
-  let rawRelations = []
 
   if (cachedData?.produced?.symbols) {
     rawSymbols = cachedData.produced.symbols
-    rawRelations = cachedData.produced.relations || []
   } else if (deps.ir?.data?.symbols) {
     rawSymbols = deps.ir.data.symbols
-    rawRelations = deps.ir.data.relations || []
   } else if (discovery?.symbols) {
     rawSymbols = discovery.symbols
   }
 
   // Filtra símbolos contidos exclusivamente no escopo
-  const inScopeSymbols = rawSymbols.filter((s) => {
+  const inScopeSymbols = rawSymbols.filter((/** @type {any} */ s) => {
     if (!s.path) return true
     return isPathInScope(s.path, scopePaths, doNotTouch)
   })
 
   // Filtra testes contidos no escopo
-  const inScopeTests = (discovery?.related_tests || []).filter((t) => {
+  const inScopeTests = (discovery?.related_tests || []).filter((/** @type {any} */ t) => {
     return isPathInScope(t.targetModule, scopePaths, doNotTouch)
   })
 
@@ -309,6 +306,7 @@ export async function buildStoryContext(input, deps = {}) {
     approvedSkills,
   })
 
+  /** @type {any[]} */
   const selectedSkills = []
   for (const name of selectedNames) {
     const sk = knownSkills.find((s) => s.name === name)
@@ -411,7 +409,7 @@ export async function buildStoryContext(input, deps = {}) {
   const maxPackBytes = deps.limits?.max_pack_bytes ?? 120000
 
   // Função auxiliar para renderizar a seção story
-  const renderStorySection = (symbolsCount) => {
+  const renderStorySection = (/** @type {number} */ symbolsCount) => {
     const parts = [
       `story_id: ${story.id}`,
       `task: ${contract.task || ''}`,
@@ -431,12 +429,12 @@ export async function buildStoryContext(input, deps = {}) {
     }
 
     if (inScopeTests.length > 0) {
-      parts.push(`related_tests: ${JSON.stringify(inScopeTests.map((t) => t.testPath))}`)
+      parts.push(`related_tests: ${JSON.stringify(inScopeTests.map((/** @type {any} */ t) => t.testPath))}`)
     }
 
     const displayedSymbols = inScopeSymbols.slice(0, symbolsCount)
     if (displayedSymbols.length > 0) {
-      parts.push(`symbols: ${JSON.stringify(displayedSymbols.map((s) => ({ name: s.name, kind: s.kind, path: s.path, line: s.line })))}`)
+      parts.push(`symbols: ${JSON.stringify(displayedSymbols.map((/** @type {any} */ s) => ({ name: s.name, kind: s.kind, path: s.path, line: s.line })))}`)
     }
 
     if (symbolsCount < inScopeSymbols.length) {
@@ -566,8 +564,8 @@ export function guardStoryContext({ story, contract, workspaceDir }) {
     ...(Array.isArray(story?.evals) ? story.evals : []),
     ...(Array.isArray(contractObj?.evals) ? contractObj.evals : []),
     ...(Array.isArray(contractObj?.verifiers) ? contractObj.verifiers : []),
-    ...(Array.isArray(story?.scenarios) ? story.scenarios.map((s) => s?.eval) : []),
-    ...(Array.isArray(contractObj?.scenarios) ? contractObj.scenarios.map((s) => s?.eval) : []),
+    ...(Array.isArray(story?.scenarios) ? story.scenarios.map((/** @type {any} */ s) => s?.eval) : []),
+    ...(Array.isArray(contractObj?.scenarios) ? contractObj.scenarios.map((/** @type {any} */ s) => s?.eval) : []),
   ]
     // Só verificador de script executa comando; juiz e schema não têm argv para conferir.
     .filter((item) => item && (item.kind === undefined || item.kind === 'script'))

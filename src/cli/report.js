@@ -426,7 +426,9 @@ export function renderVisualComparison(events = []) {
   let section = '\n## Avaliação visual e capturas comparáveis\n\n'
   section += '| rota | largura | tema | captura r1 | captura r2 | nota r1 | nota r2 |\n| --- | --- | --- | --- | --- | --- | --- |\n'
 
+  /** @type {Array<Record<string, any>>} */
   const r1Caps = r1Eval?.captures || []
+  /** @type {Array<Record<string, any>>} */
   const r2Caps = r2Eval?.captures || []
 
   if (r1Caps.length === 0 && r2Caps.length === 0) {

@@ -10,9 +10,6 @@ import {
   replanRemaining,
   assertApprovedPlan,
 } from '../src/mission/plan-lifecycle.js'
-import { main as planCli } from '../src/cli/plan.js'
-import { main as validateCli } from '../src/cli/validate.js'
-import { main as approveCli } from '../src/cli/approve.js'
 import { main as cliMain } from '../src/cli/index.js'
 import { splitContract } from '../src/intent/split.js'
 import { validateCompiledPlan } from '../src/intent/validate.js'

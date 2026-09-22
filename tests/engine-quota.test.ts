@@ -330,7 +330,7 @@ function makePlanFixture(repoDir: string) {
   const capsDir = path.join(repoDir, '.ade')
   fs.writeFileSync(path.join(capsDir, 'capabilities.json'), JSON.stringify({
     probe_ok: true,
-    probed_at: new Date().toISOString(),
+    probed_at: new Date(NOW).toISOString(),
   }), 'utf8')
 
   return { planPath }
@@ -347,6 +347,7 @@ test('CA1_recibo_oficial_valido_permite_despacho_do_cli_ao_runner_dentro_dos_lim
       env: { ADE_HOME: subject.repoDir, CI: 'true' } as any,
       quotaPort: subject.deps.quotaPort,
       dispatchClaude: subject.deps.dispatchClaude,
+      now: subject.deps.now,
     },
   )
   // A revisão independente passou a ser obrigatória: sem binário da família do Checker
@@ -411,6 +412,7 @@ test('CA3_reserva_e_duravel_e_nao_duplicada_na_retomada', async () => {
       env: { ADE_HOME: subject.repoDir, CI: 'true' } as any,
       quotaPort,
       dispatchClaude: subject.deps.dispatchClaude,
+      now: subject.deps.now,
     },
   )
 

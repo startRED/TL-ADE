@@ -179,7 +179,7 @@ function walkDir(dir) {
  * }} options
  * @returns {Promise<{ indexPath: string, entries: any[], digest: string }>}
  */
-export async function syncCatalog({ config = {}, catalogDir, rebuildIndex = false }) {
+export async function syncCatalog({ config = {}, catalogDir }) {
   if (!config || !Array.isArray(config.sources)) {
     throw new AdeError('catalog_source_not_allowlisted', 'Configuração de fontes ausente ou inválida', 4)
   }

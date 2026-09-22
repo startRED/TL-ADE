@@ -265,7 +265,7 @@ export function nextReady(stories, states = {}) {
  * Executa todas as stories de um plano em ordem sequencial respeitando dependências,
  * aprovação congelada, retomada após interrupção e replanejamento com no_changes.
  *
- * @param {Object} deps
+ * @param {Record<string, any>} deps
  * @param {Object} input
  * @param {import('./plan-load.js').LoadedPlan} input.loaded
  * @param {string} input.repoDir
@@ -341,7 +341,7 @@ export function checkApproval(deps, loadedPlan, events, mDir) {
       skillSnapshot: deps.eligibleSkillSnapshot || [],
     })
   } catch (err) {
-    const msg = err?.message || String(err)
+    const msg = err instanceof Error ? err.message : String(err)
     const match = msg.match(/contrato\s+(\S+)\s+alterado/)
     return {
       valid: false,
@@ -365,7 +365,7 @@ export function checkApproval(deps, loadedPlan, events, mDir) {
  * Executa todas as stories de um plano em ordem sequencial respeitando dependências,
  * aprovação congelada, retomada após interrupção e replanejamento com no_changes.
  *
- * @param {Object} deps
+ * @param {Record<string, any>} deps
  * @param {Object} input
  * @param {import('./plan-load.js').LoadedPlan} input.loaded
  * @param {string} input.repoDir
@@ -398,10 +398,10 @@ export async function runSequentialMission(deps, { loaded, repoDir, missionDir }
       const res = readJournal(jPath)
       return res.events || []
     } catch (err) {
-      if (err instanceof AdeError || err?.name === 'JournalCorruptError') {
+      if (err instanceof AdeError || (err instanceof Error && err.name === 'JournalCorruptError')) {
         throw err
       }
-      throw new AdeError('journal_corrupted', `journal corrompido: ${err?.message || err}`, 2)
+      throw new AdeError('journal_corrupted', `journal corrompido: ${err instanceof Error ? err.message : String(err)}`, 2)
     }
   }
 
@@ -464,7 +464,7 @@ export async function runSequentialMission(deps, { loaded, repoDir, missionDir }
         await journal.append({
           kind: 'run_resumed',
           data: {
-            verdicts: verdicts.map((v) => ({
+            verdicts: verdicts.map((/** @type {any} */ v) => ({
               step_id: v.step_id,
               verdict: v.verdict,
               reason: v.reason,
@@ -588,7 +588,7 @@ export async function runSequentialMission(deps, { loaded, repoDir, missionDir }
       }
 
       const uncompleted = currentLoaded.stories.find((s) => !isCompleted(states[s.id]))
-      const reason = states[uncompleted?.id]?.reason || 'dependency_blocked'
+      const reason = (uncompleted ? states[uncompleted.id]?.reason : undefined) || 'dependency_blocked'
       return {
         status: 'awaiting_operator',
         exitCode: 3,
@@ -698,7 +698,7 @@ export async function runSequentialMission(deps, { loaded, repoDir, missionDir }
           completedStories,
           currentStory: story.id,
           reason: 'replan_failed',
-          nextAction: `operator review needed: ${err?.message || err}`,
+          nextAction: `operator review needed: ${err instanceof Error ? err.message : String(err)}`,
         }
       }
 
@@ -756,7 +756,7 @@ export async function runSequentialMission(deps, { loaded, repoDir, missionDir }
         const allPendingIds = [
           ...completedDeps,
           ...untouchedPending.map((s) => s.id),
-          ...replanRes.replannedStories.map((c) => c.id),
+          ...replanRes.replannedStories.map((/** @type {any} */ c) => c.id),
         ]
         newPlanObj.phases = [{ epics: [{ stories: allPendingIds }] }]
         newPlanObj.immutable_digest = digest16(newPlanObj)
@@ -786,8 +786,8 @@ export async function runSequentialMission(deps, { loaded, repoDir, missionDir }
       const frozenAuth = loaded.plan?.authorization || {}
       const newAuth = currentLoaded.plan?.authorization || {}
       const widened = [
-        ...(newAuth.permitted_effects || []).filter((e) => !(frozenAuth.permitted_effects || []).includes(e)),
-        ...(newAuth.eligible_skills || []).filter((s) => !(frozenAuth.eligible_skills || []).includes(s)),
+        ...(newAuth.permitted_effects || []).filter((/** @type {string} */ e) => !(frozenAuth.permitted_effects || []).includes(e)),
+        ...(newAuth.eligible_skills || []).filter((/** @type {string} */ s) => !(frozenAuth.eligible_skills || []).includes(s)),
       ]
       if (widened.length > 0) {
         return {

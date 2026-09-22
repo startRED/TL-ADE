@@ -1,4 +1,5 @@
 /** Extrai o sufixo numérico de um id (C2 -> 2), usado para ligar requisito e cenário. */
+/** @param {unknown} id */
 function idNumber(id) {
   const match = /(\d+)\s*$/.exec(String(id || ''))
   return match ? match[1] : null
@@ -23,7 +24,7 @@ export function splitContract(contract, limits = {}) {
 
   // Limite impossível (zero, negativo, fracionário) não vira parte de um cenário calada:
   // nenhuma divisão cabe nele, então a missão aguarda recorte do operador.
-  for (const [name, value] of [['max_scenarios', maxScenarios], ['max_contract_bytes', maxBytes]]) {
+  for (const [name, value] of /** @type {Array<[string, number]>} */ ([['max_scenarios', maxScenarios], ['max_contract_bytes', maxBytes]])) {
     if (value !== Infinity && !(Number.isInteger(value) && value > 0)) {
       throw new Error(
         `splitContract: limite ${name} impossível (${value}); declare um inteiro positivo ou aguarde recorte do operador`,
@@ -71,10 +72,13 @@ export function splitContract(contract, limits = {}) {
 /**
  * Monta as partes agrupando cenários de `chunkSize` em `chunkSize`, levando os
  * verificadores e requisitos que cada grupo reivindica.
+ *
+ * @param {{ contract: any, scenarios: any[], verifiers: any[], requirements: any[], chunkSize: number }} input
  */
 function buildParts({ contract, scenarios, verifiers, requirements, chunkSize }) {
   const usedVerifierIds = new Set()
   const usedRequirementIds = new Set()
+  /** @type {any[]} */
   const parts = []
 
   for (let i = 0; i < scenarios.length; i += chunkSize) {

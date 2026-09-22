@@ -4,7 +4,7 @@ import { selectStorySkills } from '../skills/select.js'
  * Seleciona identificadores de skills elegíveis correspondendo deterministamente por domínio e linguagem.
  * Nunca retorna skill fora do conjunto elegível.
  *
- * @param {{ story?: { domains?: string[], languages?: string[], task?: string }, eligibleSkills?: any[] }} input
+ * @param {{ story?: { domains?: string[], domain?: string, languages?: string[], language?: string, task?: string }, eligibleSkills?: any[] }} input
  * @returns {string[]}
  */
 export function selectEligibleSkills({ story = {}, eligibleSkills = [] }) {
@@ -39,14 +39,14 @@ export function selectEligibleSkills({ story = {}, eligibleSkills = [] }) {
     }
   }
 
-  const storyDomains = (story.domains || []).map((d) => d.toLowerCase())
-  const storyLanguages = (story.languages || []).map((l) => l.toLowerCase())
+  const storyDomains = (story.domains || []).map((/** @type {string} */ d) => d.toLowerCase())
+  const storyLanguages = (story.languages || []).map((/** @type {string} */ l) => l.toLowerCase())
   const selected = []
 
   for (const skill of eligibleSkills) {
     if (typeof skill === 'string') {
       const lower = skill.toLowerCase()
-      if (storyDomains.some((d) => lower.includes(d)) || (story.task && story.task.toLowerCase().includes(lower))) {
+      if (storyDomains.some((/** @type {string} */ d) => lower.includes(d)) || (story.task && story.task.toLowerCase().includes(lower))) {
         selected.push(skill)
       }
       continue
@@ -56,11 +56,11 @@ export function selectEligibleSkills({ story = {}, eligibleSkills = [] }) {
       continue
     }
 
-    const skillDomains = (skill.domains || []).map((d) => d.toLowerCase())
-    const skillLanguages = (skill.languages || []).map((l) => l.toLowerCase())
+    const skillDomains = (skill.domains || []).map((/** @type {string} */ d) => d.toLowerCase())
+    const skillLanguages = (skill.languages || []).map((/** @type {string} */ l) => l.toLowerCase())
 
     // Verificar se há interseção de domínio
-    const domainMatch = skillDomains.some((d) => storyDomains.includes(d))
+    const domainMatch = skillDomains.some((/** @type {string} */ d) => storyDomains.includes(d))
     if (!domainMatch) {
       continue
     }
@@ -68,7 +68,7 @@ export function selectEligibleSkills({ story = {}, eligibleSkills = [] }) {
     // Se a skill especificar linguagens e a story tiver linguagens, verificar interseção de linguagem
     let languageMatch = true
     if (skillLanguages.length > 0 && storyLanguages.length > 0) {
-      languageMatch = skillLanguages.some((l) => storyLanguages.includes(l))
+      languageMatch = skillLanguages.some((/** @type {string} */ l) => storyLanguages.includes(l))
     }
 
     if (languageMatch) {

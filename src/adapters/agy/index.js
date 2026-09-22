@@ -149,6 +149,10 @@ export async function dispatchAgy(opts) {
     { unit, id: stepId, effect_class: 'model_call', input, session_ref: sessionId },
     async () => {
       let workerRes
+      // O canário é conferido mesmo se o worker falhar, e a fuga prevalece sobre o erro do worker.
+      let workerFailed = false
+      /** @type {unknown} */
+      let workerError
       try {
         workerRes = await runWorkerImpl({
           resolved,
@@ -168,15 +172,19 @@ export async function dispatchAgy(opts) {
           timeoutS,
           env: { ...env, AGY_READ_ONLY: '1' },
         })
-      } finally {
-        const canaryCheck = checkCanaryImpl(canary)
-        if (canaryCheck.escaped) {
-          agyAvailable = false
-          throw new AdeError('canary_escaped', `canário violado fora do diretório permitido: ${canaryCheck.filePath}`, 4, {
-            escaped_path: canaryCheck.filePath,
-          })
-        }
+      } catch (err) {
+        workerFailed = true
+        workerError = err
       }
+      const canaryCheck = checkCanaryImpl(canary)
+      if (canaryCheck.escaped) {
+        agyAvailable = false
+        throw new AdeError('canary_escaped', `canário violado fora do diretório permitido: ${canaryCheck.filePath}`, 4, {
+          escaped_path: canaryCheck.filePath,
+        })
+      }
+      if (workerFailed) throw workerError
+      if (workerRes === undefined) throw new AdeError('agy_execution_failed', 'agy não devolveu resultado', 2)
 
       if (workerRes.exitCode !== 0) {
         throw new AdeError('agy_execution_failed', `agy saiu com código ${workerRes.exitCode}: ${workerRes.stderr || workerRes.stdout}`, 2)

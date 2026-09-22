@@ -142,6 +142,7 @@ export async function discoverProject(workspace, options = {}) {
   // 4. Módulos e Símbolos
   const modules = []
   const symbols = []
+  /** @type {any[]} */
   const ambiguities = []
 
   for (const relPath of snap.paths) {
@@ -253,7 +254,8 @@ export async function discoverProject(workspace, options = {}) {
   // 7. Análise cara endereçada pela chave completa: só é chamada quando snapshot,
   // ambiguidades ou configuração mudam; senão é reproduzida do cache de artefatos.
   let analysis = null
-  if (options.producer && ambiguities.length > 0) {
+  const producer = options.producer
+  if (producer && ambiguities.length > 0) {
     const { artifact } = await getOrProduceArtifact(
       {
         producer: 'discovery-ambiguity-analysis',
@@ -263,7 +265,7 @@ export async function discoverProject(workspace, options = {}) {
         cacheDir: options.cacheDir ?? path.join(rootDir, '.ade', 'cache', 'artifacts'),
         journal: options.journal,
       },
-      () => Promise.resolve(options.producer(ambiguities)),
+      () => Promise.resolve(producer(ambiguities)),
     )
     analysis = artifact
   }

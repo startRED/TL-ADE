@@ -41,7 +41,7 @@ export async function main(argv, deps = {}) {
       },
     })
 
-    const repoDir = path.resolve(values.repo || env.ADE_REPO_DIR || process.cwd())
+    const repoDir = path.resolve(/** @type {string | undefined} */ (values.repo) || env.ADE_REPO_DIR || process.cwd())
 
     // 1. Assegura diretório de metadados sem apagar arquivos existentes
     const adeDir = path.join(repoDir, '.ade')

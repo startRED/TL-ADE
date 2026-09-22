@@ -1,4 +1,3 @@
-/* eslint-disable unicorn/no-thenable */
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'

@@ -345,7 +345,7 @@ describe('Montar contexto compacto por story', () => {
       },
     )
 
-    const taskSection = firstResult.sections.story || firstResult.sections.task || JSON.stringify(firstResult.sections)
+    const taskSection = firstResult.sections.story || JSON.stringify(firstResult.sections)
     expect(taskSection).toContain('Nota recente')
     const notesMatch = taskSection.match(/operator_notes:?([\s\S]*?)(?:===|$)/i) || [taskSection, taskSection]
     const notesLength = Buffer.byteLength(notesMatch[1] || notesMatch[0], 'utf8')
@@ -369,7 +369,7 @@ describe('Montar contexto compacto por story', () => {
         operatorNotes,
       },
     )
-    const secondSection = secondResult.sections.story || secondResult.sections.task || JSON.stringify(secondResult.sections)
+    const secondSection = secondResult.sections.story || JSON.stringify(secondResult.sections)
     expect(secondSection).not.toContain(noteRecent.slice(0, 50))
   })
 

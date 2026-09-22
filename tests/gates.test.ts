@@ -216,3 +216,127 @@ describe('lint gate', () => {
     expect(line11).toContain('anti-slop')
   })
 })
+
+// Provas da dívida zerada (v2): relógio injetado, diretivas proibidas e zero diagnóstico
+describe('debt zero gate', () => {
+  function listFiles(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const fullPath = path.join(dir, entry.name)
+      if (entry.isDirectory()) return listFiles(fullPath)
+      return entry.isFile() ? [fullPath] : []
+    })
+  }
+
+  function oxlintBin(): string {
+    const pkg = JSON.parse(readFileSync(path.join(ROOT, 'node_modules/oxlint/package.json'), 'utf8'))
+    const binRel: string = typeof pkg.bin === 'string' ? pkg.bin : (pkg.bin?.oxlint ?? '')
+    return path.join(ROOT, 'node_modules/oxlint', binRel)
+  }
+
+  // Roda um script do package.json sem shell: "node <args>" vira process.execPath <args>
+  function runPackageScript(name: string) {
+    const pkg = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
+    const script: string = pkg.scripts?.[name] ?? ''
+    const [bin, ...args] = script.split(/\s+/).filter(Boolean)
+    expect(bin, `script ${name} deve começar com node`).toBe('node')
+    const result = spawnSync(process.execPath, args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
+    return { ...result, output: `status: ${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr ?? ''}` }
+  }
+
+  // AC1: o typecheck da raiz sai 0 e não imprime nenhum diagnóstico TS
+  test('typecheck_exits_zero_with_zero_diagnostics_at_root', () => {
+    const result = runPackageScript('typecheck')
+    const diagnostics = `${result.stdout}\n${result.stderr ?? ''}`.split('\n').filter((line) => /error TS\d+/.test(line))
+    expect(diagnostics, result.output).toEqual([])
+    expect(result.status, result.output).toBe(0)
+  }, 300000)
+
+  // AC5: o portão roda os scripts typecheck e lint do package.json na raiz e ambos saem 0
+  test('gate_runs_root_typecheck_and_lint_scripts_and_both_exit_zero', () => {
+    const typecheck = runPackageScript('typecheck')
+    const lint = runPackageScript('lint')
+    expect({ typecheck: typecheck.status, lint: lint.status }, `${typecheck.output}\n${lint.output}`).toEqual({ typecheck: 0, lint: 0 })
+  }, 300000)
+
+  // AC2: lint sobre src e tests sai 0 sem nenhum aviso nem erro
+  test('lint_exits_zero_with_zero_diagnostics_over_src_and_tests', () => {
+    const result = spawnSync(
+      process.execPath,
+      [oxlintBin(), '--deny-warnings', '--format', 'unix', 'src', 'tests'],
+      { cwd: ROOT, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }
+    )
+    const output = `status: ${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr ?? ''}`
+    expect(result.status, output).toBe(0)
+    expect(result.stdout, output).not.toMatch(/\[(Error|Warning)\//)
+  }, 120000)
+
+  // Borda do AC2: um único aviso já derruba o portão com --deny-warnings
+  test('lint_gate_fails_on_single_warning', () => {
+    const tmpDir = mkdtempSync(path.join(tmpdir(), 'ade-lint-warn-'))
+    try {
+      const warnFile = path.join(tmpDir, 'warn.js')
+      writeFileSync(warnFile, 'const sobra = 1\n', 'utf8')
+      const result = spawnSync(
+        process.execPath,
+        [oxlintBin(), '--deny-warnings', warnFile],
+        { cwd: tmpDir, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }
+      )
+      expect(result.status).not.toBe(0)
+      expect(`${result.stdout}\n${result.stderr ?? ''}`).toContain('no-unused-vars')
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
+  }, 120000)
+
+  // AC4: nenhuma diretiva de supressão em src e tests, e strict segue ligado
+  test('no_suppression_directives_in_src_and_tests_and_strict_stays_true', () => {
+    const directive = /(?:\/\/|\/\*)\s*(?:@ts-(?:ignore|expect-error|nocheck)|(?:ox|es)lint-disable)/
+    expect(directive.test('// @ts-' + 'ignore')).toBe(true)
+    expect(directive.test('/* oxlint-' + 'disable no-debugger */')).toBe(true)
+    expect(directive.test("['oxlint-disable']")).toBe(false)
+    const files = [...listFiles(path.join(ROOT, 'src')), ...listFiles(path.join(ROOT, 'tests'))]
+      .filter((file) => !file.includes(`${path.sep}vendor${path.sep}`))
+    expect(files.length).toBeGreaterThan(0)
+    const hits = files.flatMap((file) =>
+      readFileSync(file, 'utf8').split('\n').flatMap((line, i) => directive.test(line) ? [`${file}:${i + 1}: ${line.trim()}`] : [])
+    )
+    expect(hits).toEqual([])
+
+    const tsconfig = JSON.parse(readFileSync(path.join(ROOT, 'tsconfig.json'), 'utf8'))
+    expect(tsconfig.compilerOptions?.strict).toBe(true)
+    for (const loosen of ['noImplicitAny', 'strictNullChecks', 'strictFunctionTypes', 'noImplicitThis']) {
+      expect(tsconfig.compilerOptions?.[loosen], `tsconfig afrouxa ${loosen}`).not.toBe(false)
+    }
+  })
+
+  // AC3: as provas de cota passam com o relógio do sistema adiantado em um ano
+  test('quota_proofs_pass_with_system_clock_one_year_ahead', () => {
+    const oneYearMs = 365 * 24 * 60 * 60 * 1000
+    // Troca o Date global do processo e dos workers: Date.now() e new Date() andam um ano à frente.
+    const shiftClock = 'data:text/javascript,' + encodeURIComponent(`const O = Date; const D = ${oneYearMs}
+      globalThis.Date = class extends O {
+        constructor(...a) { if (a.length) super(...a); else super(O.now() + D) }
+        static now() { return O.now() + D }
+      }`)
+    const result = spawnSync(
+      process.execPath,
+      [
+        'node_modules/vitest/vitest.mjs',
+        'run',
+        'tests/budget-controls.test.ts',
+        'tests/engine-quota.test.ts',
+        '-t',
+        'ca4_quota_receipt_validation_and_rejection|CA1_recibo_oficial|CA3_reserva_e_duravel',
+      ],
+      {
+        cwd: ROOT,
+        encoding: 'utf8',
+        maxBuffer: 16 * 1024 * 1024,
+        env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', NODE_OPTIONS: `--import=${shiftClock}`, VITEST: undefined, VITEST_WORKER_ID: undefined, VITEST_POOL_ID: undefined },
+      }
+    )
+    const output = `status: ${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr ?? ''}`
+    expect(result.status, output).toBe(0)
+    expect(result.stdout, output).toMatch(/Tests\s+\S*3 passed/)
+  }, 180000)
+})

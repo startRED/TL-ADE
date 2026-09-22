@@ -4,7 +4,6 @@ import os from 'node:os'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { syncCatalog, listCatalog, inspectCatalog } from '../skills/catalog.js'
-import { AdeError } from '../journal/errors.js'
 import { exitCodeOf } from './exit-codes.js'
 
 /**

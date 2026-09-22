@@ -8,7 +8,7 @@ export function assessRisk({ request = '', discovery = {} }) {
   const anchors = discovery.anchors || []
   const isAuth =
     /autentica[çc][ãa]o|senha|admin|auth|token|permiss[ãa]o|credential/i.test(request) ||
-    anchors.some((a) => (a.term && a.term.includes('auth')) || (a.path && a.path.includes('auth')))
+    anchors.some((/** @type {any} */ a) => (a.term && a.term.includes('auth')) || (a.path && a.path.includes('auth')))
 
   if (isAuth) {
     const evidence = []

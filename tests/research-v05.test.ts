@@ -1,16 +1,13 @@
 import { describe, expect, test, vi, beforeEach } from 'vitest'
-import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { compileIntent } from '../src/intent/compiler.js'
 import { runResearchStep } from '../src/intent/research.js'
 import { dispatchAgy, setAgyAvailable, isAgyAvailable } from '../src/adapters/agy/index.js'
-import { buildAgyArgs } from '../src/adapters/agy/argv.js'
-import { parseAgyFinding, parseAgyOutput, parseAgyUsage } from '../src/adapters/agy/parse.js'
-import { compilePack, SECTION_ORDER, SECTION_CAPS } from '../src/pack/pack.js'
+import { compilePack } from '../src/pack/pack.js'
 import { screenResearchFinding } from '../src/pack/firewall.js'
 import { validate } from '../src/schema/index.js'
-import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
+import { makeTmpDir } from './helpers/tmp-dir.js'
 
 describe('v0.5 Research and AGY Adapter Acceptance Criteria', () => {
   let tmpDirs: string[] = []

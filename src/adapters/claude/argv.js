@@ -17,7 +17,7 @@ function loadSchemaJson() {
 /**
  * Monta o argv para invocar o `claude` real seguindo a ordem fixa de flags decidida para o Slice 1.
  *
- * @param {{ sessionId: string, packPath: string, maxBudgetUsd: number, model?: string }} opts
+ * @param {{ sessionId: string, packPath: string, maxBudgetUsd: number, model?: string, mcpConfigPath?: string }} opts
  * @returns {string[]}
  */
 export function buildClaudeArgs(opts) {

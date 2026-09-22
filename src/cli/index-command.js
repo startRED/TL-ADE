@@ -49,7 +49,7 @@ export async function main(argv, deps = {}) {
       return 4
     }
 
-    const repoDir = path.resolve(values.repo || env.ADE_REPO_DIR || process.cwd())
+    const repoDir = path.resolve(/** @type {string | undefined} */ (values.repo) || env.ADE_REPO_DIR || process.cwd())
 
     // 1. Verificação antecipada da capacidade nativa antes de modificar qualquer índice
     const probeFn = deps.deps?.checkNativeSqlite ?? deps.checkNativeSqlite ?? checkNativeSqlite

@@ -58,6 +58,7 @@ const EXPECTED_GATE_KEYS = ['id', 'argv', 'when', 'expect_exit', 'timeout_s']
  * @property {{ max_usd: number, max_wall_clock_seconds: number, max_parked_units: number, max_subscription_weekly_percent: number }} missionBudget
  * @property {GateSpec[]} gates
  * @property {LoadedStory[]} stories
+ * @property {number} [lineageCallsRemaining]
  */
 
 /**

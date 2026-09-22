@@ -4,6 +4,7 @@
     "correctness": "error"
   },
   "rules": {
+    "unicorn/no-thenable": "off",
     "no-unused-vars": [
       "error",
       {

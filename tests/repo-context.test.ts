@@ -4,11 +4,9 @@ import path from 'node:path'
 import { makeRepo, removeRepo } from './helpers/git-repo.js'
 import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
 import { openJournal, readJournal } from '../src/journal/journal.js'
-import { WorkspacePort } from '../src/workspace/port.js'
 import { GitWorkspace } from '../src/workspace/git.js'
 import { FolderWorkspace } from '../src/workspace/folder.js'
 import { computeArtifactCacheKey, getOrProduceArtifact } from '../src/artifacts/cache.js'
-import { recordOrReplay } from '../src/artifacts/recording.js'
 import { discoverProject } from '../src/context/discovery.js'
 import { buildRepoIr } from '../src/context/repo-ir.js'
 import { rankRepoContext } from '../src/context/rank.js'
@@ -178,7 +176,7 @@ describe('Certificar descoberta e contexto do projeto', () => {
       const gitWs = new GitWorkspace({ worktreeDir: dir })
       const discovery = await discoverProject(gitWs)
 
-      const fakeProducer = async (ambiguities: any[]) => {
+      const fakeProducer = async (_ambiguities: any[]) => {
         return [
           {
             statement: 'mod resolves to src/dyn1.js at runtime',

@@ -36,7 +36,7 @@ export function readLineageCallBudget({ repoDir, plan }) {
     try {
       ancestorPlan = JSON.parse(fs.readFileSync(planPath, 'utf8'))
     } catch (err) {
-      throw new AdeError('lineage_corrupted', `plano ancestral ${missionId} inválido: ${err?.message || err}`, 4)
+      throw new AdeError('lineage_corrupted', `plano ancestral ${missionId} inválido: ${err instanceof Error ? err.message : String(err)}`, 4)
     }
     const { events } = readJournal(journalPath)
     consumedCalls += events.filter((event) => event.kind === 'budget_reserved').length
@@ -106,7 +106,7 @@ export function findStoryCommitted(events, unit) {
       }
     }
     if (ev && ev.kind === 'decision' && ev.data?.decision === 'stories_preserved' && Array.isArray(ev.data?.preserved)) {
-      const p = ev.data.preserved.find((item) => (item?.unit === unit) && typeof item?.commit === 'string')
+      const p = ev.data.preserved.find((/** @type {any} */ item) => (item?.unit === unit) && typeof item?.commit === 'string')
       if (p && (p.status === 'committed' || p.status === 'delivered')) {
         return {
           commit: p.commit,
