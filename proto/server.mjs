@@ -36,7 +36,11 @@ const IMPECCABLE = path.join(HOME, '.claude/plugins/cache/impeccable/impeccable/
 const REGISTRY = {
   claude: { label: 'Claude Code', models: [
     { id: 'sonnet', label: 'Sonnet 5', price: [2, 10], note: 'caro para o que entrega (AA 38 a US$ 5,09; Terminal-Bench 4.0 8%); só último degrau' },
-    { id: 'opus', label: 'Opus 5', price: [5, 25], note: 'forte (AA 51, Vals Index 67); entender o pedido e reserva de plano' },
+    // 22/09: Opus 5.5 (Anthropic, lançamento): Terminal-Bench 4.0 66,4% (Opus 5 52,3; Fable 5.1 55,8; Sol 37,3), FrontierCode 54,4,
+    // CursorBench 57,8, AA 58 (topo); em esforço medium supera o Opus 5 em high, ~metade dos tokens e 30% mais rápido. A CLI só conhece o
+    // nome completo a partir da 2.1.280 (ADE_CLAUDE_BIN); o apelido "opus" ainda aponta para o Opus 5.
+    { id: 'claude-opus-5-5', label: 'Opus 5.5', price: [4, 20], note: 'o melhor em código agêntico (Terminal-Bench 4.0 66%, AA 58) e mais barato que o Opus 5; escrever parte difícil, corrigir, planejar' },
+    { id: 'opus', label: 'Opus 5', price: [5, 25], note: 'geração anterior: o Opus 5.5 faz mais por menos' },
     { id: 'fable', label: 'Fable 5.1', price: [10, 50], note: 'topo junto com o Astra (AA 53) pelo dobro do custo; reserva de dividir em épicos' },
     { id: 'haiku', label: 'Haiku 4.5', price: [1, 5], note: 'muito barato; tarefas mecânicas' },
   ] },
@@ -108,9 +112,9 @@ const vendorOf = (family, model) => family === 'compat' ? (String(model || '').s
 
 const DEFAULT_SETTINGS = {
   roles: {
-    intent: { family: 'claude', model: 'opus', effort: 'medium' }, // Opus medium: AA 45 por US$ 2,19; Sonnet high faz 32 por US$ 1,79
+    intent: { family: 'claude', model: 'claude-opus-5-5', effort: 'medium' }, // Opus medium: AA 45 por US$ 2,19; Sonnet high faz 32 por US$ 1,79
     planner: { family: 'claude', model: 'fable', effort: 'high' }, // plano complexo: divide pedido grande em épicos; plano único de dificuldade pesada
-    planner_light: { family: 'claude', model: 'opus', effort: 'high' }, // plano intermediário/simples: stories de cada épico, planos leves e normais, revisões automáticas
+    planner_light: { family: 'claude', model: 'claude-opus-5-5', effort: 'high' }, // plano intermediário/simples: stories de cada épico, planos leves e normais, revisões automáticas
     maker: { family: 'claude', model: 'sonnet', effort: 'high' },
     checker: { family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' },
     research: { family: 'agy', model: 'gemini-3.1-pro', effort: 'high' },
@@ -121,16 +125,16 @@ const DEFAULT_SETTINGS = {
   // Quem escreve nunca é da empresa de quem revisa (filtrado por chamada). Claude é a cota mais curta: fica de reserva onde há substituto.
   chains: {
     epics: [{ family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'claude', model: 'fable', effort: 'high' }], // Erick: Sol no plano complexo; roda 1 vez por versão; high: em xhigh a divisão da v1 passou 30 min sem entregar (19/09)
-    plan: [{ family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'medium' }], // Sol high: AA 42 por US$ 0,81; o Astra custou mais que tudo o resto no 1º épico medido
+    plan: [{ family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }, { family: 'claude', model: 'claude-opus-5-5', effort: 'medium' }], // Sol high: AA 42 por US$ 0,81; o Astra custou mais que tudo o resto no 1º épico medido
     // 19/09 (Erick): cada empresa num papel, e quem escreve nunca revisa. O Gemini 3.8 Flash (cota do Google livre) fica só com o mais
     // pesado, escrever código (Sol leu ~1,2M tokens por parte); o Codex planeja e revisa o Flash; o Claude entra na escada e como reserva.
-    plan_edit: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }, { family: 'claude', model: 'opus', effort: 'low' }], // correção automática do plano: só edita e reescreve o JSON (~7k tokens de saída); no Astra custava US$ 0,70 por correção
+    plan_edit: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }, { family: 'claude', model: 'claude-opus-5-5', effort: 'low' }], // correção automática do plano: só edita e reescreve o JSON (~7k tokens de saída); no Astra custava US$ 0,70 por correção
     prova: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'medium' }],
     impl_light: [{ family: 'codex', model: 'gpt-5.6-luna', effort: 'high' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'medium' }], // configuração e documentação: leve e quase de graça no Luna
     impl: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }], // parte comum
     impl_hard: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-terra', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'high' }], // interface larga, risco alto
     fix: [{ family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'codex', model: 'gpt-5.6-sol', effort: 'xhigh' }], // escada: 2 rodadas por degrau; o Sol (IOI 91%) cobre o ponto fraco do Flash em algoritmo. Sem Astra: Erick não o quer pelo preço, e em m-mu8usf5z ele foi chamado 7x (3 sem mudar linha, US$ 2,70 equivalentes jogados fora)
-    checker: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'xhigh' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'agy', model: 'claude-opus-4-6-thinking', effort: 'high' }, { family: 'claude', model: 'opus', effort: 'high' }], // Terra revisa o Flash, o Flash revisa o Codex; Opus 4.6 via Google e Opus 5 na escada
+    checker: [{ family: 'codex', model: 'gpt-5.6-terra', effort: 'xhigh' }, { family: 'agy', model: 'gemini-3.8-flash', effort: 'high' }, { family: 'agy', model: 'claude-opus-4-6-thinking', effort: 'high' }, { family: 'claude', model: 'claude-opus-5-5', effort: 'high' }], // Terra revisa o Flash, o Flash revisa o Codex; Opus 4.6 via Google e Opus 5 na escada
   },
   planner_recommend: true, // o entendedor mede a dificuldade e recomenda quem planeja; você escolhe (modo noturno segue a recomendação)
   epic_plans_cheaper: true, // com Fable como planejador, ele só divide o pedido em épicos; o plano de cada épico sai no Opus alto (medido: US$ 5,60 e 13 min por épico no Fable, 74k tokens de saída)
@@ -838,6 +842,8 @@ async function repoRules(dir) {
 }
 
 // ---------- chamada Claude (maker / planner) ----------
+// CLI do Claude: a global pode ser mais velha que o modelo (a 2.1.273 recusa claude-opus-5-5); ADE_CLAUDE_BIN aponta outra
+const CLAUDE_BIN = process.env.ADE_CLAUDE_BIN || 'claude'
 async function claudeCall({ role, prompt, model, effort, tools, skipPermissions, schema, maxTurns = 40, base_url = null, token_env = null }) {
   const m = state.mission, dir = state.project.dir
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--safe-mode', '--no-session-persistence', '--max-turns', String(maxTurns), '--model', model]
@@ -867,7 +873,7 @@ async function claudeCall({ role, prompt, model, effort, tools, skipPermissions,
   let result = null, liveBuf = null
   const touched = new Set()
   const t0 = Date.now()
-  const r = await run('claude', args, {
+  const r = await run(CLAUDE_BIN, args, {
     // O token NUNCA entra nas configurações nem no estado (o painel recebe o estado inteiro): fica numa variável de
     // ambiente da máquina e o motor só guarda o NOME dela. Sem a variável, a chamada falha e a cadeia passa ao próximo.
     cwd: dir, stdin: prompt, env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', ...(base_url ? { ANTHROPIC_BASE_URL: base_url, ANTHROPIC_AUTH_TOKEN: process.env[token_env || ''] || '' } : {}) },

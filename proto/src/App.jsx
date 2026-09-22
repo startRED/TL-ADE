@@ -1195,9 +1195,10 @@ function Empty({ p, busy, onPick }) {
 }
 function Bar({ pct }) { return <span className="bar"><span style={{ width: `${Math.min(100, pct)}%` }} /></span> }
 function Quota({ q }) {
-  // janela que mais pesa (5 h ou semana); reset que já passou conta 0 %
+  // mostra a semana (é ela que diz se o plano dura); a de 5 h só aparece sem leitura semanal ou quando já passou de 90 %.
+  // Reset que já passou conta 0 %
   const live = (w) => w && (!w.resets_at || new Date(w.resets_at) > new Date()) ? w : w ? { ...w, used: 0, resets_at: null } : null
-  const worst = (v) => [['sessão de 5 h', live(v?.five_hour)], ['semana', live(v?.seven_day)]].filter((x) => x[1]).sort((x, y) => y[1].used - x[1].used)[0]
+  const worst = (v) => { const h = live(v?.five_hour), s = live(v?.seven_day); return h && (!s || h.used >= 90) ? ['sessão de 5 h', h] : s ? ['semana', s] : null }
   const rows = [['Claude', 'claude', q?.claude], ['Codex', 'codex', q?.codex], ['Gemini', 'agy', null]]
   return (
     <div className="quota">
