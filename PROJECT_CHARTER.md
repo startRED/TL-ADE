@@ -21,9 +21,9 @@ binários instalados já fazem nativamente (`claude`, `codex`); ela só escreve 
 o journal, o Task Contract com eval provado, e o Context Pack. A ADE não é um CI, não é um issue tracker,
 não é uma IDE, não é um provedor de modelo (nunca chama API HTTP de modelo; só CLI com assinatura), não é um framework de agentes.
 
-## Recorte ativo de governança da v0.5 (o que entra em `src/` e `packages/` nesta fatia e épico)
+## Recorte ativo de governança da v1 (o que entra em `src/` e `packages/` nesta fatia e épico)
 
-`ade run --plan plan.json` executa stories sob controle prévio de governança, preflight e drenagem (`RUNNING -> DRAINING -> STOPPED`); pesquisa controlada (`external_fact`), telemetria auditável por chamada, harness doctor em coleta nas categorias Tool Coverage, Context Efficiency, Quality Gates, Memory Persistence, Eval Coverage, Security Guardrails e Cost Efficiency, com `cache_read / (tokens_in + cache_read)` por papel; pausa, retomada e intervenção por takeover com terminal (PTY); painel local e lançador Windows; JS ESM com JSDoc, ADR 0023, ADR 0027 e ADR 0028.
+`ade run --plan plan.json` e `ade run --unattended` sob precondições duras; v0.5 entregue (pesquisa, telemetria, drenagem, pausa, retomada e takeover PTY); v1 ativa com dogfood Vitest, calibração por telemetria e fechamento documental; JS ESM com JSDoc, ADR 0023, ADR 0028 e ADR 0029.
 
 - `src/journal`: `canonical.js` (wrapper `canonicalize` + `digest16`), `journal.js` (append/read/fold, `prev`, fd aberto + `fsyncSync`), `errors.js` (`AdeError`, códigos de saída).
 - `src/step`: `step.js` (write-ahead, `input_digest`, `intent_context`, fila serializada), `reconcile.js` (tabela por `effect_class`).
@@ -58,7 +58,7 @@ Padrões provisórios de execução e custos fixados para o recorte ativo de gov
 - Limites de contexto: contrato de 32000 bytes e pack de 120000 bytes;
 - Espaço em disco mínimo de 1 GiB e validade de capacidade de 24 horas.
 
-**Fora do slice 1 histórico e do recorte ativo da v0.5, sem exceção — nenhum destes entra em `src/`:** Intent Compiler adicional, Skill Fabric adicional, FQE adicional, painel autoritativo, PTY livre sem takeover, ACP, concorrência N>1, rotinas, OTel, `agy` na v1 (fora de pesquisa), SQLite autoritativo, Playwright no servidor, Fastify, push/PR/merge/CI remoto no GitHub real ou WebSocket bidirecional. `proto/` fica intocado.
+**Fora do slice 1 histórico e do recorte ativo da v1, sem exceção — nenhum destes entra em `src/`:** Intent Compiler adicional, Skill Fabric adicional, FQE adicional, painel autoritativo, PTY livre sem takeover, ACP, concorrência N>1, rotinas, OTel, `agy` na v1 (fora de pesquisa), SQLite autoritativo, Playwright no servidor, Fastify, push/PR/merge/CI remoto no GitHub real ou WebSocket bidirecional. `proto/` fica intocado.
 
 **Checker como passo do método.** O operador roda `codex exec` sobre o diff, fora do engine; o Codex é ferramenta de desenvolvimento, nunca importada pelo engine.
 
@@ -67,8 +67,8 @@ Padrões provisórios de execução e custos fixados para o recorte ativo de gov
 ## Estado e autorização
 - Autorização até a v1: concedida por Erick em 2026-09-19 ([docs/adr/0024-autorizacao-roadmap-ate-v1.md](docs/adr/0024-autorizacao-roadmap-ate-v1.md)) e confirmada para governança e custos em 2026-09-20 ([docs/adr/0026-governanca-execucao-custos.md](docs/adr/0026-governanca-execucao-custos.md)).
 - Sequência obrigatória dos marcos: v0.2 (durabilidade e paridade 93) -> v0.3 -> v0.4a -> v0.4b -> v0.5 -> v1.
-- Recorte ativo deste épico: v0.5 — Pesquisa controlada, telemetria auditável, drenagem (RUNNING -> DRAINING -> STOPPED), pausa, retomada com revalidação e intervenção do operador (takeover e PTY no painel), formalizado no [ADR 0028](docs/adr/0028-ativacao-da-v05-pesquisa-telemetria-intervencao.md).
-- Recorte ativo de governança da v0.5: fontes canônicas exclusivas (`plan.json` + `journal.jsonl` + `artifacts/`), projeção SQLite reconstruível, integridade de hash, bind restrito a `127.0.0.1`, credencial efêmera, lease de processo, achados como dados não confiáveis, encerramento de processos por `taskkill /T /F /PID` no Windows e devolução explícita por `human_release`.
+- Recorte ativo deste épico: v1 — Noite desatendida (`ade run --unattended`), suíte de dogfood (runs: 3, pass^3 em Vitest), calibração por telemetria e fechamento documental, formalizado no [ADR 0029](docs/adr/0029-ativacao-da-v1-noite-desatendida-e-dogfood.md); v0.5 entregue ([ADR 0028](docs/adr/0028-ativacao-da-v05-pesquisa-telemetria-intervencao.md)).
+- Recorte ativo de governança da v1: precondições duras, fontes canônicas exclusivas (`plan.json` + `journal.jsonl` + `artifacts/`), orçamento de parede, teto de 3 unidades estacionadas em `awaiting_operator`, exit 3 com paradas, exit 2 por recusa e relatório matinal.
 - Slice 1: fechamento pendente ([docs/plans/slice-1-fechamento.md](docs/plans/slice-1-fechamento.md)).
 - Recorte local v0.2: autorizado sequencialmente ([docs/plans/v02-local-proposta.md](docs/plans/v02-local-proposta.md), [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md)).
 - Restante da v0.2: segue a ordem do roadmap.

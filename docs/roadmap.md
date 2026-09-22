@@ -126,12 +126,12 @@ porte mecânico e devem correr acima dessa média.
 
 - Autorização até a v1: concedida por Erick em 2026-09-19 ([adr/0024-autorizacao-roadmap-ate-v1.md](adr/0024-autorizacao-roadmap-ate-v1.md)) e confirmada para governança em 2026-09-20 ([adr/0026-governanca-execucao-custos.md](adr/0026-governanca-execucao-custos.md)).
 - Sequência obrigatória dos marcos: v0.2 (durabilidade e paridade 93) -> v0.3 -> v0.4a -> v0.4b -> v0.5 -> v1.
-- Recorte ativo deste épico: v0.5 — Pesquisa externa controlada, telemetria auditável por chamada, drenagem cooperativa (RUNNING -> DRAINING -> STOPPED), pausa, retomada com revalidação e intervenção do operador (takeover e terminal PTY no painel), formalizado no [ADR 0028](adr/0028-ativacao-da-v05-pesquisa-telemetria-intervencao.md). Capacidades da v1 e futuras continuam proibidas.
+- Recorte ativo deste épico: v1 — Noite desatendida sob precondições duras (`ade run --unattended`), suíte de dogfood (runs: 3, pass^3 em Vitest), calibração por telemetria e fechamento documental, formalizado no [ADR 0029](adr/0029-ativacao-da-v1-noite-desatendida-e-dogfood.md); v0.5 entregue ([ADR 0028](adr/0028-ativacao-da-v05-pesquisa-telemetria-intervencao.md)). Itens do backlog pós-v1 continuam proibidos em src/.
 - Slice 1: fechamento pendente ([plans/slice-1-fechamento.md](plans/slice-1-fechamento.md)).
 - Recorte local v0.2: autorizado sequencialmente ([plans/v02-local-proposta.md](plans/v02-local-proposta.md), [plans/v02-local-aprovacao.md](plans/v02-local-aprovacao.md)).
 - Restante da v0.2: segue a ordem do roadmap.
 Implementação dependente: autorizada sequencialmente até a v1 conforme o épico ativo.
-A autorização de Erick em 2026-09-19 (ADR 0024) permite a execução autônoma sequencial até a v1; o marco ativo v0.5 é formalizado pelo ADR 0028, mantendo a ordem obrigatória dos marcos do roadmap.
+A autorização de Erick em 2026-09-19 (ADR 0024) permite a execução autônoma sequencial até a v1; o marco ativo v1 é formalizado pelo ADR 0029, com a v0.5 entregue sob o ADR 0028, mantendo a ordem obrigatória dos marcos do roadmap.
 
 ---
 
@@ -656,6 +656,8 @@ reversão em §8. Time de pesquisa custa ~15× tokens → opt-in por config, nun
 ---
 
 ## 6. v1 — Jornada 6 e hardening (D5 pleno)
+
+**Estado.** Recorte ativo (ADR 0029): jornada 6 desatendida em dogfood real com precondições duras (`ade run --unattended`), suíte de dogfood (runs: 3, pass^3) como suíte Vitest do repositório, calibração do corte visual e dos tetos de pack pela telemetria, e consolidação documental (`docs/operations/`, `docs/security/`, `docs/evals/`).
 
 **Objetivo.** A ADE conduz o próprio desenvolvimento por uma noite inteira e a documentação fecha.
 
