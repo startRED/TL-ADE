@@ -52,18 +52,18 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | [0025](0025-fallback-da-arvore-de-processos-windows.md) | Fallback de encerramento da árvore de processos no Windows sob EPERM | Aceito (confirmado por Erick em 2026-09-20) |
 | [0026](0026-governanca-execucao-custos.md) | Governança de execução, controles de custos e preflight na v0.2 | Aceito (confirmado por Erick em 2026-09-20) |
 | [0027](0027-ativacao-da-v04b-painel-local.md) | Ativação da v0.4b: Painel local, índice SQLite descartável e interface acessível sem compilação | Aceito (confirmado por Erick em 2026-09-21) |
+| [0028](0028-ativacao-da-v05-pesquisa-telemetria-intervencao.md) | Ativação da v0.5: Pesquisa externa controlada, telemetria auditável e intervenção do operador (pausa, retomada, takeover) | Aceito (confirmado por Erick em 2026-09-21) |
 
 ## Mapa decisão → onde ela aparece
 
 | Tema | ADRs | Seção de `architecture.md` |
 | :--- | :--- | :--- |
 | Stack e repositório | 0001, 0022, 0023, 0027 | §2, §6, §11 E29 |
-| Durabilidade e recuperação | 0002, 0003, 0012, 0014, 0021, 0025, 0027 | §6, §11 E6, E7, E21, E25–E27 |
-| Modelos, transporte e papéis | 0004, 0005, 0006, 0015 | §7, §11 E10, E16, E23, E24 |
-| Intenção, contrato e prova | 0007, 0008, 0016 | §4, §5, §11 E1–E4, E12, E18–E20 |
-| Contexto, skills e qualidade | 0009, 0010, 0011, 0018, 0027 | §7, §10 A1, A7, A11, A13, A14, §11 E8, E9, E13–E15, E33, E35, E39 |
-| Observação e método | 0013, 0017, 0019, 0020, 0024, 0027 | §3, §8, §10 A10, A12, §11 E11, E17, E30, E34, E37 |
-| Orçamento e execução | 0026 | §7, §9.8, §11 E20, E24 |
+| Durabilidade e recuperação | 0002, 0003, 0012, 0014, 0021, 0025, 0027, 0028 | §6, §11 E6, E7, E21, E25–E27 |
+| Modelos, transporte e papéis | 0004, 0005, 0006, 0015, 0028 | §7, §11 E10, E16, E23, E24 |
+| Intenção, contrato e prova | 0007, 0008, 0016, 0028 | §4, §5, §11 E1–E4, E12, E18–E20 |
+| Contexto, skills e qualidade | 0009, 0010, 0011, 0018, 0027, 0028 | §7, §10 A1, A7, A11, A13, A14, §11 E8, E9, E13–E15, E33, E35, E39 |
+| Observação e método | 0013, 0017, 0019, 0020, 0024, 0027, 0028 | §3, §8, §10 A10, A12, §11 E11, E17, E30, E34, E37 |
+| Orçamento e execução | 0026, 0028 | §7, §9.8, §11 E20, E24 |
 
-O [ADR 0024](0024-autorizacao-roadmap-ate-v1.md) registra a autorização contínua até a v1 e define o recorte sequencial dos marcos, e o [ADR 0027](0027-ativacao-da-v04b-painel-local.md) ativa a v0.4b (painel local escuro e acessível sem compilação, índice SQLite reconstruível, lançador Windows `ade.bat`, servidor HTTP/WS protegido com token efêmero e o 9º schema publicado `visual-eval`).
-
+O [ADR 0024](0024-autorizacao-roadmap-ate-v1.md) registra a autorização contínua até a v1 e define o recorte sequencial dos marcos, o [ADR 0027](0027-ativacao-da-v04b-painel-local.md) ativou a v0.4b e o [ADR 0028](0028-ativacao-da-v05-pesquisa-telemetria-intervencao.md) formaliza a ativação exclusiva da v0.5 (pesquisa externa controlada, telemetria auditável, drenagem cooperativa RUNNING -> DRAINING -> STOPPED, pausa, retomada e intervenção do operador por takeover com terminal no painel).

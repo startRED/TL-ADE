@@ -11,7 +11,7 @@ operacional mora no harness.
 
 - Autorização até a v1: concedida por Erick em 2026-09-19 ([docs/adr/0024-autorizacao-roadmap-ate-v1.md](docs/adr/0024-autorizacao-roadmap-ate-v1.md)) e confirmada para governança em 2026-09-20 ([docs/adr/0026-governanca-execucao-custos.md](docs/adr/0026-governanca-execucao-custos.md)).
 - Sequência obrigatória dos marcos: v0.2 (durabilidade e paridade 93) -> v0.3 -> v0.4a -> v0.4b -> v0.5 -> v1.
-- Recorte ativo deste épico: v0.4b entregue — Painel local escuro e acessível sem compilação (`packages/web`, `index.html`), lançador Windows de 2 cliques (`ade.bat` gerado por `ade init`), servidor local protegido em `127.0.0.1` com token efêmero (`ade serve`), projeção SQLite reconstruível (`ade index --rebuild`), dependência nativa `better-sqlite3` e 9º schema publicado (`visual-eval`), conforme formalizado no [ADR 0027](docs/adr/0027-ativacao-da-v04b-painel-local.md).
+- Recorte ativo deste épico: v0.5 — Pesquisa externa controlada, telemetria auditável por chamada, harness doctor em coleta nas sete categorias (Tool Coverage, Context Efficiency, Quality Gates, Memory Persistence, Eval Coverage, Security Guardrails e Cost Efficiency), com `cache_read / (tokens_in + cache_read)` por papel, drenagem cooperativa (RUNNING -> DRAINING -> STOPPED), pausa, retomada com revalidação e intervenção do operador (takeover e terminal PTY no painel), formalizado no [ADR 0028](docs/adr/0028-ativacao-da-v05-pesquisa-telemetria-intervencao.md). Capacidades da v1 e futuras continuam proibidas.
 - Slice 1: fechamento pendente ([docs/plans/slice-1-fechamento.md](docs/plans/slice-1-fechamento.md)).
 - Recorte local v0.2: autorizado sequencialmente ([docs/plans/v02-local-proposta.md](docs/plans/v02-local-proposta.md), [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md)).
 - Restante da v0.2: segue a ordem do roadmap.
@@ -28,7 +28,7 @@ Trabalho novo entra por branch + PR contra `main`; convenções em [`docs/develo
 4. [`docs/roadmap.md`](docs/roadmap.md) — vertical slices (slice 1 → v0.2 → v0.3 → v0.4a/b → v0.5 → v1 → futuro) com aceite, evals, calendário e escada de dogfood.
 5. [`docs/plans/slice-1.md`](docs/plans/slice-1.md) — plano executável do primeiro slice (~3 semanas): stories como Task Contracts, testes nomeados, CLI falsa, método de execução.
 6. [`docs/journeys.md`](docs/journeys.md) — as 6 jornadas obrigatórias validadas contra a arquitetura.
-7. [`docs/adr/README.md`](docs/adr/README.md) — 27 ADRs (decisão, evidência, trade-offs, reversão).
+7. [`docs/adr/README.md`](docs/adr/README.md) — 28 ADRs (decisão, evidência, trade-offs, reversão).
 8. [`docs/evals/README.md`](docs/evals/README.md), [`docs/security/README.md`](docs/security/README.md), [`docs/operations/autonomy-and-permissions.md`](docs/operations/autonomy-and-permissions.md), [`docs/operations/usar-em-outro-projeto.md`](docs/operations/usar-em-outro-projeto.md), [`docs/operations/dogfood-d1.md`](docs/operations/dogfood-d1.md), [`docs/development-method.md`](docs/development-method.md).
 9. [`docs/research/README.md`](docs/research/README.md) — índice e digest da pesquisa (40 premissas derrubadas, confirmações, hipóteses a medir); [`docs/catalog-sources.md`](docs/catalog-sources.md) — fontes do catálogo com licença e decisão.
 
@@ -59,6 +59,6 @@ Os 66 invariantes de durabilidade estão catalogados em `docs/research/runtime-p
 
 ## Próximo passo
 
-Avançar para a v0.5 (concorrência controlada, PTY embutido no painel e automação noturna desatendida) sob a autorização contínua até a v1 concedida no ADR 0024.
+Implementar as capacidades ativadas da v0.5 (pesquisa externa controlada, telemetria auditável, drenagem cooperativa RUNNING -> DRAINING -> STOPPED, pausa, retomada e intervenção por takeover com terminal PTY no painel) sob a autorização contínua até a v1 concedida no ADR 0024 e formalizada no ADR 0028, mantendo capacidades da v1 e futuras expressamente proibidas neste épico.
 
 Antes disso, conferir as lacunas da matriz e responder à consulta única registrada em [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md): os US$ 0,28 do dogfood não medem percentual da assinatura. A regra de metade da cota depende da fonte oficial, da janela semanal, do consumo externo e do tratamento de ausência; o valor observado permanece documentado em [docs/operations/dogfood-d1.md](docs/operations/dogfood-d1.md).
