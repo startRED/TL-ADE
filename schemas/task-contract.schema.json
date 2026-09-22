@@ -30,6 +30,14 @@
       "type": "array",
       "items": { "type": "string" }
     },
+    "research_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^research-finding:[A-Za-z0-9][A-Za-z0-9._-]*$"
+      },
+      "uniqueItems": true
+    },
     "task": { "type": "string" },
     "workspace": {
       "type": "object",
@@ -94,7 +102,8 @@
           "id": { "type": "string" },
           "question": { "type": "string" },
           "kind": { "enum": ["product_choice", "external_fact", "repo_fact"] },
-          "resolved_by": { "type": "string" }
+          "resolved_by": { "type": "string" },
+          "parked": { "type": "boolean" }
         }
       }
     },

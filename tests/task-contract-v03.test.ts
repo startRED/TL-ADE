@@ -79,6 +79,7 @@ const VALID_V03_CONTRACT = {
     max_model_calls: 6,
     max_rework_rounds: 2,
   },
+  research_refs: [],
 }
 
 const VALID_V03_PLAN = {
@@ -129,8 +130,8 @@ describe('v0.3 Acceptance Criteria', () => {
     expect(existsSync(CHARTER_PATH)).toBe(true)
     const charter = readFileSync(CHARTER_PATH, 'utf8')
 
-    // Carta identifica a v0.3 como recorte ativo
-    expect(charter).toMatch(/Recorte ativo(?: de governança)? (?:da )?v0\.3/i)
+    // Carta identifica a v0.3 (ou v0.5 ativo) como recorte ativo
+    expect(charter).toMatch(/Recorte ativo(?: de governança)? (?:da )?v0\.[35]/i)
 
     // Aponta para o ADR 0024
     expect(charter).toContain('0024-autorizacao-roadmap-ate-v1.md')

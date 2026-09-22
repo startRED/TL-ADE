@@ -1,0 +1,32 @@
+{
+  "format_version": 1,
+  "launch": [
+    "agy"
+  ],
+  "transport": "cli",
+  "models": [
+    {
+      "id": "gemini-3.8-flash-medium",
+      "context_window": 1000000,
+      "effort": "medium",
+      "vendor": "google"
+    }
+  ],
+  "resume": false,
+  "fork": false,
+  "preminted_session_id": false,
+  "structured_output": true,
+  "budget_cap_native": false,
+  "image_in": false,
+  "image_out": false,
+  "sandbox": "read-only",
+  "cost_report": "unknown",
+  "advisor": false,
+  "unattended_flags": [
+    "--dangerously-skip-permissions"
+  ],
+  "probe_ok": null,
+  "probe_mode": "fixture",
+  "bootstrap_cost_tokens": 0,
+  "probed_at": "1970-01-01T00:00:00.000Z"
+}

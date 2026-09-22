@@ -3,7 +3,7 @@ import { classifyIntent } from './classify.js'
 import { assessRisk } from './risk.js'
 import { generateBriefing } from './briefing.js'
 import { buildInterview, applyInterviewAnswer, getRefusedQuestions } from './interview.js'
-import { runResearchStep } from './research.js'
+import { runResearchStep, fallbackArtifact } from './research.js'
 import { selectEligibleSkills } from './skills.js'
 import { splitContract } from './split.js'
 import { validateCompiledPlan } from './validate.js'
@@ -15,6 +15,7 @@ export {
   buildInterview,
   applyInterviewAnswer,
   runResearchStep,
+  fallbackArtifact,
   selectEligibleSkills,
   splitContract,
   validateCompiledPlan,
@@ -62,8 +63,6 @@ function buildVerifiers({ risk, discovery }) {
 
   if (risk.level !== 'critical') return [base]
 
-  // Superfície crítica: além da suíte, um verificador negativo/de recuperação que nomeia
-  // a superfície descoberta e o comportamento que precisa ser recusado.
   const surface = risk.surfaces[0]
   const surfaceEvidence = risk.sensitive_paths?.length > 0 ? risk.sensitive_paths : evidence
 
@@ -72,8 +71,6 @@ function buildVerifiers({ risk, discovery }) {
     {
       id: `V2-neg-${surface}`,
       kind: 'script',
-      // ponytail: o runner descoberto recebe o filtro por nome (-t); se algum runner não
-      // aceitar, o operador ajusta o cmd no contrato antes de aprovar.
       cmd: [...testCmd, '-t', `${surface} negativo`],
       expect_exit: 0,
       timeout_s: 30,
@@ -114,6 +111,8 @@ function buildContract({
   skills,
   discovery,
   index,
+  unknowns = /** @type {any[]} */ ([]),
+  researchRefs = /** @type {string[]} */ ([]),
 }) {
   const n = index + 1
   return {
@@ -149,12 +148,14 @@ function buildContract({
       checker_round: { family: 'codex', model_id: 'codex-1' },
     },
     budget: { max_model_calls: 3, max_rework_rounds: 1 },
-    unknowns: [],
+    unknowns,
+    research_refs: researchRefs,
   }
 }
 
 /**
- * Compila pedidos em briefing, classificação, entrevista e plano progressivo executável.
+ * Compila pedidos em briefing, classificação, entrevista e plano progressivo executável,
+ * integrando pesquisa externa controlada com tetos por classe de complexidade e fallback seguro.
  *
  * @param {{
  *   request: string,
@@ -164,7 +165,10 @@ function buildContract({
  *   eligibleSkills?: any[],
  *   policy?: any,
  *   advisor?: Function,
- *   unknowns?: any[]
+ *   unknowns?: any[],
+ *   researcher?: Function,
+ *   adeConfig?: any,
+ *   budget?: any
  * }} options
  * @returns {Promise<{ briefing: any, plan: any, contracts: any[], questions: any[], refusedQuestions: any[] }>}
  */
@@ -175,6 +179,10 @@ export async function compileIntent({
   eligibleSkills = [],
   advisor,
   unknowns = [],
+  policy = {},
+  researcher,
+  adeConfig,
+  budget = {},
 }) {
   if (typeof request !== 'string' || request.trim() === '') {
     throw new TypeError('compileIntent: request é obrigatório')
@@ -186,6 +194,141 @@ export async function compileIntent({
 
   const questions = buildInterview({ unknowns, discovery, repoIr, maxQuestions: 5 })
   const refusedQuestions = getRefusedQuestions({ unknowns, discovery, repoIr })
+
+  const complexity = classification.complexity
+  const externalUnknowns = unknowns.filter((u) => u && u.kind === 'external_fact')
+
+  // Tetos normativos de pesquisa por complexidade:
+  // - trivial: 0 consultas (pesquisa proibida)
+  // - bounded: máximo 1 consulta, sem time paralelo
+  // - feature ou superior: até 3 consultas
+  let maxQueries = 0
+  if (complexity === 'bounded') {
+    maxQueries = 1
+  } else if (['feature', 'subsystem', 'project'].includes(complexity)) {
+    maxQueries = 3
+  }
+
+  const allowResearch =
+    policy.allow_research !== false &&
+    adeConfig?.research?.enabled !== false &&
+    complexity !== 'trivial'
+  const configuredMaxQueries = adeConfig?.research?.max_queries
+  const effectiveMaxQueries = allowResearch
+    ? Math.min(maxQueries, Number.isSafeInteger(configuredMaxQueries) ? configuredMaxQueries : maxQueries)
+    : 0
+
+  const teamEnabled =
+    (complexity === 'subsystem' || complexity === 'project') &&
+    (policy.team_enabled === true || adeConfig?.research?.team_enabled === true)
+  const teamSize = policy.team_size ?? adeConfig?.research?.team_size
+  if (teamEnabled && (!Number.isSafeInteger(teamSize) || teamSize < 2 || teamSize > 4)) {
+    throw new TypeError('compileIntent: time de pesquisa exige team_size entre 2 e 4')
+  }
+
+  const configuredMaxUsd = adeConfig?.research?.max_usd
+  const budgetMaxUsd = budget.max_usd
+  const maxResearchUsd = Math.min(
+    typeof configuredMaxUsd === 'number' ? configuredMaxUsd : Number.POSITIVE_INFINITY,
+    typeof budgetMaxUsd === 'number' ? budgetMaxUsd : Number.POSITIVE_INFINITY,
+  )
+
+  /** @type {any[]} */
+  const researchFindings = []
+  /** @type {any[]} */
+  const researchFallbacks = []
+  const contractUnknowns = unknowns.map((u) => {
+    const rawKind = u.kind || 'product_choice'
+    const kind = ['product_choice', 'external_fact', 'repo_fact'].includes(rawKind) ? rawKind : 'product_choice'
+    /** @type {any} */
+    const base = {
+      id: String(u.id || ''),
+      question: String(u.question || ''),
+      kind,
+    }
+    if (u.resolved_by) {
+      base.resolved_by = String(u.resolved_by)
+    }
+    return base
+  })
+
+  let researchCostUsd = 0
+  let divergenceDetected = false
+
+  for (let i = 0; i < externalUnknowns.length; i++) {
+    const extU = externalUnknowns[i]
+    const unknownInContract = contractUnknowns.find((u) => u.id === extU.id)
+
+    const consumedUsd = (budget.consumed_usd ?? 0) + researchCostUsd
+    const hasBudget = consumedUsd < maxResearchUsd
+    if (i < effectiveMaxQueries && hasBudget && typeof researcher === 'function') {
+      const stepRes = await runResearchStep({
+        unknown: extU,
+        budget: {
+          ...budget,
+          ...(Number.isFinite(maxResearchUsd) ? { max_usd: maxResearchUsd } : {}),
+          consumed_usd: consumedUsd,
+        },
+        researcher,
+        policy: { ...policy, team_enabled: teamEnabled, team_size: teamSize },
+      })
+
+      if (stepRes?.divergent) {
+        divergenceDetected = true
+        questions.push(/** @type {any} */ ({
+          id: `Q-divergence-${extU.id}`,
+          text: stepRes.question || `Divergência de pesquisa em "${extU.question}"`,
+          question: extU.question,
+          kind: 'divergence',
+          options: (stepRes.findings || []).map((/** @type {any} */ f) => ({
+            id: f.id,
+            label: `${f.source}: ${f.result || f.claims?.[0]?.text || ''}`,
+          })),
+        }))
+        if (unknownInContract) {
+          unknownInContract.resolved_by = 'awaiting_operator'
+        }
+      } else if (stepRes?.kind === 'research_finding') {
+        ;(stepRes.data?.fallback_applied || stepRes.data?.parked ? researchFallbacks : researchFindings).push(stepRes)
+        if (typeof stepRes.data?.cost === 'number') {
+          researchCostUsd += stepRes.data.cost
+        }
+        if (unknownInContract) {
+          if (stepRes.data?.parked) {
+            unknownInContract.parked = true
+            unknownInContract.resolved_by = 'parked'
+          } else if (stepRes.data?.fallback_applied) {
+            unknownInContract.resolved_by = 'fallback_assumed'
+          } else {
+            unknownInContract.resolved_by = 'research'
+          }
+        }
+      }
+    } else {
+      // Excedeu o teto ou pesquisa desabilitada/não autorizada
+      if (complexity !== 'trivial') {
+        const fallback = fallbackArtifact({
+          unknown: extU,
+          budget,
+          reason: !hasBudget
+            ? 'Orçamento de pesquisa esgotado'
+            : allowResearch
+            ? `Limite de pesquisa para ${complexity} atingido (máximo ${maxQueries} consulta${maxQueries > 1 ? 's' : ''})`
+            : 'Pesquisa desabilitada por política',
+          fallbackAuthorized: policy.fallback_authorized !== false && hasBudget,
+        })
+        researchFallbacks.push(fallback)
+        if (unknownInContract) {
+          if (fallback.data?.parked) {
+            unknownInContract.parked = true
+            unknownInContract.resolved_by = 'parked'
+          } else {
+            unknownInContract.resolved_by = 'fallback_assumed'
+          }
+        }
+      }
+    }
+  }
 
   const verifiers = buildVerifiers({ risk, discovery })
   const verifierEvidence = verifiers.flatMap((v) => v.evidence || [])
@@ -241,11 +384,13 @@ export async function compileIntent({
     : (deliverables.length > 1 ? deliverables : [request])
   const futureIntent = isBroad ? deliverables.slice(IMMEDIATE_SLICE) : []
 
+  const researchRefs = researchFindings.map((f) => f.ref)
+
   const contracts = immediate.map((deliverable, index) => {
     const idMatch = deliverable.match(/^(S\d+)\b/i)
     const id = idMatch ? idMatch[1].toUpperCase() : `S${index + 1}`
     const num = id.replace(/\D/g, '') || String(index + 1)
-    return buildContract({
+    const c = buildContract({
       id,
       title: deliverable,
       task: deliverable,
@@ -257,10 +402,13 @@ export async function compileIntent({
       skills,
       discovery,
       index: Number(num) - 1,
+      unknowns: contractUnknowns,
+      researchRefs,
     })
+    Object.defineProperty(c, 'research_findings', { value: researchFindings, enumerable: false, writable: true })
+    return c
   })
 
-  // O schema do contrato é fechado: o briefing de UI vive no briefing do plano, por story.
   const designBriefs = {}
   for (const contract of contracts) {
     if (!contract.needs_ui) continue
@@ -275,6 +423,8 @@ export async function compileIntent({
     ...briefing,
     ...(Object.keys(designBriefs).length > 0 ? { design_briefs: designBriefs } : {}),
     ...(futureIntent.length > 0 ? { future_intent: futureIntent } : {}),
+    ...(researchFindings.length > 0 ? { research_findings: researchFindings } : {}),
+    ...(researchFallbacks.length > 0 ? { research_fallbacks: researchFallbacks } : {}),
   }
 
   const reqHash = createHash('sha256').update(request).digest('hex')
@@ -297,6 +447,11 @@ export async function compileIntent({
     mission_budget: { max_usd: 10 },
     budget: { max_model_calls: 3, max_rework_rounds: 1 },
   }
+
+  Object.defineProperty(plan.budget, 'research_cost_usd', { value: researchCostUsd, enumerable: false, writable: true })
+  Object.defineProperty(plan, 'research_findings', { value: researchFindings, enumerable: false, writable: true })
+
+  if (divergenceDetected) Object.defineProperty(plan, 'status', { value: 'awaiting_operator', enumerable: false })
 
   return { briefing: planBriefing, plan, contracts, questions, refusedQuestions }
 }

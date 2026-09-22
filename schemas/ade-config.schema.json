@@ -190,9 +190,18 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "trigger": { "type": "string" },
-        "team_size": { "type": "integer" },
-        "tie_becomes_question": { "type": "boolean" }
-      }
+        "team_size": { "type": "integer", "minimum": 0, "maximum": 4 },
+        "tie_becomes_question": { "type": "boolean" },
+        "team_enabled": { "type": "boolean" },
+        "max_queries": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "max_usd": { "type": "number", "minimum": 0 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "team_enabled": { "const": true } }, "required": ["team_enabled"] },
+          "then": { "properties": { "team_size": { "type": "integer", "minimum": 2, "maximum": 4 } } }
+        }
+      ]
     },
     "catalog": {
       "type": "object",

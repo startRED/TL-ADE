@@ -245,6 +245,10 @@ export async function planMission(
     eligibleSkills: deps.eligibleSkills || [],
     advisor: deps.advisor,
     unknowns: deps.unknowns || [],
+    researcher: deps.researcher,
+    policy: deps.policy,
+    adeConfig: deps.adeConfig,
+    budget: deps.budget,
   })
 
   const { plan, questions } = compiled
@@ -731,6 +735,10 @@ export async function replanRemaining(
     eligibleSkills: oldPlan.authorization?.eligible_skills || deps.eligibleSkills || [],
     advisor: deps.advisor,
     unknowns: deps.unknowns || [],
+    researcher: deps.researcher,
+    policy: deps.policy,
+    adeConfig: deps.adeConfig,
+    budget: deps.budget,
   })
 
   const { plan: newPlanTemplate } = compiled

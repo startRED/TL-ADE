@@ -64,7 +64,7 @@ function linkNodeModules(repoDir, worktreeDir) {
 /**
  * @typedef {Object} PrepareAwaitingOperatorResult
  * @property {'awaiting_operator'} status
- * @property {'takeover_open' | 'stale_branch' | 'branch_in_use' | 'environment'} reason
+ * @property {'takeover_open' | 'stale_branch' | 'branch_in_use' | 'environment' | 'research_unknown_parked' | 'visual_rework_budget_exhausted'} reason
  * @property {number} exitCode
  * @property {string} worktreeDir
  * @property {string} branch
@@ -101,6 +101,16 @@ export async function prepareStory(options) {
   const branch = `ade/${missionId}/${storyId}`
   const worktreeDir = path.join(repoDir, '.ade', 'wt', storyId)
   const basePort = createGitPort({ worktreeDir: repoDir })
+
+  if (/** @type {any} */ (options).contract?.unknowns?.some((/** @type {any} */ unknown) => unknown.parked === true || unknown.resolved_by === 'parked')) {
+    return {
+      status: 'awaiting_operator',
+      reason: 'research_unknown_parked',
+      exitCode: 3,
+      worktreeDir,
+      branch,
+    }
+  }
 
   // Ordem de precedência das guardas: dirty_worktree -> takeover_open -> dirty_unit_branch -> stale_branch -> branch_in_use
   const dirty = (await basePort.dirtyPaths()).filter(

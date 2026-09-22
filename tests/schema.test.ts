@@ -121,6 +121,7 @@ function loadFixture(schemaName: string, kind: 'valid' | 'invalid'): Record<stri
         max_model_calls: 6,
         max_rework_rounds: 2,
       },
+      research_refs: [],
     }
   }
 
@@ -665,6 +666,4 @@ describe('review-result v2 contract evolution', () => {
     expect(resInvalid.errors.some((e) => e.path.includes('depends_on'))).toBe(true)
   })
 })
-
-
 

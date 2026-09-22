@@ -1,8 +1,12 @@
 // @ts-check
+import fs from 'node:fs'
+import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
+import { dispatchAgy } from '../adapters/agy/index.js'
 import { canonicalize } from '../journal/canonical.js'
 import { planMission } from '../mission/plan-lifecycle.js'
+import { resolveBinary } from '../runner/resolve-binary.js'
 
 /**
  * Ponto de entrada do comando `ade plan`.
@@ -52,6 +56,33 @@ export async function main(argv, deps = {}) {
   const nonInteractive = Boolean(values['non-interactive'])
 
   try {
+    const configPath = path.join(String(repoDir), '.ade', 'config.json')
+    let adeConfig = deps.adeConfig
+    if (adeConfig === undefined && fs.existsSync(configPath)) {
+      adeConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'))
+    }
+
+    const researchConfig = adeConfig?.research
+    let agyResolved = deps.agyResolved
+    const researcher = deps.researcher ?? (researchConfig?.enabled === true
+      ? async (/** @type {any} */ { unknown, budget }) => {
+          if (!agyResolved) agyResolved = (deps.resolveBinary ?? resolveBinary)('agy')
+          const missionDir = path.join(String(repoDir), '.ade', 'research')
+          fs.mkdirSync(missionDir, { recursive: true })
+          return dispatchAgy({
+            unit: 'intent-compiler',
+            stepId: `research-${unknown.id}`,
+            unknown,
+            budget,
+            resolved: agyResolved,
+            cwd: String(repoDir),
+            missionDir,
+            env: /** @type {Record<string, string>} */ (env),
+            ...(deps.runWorkerImpl ? { runWorkerImpl: deps.runWorkerImpl } : {}),
+          })
+        }
+      : undefined)
+
     const result = await planMission(
       {
         request: String(request),
@@ -59,7 +90,20 @@ export async function main(argv, deps = {}) {
         fromMissionId: fromMissionId ? String(fromMissionId) : undefined,
         nonInteractive,
       },
-      deps,
+      {
+        ...deps,
+        adeConfig,
+        researcher,
+        policy: deps.policy ?? {
+          allow_research: researchConfig?.enabled === true,
+          team_enabled: researchConfig?.team_enabled === true,
+          team_size: researchConfig?.team_size,
+        },
+        budget: deps.budget ?? {
+          max_usd: researchConfig?.max_usd,
+          consumed_usd: 0,
+        },
+      },
     )
 
     if (values.json) {

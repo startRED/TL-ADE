@@ -4,13 +4,14 @@ import path from 'node:path'
 import { AdeError } from '../journal/errors.js'
 import { safeId, writeRawArtifact } from '../gates/output.js'
 import { digest16 } from '../journal/canonical.js'
+import { screenResearchFinding } from './firewall.js'
 import { redactText } from './redact.js'
 
 /**
  * Ordem fixa das seções do Context Pack.
  * @type {readonly string[]}
  */
-export const SECTION_ORDER = Object.freeze(['contract', 'policy', 'story', 'skills'])
+export const SECTION_ORDER = Object.freeze(['contract', 'policy', 'story', 'retrieved', 'skills'])
 
 /**
  * Tetos por seção, em bytes UTF-8.
@@ -20,6 +21,7 @@ export const SECTION_CAPS = Object.freeze({
   contract: 32000,
   policy: 8000,
   story: 24000,
+  retrieved: 6000,
   skills: 80000,
 })
 
@@ -126,7 +128,7 @@ function validateSections(sections) {
   }
   for (const name of SECTION_ORDER) {
     let body = record[name]
-    if (body === undefined && name === 'skills') {
+    if (body === undefined && (name === 'skills' || name === 'retrieved')) {
       body = ''
       record[name] = ''
     }
@@ -149,13 +151,16 @@ function sectionHeader(name) {
  * @returns {string}
  */
 function buildRawPack(sections) {
-  return SECTION_ORDER.map((name) => sectionHeader(name) + sections[name] + '\n').join('')
+  // Sem dado recuperado a seção nem aparece: o pack sem pesquisa mantém o formato anterior.
+  return SECTION_ORDER.filter((name) => name !== 'retrieved' || sections[name] !== '')
+    .map((name) => sectionHeader(name) + sections[name] + '\n')
+    .join('')
 }
 
 /**
  * Mede, sem gravar nada, quantos bytes o pack ocuparia com estas seções.
  *
- * @param {{contract: string, policy: string, story: string}} sections
+ * @param {{contract: string, policy: string, story: string, retrieved?: string, skills?: string}} sections
  * @returns {number}
  */
 export function measurePackBytes(sections) {
@@ -176,9 +181,15 @@ function splitPackSections(text) {
     const name = SECTION_ORDER[i]
     const marker = sectionHeader(name)
     const start = text.indexOf(marker)
+    if (start === -1) {
+      bodies[name] = ''
+      continue
+    }
     const bodyStart = start + marker.length
-    const nextName = SECTION_ORDER[i + 1]
-    const nextIdx = nextName ? text.indexOf(sectionHeader(nextName), bodyStart) : -1
+    const nextIdx =
+      SECTION_ORDER.slice(i + 1)
+        .map((next) => text.indexOf(sectionHeader(next), bodyStart))
+        .find((idx) => idx !== -1) ?? -1
     const bodyEnd = nextIdx === -1 ? text.length : nextIdx
     bodies[name] = text.slice(bodyStart, bodyEnd).replace(/\n$/, '')
   }
@@ -262,7 +273,7 @@ function writeFileAtomic(filePath, text) {
  * @typedef {Object} CompilePackOptions
  * @property {string} missionDir
  * @property {string} stepId
- * @property {{contract: string, policy: string, story: string, skills?: string}} sections
+ * @property {{contract: string, policy: string, story: string, retrieved?: string, skills?: string}} sections
  * @property {{max_pack_bytes?: number, section_bytes?: Partial<Record<string, number>>}} [limits]
  * @property {number} [savedBytes]
  * @property {Array<{name: string, source: string, sha256: string, bytes: number, cited?: boolean}>} [skills]
@@ -277,7 +288,7 @@ function writeFileAtomic(filePath, text) {
  */
 
 /**
- * Monta o Context Pack a partir das três seções, redige segredos uma única vez,
+ * Monta o Context Pack a partir das seções, redige segredos uma única vez,
  * aplica os tetos por seção e grava pack.md, manifest.json e os corpos íntegros como artefatos.
  *
  * @param {CompilePackOptions} options
@@ -285,8 +296,22 @@ function writeFileAtomic(filePath, text) {
  */
 export function compilePack(options) {
   validateOptions(options)
-  const { missionDir, stepId, sections, limits, savedBytes } = options
+  const { missionDir, stepId, sections: providedSections, limits, savedBytes } = options
+  const planPath = path.join(missionDir, 'plan.json')
+  /** @type {any[]} */
+  const findings = fs.existsSync(planPath)
+    ? (JSON.parse(fs.readFileSync(planPath, 'utf8')).briefing?.research_findings ?? [])
+    : []
+  const screenedResearch = findings.map((finding) => screenResearchFinding(finding, { missionDir }))
+  const researchText = screenedResearch.map((item) => item.fencedText).join('\n\n')
+  const sections = {
+    ...providedSections,
+    ...(researchText
+      ? { retrieved: [providedSections.retrieved, researchText].filter(Boolean).join('\n\n') }
+      : {}),
+  }
   validateSections(sections)
+  const names = SECTION_ORDER.filter((name) => name !== 'retrieved' || sections.retrieved !== '')
 
   const id = safeId(stepId)
   const sectionCaps = { ...SECTION_CAPS, ...limits?.section_bytes }
@@ -298,19 +323,19 @@ export function compilePack(options) {
 
   /** @type {Record<string, string>} */
   const finalBodies = {}
-  for (const name of SECTION_ORDER) {
+  for (const name of names) {
     const cap = /** @type {number} */ (sectionCaps[name])
     finalBodies[name] = capSection(name, redactedBodies[name], cap, `art:packs/${id}/${name}`)
   }
 
-  const finalPackText = SECTION_ORDER.map((name) => sectionHeader(name) + finalBodies[name] + '\n').join('')
+  const finalPackText = names.map((name) => sectionHeader(name) + finalBodies[name] + '\n').join('')
   const totalBytes = Buffer.byteLength(finalPackText)
   if (totalBytes > maxPackBytes) {
     throw new AdeError('pack_budget_exceeded', `pack excede ${maxPackBytes} bytes`, 2)
   }
 
   const manifest = {
-    sections: SECTION_ORDER.map((name) => ({
+    sections: names.map((name) => ({
       section: name,
       ref: `art:packs/${id}/${name}`,
       bytes: Buffer.byteLength(finalBodies[name]),
@@ -325,7 +350,18 @@ export function compilePack(options) {
       saved_bytes: savedBytes ?? 0,
     },
     ...(options.skills ? { skills: options.skills } : {}),
-    ...(options.artifactRefs ? { artifact_refs: options.artifactRefs } : {}),
+    ...((options.artifactRefs || screenedResearch.length > 0)
+      ? { artifact_refs: [...(options.artifactRefs || []), ...screenedResearch.map((item) => item.rawRef)] }
+      : {}),
+    ...(screenedResearch.length > 0
+      ? {
+          research_sources: screenedResearch.map((item) => ({
+            ref: item.rawRef,
+            digest: item.digest,
+            source: `source:research@sha256:${item.digest}`,
+          })),
+        }
+      : {}),
   }
 
   const packDir = path.join(missionDir, 'artifacts', 'packs', id)
@@ -333,7 +369,7 @@ export function compilePack(options) {
   const manifestPath = path.join(packDir, 'manifest.json')
   // Os corpos integrais redigidos saem primeiro; writeRawArtifact cria e confere
   // a contenção física de artifacts/packs/<id>, onde pack.md e manifest.json vão depois.
-  for (const name of SECTION_ORDER) {
+  for (const name of names) {
     writeRawArtifact({ missionDir, ref: `packs/${id}/${name}`, text: redactedBodies[name] })
   }
   writeFileAtomic(manifestPath, JSON.stringify(manifest, null, 2))

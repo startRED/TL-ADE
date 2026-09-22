@@ -39,11 +39,12 @@ function extractSectionBody(packText: string, section: string): string {
 
 describe('compilePack', () => {
   test('pack_section_order_and_caps_match_contract', () => {
-    expect(SECTION_ORDER).toEqual(['contract', 'policy', 'story', 'skills'])
+    expect(SECTION_ORDER).toEqual(['contract', 'policy', 'story', 'retrieved', 'skills'])
     expect(SECTION_CAPS).toEqual({
       contract: 32000,
       policy: 8000,
       story: 24000,
+      retrieved: 6000,
       skills: 80000,
     })
   })
@@ -62,6 +63,7 @@ describe('compilePack', () => {
         contract: 'C',
         policy: 'P',
         story: 'S',
+        retrieved: 'R',
       },
     })
 
