@@ -6,6 +6,9 @@
   "engines": {
     "node": ">=22"
   },
+  "workspaces": [
+    "packages/*"
+  ],
   "bin": {
     "ade": "bin/ade.js"
   },
@@ -26,6 +29,7 @@
   },
   "dependencies": {
     "ajv": "^8.20.0",
+    "better-sqlite3": "^13.0.3",
     "canonicalize": "^5.0.0",
     "playwright": "1.49.1"
   }

@@ -17,6 +17,7 @@ import { prepareStory } from '../src/engine/prepare.js'
 import { renderVisualComparison } from '../src/cli/report.js'
 import { runDoctor } from '../src/cli/doctor.js'
 import { makeRepo, removeRepo } from './helpers/git-repo.js'
+import { validate } from '../src/schema/index.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -781,5 +782,29 @@ describe('v0.4a Frontend Quality Engine (FQE) Acceptance Tests', () => {
 
     // Encerra o servidor após a chamada
     await server.close()
+  })
+
+  // Confirmação do segundo consumidor de visual-eval (schema publicado compartilhado)
+  test('resultado_do_juiz_visual_valida_com_o_schema_publicado_visual_eval', async () => {
+    const visualEval = await judgeVisual({
+      captures: [
+        {
+          path: 'artifacts/visual/test.png',
+          route: '/',
+          width: 1280,
+          theme: 'light',
+          sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        },
+      ],
+      task: 'Construir landing page com assinatura visual única e boa tipografia',
+      designBrief: {
+        surface_mode: 'persuade',
+        tokens: { typography: { display: 'Fraunces' } },
+      },
+    })
+
+    const validation = validate('visual-eval', visualEval)
+    expect(validation.valid).toBe(true)
+    expect(visualEval.verdict).toBe('pass')
   })
 })

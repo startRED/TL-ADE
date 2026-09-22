@@ -1,0 +1,96 @@
+{
+  "$id": "https://tl-ade.dev/schemas/visual-eval.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "visual-eval",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "story_id",
+    "round",
+    "rubric_version",
+    "judge",
+    "detector",
+    "surface_mode",
+    "captures",
+    "criteria",
+    "final",
+    "defects",
+    "verdict"
+  ],
+  "properties": {
+    "story_id": { "type": "string" },
+    "round": { "type": "integer", "enum": [1, 2] },
+    "rubric_version": { "type": "string" },
+    "judge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "model_id"],
+      "properties": {
+        "family": { "type": "string" },
+        "model_id": { "type": "string" },
+        "pinned_at": { "type": "string" }
+      }
+    },
+    "detector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine_version", "url_mode"],
+      "properties": {
+        "engine_version": { "type": "string" },
+        "url_mode": { "enum": ["ok", "unsupported"] }
+      }
+    },
+    "surface_mode": { "enum": ["persuade", "operate", "read", "experience"] },
+    "captures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["route", "width", "theme", "path", "sha256"],
+        "properties": {
+          "route": { "type": "string" },
+          "width": { "type": "integer" },
+          "theme": { "enum": ["light", "dark"] },
+          "path": { "type": "string" },
+          "sha256": { "type": "string" },
+          "url": { "type": "string" },
+          "revision": { "type": "string" },
+          "commit_sha": { "type": "string" },
+          "at": { "type": "string" },
+          "inspection": { "type": "object" }
+        }
+      }
+    },
+    "criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "score", "weight", "note"],
+        "properties": {
+          "id": { "enum": ["specificity", "hierarchy", "typography", "color", "states", "motion"] },
+          "score": { "type": ["number", "null"], "minimum": 0, "maximum": 10 },
+          "weight": { "type": "number" },
+          "note": { "type": "string" }
+        }
+      }
+    },
+    "final": { "type": "number", "minimum": 0, "maximum": 10 },
+    "defects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "severity", "criterion", "where", "fix"],
+        "properties": {
+          "id": { "type": "string" },
+          "severity": { "enum": ["critical", "major", "minor"] },
+          "criterion": { "type": "string" },
+          "where": { "type": "string" },
+          "fix": { "type": "string" }
+        }
+      }
+    },
+    "verdict": { "enum": ["pass", "rework", "unknown"] }
+  }
+}

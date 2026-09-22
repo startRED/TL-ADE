@@ -32,6 +32,9 @@ const ROOT_ALLOWLIST = new Set([
   'tests',
   'tsconfig.json',
   'vitest.config.mjs',
+  'index.html',
+  'packages',
+  'ade.bat',
   // Locais ignorados (7)
   '.git',
   '.claude',

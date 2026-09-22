@@ -21,11 +21,11 @@ binários instalados já fazem nativamente (`claude`, `codex`); ela só escreve 
 o journal, o Task Contract com eval provado, e o Context Pack. A ADE não é um CI, não é um issue tracker,
 não é uma IDE, não é um provedor de modelo (nunca chama API HTTP de modelo; só CLI com assinatura), não é um framework de agentes.
 
-## Recorte ativo de governança da v0.4a (o que entra em `src/` nesta fatia e épico)
+## Recorte ativo de governança da v0.4b (o que entra em `src/` e `packages/` nesta fatia e épico)
 
-`ade run --plan plan.json` executa uma story sob controle prévio de governança e preflight, família `claude`, `local_commit` local, zero rede além da CLI; código em JS ESM com JSDoc, ADR 0023.
+`ade run --plan plan.json` executa uma story sob controle prévio de governança e preflight; `ade init`, `ade serve` e `ade index --rebuild` entregam o painel local reconstruível, servidor protegido e lançador Windows; código em JS ESM com JSDoc, ADR 0023 e ADR 0027.
 
-- `src/journal`: `canonical.js` (wrapper `canonicalize` + `digest16`), `journal.js` (append/read/fold, `prev`, fd aberto + `fsyncSync`).
+- `src/journal`: `canonical.js` (wrapper `canonicalize` + `digest16`), `journal.js` (append/read/fold, `prev`, fd aberto + `fsyncSync`), `errors.js` (`AdeError`, códigos de saída).
 - `src/step`: `step.js` (write-ahead, `input_digest`, `intent_context`, fila serializada), `reconcile.js` (tabela por `effect_class`).
 - `src/lease`: `lease.js` (`mkdir` + heartbeat 2 s + TTL 15 s, fingerprint pid/start-time; exit 5).
 - `src/git`: `gitport.js` (instância por worktree, `worktree_tree` com índice racy, `dirty_paths -z`, checkpoint/restore em `refs/ade/`).
@@ -35,15 +35,19 @@ não é uma IDE, não é um provedor de modelo (nunca chama API HTTP de modelo; 
 - `src/evals`: `eval-runner.js` (`phase: red|green`, `strictness`, evidência).
 - `src/pack`: `pack.js` (seções contract, policy, story e skills, teto por seção com ponteiro, redação pós-montagem), `firewall.js`.
 - `src/skills`: `catalog.js` (sync, list, inspect, lock atômico), `skillguard.js` (NFKC, 12 controles estáticos, quarentena), `bm25.js` (ranking ponderado sem dependências), `select.js` (filtro duro, BM25 top-8, seletor de até 3 skills com tetos de 7,5k/20k tokens).
+- `src/visual`: FQE D1–D6 determinísticos, juiz multimodal com 2 rodadas, captura de superfícies e avaliações visuais.
+- `src/panel`: `projection.js` (projeção determinística de missões/journal/artefatos), `sqlite-index.js` (reconstrução atômica byte a byte de `.ade/index.sqlite`), `server.js` (servidor HTTP/WS nativo protegido), `websocket.js` (eventos ao vivo unidirecionais com `since`), `session.js` (token efêmero aleatório, checagem de `Origin`), `projects.js` (registro de projetos), `launcher.js` (geração de `ade.bat`), `serve-lease.js` (lease exclusivo de execução).
 - `src/adapters/claude`: argv, `--session-id`, `--json-schema`, parser tolerante, `parse_usage`.
 - `src/adapters/codex`: argv, supressão de personalizações nativas (`--ephemeral`, `--ignore-rules`).
 - `src/adapters/fake`: CLI falsa para testes determinísticos sem rede.
-- `src/cli`: `node:util parseArgs`; `ade run --plan`, `ade doctor` (com suporte a `--skills`), `ade show`, `ade catalog` (`sync`, `list`, `inspect`).
-- `src/engine.js`: ciclo da story, `runtime_stamp`; `src/engine`: `preflight.js` (verificações determinísticas puras de preflight na ordem fixa, cálculo de chamadas pagas evitadas), `budget.js` (controles prévios, reservas e tetos), `loop.js`, `schedule.js`, `plan-load.js`.
-- `src/schema`: carregador ajv compartilhado dos 8 schemas publicados.
-- `schemas/`: 8 arquivos `.schema.json` publicados (`journal-event`, `ade-config`, `plan`, `task-contract`, `eval`, `unit-result`, `review-result`, `capability-set`).
-- `fixtures/`: transcripts gravados, cenários da CLI falsa, vetores JCS, corpus do catálogo e SkillGuard (`fixtures/catalog/index-2026-09.json`, `fixtures/skillguard/`).
-- `tests/`: Vitest, um arquivo por módulo + `parity/` + `probes/` + `tests/skill-fabric.test.ts`.
+- `src/cli`: `node:util parseArgs`; `ade run`, `ade init`, `ade serve`, `ade index --rebuild`, `ade doctor` (com suporte a `--skills` e `--native`), `ade show`, `ade catalog`, `ade plan`, `ade validate`, `ade approve`.
+- `src/engine.js`: ciclo da story, `runtime_stamp`; `src/engine`: `preflight.js`, `budget.js`, `loop.js`, `schedule.js`, `plan-load.js`.
+- `src/schema`: carregador ajv compartilhado dos 9 schemas publicados.
+- `packages/web`: `package.json`, `styles.css` (tema escuro acessível, foco visível, movimento reduzido), `app.js` (aplicação estática sem compilação).
+- `index.html`: entrada estática na raiz servida diretamente sem pipeline de build.
+- `schemas/`: 9 arquivos `.schema.json` publicados (`journal-event`, `ade-config`, `plan`, `task-contract`, `eval`, `unit-result`, `review-result`, `capability-set`, `visual-eval`).
+- `fixtures/`: transcripts gravados, cenários da CLI falsa, vetores JCS, corpus do catálogo, SkillGuard e fixtures visuais.
+- `tests/`: Vitest, um arquivo por módulo + `parity/` + `probes/` + `tests/skill-fabric.test.ts` + `tests/frontend-quality-engine.test.ts` + `tests/panel-v04b.test.ts`.
 
 Padrões provisórios de execução e custos fixados para o recorte ativo de governança da v0.2 ([docs/adr/0026-governanca-execucao-custos.md](docs/adr/0026-governanca-execucao-custos.md)):
 - Teto absoluto de US$ 300 (reserva >= 300 recusada antes do despacho);
@@ -54,18 +58,17 @@ Padrões provisórios de execução e custos fixados para o recorte ativo de gov
 - Limites de contexto: contrato de 32000 bytes e pack de 120000 bytes;
 - Espaço em disco mínimo de 1 GiB e validade de capacidade de 24 horas.
 
-**Fora do slice 1 e fora do recorte ativo da v0.2, sem exceção — nenhum destes entra em `src/`:** Intent Compiler, entrevista, classificação, Checker como componente da ADE (adapter `codex`, ingestão de `review-result` pelo engine, rework automático), Skill Fabric, FQE, pesquisa, painel, PTY, push/PR/merge/CI, entrega remota, N>1, `agy`, SQLite, Playwright, Fastify, WebSocket. `proto/` é a demo e fica intocada.
+**Fora do slice 1 histórico e do recorte ativo da v0.4b, sem exceção — nenhum destes entra em `src/`:** Intent Compiler adicional, Skill Fabric adicional, FQE adicional, painel com terminal embutido (PTY), takeover interativo, execução paralela (N>1), `agy` na v1, SQLite autoritativo, Playwright no servidor, Fastify, push/PR/merge/CI remoto no GitHub real ou WebSocket bidirecional. `proto/` fica intocado.
 
 **Checker como passo do método.** O operador roda `codex exec` sobre o diff, fora do engine; o Codex é ferramenta de desenvolvimento, nunca importada pelo engine.
 
 **Regra de ampliação.** Item da lista "fora" que apareça em `src/` é motivo de rejeição, não de discussão; o caminho é uma linha em `docs/roadmap.md`.
 
 ## Estado e autorização
-
 - Autorização até a v1: concedida por Erick em 2026-09-19 ([docs/adr/0024-autorizacao-roadmap-ate-v1.md](docs/adr/0024-autorizacao-roadmap-ate-v1.md)) e confirmada para governança e custos em 2026-09-20 ([docs/adr/0026-governanca-execucao-custos.md](docs/adr/0026-governanca-execucao-custos.md)).
 - Sequência obrigatória dos marcos: v0.2 (durabilidade e paridade 93) -> v0.3 -> v0.4a -> v0.4b -> v0.5 -> v1.
-- Recorte ativo deste épico: v0.4a — Skill Fabric (catálogo curado, 12 controles de segurança da cadeia de suprimento, BM25 top-8, seletor de até 3 skills sob tetos de 7,5k/20k tokens, aprovação congelada e injeção sanitizada no Context Pack) e Frontend Quality Engine conforme autorização até a v1 concedida no [ADR 0024](docs/adr/0024-autorizacao-roadmap-ate-v1.md).
-- Recorte ativo de governança da v0.4a: catálogo sincronizado sob commit pinado e lock exclusivo, índice de seleção derivado, SkillGuard estático com quarentena, aprovação congelada de skills elegíveis, supressão de personalizações nativas em despacho e monitoramento de drift de memória via doctor ([docs/adr/0024-autorizacao-roadmap-ate-v1.md](docs/adr/0024-autorizacao-roadmap-ate-v1.md), [docs/adr/0026-governanca-execucao-custos.md](docs/adr/0026-governanca-execucao-custos.md)).
+- Recorte ativo deste épico: v0.4b — Painel local, índice SQLite reconstruível, lançador Windows de 2 cliques (`ade.bat`), workspace `packages/web`, servidor protegido em 127.0.0.1 com token efêmero e 9º schema publicado (`visual-eval`), conforme autorização até a v1 concedida no [ADR 0024](docs/adr/0024-autorizacao-roadmap-ate-v1.md) e formalizada no [ADR 0027](docs/adr/0027-ativacao-da-v04b-painel-local.md).
+- Recorte ativo de governança da v0.4b: projeção derivável das fontes duráveis (`plan.json` + `journal.jsonl` + `artifacts/`), ausência de estado próprio no banco ou no navegador, reconstrução atômica com integridade de hash, bind restrito a `127.0.0.1`, credencial criptográfica aleatória por execução, validação estrita de `Origin`, lease de processo exclusivo e verificação prévia da dependência nativa `better-sqlite3` via doctor.
 - Slice 1: fechamento pendente ([docs/plans/slice-1-fechamento.md](docs/plans/slice-1-fechamento.md)).
 - Recorte local v0.2: autorizado sequencialmente ([docs/plans/v02-local-proposta.md](docs/plans/v02-local-proposta.md), [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md)).
 - Restante da v0.2: segue a ordem do roadmap.

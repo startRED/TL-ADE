@@ -22,7 +22,7 @@ Nunca use `npx`: `spawn('npx.cmd')` sem shell falha com EINVAL no Windows (ADR 0
 - Eval antes do código (a prova nasce vermelha).
 - Todo `execFile`/`spawnSync` com `maxBuffer` explícito e sem `shell`.
 - Erros lançados são subclasses de `AdeError` de `src/journal/errors.js` com `exitCode`.
-- Dependências de produção: só `ajv` e `canonicalize`.
+- Dependências de produção: `ajv`, `canonicalize` e `better-sqlite3` (v0.4b, ADR 0027).
 - Textos e comentários em português.
 
 ## Proibições
@@ -31,13 +31,13 @@ Nunca use `npx`: `spawn('npx.cmd')` sem shell falha com EINVAL no Windows (ADR 0
   - Exceção do épico "Servidor: chat escreve na cópia e rotas aprovar/recusar": podem ser alterados somente proto/chat-changes.mjs, proto/server.mjs, proto/chat-routes.test.mjs e proto/README.md.
   - Exceção do épico "Tela: cartão de permissão, travas e textos": podem ser criados ou alterados somente proto/src/diff-lines.mjs, proto/src/diff-lines.test.mjs, proto/src/PermissionCard.jsx, proto/src/permission-card.test.mjs, proto/src/App.jsx, proto/src/index.css e proto/README.md.
 - Converter arquivo para `.ts` ou criar passo de build.
-- Criar `workspaces` ou `packages/`.
+- Criar novos workspaces além de `packages/web` (v0.4b, ADR 0027).
 - Suprimir regra de tipo ou lint (diretivas ts-ignore, ts-expect-error, ts-nocheck, oxlint-disable) ou afrouxar `strict`.
 - Editar ADR aceito (abrir um novo que emenda).
-- Alterar o formato dos 8 `schemas/*.schema.json` sem story própria.
+- Alterar o formato dos 9 `schemas/*.schema.json` sem story própria.
 - Criar item novo na raiz fora da allowlist de `tests/meta.test.ts`.
 - `git push`.
-- Pôr em `src/` item da lista "fora do slice 1" do charter.
+- Pôr em `src/` item da lista "fora do recorte ativo da v0.4b" do charter.
 
 ## Leia antes
 

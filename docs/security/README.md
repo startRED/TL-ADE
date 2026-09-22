@@ -223,21 +223,25 @@ muda o modelo de ameaças: muda só quem hospeda o terminal.
 - **Skills locais do repositório vencem por nome** (`architecture.md §7`) e não passam pelo S1–S5: são
   do operador, e o modelo de ameaças assume o operador como confiável dentro do próprio repo.
 
-## 10. Painel (v0.4b): 127.0.0.1 com token de sessão
+## 10. Painel (v0.4b): 127.0.0.1 com token de sessão e proteção local
 
-O painel é projeção somente-leitura do journal (ADR 0013) e entra na v0.4b (`architecture.md §11` E37).
-Escuta em `127.0.0.1` com **token aleatório por sessão do `ade serve`**, impresso no terminal e exigido
-na primeira carga, mais checagem do header `Origin` (E34). Implicações que continuam escritas porque o
-token reduz, não elimina, o risco:
+O painel é projeção das fontes duráveis (`plan.json`, `journal.jsonl`, `artifacts/`) e foi entregue na v0.4b (`architecture.md §11` E37, [ADR 0027](../adr/0027-ativacao-da-v04b-painel-local.md)).
+Escuta estritamente em `127.0.0.1` com **token aleatório efêmero por sessão do `ade serve`**, impresso no terminal e exigido na URL inicial e em todas as rotas de API e WebSocket, somado à checagem estrita do cabeçalho `Origin` (E34).
 
-- Um processo local do usuário que leia o terminal ou o estado em `.ade/` recupera o token — incluindo um
-  `postinstall` de dependência instalada por um agente no mesmo host. A projeção contém caminhos, títulos
-  de story, extratos de saída de ferramenta e o pack redigido — e redação é por padrão, não prova.
-- Uma página aberta no navegador do operador pode emitir requisições para `127.0.0.1` (CSRF de leitura,
-  DNS rebinding); o token e a checagem de `Origin` cortam esse caminho. Somente-leitura limita o dano a
-  **vazamento**, não a **alteração** — que é exatamente o vértice "dado privado" da trifecta, com o
-  navegador como canal de saída.
-- Até a v0.4b, `ade report` (arquivo local) é a única superfície de leitura e cobre o caso de uso principal.
+Controles efetivos implementados na v0.4b:
+- **Amarração restrita a `127.0.0.1`:** qualquer tentativa de vincular a endereços externos ou genéricos (`0.0.0.0`, redes locais) é terminantemente recusada na inicialização do servidor.
+- **Credencial efêmera não persistida:** o token de 32 caracteres hexadecimais é gerado com aleatoriedade criptográfica (`node:crypto` `randomBytes(16)`) a cada execução do processo. **Nunca** é gravado no disco, no repositório, no journal ou no índice SQLite.
+- **Validação estrita de `Origin`:** requisições com cabeçalho `Origin` divergente da origem local esperada (`http://127.0.0.1:<port>` ou `http://localhost:<port>`) são imediatamente rejeitadas com HTTP 403 Forbidden, neutralizando tentativas de leitura remota via CSRF ou DNS rebinding por páginas externas no navegador do operador.
+- **Falha fechada sem vazamento de metadados:** requisições sem o token ou com token inválido retornam HTTP 401 ou 403 sem expor detalhes, caminhos ou dados das missões.
+- **Isolamento de caminhos em artefatos (`/api/artifacts/*`):** resolução estrita com `path.resolve` contida dentro do diretório `artifacts/` da missão selecionada, bloqueando categoricamente evasões por `..` ou caminhos absolutos.
+- **Lease exclusivo de execução (`.ade/serve.lease`):** impede a coexistência de dois servidores simultâneos no mesmo projeto (encerra com código de saída 5, `CoordinatorConflictError`), e portas ocupadas (`EADDRINUSE`) encerram imediatamente com código 1 sem buscar portas alternativas.
+- **Ação mutável restrita e idempotente (`/api/actions/approve`):** a única rota de escrita exige sessão autenticada, origem local e o digest imutável do resumo do plano, invocando o mesmo portão durável de `ade approve`.
+- **Integridade da projeção SQLite:** reconstrução realizada em arquivo temporário (`.tmp`) e promovida atomicamente para `.ade/index.sqlite` somente após validação da cadeia de hash do journal e conformidade dos artefatos; journals corrompidos falham alto e preservam integralmente o último índice válido.
+
+Implicações que continuam válidas (o token reduz a superfície, não elimina os limites locais de SO):
+- Um processo local malicioso do mesmo usuário que leia o terminal do operador pode obter o token da sessão ativa.
+- Redação no pack é por padrão e não substitui a contenção na fronteira.
+
 
 ## 11. Limites conhecidos — o que a ADE NÃO promete
 

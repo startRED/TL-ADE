@@ -46,11 +46,11 @@ function readJsonIfExists(filePath) {
  */
 function storyIdsOf(plan) {
   const phases = Array.isArray(plan?.phases) ? plan.phases : []
-  return phases.flatMap((phase) => {
+  return phases.flatMap((/** @type {any} */ phase) => {
     const epics = Array.isArray(phase?.epics) ? phase.epics : []
-    return epics.flatMap((epic) => {
+    return epics.flatMap((/** @type {any} */ epic) => {
       const stories = Array.isArray(epic?.stories) ? epic.stories : []
-      return stories.filter((id) => typeof id === 'string' && id !== '')
+      return stories.filter((/** @type {any} */ id) => typeof id === 'string' && id !== '')
     })
   })
 }
@@ -210,7 +210,7 @@ function getProjectDiscovery(repoDir) {
  * }>}
  */
 export async function planMission(
-  { request, repoDir, fromMissionId, nonInteractive },
+  { request, repoDir, fromMissionId, nonInteractive: _nonInteractive },
   deps = {},
 ) {
   if (typeof request !== 'string' || !request.trim()) {
@@ -770,8 +770,8 @@ export async function replanRemaining(
     // Dependência de story concluída já está satisfeita e não pertence a este plano;
     // dependência de story renomeada passa a apontar para o id final.
     const remaining = contract.depends_on
-      .map((dep) => (idMap.has(dep) ? idMap.get(dep) : dep))
-      .filter((dep) => dep !== null && !completedIds.has(dep))
+      .map((/** @type {string} */ dep) => (idMap.has(dep) ? idMap.get(dep) : dep))
+      .filter((/** @type {string | null | undefined} */ dep) => dep != null && !completedIds.has(dep))
     if (remaining.length > 0) contract.depends_on = remaining
     else delete contract.depends_on
   }

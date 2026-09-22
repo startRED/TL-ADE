@@ -12,6 +12,7 @@ import { validate } from '../schema/index.js'
 import { diagnoseDocs } from '../docs/projection.js'
 import { exitCodeOf } from './exit-codes.js'
 import { probeImpeccable, PINNED_ENGINE_VERSION } from '../visual/impeccable.js'
+import { checkNativeSqlite } from '../panel/sqlite-index.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -520,6 +521,18 @@ export async function main(argv, deps = {}) {
     }
     stdout.write(`- Habilidades em quarentena: ${diag.quarantineCount}\n`)
     return 0
+  }
+
+  if (argv.includes('--native')) {
+    const probeFn = deps.checkNativeSqlite ?? checkNativeSqlite
+    try {
+      probeFn()
+      stdout.write('Dependência nativa better-sqlite3: operacional\n')
+      return 0
+    } catch (err) {
+      stderr.write((err instanceof Error ? err.message : String(err)) + '\n')
+      return exitCodeOf(err)
+    }
   }
 
   const offline = argv.includes('--offline') || env.CI === 'true'

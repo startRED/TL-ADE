@@ -12,6 +12,7 @@ const SCHEMA_NAMES = [
   'unit-result',
   'review-result',
   'capability-set',
+  'visual-eval',
 ] as const
 
 function loadFixture(schemaName: string, kind: 'valid' | 'invalid'): Record<string, any> {
@@ -151,6 +152,50 @@ function loadFixture(schemaName: string, kind: 'valid' | 'invalid'): Record<stri
     }
   }
 
+  if (schemaName === 'visual-eval' && kind === 'valid') {
+    return {
+      story_id: 'ADE-S1',
+      round: 1,
+      rubric_version: '2026-09-17-v1',
+      judge: {
+        family: 'codex',
+        model_id: 'gpt-5.6-terra',
+      },
+      detector: {
+        engine_version: '0.1.5',
+        url_mode: 'ok',
+      },
+      surface_mode: 'persuade',
+      captures: [
+        {
+          route: '/',
+          width: 1280,
+          theme: 'light',
+          path: 'artifacts/visual/root.png',
+          sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        },
+      ],
+      criteria: [
+        { id: 'specificity', score: 8.5, weight: 3.0, note: 'específico' },
+        { id: 'hierarchy', score: 8.0, weight: 2.0, note: 'hierarquia' },
+        { id: 'typography', score: 8.5, weight: 2.0, note: 'tipografia' },
+        { id: 'color', score: 8.0, weight: 1.5, note: 'cor' },
+        { id: 'states', score: 8.0, weight: 1.0, note: 'estados' },
+        { id: 'motion', score: 7.5, weight: 0.5, note: 'movimento' },
+      ],
+      final: 8.2,
+      defects: [],
+      verdict: 'pass',
+    }
+  }
+
+  if (schemaName === 'visual-eval' && kind === 'invalid') {
+    return {
+      ...loadFixture('visual-eval', 'valid'),
+      __unexpected__: true,
+    }
+  }
+
 
   const raw = readFileSync(
     new URL(`../fixtures/schemas/${schemaName}/${kind}.json`, import.meta.url),
@@ -216,7 +261,7 @@ const LEGACY_V1_INVALID_REVIEW_RESULT = {
 // desconhecido é recusada com código 4, nunca ignorada em silêncio.
 describe('published schemas', () => {
   test('published_schemas_accept_valid_and_refuse_invalid_fixtures', () => {
-    expect(SCHEMA_NAMES.length).toBe(8)
+    expect(SCHEMA_NAMES.length).toBe(9)
 
     for (const schemaName of SCHEMA_NAMES) {
       const validDoc = loadFixture(schemaName, 'valid')
@@ -288,11 +333,11 @@ describe('published schemas', () => {
     ).toBe(true)
   })
 
-  test('CA3: validate preserves acceptance of valid fixtures for the other six official schemas', () => {
+  test('CA3: validate preserves acceptance of valid fixtures for the other seven official schemas', () => {
     const otherSchemas = SCHEMA_NAMES.filter(
       (name) => name !== 'unit-result' && name !== 'review-result',
     )
-    expect(otherSchemas.length).toBe(6)
+    expect(otherSchemas.length).toBe(7)
 
     for (const schemaName of otherSchemas) {
       const validDoc = loadFixture(schemaName, 'valid')

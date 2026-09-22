@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TL-ADE Painel</title>
+  <link rel="stylesheet" href="/packages/web/styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"></span>
+        TL-ADE <small id="brandSubtitle">Painel Local</small>
+      </div>
+      <form class="run" id="runForm">
+        <span class="k">ade run</span>
+        <input id="runInput" placeholder="Pedido em linguagem natural..." aria-label="Pedido em linguagem natural">
+        <button type="submit">Rodar</button>
+      </form>
+      <div class="status" id="headerStatus">
+        <span class="chip"><span class="dot"></span><b id="statusMission">Carregando...</b></span>
+        <span class="chip">autonomia <b id="statusAutonomy">—</b></span>
+        <span class="chip">gasto <b id="statusCost">—</b></span>
+      </div>
+    </header>
+
+    <div class="cols">
+      <nav class="rail" aria-label="Seções">
+        <button aria-current="page" title="Missão" id="navMission">
+          <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7"/></svg>
+          <span class="badge" id="navBadge" style="display:none" aria-label="Decisão pendente"></span>
+        </button>
+        <button title="Histórico" id="navHistory"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button>
+        <button title="Skills" id="navSkills"><svg viewBox="0 0 24 24"><path d="M12 3l2.6 5.4L20 9.2l-4 3.9.9 5.9L12 16.2 7.1 19l.9-5.9-4-3.9 5.4-.8z"/></svg></button>
+        <button title="Custos" id="navCosts"><svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15v-4M12 15V8M16 15v-6"/></svg></button>
+        <span class="sp"></span>
+        <button title="Saúde do ambiente" id="navHealth"><svg viewBox="0 0 24 24"><path d="M12 21s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.6-7 10-7 10z"/></svg></button>
+      </nav>
+
+      <section class="pane" aria-label="Missão e stories">
+        <details id="projectsPanel" open>
+          <summary>Projetos</summary>
+          <ul class="compact-list" id="projectList"></ul>
+        </details>
+        <details id="historyPanel" open>
+          <summary>Histórico de missões</summary>
+          <div class="history-list" id="missionHistory"></div>
+        </details>
+        <h2>Stories <span id="storyCount">0</span></h2>
+        <div class="mission">
+          <div class="t" id="missionTitle">Carregando missão...</div>
+          <div class="m" id="missionSummary">Conectando ao servidor local</div>
+          <div class="prog" id="prog"></div>
+          <ul class="compact-list" id="epicProgress" aria-label="Progresso por épico"></ul>
+        </div>
+        <div class="scroll" id="storyList" role="listbox" aria-label="Stories"></div>
+        <div class="note">Verde: pronta e provada. Âmbar: aguarda você. Azul: em andamento. Cinza: na fila.</div>
+      </section>
+
+      <section class="pane" aria-label="Evidências">
+        <div class="tabs" role="tablist" id="tabs" aria-label="Abas de evidência">
+          <button class="tab" role="tab" aria-selected="true" data-k="diff">Alterações</button>
+          <button class="tab" role="tab" aria-selected="false" data-k="tests">Testes</button>
+          <button class="tab" role="tab" aria-selected="false" data-k="visual">Visual</button>
+          <button class="tab" role="tab" aria-selected="false" data-k="review">Revisão</button>
+        </div>
+        <div class="body" id="center"></div>
+      </section>
+
+      <section class="pane right" aria-label="Relatório e decisões">
+        <h2>Relatório</h2>
+        <div class="scroll"><div class="report" id="report"></div></div>
+      </section>
+    </div>
+
+    <footer class="foot" id="foot" aria-label="Status e log recente">
+      <span class="live" id="liveStatus">ao vivo</span>
+      <span id="logSummary">Conectando ao journal...</span>
+    </footer>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="/packages/web/app.js"></script>
+</body>
+</html>
