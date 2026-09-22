@@ -24,9 +24,11 @@ test('revisor é de outra empresa que o titular de código comum', () => {
 test('escada de correção começa no titular de código difícil e só sobe em inteligência', () => {
   const { chains, why } = buildChains({ plans: { claude: 'max20', codex: 'pro_lite', agy: 'ultra' }, now: NOW })
   assert.deepEqual(chains.fix[0], chains.impl_hard[0])
-  const ai = why.fix.map((w) => Number(/inteligência (\d+)/.exec(w)[1]))
+  const climb = chains.fix.filter((w) => !w.reserve), ai = why.fix.slice(0, climb.length).map((w) => Number(/inteligência (\d+)/.exec(w)[1]))
   assert.deepEqual(ai, [...ai].sort((a, b) => a - b))
-  assert.ok(chains.fix.length >= 2)
+  assert.ok(climb.length >= 2)
+  const spare = chains.fix.at(-1)
+  assert.ok(spare.reserve && spare.family !== climb[0].family, 'reserva de outra empresa no fim da escada')
 })
 
 test('papel com mínimo alto ainda ganha fila quando nenhum modelo do plano chega lá', () => {

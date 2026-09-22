@@ -161,9 +161,12 @@ export function buildChains({ plans = {}, quota = {}, measured = {}, blocked = [
       // modelo conta como degrau. Começar no melhor custo-benefício da própria escada pulava direto para o esforço máximo.
       const top = chains.impl_hard?.[0], base = rated.find((x) => top && x.e.model === top.model && x.e.effort === top.effort) || rated[0]
       picked = base ? [base, ...rated.filter((x) => x.s.quality > base.s.quality).sort((a, b) => b.s.quality - a.s.quality).slice(0, 2).reverse()] : []
+      // reserva de outra empresa no fim: a escada não sobe até ela (climbLast), mas cota esgotada da empresa da escada não para a parte
+      const spare = base && rated.find((x) => x.e.family !== base.e.family)
+      if (spare) picked.push({ ...spare, reserve: true })
     } else picked = pick(rated, role === 'checker' ? chains.impl?.[0]?.family : null) // quem revisa não é da empresa de quem mais escreve
-    chains[role] = picked.map(({ e }) => ({ family: e.family, model: e.model, effort: e.effort }))
-    why[role] = picked.map(({ e, s }) => `${e.label} (${e.effort}): nota ${s.score.toFixed(1)} · ${s.parts.join(' · ')}`)
+    chains[role] = picked.map(({ e, reserve }) => ({ family: e.family, model: e.model, effort: e.effort, ...(reserve ? { reserve } : {}) }))
+    why[role] = picked.map(({ e, s, reserve }) => `${e.label} (${e.effort})${reserve ? ', reserva' : ''}: nota ${s.score.toFixed(1)} · ${s.parts.join(' · ')}`)
   }
   return { chains, why }
 }

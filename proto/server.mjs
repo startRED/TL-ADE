@@ -6,6 +6,7 @@
 import { SCOUT_SCHEMA, scoutPrompt, ENV_GUARD } from './scout.mjs'
 import { findSuites, relatedCommand, runSuites, TOOLCHAINS } from './runners.mjs'
 import { parseJournal, usageReport } from './usage.mjs'
+import { buildChains, measure } from './models.mjs'
 import { laneCandidates, laneEngine, createLane, lanePatch, applyPatch, removeLane, LANES_DIR } from './lanes.mjs'
 import { chatWriteTurn, chatCommand, chatIntro, formatHistory, pendingProposal, PENDING_BLOCK, handleChatDecision, discardPending, pendingChatIds, pruneChatWorktrees } from './chat-changes.mjs'
 import http from 'node:http'
@@ -61,7 +62,7 @@ const REGISTRY = {
   ] },
 }
 // Esforço por papel (Erick, 17/09): Claude → --effort; Codex → model_reasoning_effort; Antigravity → sufixo do modelo (pro só tem high/low).
-const EFFORTS = ['low', 'medium', 'high'] // Claude e papéis simples; o Codex aceita também xhigh nas cadeias (passa direto em model_reasoning_effort)
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] // a CLI do Claude aceita os 5 (Opus 5.5); o Codex vai até xhigh; o Gemini só low/medium/high (agyModel)
 function effortOf(role) { return state.settings.roles[role]?.effort || DEFAULT_SETTINGS.roles[role]?.effort || 'medium' }
 function agyModel(id, effort) { const mm = /^(gemini-[\d.]+-(flash|pro))(?:-(high|medium|low))?$/.exec(id || ''); if (!mm) return id; const e = mm[2] === 'pro' && effort === 'medium' ? 'high' : (effort || 'medium'); return `${mm[1]}-${e}` }
 function plannerChoice(kind = 'complex') { const key = kind === 'light' ? 'plan' : 'epics', x = chainOf(key)[0] || state.settings.roles.planner; return { family: x.family || 'claude', model: x.model, effort: x.effort || 'high', key } }
@@ -154,6 +155,9 @@ const DEFAULT_SETTINGS = {
   interview: 'auto', // auto | always | never — entrevista de múltipla escolha antes do plano (spec: ≤5 perguntas, recomendação primeiro)
   assets_enabled: true, // imagens geradas pelo Codex ($imagegen) quando o plano pede
   skills: { auto: true, forced: [], excluded: [], max: 4 },
+  // Filas montadas pelos planos (models.mjs): com auto_chains, as cadeias acima viram só reserva e o motor refaz as filas a cada
+  // leitura de cota (5 min) com o ritmo da cota semanal e a aprovação do revisor medida no journal.
+  plans: {}, auto_chains: false, blocked_models: ['gpt-6-astra'],
   plugins: { disabled: [] }, // plugin inteiro fora do catálogo (nome da pasta em ~/.claude/plugins/cache/<loja>/<plugin>)
 }
 
@@ -161,7 +165,7 @@ const DEFAULT_SETTINGS = {
 // Vários projetos ao mesmo tempo: cada pasta tem um "engine" (projeto, missão, log, anexos). O que é global fica em G.
 // `state` é um proxy: dentro de uma cadeia assíncrona iniciada por withEngine(e, fn), state.mission/project/log/... apontam
 // para aquele engine; fora dela, para o engine ativo (o que o painel está mostrando). Assim o motor não precisou mudar.
-const G = { history: [], recent: [], settings: DEFAULT_SETTINGS, catalog: [], registry: REGISTRY, quota: { claude: null, codex: null, exhausted: {} } }
+const G = { history: [], recent: [], settings: DEFAULT_SETTINGS, catalog: [], registry: REGISTRY, quota: { claude: null, codex: null, exhausted: {} }, auto: null }
 const engines = new Map() // dir → engine
 let activeDir = null
 const als = new AsyncLocalStorage()
@@ -268,7 +272,7 @@ function pub() {
   return {
     ...engineView(a, activeDir, true),
     engines: [...engines.entries()].filter(([, e]) => e.project).map(([dir, e]) => ({ ...engineView(e, dir, false), active: dir === activeDir })),
-    history: G.history, recent: G.recent, settings: G.settings, registry: G.registry, quota: G.quota, catalog: G.catalog.map(({ body, ...c }) => c),
+    history: G.history, recent: G.recent, settings: G.settings, registry: G.registry, quota: G.quota, auto: G.auto, catalog: G.catalog.map(({ body, ...c }) => c),
   }
 }
 function tickClock() {
@@ -432,7 +436,18 @@ function pauseAllExhausted(key) {
   log('engine', `nenhum modelo da cadeia "${key}" tem cota: a missão pausa e retoma sozinha ${fmtWhen(m.quota_until)}. Para não esperar, acrescente um modelo à cadeia em Modelos e continue.`, 'warn')
   scheduleQuotaResume(currentEngine()); throw PAUSE
 }
-function chainOf(key) { return state.settings.chains?.[key] || DEFAULT_SETTINGS.chains[key] || [] }
+function chainOf(key) { const a = G.auto?.chains[key]; return a?.length ? a : state.settings.chains?.[key] || DEFAULT_SETTINGS.chains[key] || [] }
+// Filas pelos planos: aprovação medida nas últimas 2 semanas do journal (quem escreveu → próximo parecer do revisor).
+async function refreshAuto() {
+  if (!state.settings.auto_chains) { G.auto = null; return }
+  const since = new Date(Date.now() - 14 * 864e5).toISOString(), events = []
+  for (const l of (await readFile(path.join(ADE_DIR, 'journal.jsonl'), 'utf8').catch(() => '')).split('\n')) {
+    if (!l.includes('"model_call"') && !/"text":"(aprovou|pediu mudanças):/.test(l)) continue
+    try { const e = JSON.parse(l); if (e.ts >= since) events.push(e) } catch {}
+  }
+  const quota = Object.fromEntries(['claude', 'codex'].map((f) => [f, { seven_day: winLive(state.quota[f]?.seven_day) }]))
+  G.auto = buildChains({ plans: state.settings.plans, quota, measured: measure(events), blocked: state.settings.blocked_models || [] })
+}
 // Tamanho da parte para escolher a cadeia de implementação. ponytail: heurística pelo contrato; o plano ainda não declara tamanho por story.
 function storyTier(st) {
   const paths = st.scope_paths || []
@@ -2608,7 +2623,7 @@ http.createServer(async (req, res) => {
     if (url.pathname === '/api/settings' && req.method === 'POST') {
       const patch = await body(req)
       state.settings = { ...state.settings, ...patch, roles: { ...state.settings.roles, ...(patch.roles || {}) }, chains: { ...state.settings.chains, ...(patch.chains || {}) }, skills: { ...state.settings.skills, ...(patch.skills || {}) } }
-      await saveJson('settings.json', state.settings); broadcast(); return json(res, 200, state.settings)
+      await saveJson('settings.json', state.settings); await refreshAuto(); broadcast(); return json(res, 200, state.settings)
     }
     if (url.pathname === '/api/project' && req.method === 'POST') {
       const { dir } = await body(req)
@@ -2718,7 +2733,7 @@ http.createServer(async (req, res) => {
   pendingChatIds(CHATS_DIR).then((ids) => pruneChatWorktrees(ADE_DIR, ids)).catch((err) => console.error('limpeza de cópias do chat falhou:', err.message))
   // ferramentas de linguagem instaladas: o planejador não escolhe linguagem que não roda nesta máquina
   Promise.all(TOOLCHAINS.map(async (t) => ((await run(IS_WIN ? 'where' : 'which', [t])).code === 0 ? t : null))).then((r) => { state.toolchains = r.filter(Boolean) })
-  readQuota().then(broadcastSoon); setInterval(() => readQuota().then(broadcastSoon), 5 * 60 * 1000) // a reserva de cota do withChain precisa de leitura fresca
+  readQuota().then(refreshAuto).then(broadcastSoon); setInterval(() => readQuota().then(refreshAuto).then(broadcastSoon), 5 * 60 * 1000) // a reserva de cota do withChain precisa de leitura fresca
   const saved = await loadJson('settings.json', null)
   if (saved) state.settings = { ...DEFAULT_SETTINGS, ...saved, roles: { ...DEFAULT_SETTINGS.roles, ...(saved.roles || {}) }, chains: { ...DEFAULT_SETTINGS.chains, ...(saved.chains || {}) }, skills: { ...DEFAULT_SETTINGS.skills, ...(saved.skills || {}) } }
   if (!state.settings.roles.intent) state.settings.roles.intent = DEFAULT_SETTINGS.roles.intent
@@ -2728,7 +2743,7 @@ http.createServer(async (req, res) => {
     if (!EFFORTS.includes(r.effort)) r.effort = d.effort
   }
   await loadCatalog()
-  await readQuota()
+  await readQuota(); await refreshAuto()
   await loadSavedMissions()
   // pasta .ade nova: algo acima pode ter chamado currentEngine() e criado o motor 'sem-projeto'; ele não conta como projeto aberto
   if (!engines.get(activeDir)?.project) { engines.delete('sem-projeto'); const first = G.recent[0] || path.join(ROOT, 'example'); const e0 = engineFor(first); if (!e0.project) e0.project = await discover(first); activeDir = path.resolve(first) }
