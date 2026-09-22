@@ -1993,6 +1993,8 @@ async function runStories() {
       if (st.tests_after?.tests?.length) m.tests_before = st.tests_after.only || st.tests_after.related ? mergeTests(m.tests_before, st.tests_after) : st.tests_after
       await refreshProject()
       log('engine', `commit feito: ${st.title}`)
+      // tamanho contra custo, para decidir com dados se parte grande merece regra própria (a política proíbe dividir por contagem)
+      log('engine', `medida da parte ${st.id}: ${(st.acceptance || []).length} critério(s), ${(st.scope_paths || []).length} arquivo(s) de escopo, ${st.round} rodada(s), US$ ${((st.usd || 0) - (st.usd_start || 0)).toFixed(2)}${st.fix_of ? `, correção de ${st.fix_of}` : ''}`)
       st.state = 'done'
       if (st.fix_of) { const parent = m.stories.find((x) => x.id === st.fix_of); if (parent && parent.state !== 'done') { parent.state = 'done'; parent.skipped_reason = null; parent.fixed_by = st.id; log('engine', `parte "${parent.title}" concluída pela correção ${st.id}`) } }
       broadcast(); await persistMission().catch(() => {})
