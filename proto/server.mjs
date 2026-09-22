@@ -515,7 +515,7 @@ async function resumeMission() {
   // Correção que parou sem saída pausou justamente para NÃO desfazer a árvore. Continuar sem recolocá-la na fila não achava
   // parte na fila, lia a árvore como alheia e descartava tudo — o trabalho que a pausa existia para guardar (m-mu8usf5z, v03-s6f).
   // Continuar = dar a ela outra série de rodadas sobre a árvore como está; o último parecer do revisor volta na rodada 1.
-  if (m.reason === 'fix_failed') for (const x of m.stories || []) if (x.fix_of && x.state === 'blocked') { Object.assign(x, { state: 'queued', round: 0, steps: [], tests_after: null, review: null, visual: null, maker_committed: false }); log('engine', `a correção "${x.title}" volta para a fila sobre a árvore como está`, 'warn') }
+  if (m.reason === 'fix_failed') for (const x of m.stories || []) if (x.fix_of && x.state === 'blocked') { Object.assign(x, { state: 'queued', round: 0, steps: [], tests_after: null, review: null, visual: null, maker_committed: false, contract_issue: null, wrong_test: null, test_fix_allowed: null, last_red: null, no_change_retry: false }); log('engine', `a correção "${x.title}" volta para a fila sobre a árvore como está`, 'warn') }
   const next = (m.stories || []).find((x) => x.state === 'queued'), nextFix = next?.fix_of
   // alterações só nos arquivos do contrato da parte que recomeça ficam: ela recomeça sobre elas e o vermelho segue conferido
   // guardando o código de lado. Pausar para reiniciar o motor jogava fora parte já aprovada pelo revisor (épico 2, s1).
