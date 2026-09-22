@@ -1065,7 +1065,9 @@ async function codeMap(dir, files, { maxFiles = 60, maxChars = 7000 } = {}) {
 // ---------- crítica do plano: quem vai implementar (1º Codex da cadeia de escrever) lê o plano antes do código ----------
 async function planCritic(plan) {
   const m = state.mission, dir = state.project.dir
-  const who = [...chainOf('impl'), ...chainOf('checker'), ...chainOf('plan')].find((w) => ['codex', 'agy'].includes(w.family) && quotaAvailable(w.family))
+  // até duas empresas: o plano da v1 (m-mu8usf5z, 22/09) ficou SEM crítica porque o Flash estourou 8 min e ninguém tentou de novo
+  const cands = [...chainOf('impl'), ...chainOf('checker'), ...chainOf('plan')].filter((w) => ['codex', 'agy'].includes(w.family) && quotaAvailable(w.family))
+  const who = cands[(m.critic_failed || 0) % Math.max(1, cands.length)]
   if (!who) return null
   const model = who.model
   const prompt = [
@@ -1091,7 +1093,12 @@ Confira também: critério do épico que nenhuma story entrega vira issue com st
     try { crit = JSON.parse(last) } catch {}
     journal({ type: 'model_call', family: 'codex', role: 'plan_critic', model, tokens_in: usage?.input_tokens || 0, cache_read: usage?.cached_input_tokens || 0, tokens_out: usage?.output_tokens || 0, prompt_chars: prompt.length, verdict: crit?.verdict || null, issues: crit?.issues?.length || 0, wall_ms: Date.now() - t0 }).catch(() => {})
   }
-  if (!crit) { log('engine', `crítica do plano falhou (código ${r.code}); sigo com o plano como está`, 'warn'); return null }
+  if (!crit) {
+    m.critic_failed = (m.critic_failed || 0) + 1
+    const other = cands.length > 1 && m.critic_failed < 2
+    log('engine', `crítica do plano falhou (código ${r.code})${other ? '; tento com outra empresa' : '; sigo com o plano como está'}`, 'warn')
+    return other ? planCritic(plan) : null
+  }
   log(who.family, `plano ${crit.verdict === 'ready' ? 'executável' : 'precisa de detalhe'}: ${crit.summary}`, 'text')
   m.plan_critic = { verdict: crit.verdict, summary: crit.summary, issues: crit.issues || [] }
   return crit
