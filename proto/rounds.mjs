@@ -125,3 +125,14 @@ export async function putBack(saved) {
   }
   return lost
 }
+
+// A árvore suja pertence à parte? Dentro do escopo, sempre. Parte INTERROMPIDA (pausa, queda do motor ou do PC no meio dela):
+// a árvore é dela por construção, porque só quem escreve nesta parte mexeu nela desde o último commit; arquivo fora do escopo
+// é assunto do revisor ("fora do contrato"), não motivo para apagar o trabalho. Arquivo proibido (do_not_touch, ex. proto/**)
+// nunca: aí a árvore tem mão de fora. m-mu8usf5z, v0.5 V05-01, 22/09: o PC desligou na rodada 2; 16 de 17 arquivos no
+// escopo e src/mission/plan-lifecycle.js (8 linhas pedidas pelo achado 1 do revisor) fora dele, e o continuar ia descartar tudo.
+export function treeBelongs(files, { scope = [], blocked = [], interrupted = false } = {}) {
+  if (files.some((f) => blocked.some((r) => r.test(f)))) return false
+  if (interrupted) return true
+  return scope.length > 0 && files.every((f) => scope.some((r) => r.test(f)))
+}

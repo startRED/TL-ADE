@@ -1,7 +1,7 @@
 // node --test proto/rounds.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { AGY_NO_TESTS, agyPrompt, brokeGreen, climbLast, putBack, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
+import { AGY_NO_TESTS, agyPrompt, brokeGreen, climbLast, putBack, treeBelongs, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
 
 test('parte de correção herda os arquivos que a parte anterior já tinha alterado', () => {
   const stories = [{ id: 'R2', diff: 'diff --git a/src/lease/process-info.js b/src/lease/process-info.js\n', files: ['src\\adapters\\claude\\index.js'] }]
@@ -143,4 +143,13 @@ test('putBack: recria a pasta que o git apagou e devolve o arquivo', async () =>
   assert.deepEqual(lost, [])
   assert.equal(await readFile(novo, 'utf8'), 'export const x = 1\n')
   await rm(dir, { recursive: true, force: true })
+})
+
+test('treeBelongs: parte interrompida guarda a árvore mesmo com arquivo fora do escopo, nunca com arquivo proibido', () => {
+  const scope = [/^src\/intent(\/.*)?$/], blocked = [/^proto(\/.*)?$/]
+  assert.equal(treeBelongs(['src/intent/a.js'], { scope, blocked }), true)
+  assert.equal(treeBelongs(['src/intent/a.js', 'src/mission/b.js'], { scope, blocked }), false)
+  assert.equal(treeBelongs(['src/intent/a.js', 'src/mission/b.js'], { scope, blocked, interrupted: true }), true)
+  assert.equal(treeBelongs(['src/intent/a.js', 'proto/server.mjs'], { scope, blocked, interrupted: true }), false)
+  assert.equal(treeBelongs(['x.js'], { scope: [] }), false)
 })
