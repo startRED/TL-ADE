@@ -187,11 +187,25 @@ export default function App() {
   const [resumeErr, setResumeErr] = useState(null)
   const askRef = useRef(null)
 
+  // Conexão ao vivo que se conserta sozinha: a conexão caía calada (PC suspenso, aba em segundo plano, motor reiniciado) e
+  // a tela ficava parada numa decisão antiga até o F5. Sem nada do motor por 40 s (ele manda sinal a cada 15 s) ou ao voltar
+  // para a aba, reabre e busca o estado atual.
   useEffect(() => {
-    const es = new EventSource('/api/events')
-    es.onopen = () => setConnected(true); es.onerror = () => setConnected(false)
-    es.onmessage = (e) => setState(JSON.parse(e.data))
-    return () => es.close()
+    let es = null, last = Date.now(), dead = false
+    const refresh = () => fetch('/api/state').then((r) => r.json()).then(setState).catch(() => {})
+    const open = () => {
+      es?.close(); last = Date.now()
+      es = new EventSource('/api/events')
+      es.onopen = () => { setConnected(true); last = Date.now() }
+      es.onerror = () => setConnected(false)
+      es.onmessage = (e) => { last = Date.now(); setState(JSON.parse(e.data)) }
+      es.addEventListener('ping', () => { last = Date.now() })
+    }
+    open()
+    const watch = setInterval(() => { if (!dead && Date.now() - last > 40000) { setConnected(false); open(); refresh() } }, 10000)
+    const onVisible = () => { if (document.visibilityState === 'visible') { refresh(); if (Date.now() - last > 20000 || es.readyState === EventSource.CLOSED) open() } }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { dead = true; clearInterval(watch); document.removeEventListener('visibilitychange', onVisible); es?.close() }
   }, [])
 
   const m = state.mission, p = state.project, s = state.settings

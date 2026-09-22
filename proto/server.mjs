@@ -2614,7 +2614,10 @@ http.createServer(async (req, res) => {
   try {
     if (url.pathname === '/api/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' })
-      res.write(`data: ${JSON.stringify(pub())}\n\n`); clients.add(res); req.on('close', () => clients.delete(res)); return
+      // sinal de vida a cada 15 s: o painel reabre a conexão quando ele some (conexão morta calada congelava a tela)
+      res.write(`retry: 2000\ndata: ${JSON.stringify(pub())}\n\n`); clients.add(res)
+      const ping = setInterval(() => res.write('event: ping\ndata: 1\n\n'), 15000)
+      req.on('close', () => { clearInterval(ping); clients.delete(res) }); return
     }
     if (url.pathname === '/api/state') return json(res, 200, pub())
     // uso de modelo organizado: ?mission=<id> (padrão: a missão aberta; "todas" = todas), ?since=AAAA-MM-DD, ?last=N
