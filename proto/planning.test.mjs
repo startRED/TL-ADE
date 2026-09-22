@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { planIssues, versionProgram, needsPlanCritic, needsScout, scoutKey, skillsForStory, canCombineProof } from './planning.mjs'
+import { planIssues, versionProgram, needsPlanCritic, needsScout, scoutKey, skillsForStory, canCombineProof, RISK_WORDS } from './planning.mjs'
 import { planningSamples } from './planning-eval.mjs'
 
 const story = (id, extra = {}) => ({ id, request: 'Entregar o comportamento pedido', acceptance: ['O resultado é verificável'], scope_paths: ['src/a.js'], depends_on: [], ...extra })
@@ -71,4 +71,11 @@ test('needsScout: mesmo épico da mesma versão não repete', () => {
 
 test('needsScout: épico seguinte dentro do mesmo programa renova', () => {
   assert.equal(needsScout({ epic: scoutKey('e1', 0) }, 'e2', 1, 0), true)
+})
+
+test('RISK_WORDS: pedido curto em superfície sensível sai da faixa rápida', () => {
+  assert.equal(RISK_WORDS.test('remova a autenticação da rota de pagamento'), true)
+  assert.equal(RISK_WORDS.test('troque a senha padrão do admin'), true)
+  assert.equal(RISK_WORDS.test('aumente a fonte do título'), false)
+  assert.equal(RISK_WORDS.test('mude a cor do botão de login'), true) // na dúvida, plano completo
 })

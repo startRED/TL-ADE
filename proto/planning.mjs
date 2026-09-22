@@ -60,3 +60,7 @@ export function needsScout(scout, epicId, index = 0, versionIndex = 0) {
   if (!epicId || scout?.epic === scoutKey(epicId, versionIndex)) return false
   return index > 0 || versionIndex > 0
 }
+
+// Pedido curto não é pedido de baixo risco: "remova a autenticação da rota de pagamento" tem verbo de ajuste e cabe em uma
+// linha. Superfície sensível sai da faixa rápida e ganha plano com escopo e revisão completos.
+export const RISK_WORDS = /\b(autentica\w*|login|senha\w*|token\w*|segredo\w*|credencia\w*|pagamento\w*|cobran[çc]a\w*|dinheiro|saldo|permiss\w*|autoriza\w*|seguran[çc]a|criptogra\w*|migra[çc]\w*|banco de dados|dados? d[eo]s? (usu[áa]rios?|clientes?)|admin\w*|sess[ãa]o|cookie\w*|webhook\w*)\b/i

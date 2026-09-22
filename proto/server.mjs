@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { skillDescription } from './skill-meta.mjs'
 import { agyPrompt, brokeGreen, climbLast, putBack, treeBelongs, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
-import { PLANNING_POLICY, versionProgram, planIssues, needsPlanCritic, needsScout, scoutKey, skillsForStory, canCombineProof } from './planning.mjs'
+import { PLANNING_POLICY, versionProgram, planIssues, needsPlanCritic, needsScout, scoutKey, skillsForStory, canCombineProof, RISK_WORDS } from './planning.mjs'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
 const ADE_DIR = path.join(ROOT, '.ade')
@@ -1113,7 +1113,7 @@ async function checker(diff, tests, st) {
       `ESTA É A RODADA ${st.round} DE REVISÃO. Seus achados da rodada anterior: ${st.review.findings.map((f) => `[${f.severity}] ${f.file}: ${String(f.problem).slice(0, 220)}`).join(' | ')}`,
       `Resposta de quem escreveu (o fechamento item a item fica no fim): ${String(st.last_summary || '(sem resposta)').slice(-1800)}`,
       'Regras desta rodada: (1) confira se cada achado anterior foi corrigido; (2) se quem escreveu RECUSOU um achado citando uma decisão do plano, o contrato da story ou um critério de aceite, e a citação procede, RETIRE o achado (não repita); (3) achado NOVO só vale como high se tiver sido introduzido pelo diff desta rodada ou violar LITERALMENTE um critério de aceite (cite o número); melhorias que você não pediu na primeira rodada viram no máximo low. O objetivo é convergir, não reabrir a story.',
-      st.round >= 4 ? `RODADA ${st.round}: todos os vetores que você queria cobertos deviam ter sido listados na primeira rodada. Se os achados anteriores foram corrigidos, APROVE. Achado novo que não é regressão introduzida por este diff entra em findings com severity "low" e problem começando por "PENDÊNCIA:" (o motor registra e o planejador abre uma parte própria no épico seguinte); ele NÃO impede o approve, por mais grave que pareça.` : '',
+      st.round >= 4 ? `RODADA ${st.round}: todos os vetores que você queria cobertos deviam ter sido listados na primeira rodada. Se os achados anteriores foram corrigidos, APROVE. Achado novo que não é regressão introduzida por este diff só bloqueia se for defeito concreto de comportamento, segurança, dado ou critério de aceite, com evidência (arquivo, linha e o cenário que falha); defeito assim continua high, a régua não baixa porque a rodada é tardia. Preferência, cobertura extra, estilo ou melhoria entra em findings com severity "low" e problem começando por "PENDÊNCIA:" (o motor registra e o planejador abre uma parte própria no épico seguinte) e NÃO impede o approve.` : '',
     ].join('\n') : '',
     `Pedido do usuário: ${m.request}`, `Story em revisão: ${st.title}. Critérios de aceite: ${(st.acceptance || []).map((a, i) => `(${i + 1}) ${a}`).join(' ')}`,
     st.assumptions?.length ? `SUPOSIÇÕES que quem escreveu declarou (faltava decisão no plano). Julgue cada uma: cabe no contrato e nos critérios = aceite e não comente; fixa comportamento que um critério ou decisão cobre de outro jeito = achado citando o critério:\n${st.assumptions.map((a) => `- ${a}`).join('\n')}` : '',
@@ -1654,7 +1654,7 @@ const BIG_WORDS = /\b(e tamb[ée]m|al[ée]m disso|tela nova|p[áa]gina nova|sist
 function fastLane(request) {
   const p = state.project
   if (state.settings.fast_lane === false || !p || p.files === 0) return null
-  if (request.length > 220 || /\n/.test(request) || !FIX_VERBS.test(request) || BIG_WORDS.test(request)) return null
+  if (request.length > 220 || /\n/.test(request) || !FIX_VERBS.test(request) || BIG_WORDS.test(request) || RISK_WORDS.test(request)) return null
   const ui = /\b(bot[ãa]o|cor|cores|css|tela|p[áa]gina|layout|fonte|imagem|menu|link|t[íi]tulo|texto|estilo)\b/i.test(request) || (p.has_index && !/\b(api|rota|endpoint|servidor|banco)\b/i.test(request))
   const be = /\b(api|rota|endpoint|banco|sql|servidor|valida[çc][ãa]o)\b/i.test(request)
   const domains = new Set(['testing']); if (ui) { domains.add('frontend'); domains.add('design') } if (be) { domains.add('backend'); domains.add('api') } if (p.language) domains.add(p.language)
@@ -1956,7 +1956,15 @@ async function runStories() {
         log('engine', `"${st.title}" parou em ${fix.no_test_phase ? 'provas vermelhas' : 'achado grave do revisor'}; o trabalho fica e vira a parte "${fix.title}" com o modelo forte`, 'warn'); broadcast(); continue
       }
       if (!ok && state.settings.unattended && m.reason !== 'budget' && m.reason !== 'engine_error') {
-        if (['review_failed', 'review_changes'].includes(m.reason) && st.tests_after?.ok && !(st.review?.findings || []).some((f) => f.severity === 'high')) {
+        // "Não achei nada grave" e "não consegui revisar" são resultados diferentes. review_failed = nenhum revisor da cadeia
+        // respondeu (st.review nulo): a lista de achados vazia passava no filtro e a parte ia ao commit SEM revisão. Agora só
+        // um parecer que existe pode ser aceito; sem parecer, a missão pausa com o trabalho na árvore (a parte recomeça sobre ele).
+        if (m.reason === 'review_failed') {
+          Object.assign(st, { state: 'queued', round: 0, steps: [] }); m.state = 'paused'; m.reason = 'review_unavailable'
+          log('engine', `nenhum revisor da cadeia conseguiu revisar "${st.title}" (cota, erro ou resposta fora do formato). Trabalho não revisado não vai ao commit: missão pausada com a árvore no lugar; continuar retoma a parte sobre ela`, 'error')
+          await stopLanes(); await persistMission().catch(() => {}); return finish()
+        }
+        if (m.reason === 'review_changes' && st.review && st.tests_after?.ok && !(st.review.findings || []).some((f) => f.severity === 'high')) {
           st.auto_accepted = true; ok = true; log('engine', `modo noturno: ${m.reason} com provas verdes e nada grave; parte aceita`, 'warn')
         } else if (st.fix_of) {
           // Parte de CORREÇÃO que para sem saída: desfazer a árvore aqui joga fora TAMBÉM o trabalho da parte anterior, que
