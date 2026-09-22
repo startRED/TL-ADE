@@ -3,6 +3,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { AdeError } from '../journal/errors.js'
 import { readJournal } from '../journal/journal.js'
+import { assertStampCurrent } from '../journal/stamp.js'
+import { clearControlRequest, readMissionControl } from './control.js'
+import { checkApproval, runSequentialMission } from './schedule.js'
 
 /**
  * Recupera o teto raiz e as reservas consumidas pelas missões ancestrais.
@@ -110,6 +113,55 @@ export function findStoryCommitted(events, unit) {
         }
       }
     }
+  }
+  return null
+}
+
+/**
+ * Retoma uma missão STOPPED com pedido de retomada pendente. Antes de voltar a RUNNING revalida
+ * aprovação, lease, versão e orçamento; divergência mantém a missão parada e o pedido pendente.
+ * Missão sem pedido segue para o scheduler, que respeita o portão de controle.
+ *
+ * @param {{ loaded: import('./plan-load.js').LoadedPlan, repoDir: string, missionDir: string, deps: any }} input
+ * @returns {ReturnType<typeof runSequentialMission>}
+ */
+export async function resumeMission({ loaded, repoDir, missionDir, deps }) {
+  const control = readMissionControl({ missionDir })
+  if (control.state === 'STOPPED' && control.requested_action === 'resume' && control.request_id) {
+    const { events } = readJournal(path.join(missionDir, 'journal.jsonl'))
+    const refusal = resumeRefusal({ loaded, repoDir, missionDir, deps, events })
+    if (refusal) {
+      return { status: 'awaiting_operator', exitCode: 3, completedStories: [], ...refusal }
+    }
+    await deps.journal.append({
+      kind: 'mission_control',
+      data: { state: 'RUNNING', action: 'resume', request_id: control.request_id, reason: 'resume' },
+    })
+    clearControlRequest(missionDir, control.request_id)
+  }
+  return runSequentialMission(deps, { loaded, repoDir, missionDir })
+}
+
+/**
+ * @param {{ loaded: any, repoDir: string, missionDir: string, deps: any, events: Array<Record<string, any>> }} input
+ * @returns {{ reason: string, nextAction: string, currentStory?: string } | null}
+ */
+function resumeRefusal({ loaded, repoDir, missionDir, deps, events }) {
+  if (!deps.lease) return { reason: 'lease_missing', nextAction: 'ade run (readquirir o lease da missão)' }
+  try {
+    assertStampCurrent(events)
+  } catch (err) {
+    if (!(err instanceof AdeError)) throw err
+    return { reason: 'version_divergent', nextAction: 'ade run --accept-stale-version' }
+  }
+  const approval = checkApproval(deps, loaded, events, missionDir)
+  if (!approval.valid) {
+    return { reason: approval.reason ?? 'approval_divergent', nextAction: approval.nextAction ?? 'ade approve', currentStory: approval.storyId }
+  }
+  const { maxModelCalls, consumedCalls } = readLineageCallBudget({ repoDir, plan: loaded.plan })
+  const reserved = events.filter((e) => e.kind === 'budget_reserved').length
+  if (typeof maxModelCalls === 'number' && consumedCalls + reserved >= maxModelCalls) {
+    return { reason: 'budget_exhausted', nextAction: 'ampliar o orçamento do plano e aprovar de novo' }
   }
   return null
 }

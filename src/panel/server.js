@@ -6,6 +6,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AdeError } from '../journal/errors.js'
 import { approveMission } from '../mission/plan-lifecycle.js'
+import { requestMissionControl } from '../engine/control.js'
 import { createSessionManager } from './session.js'
 import { acquireServeLease } from './serve-lease.js'
 import { createWebSocketHandler } from './websocket.js'
@@ -225,6 +226,40 @@ export async function startServer({
           } else {
             res.writeHead(400, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify(result))
+          }
+          return
+        }
+
+        const controlMatch = pathname.match(/^\/api\/actions\/(pause|resume)$/)
+        if (controlMatch && method === 'POST') {
+          let bodyText = ''
+          for await (const chunk of req) {
+            bodyText += chunk
+          }
+          /** @type {any} */
+          let payload
+          try {
+            payload = JSON.parse(bodyText)
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'invalid_json' }))
+            return
+          }
+          try {
+            // O painel só grava o pedido durável; quem executa a missão registra a transição.
+            const result = await requestMissionControl({
+              repoDir: resolvedRepo,
+              missionId: payload?.mission_id,
+              action: /** @type {'pause' | 'resume'} */ (controlMatch[1]),
+              expectedDigest: payload?.digest,
+              source: 'panel',
+            })
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify(result))
+          } catch (err) {
+            if (!(err instanceof AdeError)) throw err
+            res.writeHead(err.exitCode === 5 ? 409 : 400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: err.code, message: err.message }))
           }
           return
         }

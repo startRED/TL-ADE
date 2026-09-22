@@ -14,7 +14,8 @@ import { runStory } from '../engine.js'
 import { loadPlan } from '../engine/plan-load.js'
 import { runPreflight } from '../engine/preflight.js'
 import { prepareStory } from '../engine/prepare.js'
-import { runSequentialMission } from '../engine/schedule.js'
+import { installShutdownDrain, readMissionControl } from '../engine/control.js'
+import { resumeMission } from '../engine/resume.js'
 import { replanRemaining } from '../mission/plan-lifecycle.js'
 import { createEvalRunner } from '../evals/eval-runner.js'
 import { createGateRunner } from '../gates/gates.js'
@@ -26,12 +27,15 @@ import { acceptStaleVersion as acceptStaleVersionFn, assertStampCurrent, buildRu
 import { acquireLease } from '../lease/lease.js'
 import { compilePack } from '../pack/pack.js'
 import { resolveBinary } from '../runner/resolve-binary.js'
+import { activeWorkerPids, terminateProcessTree } from '../runner/spawn.js'
 import { reconcileAll } from '../step/reconcile.js'
 import { createStepRunner } from '../step/step.js'
 import { loadApprovedSkills } from '../skills/catalog.js'
 import { closeMissionSummary } from '../telemetry/telemetry.js'
 
 const LEASE_TTL_MS = 15_000
+/** Prazo seguro para o worker em curso terminar sozinho depois de um sinal de encerramento. */
+const SHUTDOWN_GRACE_MS = 30_000
 
 /**
  * @param {string} missionDir
@@ -103,6 +107,17 @@ export async function runCommand(options, deps = {}) {
   let missionStarted = false
   /** @type {number | null} */
   let missionExitCode = null
+  // Desligamento, atualização ou reinício entram pela mesma drenagem cooperativa da pausa.
+  const shutdown = installShutdownDrain(deps.processSignals ?? process, (signal) => {
+    for (const pid of activeWorkerPids()) {
+      terminateProcessTree({ pid, timeoutMs: SHUTDOWN_GRACE_MS })
+        .then((result) => journal?.append({ kind: 'process_tree_terminated', data: { signal, ...result } }))
+        .catch((err) => {
+          process.stderr.write(`ade run: falha ao registrar encerramento do worker ${pid}: ${err instanceof Error ? err.message : err}
+`)
+        })
+    }
+  })
 
   try {
     journal = openJournal({ missionDir, runtimeStamp })
@@ -247,6 +262,8 @@ export async function runCommand(options, deps = {}) {
       replanRemaining: deps.replanRemaining ?? replanRemaining,
       loadPlan: deps.loadPlan ?? loadPlan,
       runtimeStamp,
+      lease,
+      shutdown,
       eligibleSkills,
       eligibleSkillSnapshot,
       skillCatalogError,
@@ -255,7 +272,12 @@ export async function runCommand(options, deps = {}) {
     const hasApproval = existingEvents.some(
       (e) => e.kind === 'decision' && e.data?.decision === 'plan_approved',
     )
-    if (loaded.stories.length === 1 && !hasApproval && approvedSkillIds.length === 0) {
+    if (
+      loaded.stories.length === 1 &&
+      !hasApproval &&
+      approvedSkillIds.length === 0 &&
+      readMissionControl({ missionDir }).state === 'RUNNING'
+    ) {
       const story = loaded.stories[0]
       const storyResult = await (deps.runStory ?? runStory)(engineDeps, {
         loaded,
@@ -267,15 +289,12 @@ export async function runCommand(options, deps = {}) {
       return storyResult.exitCode
     }
 
-    const missionResult = await runSequentialMission(engineDeps, {
-      loaded,
-      repoDir,
-      missionDir,
-    })
+    const missionResult = await resumeMission({ loaded, repoDir, missionDir, deps: engineDeps })
 
     missionExitCode = missionResult.exitCode
     return missionResult.exitCode
   } finally {
+    shutdown.dispose()
     if (journal && missionStarted) {
       // Um único resumo por missão: 0 conclui, 3 estaciona, o resto (inclusive exceção) interrompe.
       const summary = closeMissionSummary({

@@ -9,6 +9,7 @@ import { acquireLease } from '../lease/lease.js'
 import { assertApprovedPlan, replanRemaining } from '../mission/plan-lifecycle.js'
 import { createStepRunner } from '../step/step.js'
 import { loadPlan } from './plan-load.js'
+import { drainMission, readMissionControl, clearControlRequest } from './control.js'
 import { readLineageCallBudget } from './resume.js'
 
 /**
@@ -292,6 +293,75 @@ function nextFreeStoryId(usedIds) {
 }
 
 /**
+ * Confere a aprovação durável contra o plano e os contratos carregados.
+ *
+ * @param {any} deps
+ * @param {import('./plan-load.js').LoadedPlan} loadedPlan
+ * @param {Array<Record<string, any>>} events
+ * @param {string} mDir
+ * @returns {{ valid: boolean, reason?: string, storyId?: string, nextAction?: string, approval?: any }}
+ */
+export function checkApproval(deps, loadedPlan, events, mDir) {
+  const approval = events.find(
+    (e) => e.kind === 'decision' && e.data?.decision === 'plan_approved',
+  )
+
+  if (!approval) {
+    return { valid: false, reason: 'approval_missing', nextAction: 'ade approve' }
+  }
+  if (deps.skillCatalogError) {
+    return { valid: false, reason: 'approval_divergent', nextAction: 'ade catalog sync && ade approve' }
+  }
+  if (!approval.data?.digest) {
+    return { valid: false, reason: 'approval_divergent', nextAction: 'ade approve' }
+  }
+  if (approval.data.digest !== digest16(loadedPlan.plan)) {
+    return { valid: false, reason: 'approval_divergent', nextAction: 'ade approve' }
+  }
+  const frozenContracts = approval.data?.contract_digests || {}
+  const authorization = loadedPlan.plan?.authorization || {}
+  if (
+    digest16(approval.data?.eligible_skills) !== digest16(authorization.eligible_skills || []) ||
+    digest16(approval.data?.permitted_effects) !== digest16(authorization.permitted_effects || [])
+  ) {
+    return { valid: false, reason: 'approval_divergent', nextAction: 'ade approve' }
+  }
+  // `assertApprovedPlan` confere os arquivos; aqui se confere o contrato em memória, que é
+  // o que de fato vai para o despacho.
+  for (const story of loadedPlan.stories || []) {
+    if (frozenContracts[story.id] !== digest16(story.contract)) {
+      return { valid: false, reason: 'approval_divergent', storyId: story.id, nextAction: 'ade approve' }
+    }
+  }
+  const assertApprovedPlanFn = deps.assertApprovedPlan || assertApprovedPlan
+  try {
+    assertApprovedPlanFn({
+      missionDir: mDir,
+      plan: loadedPlan.plan,
+      skillSnapshot: deps.eligibleSkillSnapshot || [],
+    })
+  } catch (err) {
+    const msg = err?.message || String(err)
+    const match = msg.match(/contrato\s+(\S+)\s+alterado/)
+    return {
+      valid: false,
+      reason: 'approval_divergent',
+      storyId: match ? match[1] : undefined,
+      nextAction: 'ade approve',
+    }
+  }
+  const expectedSummary = digest16({
+    plan: approval.data.digest,
+    contracts: frozenContracts,
+    ...(Array.isArray(approval.data?.eligible_skill_pins) ? { skills: approval.data.eligible_skill_pins } : {}),
+  })
+  if (approval.data.summary_digest !== expectedSummary) {
+    return { valid: false, reason: 'approval_divergent', nextAction: 'ade approve' }
+  }
+  return { valid: true, approval }
+}
+
+/**
  * Executa todas as stories de um plano em ordem sequencial respeitando dependências,
  * aprovação congelada, retomada após interrupção e replanejamento com no_changes.
  *
@@ -301,12 +371,13 @@ function nextFreeStoryId(usedIds) {
  * @param {string} input.repoDir
  * @param {string} input.missionDir
  * @returns {Promise<{
- *   status: 'completed' | 'awaiting_operator',
+ *   status: 'completed' | 'awaiting_operator' | 'stopped',
  *   exitCode: number,
  *   completedStories: string[],
  *   currentStory?: string,
  *   reason?: string | null,
  *   nextAction?: string,
+ *   checkpointRef?: string,
  * }>}
  */
 export async function runSequentialMission(deps, { loaded, repoDir, missionDir }) {
@@ -338,66 +409,47 @@ export async function runSequentialMission(deps, { loaded, repoDir, missionDir }
    * @param {import('./plan-load.js').LoadedPlan} loadedPlan
    * @param {Array<Record<string, any>>} events
    * @param {string} [mDir]
-   * @returns {{ valid: boolean, reason?: string, storyId?: string, nextAction?: string, approval?: any }}
    */
-  const validateApproval = (loadedPlan, events, mDir = currentMissionDir) => {
-    const approval = events.find(
-      (e) => e.kind === 'decision' && e.data?.decision === 'plan_approved',
-    )
+  const validateApproval = (loadedPlan, events, mDir = currentMissionDir) =>
+    checkApproval(deps, loadedPlan, events, mDir)
 
-    if (!approval) {
-      return { valid: false, reason: 'approval_missing', nextAction: 'ade approve' }
+  let claiming = true
+  /**
+   * Portão de controle: missão STOPPED não despacha; pausa pedida, DRAINING herdado de um
+   * processo que caiu ou sinal de encerramento drenam até STOPPED antes de reivindicar story.
+   *
+   * @param {string[]} completed
+   */
+  const controlGate = async (completed) => {
+    const ctl = readMissionControl({ missionDir: currentMissionDir })
+    const nextAction = 'retomar pelo painel (POST /api/actions/resume)'
+    if (ctl.state === 'STOPPED') {
+      return { status: /** @type {const} */ ('stopped'), exitCode: 3, completedStories: completed, reason: 'mission_stopped', nextAction }
     }
-    if (deps.skillCatalogError) {
-      return { valid: false, reason: 'approval_divergent', nextAction: 'ade catalog sync && ade approve' }
-    }
-    if (!approval.data?.digest) {
-      return { valid: false, reason: 'approval_divergent', nextAction: 'ade approve' }
-    }
-    if (approval.data.digest !== digest16(loadedPlan.plan)) {
-      return { valid: false, reason: 'approval_divergent', nextAction: 'ade approve' }
-    }
-    const frozenContracts = approval.data?.contract_digests || {}
-    const authorization = loadedPlan.plan?.authorization || {}
-    if (
-      digest16(approval.data?.eligible_skills) !== digest16(authorization.eligible_skills || []) ||
-      digest16(approval.data?.permitted_effects) !== digest16(authorization.permitted_effects || [])
-    ) {
-      return { valid: false, reason: 'approval_divergent', nextAction: 'ade approve' }
-    }
-    // `assertApprovedPlan` confere os arquivos; aqui se confere o contrato em memória, que é
-    // o que de fato vai para o despacho.
-    for (const story of loadedPlan.stories || []) {
-      if (frozenContracts[story.id] !== digest16(story.contract)) {
-        return { valid: false, reason: 'approval_divergent', storyId: story.id, nextAction: 'ade approve' }
-      }
-    }
-    const assertApprovedPlanFn = deps.assertApprovedPlan || assertApprovedPlan
-    try {
-      assertApprovedPlanFn({
-        missionDir: mDir,
-        plan: loadedPlan.plan,
-        skillSnapshot: deps.eligibleSkillSnapshot || [],
-      })
-    } catch (err) {
-      const msg = err?.message || String(err)
-      const match = msg.match(/contrato\s+(\S+)\s+alterado/)
-      return {
-        valid: false,
-        reason: 'approval_divergent',
-        storyId: match ? match[1] : undefined,
-        nextAction: 'ade approve',
-      }
-    }
-    const expectedSummary = digest16({
-      plan: approval.data.digest,
-      contracts: frozenContracts,
-      ...(Array.isArray(approval.data?.eligible_skill_pins) ? { skills: approval.data.eligible_skill_pins } : {}),
+    const { shutdown, journal } = /** @type {any} */ (deps)
+    const shutdownReason = shutdown ? shutdown.reason() : null
+    const pauseRequested = ctl.requested_action === 'pause'
+    if (ctl.state !== 'DRAINING' && !pauseRequested && !shutdownReason) return null
+    if (!journal) throw new AdeError('journal_missing', 'drenagem exige o journal da missão', 4)
+    const reason = shutdownReason ?? 'pause'
+    const drained = await drainMission({
+      journal,
+      checkpoint: async () => `journal:${journal.lastSeq}`,
+      stopClaiming: () => {
+        claiming = false
+      },
+      reason,
+      requestId: pauseRequested ? ctl.request_id : null,
     })
-    if (approval.data.summary_digest !== expectedSummary) {
-      return { valid: false, reason: 'approval_divergent', nextAction: 'ade approve' }
+    if (pauseRequested && ctl.request_id) clearControlRequest(currentMissionDir, ctl.request_id)
+    return {
+      status: /** @type {const} */ ('stopped'),
+      exitCode: 3,
+      completedStories: completed,
+      reason,
+      nextAction,
+      checkpointRef: drained.checkpoint_ref,
     }
-    return { valid: true, approval }
   }
 
   // 1. Reconciliação inicial de intenções abertas
@@ -422,6 +474,9 @@ export async function runSequentialMission(deps, { loaded, repoDir, missionDir }
       }
     }
   }
+
+  const startGate = await controlGate([])
+  if (startGate) return startGate
 
   // 2. Validação da aprovação do plano
   const initialCheck = validateApproval(currentLoaded, readEvents(currentMissionDir))
@@ -459,6 +514,8 @@ export async function runSequentialMission(deps, { loaded, repoDir, missionDir }
 
   try {
     while (true) {
+    const gate = await controlGate(completedStories)
+    if (gate) return gate
     const events = readEvents(currentMissionDir)
     const storiesById = new Map(currentLoaded.stories.map((s) => [s.id, s]))
     const journalStates = deriveStoryStates(events, storiesById)
@@ -547,6 +604,7 @@ export async function runSequentialMission(deps, { loaded, repoDir, missionDir }
       throw new Error(`Story ${next.id} não encontrada no plano carregado`)
     }
 
+    if (!claiming) throw new AdeError('scheduler_draining', 'scheduler drenado não reivindica story', 2)
     // Executa a story
     const runStoryFn = deps.runStory || (await import('../engine.js')).runStory
     const storyResult = await runStoryFn(deps, {

@@ -114,6 +114,80 @@ export function killTree(
   }
 }
 
+/** PIDs dos workers vivos deste processo, para o encerramento por sinal alcançar a árvore. */
+const ACTIVE_WORKER_PIDS = new Set()
+
+/** @returns {number[]} */
+export function activeWorkerPids() {
+  return [...ACTIVE_WORKER_PIDS]
+}
+
+/**
+ * @param {number} pid
+ * @returns {boolean}
+ */
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return /** @type {NodeJS.ErrnoException} */ (err)?.code === 'EPERM'
+  }
+}
+
+/**
+ * Espera o processo sair sozinho até `timeoutMs`; vencido o prazo, encerra a árvore por
+ * `killTree` (taskkill /T /F no Windows). Falha do encerramento volta no resultado para ser
+ * registrada, nunca decidida por pty.kill().
+ *
+ * @param {{
+ *   pid: number,
+ *   platform?: string,
+ *   timeoutMs: number,
+ *   isAlive?: (pid: number) => boolean,
+ *   now?: () => number,
+ *   sleep?: (ms: number) => Promise<void>,
+ *   execFileSync?: Function,
+ *   kill?: (pid: number, signal: string) => void,
+ * }} input
+ * @returns {Promise<{ pid: number, platform: string, cooperative: boolean, terminated_by: string, waited_ms: number, error?: string }>}
+ */
+export async function terminateProcessTree({
+  pid,
+  platform = process.platform,
+  timeoutMs,
+  isAlive = processAlive,
+  now = Date.now,
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  execFileSync: exec = execFileSync,
+  kill = (target, signal) => process.kill(target, signal),
+}) {
+  if (!Number.isInteger(pid) || pid <= 0) throw new TypeError('pid inválido')
+  if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    throw new TypeError('timeoutMs inválido')
+  }
+  const start = now()
+  while (isAlive(pid)) {
+    const waited = now() - start
+    if (waited >= timeoutMs) {
+      try {
+        const { terminated_by } = killTree(pid, {
+          platform,
+          execFileSync: exec,
+          // No Windows só taskkill decide; o fallback por sinal fica para as demais plataformas.
+          child: platform === 'win32' ? undefined : { kill: (/** @type {string} */ signal) => kill(pid, signal) },
+        })
+        return { pid, platform, cooperative: false, terminated_by, waited_ms: waited }
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err)
+        return { pid, platform, cooperative: false, terminated_by: 'failed', waited_ms: waited, error }
+      }
+    }
+    await sleep(Math.min(100, timeoutMs - waited))
+  }
+  return { pid, platform, cooperative: true, terminated_by: 'cooperative_exit', waited_ms: now() - start }
+}
+
 /**
  * @typedef {Object} RunWorkerResult
  * @property {'exited' | 'timeout' | 'crashed' | 'start_failed'} state
@@ -231,6 +305,7 @@ export async function runWorker(options) {
     async function finalize(state, reason, exitCode, failureClass, pid) {
       if (finalizado) return
       finalizado = true
+      if (pid !== null) ACTIVE_WORKER_PIDS.delete(pid)
 
       if (timeoutTimer !== null) {
         clearTimeout(timeoutTimer)
@@ -385,6 +460,7 @@ export async function runWorker(options) {
 
     if (child.pid) {
       const childPid = child.pid
+      ACTIVE_WORKER_PIDS.add(childPid)
 
       if (timeoutS !== undefined) {
         timeoutTimer = setTimeout(() => {
