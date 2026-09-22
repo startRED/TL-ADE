@@ -1363,7 +1363,7 @@ async function makeBrief() {
     m.state = 'awaiting_plan'; m.reason = 'questions'; setStep('brief', 'running')
     log('engine', `briefing: ${b.questions.length} pergunta(s) a mais antes de fechar o documento`); broadcast(); await persistMission().catch(() => {}); return
   }
-  if (b.questions?.length && state.settings.unattended) { m.answers = [...(m.answers || []), ...b.questions.map((q) => ({ id: q.id, question: q.question, answer: q.options?.[0]?.label || 'não sei' }))]; log('engine', `modo noturno: perguntas do briefing respondidas com as recomendações (${b.questions.length})`, 'warn') }
+  if (b.questions?.length && state.settings.unattended) { m.answers = [...(m.answers || []), ...b.questions.map((q) => ({ id: q.id, question: q.question, answer: q.options?.[0]?.label ? `${q.options[0].label} (escolha automática, NÃO confirmada pelo usuário: trate como suposição)` : 'não sei', by: 'ia' }))]; log('engine', `modo noturno: perguntas do briefing respondidas com as recomendações (${b.questions.length})`, 'warn') }
   m.brief = { ...b, questions: undefined }; m.brief_draft = null; setStep('brief', 'done')
   log('engine', `briefing pronto: ${b.in_scope.length} item(ns) no escopo, ${b.versions.length} versão(ões), todas nesta missão, em sequência a partir de ${b.versions[0].name}`)
   if (state.settings.unattended) { log('engine', 'modo noturno: briefing aprovado automaticamente', 'warn'); return makeProgram() }
@@ -1684,7 +1684,7 @@ async function planMission() {
   { const big = ['subsystem', 'project'].includes(intent.complexity), kind = big || intent.difficulty === 'hard' ? 'complex' : 'light', w = plannerChoice(kind)
     log('engine', `dificuldade ${intent.difficulty || '?'}${intent.difficulty_why ? ` (${intent.difficulty_why})` : ''}: ${big ? 'divisão em épicos' : 'plano'} com o planejador ${kind === 'complex' ? 'complexo' : 'intermediário'} (${w.model}, ${w.effort})${big ? `; o plano de cada épico sai no intermediário (${plannerChoice('light').model})` : ''}`) }
   log('engine', `entendido: ${intent.complexity} · ${intent.domains.join(', ')} · skills — planejador: ${m.skills.planner.map((s) => s.id).join(', ') || 'nenhuma'}; maker: ${m.skills.maker.map((s) => s.id).join(', ') || 'nenhuma'}; revisor: ${m.skills.checker.map((s) => s.id).join(', ') || 'nenhuma'}; pesquisa: ${m.skills.research.map((s) => s.id).join(', ') || 'nenhuma'}`)
-  if (intent.questions?.length && state.settings.unattended) { m.answers = intent.questions.map((q) => ({ id: q.id, question: q.question, answer: q.options?.[0]?.label || 'não sei' })); log('engine', `modo noturno: entrevista respondida com as recomendações (${m.answers.length} pergunta(s))`, 'warn') }
+  if (intent.questions?.length && state.settings.unattended) { m.answers = intent.questions.map((q) => ({ id: q.id, question: q.question, answer: q.options?.[0]?.label ? `${q.options[0].label} (escolha automática, NÃO confirmada pelo usuário: trate como suposição)` : 'não sei', by: 'ia' })); log('engine', `modo noturno: entrevista respondida com as recomendações (${m.answers.length} pergunta(s))`, 'warn') }
   else if (intent.questions?.length) { m.plan = { title: m.request.slice(0, 60), summary: intent.summary, complexity: intent.complexity, domains: intent.domains, needs_ui: intent.needs_ui, needs_backend: intent.needs_backend, questions: intent.questions, research_questions: [], stories: [] }; m.state = 'awaiting_plan'; m.reason = 'questions'; broadcast(); await persistMission().catch(() => {}); return }
   return continuePlanning()
 }
@@ -1830,7 +1830,7 @@ async function makePlan({ inProgram = false } = {}) {
   log('engine', `plano${m.epic ? ` do épico "${m.epic.title}"` : ''}: ${plan.title} · ${m.plan.complexity} · ${m.stories.length} story(s)`)
   // Modo noturno responde as perguntas do plano com as recomendações, como já faz com as do briefing e as da entrevista. Era o
   // único ponto que ainda parava a missão sem operador: a m-mu8usf5z dormiu aqui às 04:08 com uma pergunta de uma linha.
-  if (plan.questions?.length && state.settings.unattended) { m.answers = [...(m.answers || []), ...plan.questions.map((q) => ({ id: q.id, question: q.question, answer: q.options?.[0]?.label || 'não sei' }))]; log('engine', `modo noturno: perguntas do plano respondidas com as recomendações (${plan.questions.length})`, 'warn') }
+  if (plan.questions?.length && state.settings.unattended) { m.answers = [...(m.answers || []), ...plan.questions.map((q) => ({ id: q.id, question: q.question, answer: q.options?.[0]?.label ? `${q.options[0].label} (escolha automática, NÃO confirmada pelo usuário: trate como suposição)` : 'não sei', by: 'ia' }))]; log('engine', `modo noturno: perguntas do plano respondidas com as recomendações (${plan.questions.length})`, 'warn') }
   else if (plan.questions?.length) { m.state = 'awaiting_plan'; m.reason = 'questions'; broadcast(); await persistMission().catch(() => {}); return inProgram ? true : undefined }
   if (inProgram) return true
   if (state.settings.unattended) log('engine', `modo noturno: plano com ${m.stories.length} parte(s) aprovado automaticamente`, 'warn')
@@ -2489,7 +2489,7 @@ async function decide(option, payload = {}) {
       m.planner = pick === 'recommended' ? { ...m.planner_options.recommended, source: 'recomendado' } : { ...m.planner_options.configured, source: 'configurado' }
       log('operador', `planejar com ${m.planner.model} (${m.planner.effort}, ${m.planner.source})`); return continuePlanning()
     }
-    if (option === 'start' && m.reason === 'questions') { m.answers = (m.plan.questions || []).map((q) => ({ id: q.id, question: q.question, answer: q.options?.[0]?.label || 'não sei' })); log('operador', 'seguiu com as recomendações'); return continuePlanning() }
+    if (option === 'start' && m.reason === 'questions') { m.answers = (m.plan.questions || []).map((q) => ({ id: q.id, question: q.question, answer: q.options?.[0]?.label ? `${q.options[0].label} (escolha automática, NÃO confirmada pelo usuário: trate como suposição)` : 'não sei', by: 'ia' })); log('operador', 'seguiu com as recomendações'); return continuePlanning() }
     if (option === 'start') { log('operador', 'aprovou o plano'); return m.program ? runProgram() : runStories() }
     if ((option === 'answer' || option === 'start') && m.planner_options && !m.planner && payload.planner) { const pick = payload.planner === 'recommended' ? 'recommended' : 'configured'; m.planner = { ...m.planner_options[pick], source: pick === 'recommended' ? 'recomendado' : 'configurado' }; log('operador', `planejar com ${m.planner.model} (${m.planner.effort}, ${m.planner.source})`) }
     if (option === 'answer') {
