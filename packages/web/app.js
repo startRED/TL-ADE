@@ -119,12 +119,18 @@ function handleEvent(event) {
   loadSnapshot()
 }
 
-function render() {
-  if (!snapshot || !snapshot.selectedMission) return
-
+/** Missão exibida: a escolhida pelo operador ou, na falta, a destacada pelo snapshot. */
+function currentMission() {
+  if (!snapshot || !snapshot.selectedMission) return null
   if (!selectedMissionId) selectedMissionId = snapshot.selectedMission.id
-  const mission = snapshot.missions.find((item) => item.id === selectedMissionId) || snapshot.selectedMission
+  return snapshot.missions.find((item) => item.id === selectedMissionId) || snapshot.selectedMission
+}
+
+function render() {
+  const mission = currentMission()
+  if (!mission) return
   const stories = mission.stories || []
+  renderControl(mission)
 
   if (!selectedStoryId && stories.length > 0) {
     selectedStoryId = stories[0].id
@@ -479,5 +485,122 @@ $('navHistory')?.addEventListener('click', () => {
 $('navSkills')?.addEventListener('click', () => toast('Skills não estão disponíveis nesta projeção.'))
 $('navCosts')?.addEventListener('click', () => $('report')?.scrollIntoView({ block: 'start' }))
 $('navHealth')?.addEventListener('click', () => toast('Use ade doctor para verificar o ambiente.'))
+const stateText = { RUNNING: 'Em execução', DRAINING: 'Drenando (terminando o passo atual)', STOPPED: 'Parada' }
+let controlBusy = false
+let term = null
+let termSocket = null
+
+/**
+ * Estado, story, checkpoint, custo e pesquisas vêm só do snapshot projetado das fontes canônicas.
+ */
+function renderControl(mission) {
+  const state = mission.runtime_state || 'RUNNING'
+  const tk = mission.takeover || { active: false, story_id: null, intervention_needed: false }
+  $('ctlState').textContent = tk.active ? `${stateText[state] || state} · operador no controle de ${tk.story_id}` : stateText[state] || state
+  $('ctlStory').textContent = mission.current_story || '—'
+  $('ctlCheckpoint').textContent = mission.checkpoint ? `${mission.checkpoint.ref} (${mission.checkpoint.at})` : '—'
+  $('ctlCost').textContent = formatMoney(mission.consumed_usd)
+  const list = $('researchList')
+  list.replaceChildren(...(mission.research || []).map((r) => {
+    const li = document.createElement('li')
+    li.textContent = `${r.id}: ${JSON.stringify(r.data)} (confiança ${r.confidence ?? '—'})`
+    return li
+  }))
+  if (tk.intervention_needed) {
+    const status = $('controlStatus')
+    status.textContent = 'Terminal não encerrou: intervenção necessária. A missão continua parada.'
+    status.classList.add('warn')
+  }
+  if (controlBusy) return
+  $('ctlPause').disabled = state !== 'RUNNING'
+  $('ctlResume').disabled = state !== 'STOPPED' || tk.active
+  $('ctlTakeover').disabled = state !== 'STOPPED' || !mission.current_story || (tk.active && Boolean(termSocket))
+  $('ctlRelease').disabled = !tk.active
+}
+
+const controlLabels = {
+  pause: ['Pedindo pausa...', 'Pausa aceita: a missão drena o passo atual e para.'],
+  resume: ['Pedindo retomada...', 'Retomada pedida: a execução volta após revalidar aprovação, lease, versão e orçamento.'],
+  takeover: ['Assumindo a sessão...', 'Sessão assumida: o motor não despacha enquanto você controla.'],
+  release: ['Devolvendo controle...', 'Controle devolvido: checkpoint salvo e retomada pedida.'],
+}
+
+async function controlAction(action) {
+  const mission = currentMission()
+  if (!mission || controlBusy) return
+  const panel = $('controlPanel')
+  const status = $('controlStatus')
+  controlBusy = true
+  panel.setAttribute('aria-busy', 'true')
+  for (const id of ['ctlPause', 'ctlResume', 'ctlTakeover', 'ctlRelease']) $(id).disabled = true
+  status.classList.remove('warn')
+  status.textContent = controlLabels[action][0]
+  const body = { mission_id: mission.id, digest: mission.digest }
+  if (action === 'takeover' || action === 'release') body.story_id = mission.takeover?.story_id || mission.current_story
+  try {
+    const res = await fetch(`/api/actions/${action}?session=${encodeURIComponent(sessionToken)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || data.error || `HTTP ${res.status}`)
+    if (action === 'takeover') openTerminal(data)
+    if (action === 'release') closeTerminal()
+    status.textContent = controlLabels[action][1]
+  } catch (err) {
+    status.classList.add('warn')
+    status.textContent = `Ação recusada: ${err instanceof Error ? err.message : String(err)}`
+  } finally {
+    controlBusy = false
+    panel.setAttribute('aria-busy', 'false')
+    await loadSnapshot()
+  }
+}
+
+function closeTerminal() {
+  termSocket?.close()
+  termSocket = null
+  term?.dispose()
+  term = null
+  $('terminal').hidden = true
+}
+
+/**
+ * A saída do terminal só entra pelo xterm (term.write), nunca como marcação da página.
+ * Fechar a aba ou perder o canal não devolve o controle; só o botão Devolver faz isso.
+ */
+function openTerminal(session) {
+  const box = $('terminal')
+  termSocket?.close()
+  term?.dispose()
+  box.hidden = false
+  box.replaceChildren()
+  term = new window.Terminal({ convertEol: false, cursorBlink: true, screenReaderMode: true })
+  term.open(box)
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const q = new URLSearchParams({ session: session.terminal_token, mission: session.mission_id, story: session.story_id })
+  const socket = new WebSocket(`${proto}//${location.host}/api/terminal?${q}`)
+  socket.binaryType = 'arraybuffer'
+  socket.onmessage = (evt) => {
+    if (term) term.write(new Uint8Array(evt.data))
+  }
+  socket.onclose = () => {
+    if (termSocket !== socket) return
+    termSocket = null
+    $('controlStatus').textContent = 'Canal do terminal caiu; o controle continua com você. Assuma de novo para reabrir.'
+    loadSnapshot()
+  }
+  term.onData((data) => {
+    if (socket.readyState === WebSocket.OPEN) socket.send(new TextEncoder().encode(data))
+  })
+  termSocket = socket
+  term.focus()
+}
+
+$('ctlPause')?.addEventListener('click', () => controlAction('pause'))
+$('ctlResume')?.addEventListener('click', () => controlAction('resume'))
+$('ctlTakeover')?.addEventListener('click', () => controlAction('takeover'))
+$('ctlRelease')?.addEventListener('click', () => controlAction('release'))
 loadSnapshot()
 connectWebSocket()

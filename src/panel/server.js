@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { AdeError } from '../journal/errors.js'
 import { approveMission } from '../mission/plan-lifecycle.js'
 import { requestMissionControl } from '../engine/control.js'
+import { createInterventionController } from './control.js'
 import { createSessionManager } from './session.js'
 import { acquireServeLease } from './serve-lease.js'
 import { createWebSocketHandler } from './websocket.js'
@@ -22,6 +23,13 @@ const MIME_TYPES = {
   '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml',
   '.txt': 'text/plain; charset=utf-8',
+}
+
+/** Biblioteca do terminal embutido (dependência pinada de packages/web). */
+/** @type {Record<string, string>} */
+const XTERM_FILES = {
+  '/vendor/xterm.js': path.join('lib', 'xterm.js'),
+  '/vendor/xterm.css': path.join('css', 'xterm.css'),
 }
 
 /**
@@ -64,7 +72,7 @@ export async function defaultOpenBrowser(url) {
  *     stderr?: { write: (s: string) => void } | ((s: string) => void),
  *     openBrowser?: (url: string) => Promise<void>,
  *     checkNativeSqlite?: () => any,
- *   },
+ *   } & import('./control.js').TerminalDeps,
  * }} [options]
  */
 export async function startServer({
@@ -105,9 +113,11 @@ export async function startServer({
     typeof deps.stderr === 'function'
       ? deps.stderr
       : (deps.stderr?.write?.bind(deps.stderr) ?? process.stderr.write.bind(process.stderr))
+  const intervention = createInterventionController({ repoDir: resolvedRepo, terminal: deps })
   const wsHandler = createWebSocketHandler({
     sessionManager,
     repoDir: resolvedRepo,
+    findTerminal: intervention.findTerminal,
     onJournalChanged: () => rebuildProjection({ repoDir: resolvedRepo, indexPath }),
     onError: (err) => stderrWrite(`ade serve: falha ao atualizar painel: ${err instanceof Error ? err.message : String(err)}\n`),
   })
@@ -127,6 +137,21 @@ export async function startServer({
       if (pathname === '/' || pathname === '/index.html') {
         const content = fs.readFileSync(rootIndexHtml)
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.end(content)
+        return
+      }
+
+      const xtermFile = XTERM_FILES[pathname]
+      if (xtermFile) {
+        let content
+        try {
+          content = await fs.promises.readFile(path.join(packageDir, 'node_modules', '@xterm', 'xterm', xtermFile))
+        } catch (err) {
+          res.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ error: { code: 'terminal_asset_missing', message: `xterm indisponível: ${err instanceof Error ? err.message : err}` } }))
+          return
+        }
+        res.writeHead(200, { 'Content-Type': MIME_TYPES[path.extname(xtermFile)] })
         res.end(content)
         return
       }
@@ -230,7 +255,7 @@ export async function startServer({
           return
         }
 
-        const controlMatch = pathname.match(/^\/api\/actions\/(pause|resume)$/)
+        const controlMatch = pathname.match(/^\/api\/actions\/(pause|resume|takeover|release)$/)
         if (controlMatch && method === 'POST') {
           let bodyText = ''
           for await (const chunk of req) {
@@ -246,14 +271,20 @@ export async function startServer({
             return
           }
           try {
-            // O painel só grava o pedido durável; quem executa a missão registra a transição.
-            const result = await requestMissionControl({
-              repoDir: resolvedRepo,
-              missionId: payload?.mission_id,
-              action: /** @type {'pause' | 'resume'} */ (controlMatch[1]),
-              expectedDigest: payload?.digest,
-              source: 'panel',
-            })
+            const action = controlMatch[1]
+            // Pausa e retomada só gravam o pedido durável; quem executa a missão registra a transição.
+            // Takeover e devolução exigem STOPPED: o painel vira o escritor único enquanto controla.
+            const result = action === 'takeover'
+              ? await intervention.takeover(payload)
+              : action === 'release'
+                ? await intervention.release(payload)
+                : await requestMissionControl({
+                  repoDir: resolvedRepo,
+                  missionId: payload?.mission_id,
+                  action: /** @type {'pause' | 'resume'} */ (action),
+                  expectedDigest: payload?.digest,
+                  source: 'panel',
+                })
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify(result))
           } catch (err) {
@@ -316,6 +347,7 @@ export async function startServer({
     if (closed) return
     closed = true
     wsHandler.closeAll()
+    await intervention.closeAll()
     lease.release()
     await new Promise((resolve) => {
       server.close(() => resolve(undefined))

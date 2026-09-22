@@ -25,6 +25,17 @@ function controlEvents(events) {
 }
 
 /**
+ * Story sob controle humano: último `human_takeover` sem `human_release` posterior.
+ *
+ * @param {Array<Record<string, any>>} events
+ * @returns {string | null}
+ */
+export function activeTakeover(events) {
+  const last = [...events].reverse().find((e) => e.kind === 'human_takeover' || e.kind === 'human_release')
+  return last?.kind === 'human_takeover' ? last.data?.unit ?? null : null
+}
+
+/**
  * @param {string} missionDir
  * @returns {Record<string, any> | null}
  */
@@ -116,6 +127,9 @@ export async function requestMissionControl({ repoDir, missionId, action, expect
       return { request_id: last?.data?.request_id ?? null, action, state, idempotent: true }
     }
     if (action === 'resume' && state === 'RUNNING') return { request_id: null, action, state, idempotent: true }
+    if (action === 'resume' && activeTakeover(events)) {
+      throw new AdeError('control_invalid_transition', 'operador no controle: devolva o controle antes de retomar', 5, { state })
+    }
     if (action === 'resume' && state === 'DRAINING') {
       throw new AdeError('control_invalid_transition', 'retomada exige a missão em STOPPED', 5, { state })
     }

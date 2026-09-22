@@ -59,6 +59,6 @@ Os 66 invariantes de durabilidade estão catalogados em `docs/research/runtime-p
 
 ## Próximo passo
 
-Implementar as capacidades ativadas da v0.5 (pesquisa externa controlada, telemetria auditável, drenagem cooperativa RUNNING -> DRAINING -> STOPPED, pausa, retomada e intervenção por takeover com terminal PTY no painel) sob a autorização contínua até a v1 concedida no ADR 0024 e formalizada no ADR 0028, mantendo capacidades da v1 e futuras expressamente proibidas neste épico.
+A v0.5 está entregue: pesquisa externa controlada, telemetria auditável, drenagem cooperativa RUNNING -> DRAINING -> STOPPED, pausa, retomada com revalidação e intervenção por takeover com terminal PTY no painel (ADR 0028; provas em `tests/research-v05.test.ts`, `tests/telemetry-v05.test.ts`, `tests/mission-control-v05.test.ts` e `tests/panel-intervention-v05.test.ts`; operação em [docs/specs/operator-surface.md](docs/specs/operator-surface.md) §5.1). O próximo marco é a v1, que exige ativação própria por ADR novo sob a autorização contínua do ADR 0024.
 
 Antes disso, conferir as lacunas da matriz e responder à consulta única registrada em [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md): os US$ 0,28 do dogfood não medem percentual da assinatura. A regra de metade da cota depende da fonte oficial, da janela semanal, do consumo externo e do tratamento de ausência; o valor observado permanece documentado em [docs/operations/dogfood-d1.md](docs/operations/dogfood-d1.md).

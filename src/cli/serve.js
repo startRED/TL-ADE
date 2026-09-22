@@ -40,8 +40,8 @@ export async function main(argv, deps = {}) {
       },
     })
 
-    const repoDir = path.resolve(values.repo || env.ADE_REPO_DIR || process.cwd())
-    const port = values.port ? parseInt(values.port, 10) : 4173
+    const repoDir = path.resolve(String(values.repo || env.ADE_REPO_DIR || process.cwd()))
+    const port = values.port ? parseInt(String(values.port), 10) : 4173
     const openBrowser = !values['no-open']
 
     const serverHandle = await startServer({

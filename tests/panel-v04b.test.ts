@@ -3,26 +3,20 @@ import http from 'node:http'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, describe, expect, test } from 'vitest'
 
-import { main as cliMain } from '../src/cli/index.js'
 import { main as initMain } from '../src/cli/init.js'
 import { main as serveMain } from '../src/cli/serve.js'
 import { main as indexMain } from '../src/cli/index-command.js'
-import { main as doctorMain } from '../src/cli/doctor.js'
 import { validate } from '../src/schema/index.js'
 import {
-  checkNativeSqlite,
   readPanelSnapshot,
   rebuildProjection,
 } from '../src/panel/sqlite-index.js'
 import { generateLauncher } from '../src/panel/launcher.js'
-import { listProjects, registerProject } from '../src/panel/projects.js'
-import { createSessionManager } from '../src/panel/session.js'
-import { acquireServeLease } from '../src/panel/serve-lease.js'
+import { listProjects } from '../src/panel/projects.js'
 import { startServer } from '../src/panel/server.js'
 import { openJournal } from '../src/journal/journal.js'
-import { planMission } from '../src/mission/plan-lifecycle.js'
 import { digest16 } from '../src/journal/canonical.js'
 import { AdeError } from '../src/journal/errors.js'
 
@@ -488,7 +482,7 @@ describe('v0.4b Acceptance Tests', () => {
   // continuarão passando com o novo portão.
   test('criterio_10_aprovacao_no_painel_utiliza_mesmo_fluxo_de_ade_approve_com_resumo_imutavel', async () => {
     const repoDir = makeTmpDir('ade-approve-')
-    const { plan, missionDir } = createSampleMission(repoDir)
+    const { missionDir } = createSampleMission(repoDir)
     const planPath = path.join(missionDir, 'plan.json')
     const planDigest = digest16(JSON.parse(readFileSync(planPath, 'utf8')))
 
@@ -745,7 +739,7 @@ describe('v0.4b Acceptance Tests', () => {
     expect(existsSync(path.join(repoDir, 'ade.bat'))).toBe(true)
 
     // 2. Prepara missão
-    const { plan, missionDir } = createSampleMission(repoDir, 'mission-focal')
+    const { missionDir } = createSampleMission(repoDir, 'mission-focal')
     await writeSampleJournal(missionDir)
 
     // 3. Abertura do servidor

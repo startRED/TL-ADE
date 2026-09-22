@@ -608,6 +608,8 @@ pesquisa em time, telemetria completa.
 
 ## 5. v0.5 — Pesquisa, takeover embutido e telemetria (D5)
 
+**Estado.** Entregue (ADR 0028): pesquisa, telemetria, pausa/retomada cooperativa e takeover com PTY no painel, provados em `tests/research-v05.test.ts`, `tests/telemetry-v05.test.ts`, `tests/mission-control-v05.test.ts` e `tests/panel-intervention-v05.test.ts`.
+
 **Objetivo.** A missão longa fica auditável e interrompível: `agy` para pesquisa, PTY no painel, telemetria
 por chamada.
 

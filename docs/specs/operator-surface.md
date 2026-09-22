@@ -379,6 +379,26 @@ Comando por família:
 Na prática a v1 quase sempre imprime a linha do `claude`: o Maker é Claude por default e o Checker Codex
 roda `--sandbox read-only`, logo não há árvore dele para assumir.
 
+### 5.1 Intervenção pelo painel (v0.5)
+
+O painel (`ade serve`) mostra, a partir de `GET /api/snapshot` e sem estado salvo no navegador, o
+`runtime_state` (RUNNING, DRAINING, STOPPED), a story atual, o último checkpoint (`ref`, `seq`, `at`),
+custos, pesquisas, intervenções e o estado do takeover. Toda ação exige o token da sessão, Origin local e o
+digest atual do plano; corpo inválido ou digest obsoleto dão 400, transição ilegal dá 409, sem alterar a missão.
+
+| Ação | Corpo | Efeito |
+| :--- | :--- | :--- |
+| `POST /api/actions/pause` | `{ mission_id, digest }` | pedido durável; o escritor ativo drena RUNNING → DRAINING → STOPPED |
+| `POST /api/actions/resume` | `{ mission_id, digest }` | pedido durável; volta a RUNNING só após revalidar aprovação, lease, versão e orçamento |
+| `POST /api/actions/takeover` | `{ mission_id, story_id, digest }` | só em STOPPED: adquire o lease, registra `human_takeover` e abre `claude --resume <session_ref>` no worktree da story |
+| `POST /api/actions/release` | `{ mission_id, story_id, digest }` | encerra o terminal, registra `human_release` com `checkpoint_ref`, libera o lease e pede a retomada |
+
+O terminal usa `WS /api/terminal?session=<token do takeover>&mission=<id>&story=<id>`, com token próprio
+(o da sessão do painel é recusado). A saída sai em frames binários de até 64 KiB, sem sequências OSC/DCS,
+e só é escrita no xterm. Fechar o navegador ou perder o canal não devolve o controle: a missão continua
+parada até `release`. No Windows o terminal é encerrado por `taskkill /T /F /PID`, nunca por
+`pty.kill()`; falha de encerramento mantém a missão parada e o painel mostra intervenção necessária.
+
 **O que o operador pode e não pode fazer**
 
 | Pode | Não pode |

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TL-ADE Painel</title>
+  <link rel="stylesheet" href="/vendor/xterm.css">
   <link rel="stylesheet" href="/packages/web/styles.css">
 </head>
 <body>
@@ -69,6 +70,24 @@
       </section>
 
       <section class="pane right" aria-label="Relatório e decisões">
+        <section class="control" id="controlPanel" aria-label="Controle da missão" aria-busy="false">
+          <h2>Controle</h2>
+          <dl class="ctl-facts">
+            <dt>Estado</dt><dd id="ctlState">—</dd>
+            <dt>Story atual</dt><dd id="ctlStory">—</dd>
+            <dt>Último checkpoint</dt><dd id="ctlCheckpoint">—</dd>
+            <dt>Custo</dt><dd id="ctlCost">—</dd>
+          </dl>
+          <div class="ctl-row">
+            <button type="button" class="ctl" id="ctlPause" disabled>Pausar missão</button>
+            <button type="button" class="ctl" id="ctlResume" disabled>Retomar missão</button>
+            <button type="button" class="ctl" id="ctlTakeover" disabled>Assumir sessão da story</button>
+            <button type="button" class="ctl" id="ctlRelease" disabled>Devolver controle ao motor</button>
+          </div>
+          <p class="ctl-status" id="controlStatus" role="status" aria-live="polite"></p>
+          <ul class="compact-list" id="researchList" aria-label="Resultado das pesquisas"></ul>
+          <div class="terminal" id="terminal" role="region" aria-label="Terminal da sessão assumida" hidden></div>
+        </section>
         <h2>Relatório</h2>
         <div class="scroll"><div class="report" id="report"></div></div>
       </section>
@@ -81,6 +100,7 @@
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+  <script src="/vendor/xterm.js"></script>
   <script type="module" src="/packages/web/app.js"></script>
 </body>
 </html>

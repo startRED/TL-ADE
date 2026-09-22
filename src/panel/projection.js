@@ -1,6 +1,7 @@
 // @ts-check
 import fs from 'node:fs'
 import path from 'node:path'
+import { activeTakeover } from '../engine/control.js'
 import { digest16 } from '../journal/canonical.js'
 import { readJournal } from '../journal/journal.js'
 import { validate } from '../schema/index.js'
@@ -216,6 +217,48 @@ export function projectMissionFromSources({ missionDir }) {
     stories,
     decisions,
     artifacts,
+    ...interventionView(events),
+    research: (Array.isArray(plan.research_findings) ? plan.research_findings : []).map((/** @type {any} */ f) => ({
+      id: f.id,
+      ref: f.ref,
+      confidence: f.confidence,
+      data: f.data,
+    })),
     events,
+  }
+}
+
+const INTERVENTION_KINDS = new Set(['mission_control', 'human_takeover', 'human_release', 'takeover_terminate_failed'])
+
+/**
+ * Estado de controle, story atual, último checkpoint e intervenções, só a partir do journal.
+ *
+ * @param {any[]} events
+ */
+function interventionView(events) {
+  const done = new Set(events.filter((e) => e.kind === 'story_done').map((e) => e.data?.unit))
+  const current = [...events].reverse().find((e) => e.kind === 'story_started' && !done.has(e.data?.unit))
+  const checkpoint = [...events].reverse().find((e) => typeof e.data?.checkpoint_ref === 'string')
+  const held = activeTakeover(events)
+  const lastTakeover = events.map((e) => e.kind).lastIndexOf('human_takeover')
+  const interventions = events.filter((e) => INTERVENTION_KINDS.has(e.kind))
+  return {
+    runtime_state: events.filter((e) => e.kind === 'mission_control').at(-1)?.data?.state ?? 'RUNNING',
+    current_story: current?.data?.unit ?? null,
+    checkpoint: checkpoint ? { ref: checkpoint.data.checkpoint_ref, seq: checkpoint.seq, at: checkpoint.at } : null,
+    takeover: {
+      active: held !== null,
+      story_id: held,
+      intervention_needed: held !== null && events.slice(lastTakeover).some((e) => e.kind === 'takeover_terminate_failed'),
+    },
+    interventions: interventions.map((e) => ({
+      seq: e.seq,
+      at: e.at,
+      kind: e.kind,
+      state: e.data?.state ?? null,
+      unit: e.data?.unit ?? null,
+      source: e.source ?? null,
+      checkpoint_ref: e.data?.checkpoint_ref ?? null,
+    })),
   }
 }

@@ -5,34 +5,113 @@ import path from 'node:path'
 import { readJournal } from '../journal/journal.js'
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
+/** Entrada do operador por frame; acima disso o canal do terminal fecha. */
+const MAX_TERMINAL_INPUT = 64 * 1024
+/** Saída pendente no socket além da qual o terminal descarta até o navegador drenar. */
+const MAX_TERMINAL_PENDING = 1024 * 1024
 
 /**
- * Codifica uma string de texto em um frame WebSocket RFC 6455 não mascarado (servidor para cliente).
+ * Codifica um frame WebSocket RFC 6455 não mascarado (servidor para cliente).
  *
- * @param {string} text
+ * @param {Buffer} payload
+ * @param {number} opcode 0x1 texto, 0x2 binário, 0xa pong
  * @returns {Buffer}
  */
-export function encodeWsTextFrame(text) {
-  const payload = Buffer.from(text, 'utf8')
+function encodeWsFrame(payload, opcode) {
   const len = payload.length
   let header
 
   if (len < 126) {
-    header = Buffer.from([0x81, len])
+    header = Buffer.from([0x80 | opcode, len])
   } else if (len <= 65535) {
     header = Buffer.alloc(4)
-    header[0] = 0x81
+    header[0] = 0x80 | opcode
     header[1] = 126
     header.writeUInt16BE(len, 2)
   } else {
     header = Buffer.alloc(10)
-    header[0] = 0x81
+    header[0] = 0x80 | opcode
     header[1] = 127
     header.writeBigUInt64BE(BigInt(len), 2)
   }
 
   return Buffer.concat([header, payload])
 }
+
+/**
+ * @param {string} text
+ * @returns {Buffer}
+ */
+export function encodeWsTextFrame(text) {
+  return encodeWsFrame(Buffer.from(text, 'utf8'), 0x1)
+}
+
+/**
+ * Extrai do buffer os frames completos enviados pelo cliente (sempre mascarados).
+ *
+ * @param {Buffer} buf
+ * @returns {{ frames: Array<{ fin: boolean, opcode: number, payload: Buffer }>, rest: Buffer, error: string | null }}
+ */
+function decodeClientFrames(buf) {
+  const frames = []
+  while (buf.length >= 2) {
+    const fin = (buf[0] & 0x80) !== 0
+    const opcode = buf[0] & 0x0f
+    if ((buf[1] & 0x80) === 0) return { frames, rest: buf, error: 'unmasked' }
+    let len = buf[1] & 0x7f
+    let off = 2
+    if (len === 126) {
+      if (buf.length < 4) break
+      len = buf.readUInt16BE(2)
+      off = 4
+    } else if (len === 127) {
+      if (buf.length < 10) break
+      const big = buf.readBigUInt64BE(2)
+      if (big > BigInt(MAX_TERMINAL_INPUT)) return { frames, rest: buf, error: 'too_large' }
+      len = Number(big)
+      off = 10
+    }
+    if (len > MAX_TERMINAL_INPUT) return { frames, rest: buf, error: 'too_large' }
+    if (buf.length < off + 4 + len) break
+    const mask = buf.subarray(off, off + 4)
+    const payload = Buffer.from(buf.subarray(off + 4, off + 4 + len))
+    for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4]
+    frames.push({ fin, opcode, payload })
+    buf = buf.subarray(off + 4 + len)
+  }
+  return { frames, rest: buf, error: null }
+}
+
+/**
+ * @param {import('node:http').IncomingMessage} req
+ * @param {import('node:net').Socket} socket
+ * @returns {boolean}
+ */
+function acceptUpgrade(req, socket) {
+  const secKey = req.headers['sec-websocket-key']
+  if (!secKey || typeof secKey !== 'string') {
+    socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
+    socket.destroy()
+    return false
+  }
+  const acceptKey = createHash('sha1').update(secKey + WS_GUID).digest('base64')
+  socket.write([
+    'HTTP/1.1 101 Switching Protocols',
+    'Upgrade: websocket',
+    'Connection: Upgrade',
+    `Sec-WebSocket-Accept: ${acceptKey}`,
+    '',
+    '',
+  ].join('\r\n'))
+  return true
+}
+
+/**
+ * @typedef {{
+ *   session: { onOutput: (cb: (chunk: Buffer) => void) => () => unknown, write: (data: string) => void },
+ *   socket: import('node:net').Socket | null,
+ * }} TerminalEntry
+ */
 
 /**
  * Cria o manipulador do canal unidirecional de eventos WebSocket (/api/events).
@@ -42,9 +121,10 @@ export function encodeWsTextFrame(text) {
  *   repoDir: string,
  *   onJournalChanged?: () => Promise<unknown>,
  *   onError?: (error: unknown) => void,
+ *   findTerminal?: (q: { token: string | null, mission: string | null, story: string | null }) => TerminalEntry | null,
  * }} options
  */
-export function createWebSocketHandler({ sessionManager, repoDir, onJournalChanged = async () => {}, onError = () => {} }) {
+export function createWebSocketHandler({ sessionManager, repoDir, onJournalChanged = async () => {}, onError = () => {}, findTerminal = () => null }) {
   /** @type {Set<import('node:net').Socket>} */
   const clients = new Set()
 
@@ -72,6 +152,87 @@ export function createWebSocketHandler({ sessionManager, repoDir, onJournalChang
   }
 
   /**
+   * Canal bidirecional do terminal durante o takeover: autorização própria (token do takeover,
+   * missão e story), saída só em frames binários e entrada limitada por frame. Cair o canal não
+   * devolve o controle; só a ação explícita de devolver faz isso.
+   *
+   * @param {import('node:http').IncomingMessage} req
+   * @param {import('node:net').Socket} socket
+   * @param {URL} url
+   */
+  function handleTerminal(req, socket, url) {
+    const entry = findTerminal({
+      token: url.searchParams.get('session'),
+      mission: url.searchParams.get('mission'),
+      story: url.searchParams.get('story'),
+    })
+    if (!entry) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
+      socket.destroy()
+      return
+    }
+    if (!sessionManager.validateOrigin(req.headers.origin)) {
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n')
+      socket.destroy()
+      return
+    }
+    if (!acceptUpgrade(req, socket)) return
+
+    // Um navegador por vez: a conexão nova substitui a anterior.
+    entry.socket?.destroy()
+    entry.socket = socket
+    const off = entry.session.onOutput((chunk) => {
+      if (socket.destroyed) return
+      // Navegador que não drena perde o canal (reabre pelo mesmo token), nunca a memória do servidor.
+      if (socket.writableLength > MAX_TERMINAL_PENDING) {
+        socket.destroy()
+        return
+      }
+      socket.write(encodeWsFrame(chunk, 0x2))
+    })
+    /** @type {Buffer} */
+    let pending = Buffer.alloc(0)
+    /** @type {Buffer[]} Fragmentos de uma mensagem ainda sem FIN (RFC 6455 §5.4). */
+    let fragments = []
+    socket.on('data', (buf) => {
+      const { frames, rest, error } = decodeClientFrames(Buffer.concat([pending, buf]))
+      if (error) {
+        onError(new Error(`terminal: frame recusado (${error})`))
+        socket.destroy()
+        return
+      }
+      pending = rest
+      for (const frame of frames) {
+        if (frame.opcode === 0x8) {
+          socket.end()
+          return
+        }
+        if (frame.opcode === 0x9) {
+          socket.write(encodeWsFrame(frame.payload, 0xa))
+          continue
+        }
+        if (frame.opcode !== 0x0 && frame.opcode !== 0x1 && frame.opcode !== 0x2) continue
+        if (frame.opcode !== 0x0) fragments = []
+        fragments.push(frame.payload)
+        const message = Buffer.concat(fragments)
+        if (message.length > MAX_TERMINAL_INPUT) {
+          onError(new Error('terminal: mensagem fragmentada acima do limite'))
+          socket.destroy()
+          return
+        }
+        if (!frame.fin) continue
+        fragments = []
+        entry.session.write(message.toString('utf8'))
+      }
+    })
+    socket.on('close', () => {
+      off()
+      if (entry.socket === socket) entry.socket = null
+    })
+    socket.on('error', () => socket.destroy())
+  }
+
+  /**
    * Trata o upgrade HTTP para WebSocket no servidor nativo.
    *
    * @param {import('node:http').IncomingMessage} req
@@ -80,6 +241,11 @@ export function createWebSocketHandler({ sessionManager, repoDir, onJournalChang
    */
   function handleUpgrade(req, socket, _head) {
     const url = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`)
+
+    if (url.pathname === '/api/terminal') {
+      handleTerminal(req, socket, url)
+      return
+    }
 
     if (url.pathname !== '/api/events') {
       socket.write('HTTP/1.1 404 Not Found\r\n\r\n')
@@ -102,18 +268,6 @@ export function createWebSocketHandler({ sessionManager, repoDir, onJournalChang
       return
     }
 
-    const secKey = req.headers['sec-websocket-key']
-    if (!secKey || typeof secKey !== 'string') {
-      socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
-      socket.destroy()
-      return
-    }
-
-    // Handshake RFC 6455
-    const acceptKey = createHash('sha1')
-      .update(secKey + WS_GUID)
-      .digest('base64')
-
     const sinceParam = parseInt(url.searchParams.get('since') || '0', 10)
     const since = Number.isNaN(sinceParam) ? 0 : sinceParam
     let pastEvents
@@ -126,16 +280,7 @@ export function createWebSocketHandler({ sessionManager, repoDir, onJournalChang
       return
     }
 
-    const responseHeaders = [
-      'HTTP/1.1 101 Switching Protocols',
-      'Upgrade: websocket',
-      'Connection: Upgrade',
-      `Sec-WebSocket-Accept: ${acceptKey}`,
-      '',
-      '',
-    ].join('\r\n')
-
-    socket.write(responseHeaders)
+    if (!acceptUpgrade(req, socket)) return
     clients.add(socket)
 
     // Parser simples de frames WebSocket do cliente (close/ping)
