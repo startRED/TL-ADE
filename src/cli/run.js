@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 import { createLocalPreflightPorts } from '../adapters/local/preflight.js'
 import { createLocalQuotaPort } from '../adapters/local/quota.js'
 import { dispatchClaude } from '../adapters/claude/index.js'
@@ -12,10 +13,12 @@ import { checkCanary, plantCanary } from '../contain/canary.js'
 import { contain } from '../contain/contain.js'
 import { runStory } from '../engine.js'
 import { loadPlan } from '../engine/plan-load.js'
-import { runPreflight } from '../engine/preflight.js'
+import { runHardPreconditions, runPreflight } from '../engine/preflight.js'
+import { guardExternalEffects, runUnattendedBatch } from '../engine/loop.js'
 import { prepareStory } from '../engine/prepare.js'
 import { installShutdownDrain, readMissionControl } from '../engine/control.js'
 import { resumeMission } from '../engine/resume.js'
+import { checkApproval } from '../engine/schedule.js'
 import { replanRemaining } from '../mission/plan-lifecycle.js'
 import { createEvalRunner } from '../evals/eval-runner.js'
 import { createGateRunner } from '../gates/gates.js'
@@ -33,9 +36,120 @@ import { createStepRunner } from '../step/step.js'
 import { loadApprovedSkills } from '../skills/catalog.js'
 import { closeMissionSummary } from '../telemetry/telemetry.js'
 
+const execFileAsync = promisify(execFile)
+
 const LEASE_TTL_MS = 15_000
 /** Prazo seguro para o worker em curso terminar sozinho depois de um sinal de encerramento. */
 const SHUTDOWN_GRACE_MS = 30_000
+
+/**
+ * Portas das precondições duras da noite desatendida. Todas determinísticas e locais: nenhuma
+ * delas dispara chamada paga, porque a recusa acontece antes do primeiro despacho.
+ *
+ * @param {{
+ *   repoDir: string,
+ *   missionDir: string,
+ *   missionId: string,
+ *   loaded: import('../engine/plan-load.js').LoadedPlan,
+ *   events: Array<Record<string, any>>,
+ *   gitPort: any,
+ * }} input
+ * @returns {Record<string, { check: () => Promise<import('../engine/preflight.js').PreflightCheckResult> }>}
+ */
+function createHardPreconditionPorts({ repoDir, missionDir, missionId, loaded, events, gitPort }) {
+  const ready = { status: /** @type {const} */ ('ready'), reason: null }
+  /** @param {string} reason */
+  const blocked = (reason) => ({ status: /** @type {const} */ ('blocked'), reason })
+
+  return {
+    gates_active: {
+      check: async () => {
+        const gatesPath = path.join(missionDir, 'gates.json')
+        if (!fs.existsSync(gatesPath)) return blocked(`gates ausentes: ${gatesPath}`)
+        let gates
+        try {
+          gates = JSON.parse(fs.readFileSync(gatesPath, 'utf8'))
+        } catch (err) {
+          return blocked(`gates ilegíveis: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        if (!Array.isArray(gates) || gates.length === 0) return blocked('nenhum gate ativo no plano')
+        return ready
+      },
+    },
+    eval_baseline_green: {
+      check: async () => {
+        const scripts = loaded.plan?.briefing?.discovery?.scripts
+        const testArgv = scripts?.test_argv ?? (Array.isArray(scripts?.test) ? scripts.test : null)
+        let cmd
+        /** @type {string[]} */
+        let args = []
+        let displayCmd = ''
+        if (Array.isArray(testArgv) && testArgv.length > 0) {
+          [cmd, ...args] = testArgv
+          displayCmd = testArgv.join(' ')
+        } else if (typeof scripts?.test === 'string' && scripts.test.trim() !== '') {
+          const raw = scripts.test.trim()
+          displayCmd = raw
+          if (/["'`]|&&|\||;/.test(raw)) {
+            return blocked(`formato de script não suportado: ${raw} (requer argv estruturado ou comando simples sem aspas ou encadeamento)`)
+          }
+          [cmd, ...args] = raw.split(/\s+/)
+        } else {
+          return blocked('baseline de eval sem comando de prova na descoberta')
+        }
+        try {
+          await execFileAsync(cmd, args, {
+            cwd: repoDir,
+            shell: false,
+            windowsHide: true,
+            maxBuffer: 1 << 24,
+            timeout: 600_000,
+          })
+        } catch (err) {
+          const code = /** @type {any} */ (err)?.code
+          return blocked(`baseline de eval não verde (${displayCmd} saiu com ${code ?? 'erro'})`)
+        }
+        return ready
+      },
+    },
+    rollback_point: {
+      check: async () => {
+        const ref = `refs/ade/rollback/${missionId}`
+        const res = await gitPort.run(['show-ref', '--verify', ref], {
+          maxBuffer: 1 << 20,
+          okCodes: [0, 1, 128],
+        })
+        return res.code === 0 ? ready : blocked(`ponto de rollback ausente: ${ref}`)
+      },
+    },
+    worktree_isolation: {
+      check: async () => {
+        const outsideDir = path.join(os.tmpdir(), `ade-canary-${missionId}`)
+        try {
+          const canary = plantCanary({ worktreeDir: repoDir, outsideDir, unitId: 'preflight' })
+          if (checkCanary(canary).escaped) return blocked(`canário escapou para ${canary.filePath}`)
+        } catch (err) {
+          return blocked(`canário não pôde ser plantado: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        return ready
+      },
+    },
+    permitted_effects: {
+      check: async () => {
+        const approval = [...events]
+          .reverse()
+          .find((e) => e.kind === 'decision' && e.data?.decision === 'plan_approved')
+        if (!approval) return blocked('plano sem aprovação congelada no journal')
+        const approved = approval.data?.permitted_effects
+        if (!Array.isArray(approved)) return blocked('aprovação sem permitted_effects')
+        const planned = loaded.plan?.authorization?.permitted_effects ?? []
+        const widened = planned.filter((/** @type {string} */ e) => !approved.includes(e))
+        if (widened.length > 0) return blocked(`efeitos não aprovados: ${widened.join(', ')}`)
+        return ready
+      },
+    },
+  }
+}
 
 /**
  * @param {string} missionDir
@@ -55,6 +169,7 @@ export function heartbeatAgeMs(missionDir) {
  *   plan: string,
  *   repo?: string,
  *   acceptStaleVersion: boolean,
+ *   unattended?: boolean,
  * }} options
  * @param {{
  *   env?: NodeJS.ProcessEnv,
@@ -194,6 +309,7 @@ export async function runCommand(options, deps = {}) {
 
     const approvedSkillIds = loaded.plan.authorization?.eligible_skills || []
     let eligibleSkills = []
+    /** @type {any[]} */
     let eligibleSkillSnapshot = []
     let skillCatalogError = null
     if (approvedSkillIds.length > 0) {
@@ -209,7 +325,52 @@ export async function runCommand(options, deps = {}) {
       }
     }
 
-    const { step } = createStepRunner({ journal, missionDir })
+    // A noite desatendida só começa com todas as precondições duras verdes. A recusa acontece
+    // antes de qualquer despacho, então nenhuma chamada paga é feita para descobrir o bloqueio.
+    if (options.unattended) {
+      // A aprovação congelada é a primeira precondição: plano divergente é recusado antes de
+      // qualquer comando vindo do plano (como o baseline de eval) chegar a rodar.
+      const approval = checkApproval({ skillCatalogError, eligibleSkillSnapshot }, loaded, existingEvents, missionDir)
+      if (!approval.valid) {
+        await journal.append({
+          kind: 'unattended_refused',
+          data: {
+            failures: [{ id: 'approval_frozen', reason: approval.reason ?? 'approval_divergent' }],
+            next_action: approval.nextAction ?? 'ade approve',
+          },
+        })
+        return 2
+      }
+      const hard = await runHardPreconditions({
+        checks: createHardPreconditionPorts({
+          repoDir,
+          missionDir,
+          missionId,
+          loaded,
+          events: existingEvents,
+          gitPort,
+        }),
+      })
+      if (!hard.ready) {
+        await journal.append({
+          kind: 'unattended_refused',
+          data: { failures: hard.failures, checks: hard.checks },
+        })
+        return 2
+      }
+    }
+
+    // Na noite desatendida todo efeito externo passa pelo guarda: o que não está em
+    // `permitted_effects` do plano aprovado é recusado antes de acontecer. O `ade run` normal
+    // mantém o executor de sempre (`--unattended` é opt-in).
+    const { step: runStep } = createStepRunner({ journal, missionDir })
+    const step = options.unattended
+      ? guardExternalEffects({
+        step: runStep,
+        journal,
+        permittedEffects: loaded.plan.authorization?.permitted_effects ?? [],
+      })
+      : runStep
     missionStarted = true
     const engineDeps = {
       journal,
@@ -267,6 +428,12 @@ export async function runCommand(options, deps = {}) {
       eligibleSkills,
       eligibleSkillSnapshot,
       skillCatalogError,
+    }
+
+    if (options.unattended) {
+      const batch = await runUnattendedBatch(engineDeps, { loaded, repoDir, missionDir })
+      missionExitCode = batch.exitCode
+      return batch.exitCode
     }
 
     const hasApproval = existingEvents.some(

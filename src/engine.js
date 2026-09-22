@@ -917,7 +917,9 @@ async function runStoryImpl(deps, input) {
     const gateFailed =
       !gateRes.ok ||
       gateRes.results.some(
-        (/** @type {any} */ r) => r.status !== 'passed' && r.status !== 'ok',
+        // `buildExtract` classifica o gate verde como `success`; `passed`/`ok` são as formas
+        // antigas e continuam aceitas para journal já gravado.
+        (/** @type {any} */ r) => r.status !== 'success' && r.status !== 'passed' && r.status !== 'ok',
       )
     if (gateFailed) {
       await deps.journal.append({
@@ -1309,6 +1311,25 @@ async function runStoryImpl(deps, input) {
       maybeEngineFault('after_commit', env)
 
       const commitSha = /** @type {any} */ (commitStepResult.result)?.commit
+
+      // Noite desatendida (`deliver: false`): o commit revisado é o checkpoint da unidade e a base
+      // do operador não anda sozinha durante a noite; o relatório matinal traz o merge de cada
+      // unidade comitada.
+      if (input.deliver === false) {
+        await journal.append({
+          kind: 'story_done',
+          unit: storyId,
+          data: {
+            status: 'committed',
+            reason: null,
+            commit: commitSha,
+            spec_revision: story.spec_revision,
+            unit: storyId,
+            verified_tree: treeAfterContain,
+          },
+        })
+        return { status: 'committed', exitCode: 0, reason: null, commit: commitSha }
+      }
 
       const delivery = await deliverStory({
         journal,

@@ -322,9 +322,30 @@ export function renderReport(mission, units, costs = [], quota = null, events = 
     }
   }
 
+  report += renderParkedUnits(events)
   report += renderVisualComparison(events)
 
   return report
+}
+
+/**
+ * Renderiza, por unidade estacionada na noite, o motivo e o caminho absoluto abrível da evidência.
+ *
+ * @param {Array<Record<string, any>>} [events]
+ * @returns {string}
+ */
+export function renderParkedUnits(events = []) {
+  const parked = (events || []).filter((e) => e?.kind === 'unit_parked')
+  if (parked.length === 0) return ''
+
+  let section = '\n## Unidades paradas\n\n| unidade | motivo | evidência |\n| --- | --- | --- |\n'
+  for (const e of parked) {
+    const unit = e.data?.unit ?? '-'
+    const reason = e.data?.reason ?? '-'
+    const evidence = e.data?.evidence_path ?? 'indisponível'
+    section += `| ${unit} | ${reason} | ${evidence} |\n`
+  }
+  return section
 }
 
 /**

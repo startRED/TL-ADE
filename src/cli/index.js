@@ -63,11 +63,12 @@ export async function main(argv, deps = {}) {
           plan: { type: 'string' },
           repo: { type: 'string' },
           'accept-stale-version': { type: 'boolean' },
+          unattended: { type: 'boolean' },
         },
       })
 
       if (!parsed.values.plan) {
-        stderr.write('uso: ade run --plan <arquivo> [--repo <pasta>] [--accept-stale-version]\n')
+        stderr.write('uso: ade run --plan <arquivo> [--repo <pasta>] [--accept-stale-version] [--unattended]\n')
         return 4
       }
 
@@ -76,6 +77,7 @@ export async function main(argv, deps = {}) {
           plan: /** @type {string} */ (parsed.values.plan),
           repo: /** @type {string | undefined} */ (parsed.values.repo),
           acceptStaleVersion: Boolean(parsed.values['accept-stale-version']),
+          unattended: Boolean(parsed.values.unattended),
         },
         delegatedDeps,
       )

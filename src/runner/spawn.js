@@ -150,7 +150,7 @@ function processAlive(pid) {
  *   execFileSync?: Function,
  *   kill?: (pid: number, signal: string) => void,
  * }} input
- * @returns {Promise<{ pid: number, platform: string, cooperative: boolean, terminated_by: string, waited_ms: number, error?: string }>}
+ * @returns {Promise<{ pid: number, platform: string, cooperative: boolean, terminated_by: 'taskkill' | 'job_fallback' | 'already_exited' | 'sigkill' | 'cooperative_exit' | 'failed', waited_ms: number, error?: string }>}
  */
 export async function terminateProcessTree({
   pid,
@@ -174,8 +174,9 @@ export async function terminateProcessTree({
         const { terminated_by } = killTree(pid, {
           platform,
           execFileSync: exec,
-          // No Windows só taskkill decide; o fallback por sinal fica para as demais plataformas.
-          child: platform === 'win32' ? undefined : { kill: (/** @type {string} */ signal) => kill(pid, signal) },
+          // Quando o sistema recusa `taskkill /T /F` (EPERM), o fallback limitado encerra só o
+          // processo do worker; a forma usada é gravada e nenhuma decisão do motor depende dela.
+          child: { kill: (/** @type {string} */ signal) => kill(pid, signal) },
         })
         return { pid, platform, cooperative: false, terminated_by, waited_ms: waited }
       } catch (err) {

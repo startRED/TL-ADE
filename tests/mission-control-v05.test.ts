@@ -292,14 +292,16 @@ describe('controle cooperativo da missão (v0.5)', () => {
     } as any)
     expect(coop).toMatchObject({ cooperative: true, terminated_by: 'cooperative_exit' })
 
-    // Falha do taskkill fica registrada no resultado, sem depender de pty.kill().
+    // taskkill recusado (EPERM) usa o fallback limitado e grava a forma usada, sem pty.kill().
+    const killed: any[] = []
     const failed = await terminateProcessTree({
       pid: 4323, platform: 'win32', timeoutMs: 0,
       isAlive: () => true, now: () => clock, sleep: async () => {},
       execFileSync: () => { throw Object.assign(new Error('Acesso negado'), { code: 'EPERM' }) },
+      kill: (pid: number, signal: string) => { killed.push([pid, signal]) },
     } as any)
-    expect(failed).toMatchObject({ cooperative: false, terminated_by: 'failed' })
-    expect(failed.error).toMatch(/Acesso negado/)
+    expect(failed).toMatchObject({ cooperative: false, terminated_by: 'job_fallback' })
+    expect(killed).toEqual([[4323, 'SIGKILL']])
 
     await expect(terminateProcessTree({ pid: -1, platform: 'win32', timeoutMs: 10 } as any)).rejects.toThrow()
   })
