@@ -723,3 +723,21 @@ describe('S18 telemetria honesta', () => {
   }, 60_000)
 })
 
+
+describe('modelo do maker vem do contrato', () => {
+  // O contrato grava roles.maker.model_id, mas o engine não repassava ao adapter: o maker rodava no
+  // padrão da CLI do Claude, qualquer que fosse, e o modelo do contrato era só enfeite.
+  test('engine_passes_contract_maker_model_to_dispatch', async () => {
+    const fixture = setupStoryFixture()
+    const origDispatch = fixture.deps.dispatchClaude
+    const seen: Array<string | undefined> = []
+    fixture.deps.dispatchClaude = async (args: any) => {
+      seen.push(args.model)
+      return origDispatch(args)
+    }
+
+    const result = await runStory(fixture.deps, fixture.input)
+    expect(result.status).toBe('delivered')
+    expect(seen).toEqual(['claude-sonnet-5'])
+  }, 60_000)
+})

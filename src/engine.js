@@ -745,6 +745,8 @@ async function runStoryImpl(deps, input) {
         resolved: deps.resolved,
         env: workerEnv,
         mcpConfigPath,
+        // sem isto o maker rodava no padrão da CLI do Claude e o model_id do contrato não valia nada
+        model: makerModel,
       })
     } catch (err) {
       await appendMakerTelemetry(undefined, 'stop')
