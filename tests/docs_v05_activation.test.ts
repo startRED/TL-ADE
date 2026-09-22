@@ -102,7 +102,7 @@ describe('Governança e ativação exclusiva da v0.5', () => {
     const charterLines = charter.split(/\r?\n/)
     expect(charterLines.length, 'Carta deve ter no máximo 80 linhas').toBeLessThanOrEqual(80)
 
-    expect(charter).toContain('Recorte ativo de governança da v0.5')
+    expect(charter).toMatch(/Recorte ativo de governança da (?:v0\.5|v1)/)
     expect(charter).toContain('pesquisa controlada')
     expect(charter).toContain('telemetria')
     expect(charter).toContain('DRAINING')
@@ -113,7 +113,7 @@ describe('Governança e ativação exclusiva da v0.5', () => {
     expect(charter).toContain('ADR 0028')
 
     // Proibições em src/ no charter (v1 e além proibidas)
-    expect(charter).toContain('Fora do slice 1 histórico e do recorte ativo da v0.5')
+    expect(charter).toMatch(/Fora do slice 1 histórico e do recorte ativo da (?:v0\.5|v1)/)
     expect(charter).toContain('ACP')
     expect(charter).toContain('N>1')
     expect(charter).toContain('rotinas')

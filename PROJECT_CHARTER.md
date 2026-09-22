@@ -23,7 +23,7 @@ não é uma IDE, não é um provedor de modelo (nunca chama API HTTP de modelo; 
 
 ## Recorte ativo de governança da v1 (o que entra em `src/` e `packages/` nesta fatia e épico)
 
-`ade run --plan plan.json` e `ade run --unattended` sob precondições duras; v0.5 entregue (pesquisa, telemetria, drenagem, pausa, retomada e takeover PTY); v1 ativa com dogfood Vitest, calibração por telemetria e fechamento documental; JS ESM com JSDoc, ADR 0023, ADR 0028 e ADR 0029.
+`ade run --plan plan.json` e `ade run --unattended` sob precondições duras; v0.5 entregue (pesquisa controlada, telemetria, drenagem DRAINING -> STOPPED, pausa, retomada e takeover PTY); v1 ativa com dogfood Vitest, calibração por telemetria e fechamento documental; JS ESM com JSDoc, ADR 0023, ADR 0028 e ADR 0029.
 
 - `src/journal`: `canonical.js` (wrapper `canonicalize` + `digest16`), `journal.js` (append/read/fold, `prev`, fd aberto + `fsyncSync`), `errors.js` (`AdeError`, códigos de saída).
 - `src/step`: `step.js` (write-ahead, `input_digest`, `intent_context`, fila serializada), `reconcile.js` (tabela por `effect_class`).

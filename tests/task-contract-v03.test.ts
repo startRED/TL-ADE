@@ -130,8 +130,8 @@ describe('v0.3 Acceptance Criteria', () => {
     expect(existsSync(CHARTER_PATH)).toBe(true)
     const charter = readFileSync(CHARTER_PATH, 'utf8')
 
-    // Carta identifica a v0.3 (ou v0.5 ativo) como recorte ativo
-    expect(charter).toMatch(/Recorte ativo(?: de governança)? (?:da )?v0\.[35]/i)
+    // Carta identifica a v0.3 (ou v0.5 ou v1 ativo) como recorte ativo
+    expect(charter).toMatch(/Recorte ativo(?: de governança)? (?:da )?(?:v0\.[35]|v1)/i)
 
     // Aponta para o ADR 0024
     expect(charter).toContain('0024-autorizacao-roadmap-ate-v1.md')
