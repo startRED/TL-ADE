@@ -1,7 +1,7 @@
 // node --test proto/rounds.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { AGY_NO_TESTS, agyPrompt, brokeGreen, climbLast, putBack, treeBelongs, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
+import { AGY_NO_TESTS, agyPrompt, brokeGreen, climbLast, putBack, treeBelongs, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated, staticCommands, parseDiagnostics, newDiagnostics } from './rounds.mjs'
 
 test('parte de correção herda os arquivos que a parte anterior já tinha alterado', () => {
   const stories = [{ id: 'R2', diff: 'diff --git a/src/lease/process-info.js b/src/lease/process-info.js\n', files: ['src\\adapters\\claude\\index.js'] }]
@@ -152,4 +152,18 @@ test('treeBelongs: parte interrompida guarda a árvore mesmo com arquivo fora do
   assert.equal(treeBelongs(['src/intent/a.js', 'src/mission/b.js'], { scope, blocked, interrupted: true }), true)
   assert.equal(treeBelongs(['src/intent/a.js', 'proto/server.mjs'], { scope, blocked, interrupted: true }), false)
   assert.equal(treeBelongs(['x.js'], { scope: [] }), false)
+})
+test('staticCommands: tsc local e lint "node ..." sem shell', () => {
+  assert.deepEqual(staticCommands({ scripts: { lint: 'node node_modules/oxlint/bin/oxlint src tests' } }, true).map((c) => c.args), [
+    ['node_modules/typescript/bin/tsc', '--noEmit', '--pretty', 'false'],
+    ['node_modules/oxlint/bin/oxlint', 'src', 'tests', '--format', 'unix'],
+  ])
+  assert.deepEqual(staticCommands({ scripts: { lint: 'eslint . && prettier' } }, false), [])
+})
+test('newDiagnostics: erro que só mudou de linha não é novo; repetido conta', () => {
+  const before = parseDiagnostics('tipos', 'src/a.js(10,5): error TS7006: x\nlixo\n')
+  const after = parseDiagnostics('tipos', 'src\\a.js(12,5): error TS7006: x\nsrc/a.js(40,1): error TS7006: x\n')
+  assert.equal(after[0].file, 'src/a.js')
+  assert.deepEqual(newDiagnostics(before, after).map((d) => d.line), [40])
+  assert.deepEqual(parseDiagnostics('lint', 'tests/b.ts:4:11: Variable x unused [Error/eslint(no-unused-vars)]').map((d) => [d.file, d.line]), [['tests/b.ts', 4]])
 })

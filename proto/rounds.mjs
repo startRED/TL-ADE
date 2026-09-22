@@ -53,6 +53,33 @@ export function loosenedTimeouts(diff, isTestFile = () => true) {
   return hits
 }
 
+// Tipos e lint que o motor mesmo roda (m-mu8usf5z, 22/09: o portão de tipos do projeto é UMA prova só, vermelha desde a
+// v0.4b; acceptPreexisting a desculpava pelo nome e cada parte commitou erro de tipo e de lint novo por baixo dela).
+// Só comando que dá para chamar com `node` sem shell: tsc local e script de lint "node ...". Outro formato fica de fora.
+export function staticCommands(pkg, hasTsc) {
+  const out = []
+  if (hasTsc) out.push({ name: 'tipos', args: ['node_modules/typescript/bin/tsc', '--noEmit', '--pretty', 'false'] })
+  const lint = String(pkg?.scripts?.lint || '').trim()
+  if (/^node\s/.test(lint) && !/[&|;<>]/.test(lint)) out.push({ name: 'lint', args: [...lint.split(/\s+/).slice(1), ...(/oxlint/.test(lint) ? ['--format', 'unix'] : [])] })
+  return out
+}
+// "arq(10,5): error TS..." (tsc) e "arq:10:5: mensagem" (lint unix). A chave tira linha e coluna: código que só desceu de
+// linha não vira erro novo.
+export function parseDiagnostics(name, out) {
+  const rows = []
+  for (const l of String(out).split(/\r?\n/)) {
+    const x = /^(\S[^:(]*?)(?:\((\d+),(\d+)\)|:(\d+):(\d+)):\s*(.+)$/.exec(l.trim())
+    if (x) { const file = x[1].replace(/\\/g, '/'); rows.push({ name, file, line: +(x[2] || x[4]), text: x[6].trim(), key: `${name}|${file}|${x[6].trim()}` }) }
+  }
+  return rows
+}
+// erros de agora que não estavam no último commit (contagem por chave: o mesmo erro repetido num lugar novo também conta)
+export function newDiagnostics(before, after) {
+  const left = new Map()
+  for (const d of before || []) left.set(d.key, (left.get(d.key) || 0) + 1)
+  return (after || []).filter((d) => { const n = left.get(d.key) || 0; if (n) { left.set(d.key, n - 1); return false } return true })
+}
+
 export function preexistingReds(tests, before) {
   if (!tests?.tests?.length || !before?.length) return []
   const redBefore = new Set(before.filter((t) => t.status !== 'passed').map((t) => t.name))

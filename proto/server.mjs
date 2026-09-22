@@ -11,14 +11,14 @@ import { chatWriteTurn, chatCommand, chatIntro, formatHistory, pendingProposal, 
 import http from 'node:http'
 import { spawn } from 'node:child_process'
 import { readFile, writeFile, mkdir, appendFile, rm, stat, access, readdir, realpath , rename } from 'node:fs/promises'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { skillDescription } from './skill-meta.mjs'
-import { agyPrompt, brokeGreen, climbLast, putBack, treeBelongs, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated } from './rounds.mjs'
+import { agyPrompt, brokeGreen, climbLast, putBack, treeBelongs, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated, staticCommands, parseDiagnostics, newDiagnostics } from './rounds.mjs'
 import { PLANNING_POLICY, versionProgram, planIssues, needsPlanCritic, needsScout, scoutKey, skillsForStory, canCombineProof, RISK_WORDS } from './planning.mjs'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
@@ -2150,6 +2150,35 @@ function acceptPreexisting(tests, m = state.mission) {
   log('engine', `${old.length} prova(s) já estava(m) vermelha(s) no ponto de partida (${old.map((n) => n.slice(0, 80)).join(' | ')}); não são desta parte e não a travam${failed ? `; sobram ${failed} vermelha(s) desta parte` : ''}`, 'warn')
   return { ...tests, ok: failed === 0, failed, preexisting: old }
 }
+// Tipos e lint rodados pelo motor, comparados com o último commit (ver staticCommands em rounds.mjs). null = o projeto não
+// tem tsc local nem script de lint que o motor saiba chamar.
+async function staticDiags(dir) {
+  let pkg = null; try { pkg = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8')) } catch {}
+  const cmds = staticCommands(pkg, existsSync(path.join(dir, 'tsconfig.json')) && existsSync(path.join(dir, 'node_modules/typescript/bin/tsc')))
+  if (!cmds.length) return null
+  const out = []
+  for (const c of cmds) { const r = await run('node', c.args, { cwd: dir, timeoutMs: 5 * 60 * 1000 }); out.push(...parseDiagnostics(c.name, `${r.out}
+${r.err}`)) }
+  return out
+}
+// o último commit conferido numa worktree à parte (a árvore do projeto tem o trabalho da parte); um cálculo por commit
+async function staticBase() {
+  const m = state.mission, head = await gitHead(state.project.dir)
+  if (!head) return null
+  if (m.static_base?.head === head) return m.static_base.diags
+  const lane = await createLane(run, state.project, 'tipos')
+  try { const diags = await staticDiags(lane.projectDir); m.static_base = { head, diags }; return diags } finally { await removeLane(run, lane).catch(() => {}) }
+}
+// erro de tipo ou de lint que a parte criou vira prova vermelha dela, um item por arquivo, com as mensagens
+async function staticGate(st) {
+  if (st.maker_committed) return []
+  const before = await staticBase().catch((e) => { log('engine', `portão de tipos/lint: não consegui conferir o último commit (${e.message}); sigo sem ele nesta parte`, 'warn'); return null })
+  if (!before) return []
+  const fresh = newDiagnostics(before, await staticDiags(state.project.dir) || [])
+  const byFile = new Map()
+  for (const d of fresh) byFile.set(`${d.name}: ${d.file}`, [...(byFile.get(`${d.name}: ${d.file}`) || []), `linha ${d.line}: ${d.text}`])
+  return [...byFile].map(([k, v]) => ({ name: `portão do motor > ${k}`, status: 'failed', message: v.join(' | ').slice(0, 600) }))
+}
 // base de provas depois de um resultado parcial (só a prova da parte ou só as afetadas): atualiza por nome sem perder o resto
 const mergeTests = (base, part) => { const tests = [...new Map([...(base?.tests || []), ...part.tests].map((t) => [t.name, t])).values()]; return { ...(base || part), tests, total: tests.length } }
 // arquivos de um diff do git, relativos à pasta do projeto (o git dá o caminho a partir da raiz do repositório)
@@ -2361,6 +2390,15 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
       m.tests_before = { ...m.tests_before, tests: m.tests_before.tests.map((t) => (env.includes(t.name) ? { ...t, status: 'failed', message: 'vermelha também sem o trabalho da parte (conferido pelo motor)' } : t)) }
       st.tests_after = acceptPreexisting(st.tests_after)
       log('engine', `${env.length} prova(s) antiga(s) vermelha(s) falham também no último commit, sem o trabalho desta parte (${env.map((n) => n.slice(-70)).join(' | ')}): não são desta parte. Marco no ponto de partida e sigo`, 'warn')
+    }
+  }
+  if (!st.tests_after.timeout && st.diff?.trim()) {
+    const bad = await staticGate(st)
+    if (bad.length) {
+      const tests = [...(st.tests_after.tests || []).filter((t) => !t.name.startsWith('portão do motor > ')), ...bad]
+      const failed = tests.filter((t) => t.status !== 'passed' && !(st.tests_after.preexisting || []).includes(t.name)).length
+      st.tests_after = { ...st.tests_after, tests, total: tests.length, failed, ok: false }
+      log('engine', `portão de tipos/lint: ${bad.length} arquivo(s) com erro novo que não existia no último commit (${bad.map((t) => t.name.slice(18)).join(' | ').slice(0, 300)}); conta como prova vermelha desta parte`, 'warn')
     }
   }
   log('engine', `provas depois: ${st.tests_after.total} no total, ${st.tests_after.failed} vermelha(s)`); setStep('tests', st.tests_after.ok ? 'done' : 'failed')
