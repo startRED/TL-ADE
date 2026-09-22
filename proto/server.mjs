@@ -1950,7 +1950,10 @@ async function runStories() {
     const epicSuite = async () => {
       m.suite_due = true; await persistMission().catch(() => {})
       log('engine', 'fim do épico: rodando a suíte inteira'); let full = acceptPreexisting(await runTests(state.project))
-      if (!full.ok && full.tests?.length && full.tests.filter((t) => t.status !== 'passed').every((t) => TIMEOUT_RX.test(t.message || ''))) { log('engine', `fim do épico: só provas por tempo limite; repito a suíte com ${SLOW_TEST_MS / 1000} s por prova`, 'warn'); full = acceptPreexisting(await runTests(state.project, { slowMs: SLOW_TEST_MS })) }
+      const newReds = (f) => (f.tests || []).filter((t) => t.status !== 'passed' && !(f.preexisting || []).includes(t.name))
+      // só as vermelhas novas contam: as da largada (outro tipo de erro) bloqueavam a repetição e a missão parava por uma prova
+      // que passa sozinha em 3 s (m-mu8usf5z, 22/09: takeover da v0.5 estourou 5 s com 864 provas rodando juntas)
+      if (!full.ok && newReds(full).length && newReds(full).every((t) => TIMEOUT_RX.test(t.message || ''))) { log('engine', `fim do épico: só provas por tempo limite; repito a suíte com ${SLOW_TEST_MS / 1000} s por prova`, 'warn'); full = acceptPreexisting(await runTests(state.project, { slowMs: SLOW_TEST_MS })) }
       log('engine', `fim do épico: suíte inteira ${full.ok ? 'verde' : `com ${full.failed} vermelha(s)`} (${full.total} provas)`, full.ok ? 'info' : 'warn')
       if (full.tests?.length) m.tests_before = full
       if (!full.ok && m.stories.some((x) => x.id === 'suite')) { m.state = 'awaiting_operator'; m.reason = 'tests_red'; log('engine', 'a suíte inteira segue vermelha depois da parte de correção; paro para você ver', 'error'); await stopLanes(); finish(); return 'stopped' }
