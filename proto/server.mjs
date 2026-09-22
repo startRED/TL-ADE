@@ -1924,7 +1924,7 @@ async function runStories() {
       if (full.tests?.length) m.tests_before = full
       if (!full.ok && m.stories.some((x) => x.id === 'suite')) { m.state = 'awaiting_operator'; m.reason = 'tests_red'; log('engine', 'a suíte inteira segue vermelha depois da parte de correção; paro para você ver', 'error'); await stopLanes(); finish(); return 'stopped' }
       if (!full.ok) {
-        const reds = full.tests.filter((t) => t.status !== 'passed').slice(0, 6)
+        const reds = full.tests.filter((t) => t.status !== 'passed' && !(full.preexisting || []).includes(t.name)).slice(0, 6) // a dívida antiga não vira critério
         m.stories.push({ id: 'suite', title: 'Corrigir: suíte inteira no fim do épico', request: `A suíte inteira ficou vermelha no fim do épico (cada parte rodou só as provas ligadas aos arquivos dela). Corrija o código das partes deste épico para estas provas voltarem a passar; não apague nem enfraqueça provas:\n${reds.map((t) => `- ${t.name}: ${(t.message || '').slice(0, 300)}`).join('\n')}`, acceptance: reds.slice(0, 4).map((t) => `A prova "${t.name.slice(0, 100)}" passa`), test_hint: 'as provas vermelhas listadas já existem; não escreva novas', depends_on: [], no_test_phase: true, scope_paths: [...new Set(m.stories.flatMap((x) => [...(x.scope_paths || []), x.test_file].filter(Boolean)))], do_not_touch: [], out_of_scope: [], interfaces: [], state: 'queued', steps: [], round: 0, red_tests: [], tests_after: null, diff: '', review: null, visual: null })
         broadcast()
       }
@@ -1943,7 +1943,10 @@ async function runStories() {
       if (ok == null) ok = await runStory(st)
       // rejeitada pelo revisor com achado grave depois das rodadas: o trabalho fica e vira uma parte de correção só com os achados (uma vez)
       const highs = (st.review?.findings || []).filter((f) => f.severity === 'high')
-      const reds = (st.tests_after?.tests || []).filter((t) => t.status !== 'passed').slice(0, 6)
+      // só as vermelhas DESTA parte: m-mu8usf5z, V05-04f nasceu com as 4 provas já vermelhas na largada como critério (relógio,
+      // portão de tipos da dívida antiga) e sem a que a V05-04 quebrou; parou em "contrato errado" depois de 4 rodadas
+      const excused = new Set([...(st.tests_after?.preexisting || []), ...(st.tests_after?.tolerated || [])])
+      const reds = (st.tests_after?.tests || []).filter((t) => t.status !== 'passed' && !excused.has(t.name)).slice(0, 6)
       const fixable = !ok && state.settings.autonomy !== 'ask' && !st.fix_attempted && !st.fix_of && ((m.reason === 'review_changes' && highs.length) || (m.reason === 'tests_red' && reds.length))
       if (fixable) {
         // achados graves do revisor e provas vermelhas entram juntos, graves primeiro: parar por prova vermelha não apaga o que o
