@@ -8,6 +8,7 @@ import {
   Kanban, ChatCircle, Binoculars, Broom,
 } from '@phosphor-icons/react'
 import { PermissionCard } from './PermissionCard.jsx'
+import { PLANS } from '../models.mjs'
 
 /* ========================= textos e mapas ========================= */
 const ROLES_PT = { planner: 'planejador', maker: 'maker', checker: 'revisor', research: 'pesquisador' }
@@ -61,7 +62,7 @@ const REASON = {
   planner_choice: 'O entendedor mediu a dificuldade e recomenda outro modelo para planejar. Escolha.',
 }
 const DIFF_PT = { easy: 'leve', normal: 'normal', hard: 'pesada' }
-const EFFORT_PT = { low: 'baixo', medium: 'médio', high: 'alto', xhigh: 'extra alto' }
+const EFFORT_PT = { low: 'baixo', medium: 'médio', high: 'alto', xhigh: 'extra alto', max: 'máximo' }
 const modelName = (r) => `${r?.model || ''}${r?.effort ? ` · esforço ${EFFORT_PT[r.effort] || r.effort}` : ''}`
 const EPIC_PT = { incomplete: 'incompleto', queued: 'na fila', running: 'em andamento', done: 'pronto', failed: 'falhou', blocked: 'bloqueado' }
 // pergunta ou pedido pequeno vai para a conversa (só leitura), não vira missão
@@ -1236,10 +1237,34 @@ const Card = ({ title, note, children, className = '' }) => (
 function ModelsPage({ state, save }) {
   const { settings: s, registry } = state
   if (!s) return null
+  const auto = s.auto_chains ? state.auto : null
   return (
     <Page title="Modelos" note="Cada papel tem um titular e substitutos em ordem. Desce para o próximo quando a cota acabou, a chamada falhou, ou a empresa já passou de 90 % da cota e há substituto de outra empresa com folga. Titular que renova em até 12 minutos espera em vez de descer. Quem escreve e quem revisa têm de ser de empresas diferentes.">
+      <Card title="Seus planos" note="Com as filas pelos planos ligadas, o motor escolhe o modelo e o esforço de cada papel sozinho e refaz a escolha a cada 5 minutos. Conta a inteligência medida pela Artificial Analysis, o tempo de resposta, o ritmo da sua cota semanal (se ela vai acabar antes da renovação, sai o esforço caro) e quanto o revisor aprovou de cada modelo aqui.">
+        <div className="plan-sels">
+          {Object.entries(PLANS).map(([fam, p]) => (
+            <label key={fam}><span>{p.label}</span>
+              <select className="sel" value={s.plans?.[fam] || 'none'} onChange={(e) => save({ plans: { ...s.plans, [fam]: e.target.value } })}>
+                {p.tiers.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+            </label>
+          ))}
+        </div>
+        <div className="opt-row"><div className="opt-txt"><b>Montar filas pelos planos</b><small>Desligado: valem as filas que você monta à mão abaixo.</small></div><div className="opt-ctl"><Switch checked={!!s.auto_chains} onCheckedChange={(v) => save({ auto_chains: v })} /></div></div>
+      </Card>
       <div className="role-cards">
         {Object.entries(ROLE_CARD).map(([role, { label, icon: Ico, note, chain }]) => {
+          if (chain && auto?.chains?.[chain]?.length) return (
+            <Card key={role} className="role-card">
+              <div className="role-card-top"><span className="role-ico"><Ico weight="fill" /></span><div><b>{label}</b><p>{note}</p></div></div>
+              {(auto.why[chain] || []).map((w, i) => { const cut = w.indexOf(': '); return (
+                <div key={i} className={`chain-row${i ? ' sub' : ''}`}>
+                  <span className="chain-n">{`${i + 1}º`}</span>
+                  <div className="chain-auto"><b>{w.slice(0, cut)}</b><small>{w.slice(cut + 2)}</small></div><span />
+                </div>
+              ) })}
+            </Card>
+          )
           const list = chain ? (s.chains?.[chain] || []) : [s.roles[role] || {}]
           const setAt = (i, patch) => chain ? save({ chains: { [chain]: list.map((w, j) => j === i ? { ...w, ...patch } : w) } }) : save({ roles: { [role]: { ...list[0], ...patch } } })
           const drop = (i) => save({ chains: { [chain]: list.filter((_, j) => j !== i) } })
@@ -1255,7 +1280,7 @@ function ModelsPage({ state, save }) {
                       {Object.entries(registry).map(([fam, fr]) => <optgroup key={fam} label={fr.label}>{fr.models.map((mo) => <option key={mo.id} value={`${fam}|${mo.id}`}>{mo.label}{mo.note ? ` · ${mo.note}` : ''}</option>)}</optgroup>)}
                     </select>
                     <select className="sel" aria-label={`Esforço de ${label}, modelo ${i + 1}`} value={w.effort || 'medium'} onChange={(e) => setAt(i, { effort: e.target.value })}>
-                      <option value="low">esforço baixo · rápido e barato</option><option value="medium">esforço médio</option><option value="high">esforço alto · pensa mais, custa mais</option>{w.family === 'codex' && <option value="xhigh">esforço extra alto · só Codex</option>}
+                      <option value="low">esforço baixo · rápido e barato</option><option value="medium">esforço médio</option><option value="high">esforço alto · pensa mais, custa mais</option>{w.family !== 'agy' && <option value="xhigh">esforço extra alto</option>}{w.family === 'claude' && <option value="max">esforço máximo · só Claude</option>}
                     </select>
                   </div>
                   {chain && list.length > 1 ? <button className="chain-x" aria-label="Tirar da cadeia" title="Tirar da cadeia" onClick={() => drop(i)}>×</button> : <span />}

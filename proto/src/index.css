@@ -860,6 +860,11 @@ button { font: inherit; color: inherit; }
 .chain-row.sub .sel { opacity: .85; }
 .chain-n { font-size: 11px; color: var(--gray-10); padding-top: 11px; text-align: right; }
 .chain-sels { display: grid; gap: 6px; }
+.chain-auto { display: grid; gap: 2px; min-width: 0; padding-top: 9px; }
+.chain-auto b { font-size: 13px; font-weight: 600; }
+.chain-auto small { font-size: 11.5px; line-height: 1.45; color: var(--gray-10); overflow-wrap: anywhere; }
+.plan-sels { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.plan-sels label { display: grid; gap: 4px; font-size: 12px; color: var(--gray-11); }
 .chain-x { width: 26px; height: 36px; border: 0; background: none; color: var(--gray-10); font-size: 18px; cursor: pointer; border-radius: 6px; }
 .chain-x:hover { background: var(--bg-2); color: var(--gray-12); }
 .chain-add { justify-self: start; border: 1px dashed var(--line-2); background: none; color: var(--gray-11); font: inherit; font-size: 12px; padding: 5px 10px; border-radius: var(--r-ctl); cursor: pointer; }
