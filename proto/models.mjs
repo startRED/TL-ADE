@@ -64,16 +64,17 @@ export const PLANS = {
 
 // O que cada papel precisa. volume = chamadas por parte (1 = a cada rodada): quanto a cota pesa. speed = quanto o tempo pesa
 // (Erick, 22/09: o que mais importa é o tempo até terminar). minAi = abaixo disso não entra. ladder = fila em ordem crescente de
-// qualidade (a escada sobe a cada duas rodadas que falham). cross = precisa de 2 empresas (quem escreve nunca revisa).
+// qualidade (a escada sobe a cada duas rodadas que falham). maker = papel de quem escreve: só nele vale o medido aqui (aprovação
+// do revisor e minutos por chamada são de quem escreveu; não dizem se o modelo revisa ou planeja bem). cross = precisa de 2 empresas (quem escreve nunca revisa).
 export const ROLES = {
   epics: { minAi: 48, speed: 0.1, volume: 0.05, label: 'dividir em épicos' },
   plan: { minAi: 44, speed: 0.2, volume: 0.2, label: 'planejar' },
   plan_edit: { minAi: 30, speed: 0.6, volume: 0.2, label: 'corrigir o plano' },
-  prova: { minAi: 34, speed: 0.6, volume: 1, label: 'escrever a prova' },
-  impl_light: { minAi: 30, speed: 0.7, volume: 1, label: 'código leve' },
-  impl: { minAi: 38, speed: 0.5, volume: 1, label: 'código comum' },
-  impl_hard: { minAi: 45, speed: 0.2, volume: 0.6, label: 'código difícil' },
-  fix: { minAi: 38, speed: 0.2, volume: 0.6, ladder: true, label: 'correção (escada)' },
+  prova: { minAi: 34, speed: 0.6, volume: 1, maker: true, label: 'escrever a prova' },
+  impl_light: { minAi: 30, speed: 0.7, volume: 1, maker: true, label: 'código leve' },
+  impl: { minAi: 38, speed: 0.5, volume: 1, maker: true, label: 'código comum' },
+  impl_hard: { minAi: 45, speed: 0.2, volume: 0.6, maker: true, label: 'código difícil' },
+  fix: { minAi: 38, speed: 0.2, volume: 0.6, ladder: true, maker: true, label: 'correção (escada)' },
   checker: { minAi: 38, speed: 0.5, volume: 1, cross: true, label: 'revisar' },
 }
 
@@ -86,7 +87,7 @@ export function pressure(tier, quota, now = Date.now()) {
   const w = quota?.seven_day
   if (w && Number.isFinite(w.used) && w.resets_at) {
     const left = Math.min(1, Math.max(0, (new Date(w.resets_at) - now) / WEEK)), elapsed = 1 - left
-    return Math.max(0, (elapsed > 0.1 ? w.used / elapsed : w.used) / 100)
+    return Math.max(0, w.used / Math.max(elapsed, 0.1) / 100) // começo de semana: projeta como se tivesse passado 10% (gasto cedo é sinal)
   }
   return tier.cap >= 10 ? 0.3 : tier.cap >= 5 ? 0.5 : 0.8
 }
@@ -117,7 +118,7 @@ const measuredOf = (measured, e) => measured?.[`${e.model}-${e.effort}`] || meas
 export function scoreFor(entry, role, { tier, quota, measured, now } = {}) {
   const r = ROLES[role], parts = []
   let q = entry.ai; parts.push(`inteligência ${entry.ai}`)
-  const g = measuredOf(measured, entry)
+  const g = r.maker ? measuredOf(measured, entry) : null
   if (g?.reviewed >= 5) { // retorno de QUALIDADE: aprovação do revisor contra a média, com peso pela amostra
     const w = g.reviewed / (g.reviewed + 10), adj = (g.approved / g.reviewed - 0.4) * 30 * w - (g.zero / g.calls) * 15
     q += adj; parts.push(`medido aqui: revisor aprovou ${Math.round(100 * g.approved / g.reviewed)}% de ${g.reviewed}${g.zero ? `, ${g.zero} chamada(s) sem mudar arquivo` : ''} (${adj >= 0 ? '+' : ''}${adj.toFixed(1)})`)
