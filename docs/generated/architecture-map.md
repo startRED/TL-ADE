@@ -30,6 +30,7 @@ Fonte: `docs/architecture.md` (seção Componentes) e `schemas/`.
 
 ## Schemas publicados
 - `ade-config.schema.json`
+- `artifact.schema.json`
 - `capability-set.schema.json`
 - `eval.schema.json`
 - `journal-event.schema.json`
@@ -37,3 +38,4 @@ Fonte: `docs/architecture.md` (seção Componentes) e `schemas/`.
 - `review-result.schema.json`
 - `task-contract.schema.json`
 - `unit-result.schema.json`
+- `visual-eval.schema.json`

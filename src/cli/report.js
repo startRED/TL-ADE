@@ -6,6 +6,63 @@ import { parseArgs } from 'node:util'
 import { readJournal } from '../journal/journal.js'
 import { projectUnits } from './project.js'
 import { telemetryTokens } from '../telemetry/telemetry.js'
+import { calibrate, limitsInForce, pendingCalibration } from '../telemetry/harness.js'
+import { AdeError } from '../journal/errors.js'
+import { openJournal } from '../journal/journal.js'
+import { acquireLease } from '../lease/lease.js'
+
+/**
+ * Configuração aprovada do repositório dono da missão (`<repo>/.ade/missions/<id>`); ausente vale
+ * `{}`, ilegível é erro para nunca calibrar contra limite padrão calado.
+ *
+ * @param {string} missionDir
+ */
+function readApprovedConfig(missionDir) {
+  const configPath = path.join(missionDir, '..', '..', 'config.json')
+  if (!fs.existsSync(configPath)) return {}
+  try {
+    return JSON.parse(fs.readFileSync(configPath, 'utf8'))
+  } catch (err) {
+    throw new AdeError('config_invalid', `.ade/config.json inválido: ${err instanceof Error ? err.message : String(err)}`, 2)
+  }
+}
+
+/**
+ * `ade report --calibrate`: imprime a proposta e a registra como pendente no journal; nunca
+ * escreve na configuração.
+ *
+ * @param {string} missionDir
+ * @param {any[]} events
+ * @param {any} config
+ * @param {{ write: (s: string) => void }} stdout
+ */
+async function recordCalibration(missionDir, events, config, stdout) {
+  const proposal = calibrate(events)
+  if ('proposta' in proposal) {
+    stdout.write(`calibração: sem proposta (${proposal.motivo})
+`)
+    return 0
+  }
+  const lease = await acquireLease({ missionDir })
+  try {
+    const journal = openJournal({ missionDir, runtimeStamp: events.at(-1).runtime_stamp })
+    try {
+      await journal.append({ kind: 'calibration_proposed', data: { status: 'pending', proposta: proposal, em_vigor: limitsInForce(config) } })
+    } finally {
+      await journal.close()
+    }
+  } finally {
+    await lease.release()
+  }
+  const { motivo, amostra, ...limits } = proposal
+  for (const [k, v] of Object.entries(limits)) stdout.write(`${k}: ${v}
+`)
+  stdout.write(`amostra: ${amostra}
+motivo: ${motivo}
+status: pendente; os limites só mudam por configuração aprovada
+`)
+  return 0
+}
 
 /**
  * Agrupa e soma contadores de telemetria de tokens por papel.
@@ -427,12 +484,13 @@ export async function main(argv, deps = {}) {
       mission: { type: 'string' },
       out: { type: 'string' },
       quota: { type: 'boolean' },
+      calibrate: { type: 'boolean' },
     },
   })
 
   const missionDir = values.mission ?? env.ADE_MISSION_DIR
   if (!missionDir) {
-    stderr.write('uso: ade report --mission <pasta> [--out <arquivo>]\n')
+    stderr.write('uso: ade report --mission <pasta> [--out <arquivo>] [--calibrate]\n')
     return 4
   }
 
@@ -443,6 +501,8 @@ export async function main(argv, deps = {}) {
   }
 
   const { events } = readJournal(journalPath)
+  const config = readApprovedConfig(missionDir)
+  if (values.calibrate) return recordCalibration(missionDir, events, config, stdout)
   const mission = path.basename(missionDir)
   const outPath = path.resolve(values.out ?? path.join(missionDir, 'report.md'))
 
@@ -458,6 +518,12 @@ export async function main(argv, deps = {}) {
     reportContent = renderReport(mission, projectUnits(events), costs, null, events)
   }
 
+  const pending = pendingCalibration(events, limitsInForce(config))
+  if (pending.length > 0) reportContent += `
+## Calibração pendente
+
+${pending.map((l) => `- ${l}
+`).join('')}`
   fs.writeFileSync(outPath, reportContent, 'utf8')
   stdout.write(`relatório: ${outPath}\n`)
   return 0

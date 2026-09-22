@@ -14,6 +14,6 @@ Evidência até: 2026-09-18T15:42:25Z
 - **Com revisão independente aprovada:** 0
 
 ## Diagnóstico Documental
-- **Documentos escaneados:** 86
+- **Documentos escaneados:** 92
 - **Referências inválidas:** 0
 - **Documentos com evidência antiga:** 0

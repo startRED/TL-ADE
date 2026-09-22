@@ -160,3 +160,112 @@ export function evaluateModelPromotion({ events, candidate, components, config }
   const approved = Array.isArray(config?.harness?.approved_models) && config.harness.approved_models.includes(candidate)
   return approved ? { allowed: true, missing: [], reason: null } : { allowed: false, missing: [], reason: 'not_approved_in_config' }
 }
+
+const CALIBRATION_WINDOW = 20
+const ESCAPED_MAX_RATE = 0.1
+/** Limites de fábrica quando `.ade/config.json` não os fixa (ADR 0010, ADR 0011, master-spec §limits). */
+export const CALIBRATION_DEFAULTS = Object.freeze({ max_pack_bytes: 120000, review_max_diff_bytes: 60000, visual_cut: 7.5 })
+
+/** @param {any} e */
+const unitOf = (e) => e?.unit ?? e?.data?.unit
+
+/** p90 por posição mais próxima: o menor valor que cobre 90% das observações. @param {number[]} values */
+function p90(values) {
+  const sorted = [...values].sort((a, b) => a - b)
+  return sorted[Math.ceil(0.9 * sorted.length) - 1]
+}
+
+/**
+ * Limites em vigor lidos da configuração aprovada; campo ausente vale o de fábrica.
+ *
+ * @param {any} config
+ * @returns {{ max_pack_bytes: number, review_max_diff_bytes: number, visual_cut: number }}
+ */
+export function limitsInForce(config) {
+  return {
+    max_pack_bytes: config?.limits?.max_pack_bytes ?? CALIBRATION_DEFAULTS.max_pack_bytes,
+    review_max_diff_bytes: config?.limits?.review?.max_diff_bytes ?? CALIBRATION_DEFAULTS.review_max_diff_bytes,
+    visual_cut: config?.visual?.cut ?? CALIBRATION_DEFAULTS.visual_cut,
+  }
+}
+
+/**
+ * Proposta de calibração derivada só da telemetria já gravada: teto do pack e corte do diff de
+ * revisão pelo p90 observado, corte visual pelo critério publicado (E39). Nunca aplica nada; sem
+ * amostra suficiente devolve `proposta: null` com o motivo em vez de inventar número.
+ *
+ * @param {any[]} events
+ * @returns {{ max_pack_bytes?: number, review_max_diff_bytes?: number, visual_cut?: number, motivo: string, amostra: number } | { proposta: null, motivo: string }}
+ */
+export function calibrate(events) {
+  const calls = events.filter(isModelCallTelemetry)
+  /** @type {{ max_pack_bytes?: number, review_max_diff_bytes?: number, visual_cut?: number }} */
+  const proposal = {}
+  const reasons = []
+  const stories = new Set()
+
+  /** @type {Array<[ 'max_pack_bytes' | 'review_max_diff_bytes', string, any[], number[]]>} */
+  const ceilings = [
+    ['max_pack_bytes', 'pack_bytes', calls, calls.map((c) => c.data.pack_bytes)],
+  ]
+  const diffCalls = calls.filter((c) => c.data.pack_sections.some((/** @type {any} */ s) => s.section === 'diff'))
+  ceilings.push(['review_max_diff_bytes', 'bytes da seção diff', diffCalls,
+    diffCalls.map((c) => c.data.pack_sections.filter((/** @type {any} */ s) => s.section === 'diff')
+      .reduce((/** @type {number} */ acc, /** @type {any} */ s) => acc + s.bytes, 0))])
+  for (const [key, label, source, values] of ceilings) {
+    if (values.length < CALIBRATION_WINDOW) {
+      reasons.push(`${key}: ${values.length} observações de ${label}, mínimo ${CALIBRATION_WINDOW}`)
+      continue
+    }
+    proposal[key] = p90(values)
+    for (const c of source) stories.add(c.data.story_id)
+    reasons.push(`${key}: p90 de ${label} em ${values.length} chamadas = ${proposal[key]}`)
+  }
+
+  const uiStories = [...new Set(events.filter((e) => e?.kind === 'visual_eval_done').map(unitOf))]
+  if (uiStories.length < CALIBRATION_WINDOW) {
+    reasons.push(`visual_cut: ${uiStories.length} stories com UI, critério publicado exige ${CALIBRATION_WINDOW}`)
+  } else {
+    const window = new Set(uiStories.slice(-CALIBRATION_WINDOW))
+    const escaped = events.filter((e) => e?.kind === 'visual_defect_escaped' && window.has(unitOf(e))).length
+    const parkedVisual = new Set(events.filter((e) => e?.kind === 'story_done' && window.has(unitOf(e)) &&
+      e.data?.status === 'awaiting_operator' && e.data?.reason === 'visual_cut_not_met').map(unitOf))
+    const firstSight = new Set(events.filter((e) => e?.kind === 'decision' && e.source === 'operator' &&
+      e.data?.decision === 'visual_accepted_as_is' && parkedVisual.has(unitOf(e))).map(unitOf)).size
+    const raise = escaped / CALIBRATION_WINDOW > ESCAPED_MAX_RATE
+    const escapedText = `escaped_visual_defects ${escaped}/${CALIBRATION_WINDOW} = ${Math.round((escaped / CALIBRATION_WINDOW) * 100)}%`
+    const firstSightText = `${firstSight} de ${CALIBRATION_WINDOW} stories aguardaram operador por visual_cut_not_met e foram aprovadas à primeira vista`
+    if (raise && firstSight > 0) {
+      reasons.push(`visual_cut: gatilhos opostos (${escapedText}; ${firstSightText}); corte mantido até o operador decidir`)
+    } else if (raise) {
+      proposal.visual_cut = 8
+      reasons.push(`visual_cut: ${escapedText} > 10% em ${CALIBRATION_WINDOW} stories com UI → corte 8,0`)
+    } else if (firstSight > 0) {
+      proposal.visual_cut = 7
+      reasons.push(`visual_cut: ${firstSightText} → corte 7,0`)
+    } else {
+      reasons.push(`visual_cut: nenhum gatilho publicado (${escapedText}; ${firstSightText})`)
+    }
+    if (proposal.visual_cut !== undefined) for (const s of window) stories.add(s)
+  }
+
+  const motivo = reasons.join('; ')
+  if (Object.keys(proposal).length === 0) return { proposta: null, motivo }
+  return { ...proposal, motivo, amostra: stories.size }
+}
+
+/**
+ * Diferenças entre a última proposta registrada e os limites em vigor; vazio quando a
+ * configuração aprovada já a absorveu ou não há proposta.
+ *
+ * @param {any[]} events
+ * @param {ReturnType<typeof limitsInForce>} inForce
+ * @returns {string[]}
+ */
+export function pendingCalibration(events, inForce) {
+  const last = [...events].reverse().find((e) => e?.kind === 'calibration_proposed')
+  if (!last) return []
+  return /** @type {const} */ (['max_pack_bytes', 'review_max_diff_bytes', 'visual_cut'])
+    .filter((k) => last.data.proposta[k] !== undefined && last.data.proposta[k] !== inForce[k])
+    .map((k) => `${k}: ${inForce[k]} em vigor, proposto ${last.data.proposta[k]}`)
+}
