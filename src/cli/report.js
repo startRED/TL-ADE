@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 import { readJournal } from '../journal/journal.js'
 import { projectUnits } from './project.js'
+import { telemetryTokens } from '../telemetry/telemetry.js'
 
 /**
  * Agrupa e soma contadores de telemetria de tokens por papel.
@@ -17,7 +18,8 @@ export function sumTokensByRole(events = []) {
   const grouped = {}
 
   for (const event of events ?? []) {
-    if (event?.kind !== 'telemetry' || !event?.data?.tokens) {
+    const tokens = event?.kind === 'telemetry' ? telemetryTokens(event.data) : null
+    if (!tokens) {
       continue
     }
 
@@ -38,7 +40,6 @@ export function sumTokensByRole(events = []) {
     const entry = grouped[role]
     entry.calls++
 
-    const tokens = event.data.tokens
     if (tokens.source === 'reported') {
       entry.input += Number(tokens.input ?? 0)
       entry.cache_write += Number(tokens.cache_write ?? 0)
@@ -138,8 +139,8 @@ export function sumQuotaUsage(events = [], nowMs = Date.now()) {
     }
 
     // 2. Telemetria
-    if (event.kind === 'telemetry') {
-      const tokens = event.data?.tokens ?? event.tokens
+    if (event.kind === 'telemetry' && event.data?.scope !== 'mission_summary') {
+      const tokens = telemetryTokens(event.data) ?? event.tokens
       const family = String(event.data?.family ?? event.family ?? event.data?.tokens?.family ?? 'claude')
       const role = String(event.data?.role ?? event.role ?? 'maker')
 
@@ -216,7 +217,7 @@ export function sumQuotaUsage(events = [], nowMs = Date.now()) {
   let totalCostUsd = 0
   for (const event of events ?? []) {
     if (event?.kind === 'telemetry') {
-      const tokens = event.data?.tokens ?? event.tokens
+      const tokens = telemetryTokens(event.data) ?? event.tokens
       if (tokens && tokens.source === 'reported') {
         totalQuotaTokens += Number(tokens.input ?? 0) + Number(tokens.cache_read ?? 0) + Number(tokens.output ?? 0)
         if (typeof tokens.usd === 'number' && Number.isFinite(tokens.usd)) {

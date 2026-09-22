@@ -403,7 +403,7 @@ describe('engine', () => {
     // CA4: telemetry.data.maker_wall_ms >= 0
     const telemetry = events.find((e) => e.kind === 'telemetry')
     expect(telemetry).toBeDefined()
-    const wallMs = (telemetry?.data as any)?.maker_wall_ms
+    const wallMs = (telemetry?.data as any)?.duration_ms
     expect(Number.isInteger(wallMs)).toBe(true)
     expect(wallMs).toBeGreaterThanOrEqual(0)
     expect(telemetry?.data).not.toHaveProperty('first_source_edit_ms')
@@ -530,7 +530,7 @@ describe('S18 telemetria honesta', () => {
     const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
     const telemetry = events.find((e) => e.kind === 'telemetry')
     expect(telemetry).toBeDefined()
-    expect((telemetry?.data as any)?.maker_wall_ms).toBe(2000)
+    expect((telemetry?.data as any)?.duration_ms).toBe(2000)
     expect((telemetry?.data as any)?.role).toBe('maker')
     expect((telemetry?.data as any)?.step_id).toBe(`${fixture.input.story.id}:r1:maker`)
     expect(telemetry?.data).not.toHaveProperty('first_source_edit_ms')
@@ -556,7 +556,7 @@ describe('S18 telemetria honesta', () => {
     const { events: eventsBackward } = readJournal(path.join(fixtureBackward.missionDir, 'journal.jsonl'))
     const telemetryBackward = eventsBackward.find((e) => e.kind === 'telemetry')
     expect(telemetryBackward).toBeDefined()
-    expect((telemetryBackward?.data as any)?.maker_wall_ms).toBe(0)
+    expect((telemetryBackward?.data as any)?.duration_ms).toBe(0)
   }, 60_000)
 
   // CA3: Dado um contain falso que devolve ok: false por escopo, quando a story para em
@@ -577,7 +577,8 @@ describe('S18 telemetria honesta', () => {
 
     const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
     const telemetryEvents = events.filter((e) => e.kind === 'telemetry')
-    expect(telemetryEvents.length).toBe(0)
+    expect(telemetryEvents.length).toBe(1)
+    expect((telemetryEvents[0].data as any).outcome).toBe('park')
   }, 60_000)
 
   // CA2: disk blocked → exitCode:3, zero budget_reserved/prepare/dispatch

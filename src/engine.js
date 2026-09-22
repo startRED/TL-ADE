@@ -10,7 +10,7 @@ import { authorizedStep } from './engine/paid-call.js'
 import { maybeEngineFault } from './engine/faults.js'
 import { findStoryCommitted, findStoryStarted } from './engine/resume.js'
 import { dedupStorySection } from './pack/dedup.js'
-import { measurePackBytes } from './pack/pack.js'
+import { measurePackBytes, telemetrySections } from './pack/pack.js'
 import { buildStoryContext, guardStoryContext } from './context/story.js'
 import { dispatchClaude } from './adapters/claude/index.js'
 import { dispatchCodex } from './adapters/codex/index.js'
@@ -41,6 +41,7 @@ import {
   isBlockingFinding,
 } from './review/handoff.js'
 import { isReviewApproved } from './review/validate.js'
+import { buildModelTelemetry, modelsFromUsage } from './telemetry/telemetry.js'
 
 /**
  * Famílias de modelos com canário aprovado no Slice 1 e v0.2.
@@ -48,6 +49,17 @@ import { isReviewApproved } from './review/validate.js'
  * @type {readonly string[]}
  */
 export const CANARY_FAMILIES = ['claude', 'codex']
+
+/**
+ * Composição do pack para a telemetria. Manifesto sem a lista de seções (compilador sem
+ * detalhamento) vira uma seção única `pack` com o total medido, para a soma continuar fechando.
+ *
+ * @param {any} manifest
+ */
+function packTelemetry(manifest) {
+  if (Array.isArray(manifest?.sections)) return { sections: telemetrySections(manifest), bytes: manifest.bytes }
+  return { sections: [{ section: 'pack', bytes: manifest.bytes, digest: String(manifest.digest ?? '') }], bytes: manifest.bytes }
+}
 
 /**
  * Orquestra o ciclo durável de execução de uma story.
@@ -602,6 +614,7 @@ async function runStoryImpl(deps, input) {
 
   while (true) {
     let currentPackPath = packResult.pack_path
+    let currentManifest = packResult.manifest
     if (round > 1) {
       const reworkHandoff = buildReviewHandoff({
         storyId,
@@ -626,6 +639,7 @@ async function runStoryImpl(deps, input) {
         stepId: `${storyId}:r${round}:pack`,
       })
       currentPackPath = reworkPack.pack_path
+      currentManifest = reworkPack.manifest
     }
 
     // Canário fora da worktree
@@ -679,6 +693,35 @@ async function runStoryImpl(deps, input) {
       }
     }
 
+    let makerDurationMs = 0
+    /** @type {(dispatch: any, outcome: 'ok' | 'rework' | 'park' | 'stop') => Promise<void>} */
+    const appendMakerTelemetry = (dispatch, outcome) => deps.journal.append({
+      kind: 'telemetry',
+      unit: storyId,
+      data: buildModelTelemetry({
+        mission_id: missionId,
+        story_id: storyId,
+        step_id: `${storyId}:r${round}:maker`,
+        family: 'claude',
+        role: 'maker',
+        effort: 'default',
+        models: modelsFromUsage(dispatch?.usage?.models ?? [], makerModel ?? null),
+        duration_ms: dispatch === undefined ? Math.max(0, (deps.now?.() ?? Date.now()) - makerStartedAt) : makerDurationMs,
+        tokens: dispatch?.tokens ?? { source: 'unavailable' },
+        usage: dispatch?.usage,
+        pack: packTelemetry(currentManifest),
+        skills: currentManifest.skills ?? [],
+        sources: dispatch?.unit_result?.sources ?? [],
+        outcome,
+        ttft_ms: null,
+        approval_decisions: 0,
+        network_attempts: 0,
+        files_touched: 0,
+        tool_output_raw_bytes: 0,
+        tool_output_model_bytes: 0,
+      }),
+    })
+
     /** @type {any} */
     let dispatch
     try {
@@ -703,12 +746,15 @@ async function runStoryImpl(deps, input) {
         env: workerEnv,
         mcpConfigPath,
       })
+    } catch (err) {
+      await appendMakerTelemetry(undefined, 'stop')
+      throw err
     } finally {
       if (designServer) {
         await designServer.close()
       }
     }
-    const makerWallMs = Math.max(0, (deps.now?.() ?? Date.now()) - makerStartedAt)
+    makerDurationMs = Math.max(0, (deps.now?.() ?? Date.now()) - makerStartedAt)
 
     maybeEngineFault('after_maker_effect', env)
 
@@ -747,6 +793,7 @@ async function runStoryImpl(deps, input) {
 
     const canaryResult = await deps.checkCanary(canary)
     if (canaryResult.escaped) {
+      await appendMakerTelemetry(dispatch, 'park')
       await deps.journal.append({
         kind: 'story_done',
         unit: storyId,
@@ -766,6 +813,7 @@ async function runStoryImpl(deps, input) {
     }
 
     if (!containResult.ok) {
+      await appendMakerTelemetry(dispatch, 'park')
       await deps.journal.append({
         kind: 'story_done',
         unit: storyId,
@@ -794,6 +842,7 @@ async function runStoryImpl(deps, input) {
         changedFiles: changedPaths,
       })
       if (unresolvedCheck.unresolved) {
+        await appendMakerTelemetry(dispatch, 'park')
         await deps.journal.append({
           kind: 'story_done',
           unit: storyId,
@@ -813,16 +862,7 @@ async function runStoryImpl(deps, input) {
       }
     }
 
-    await deps.journal.append({
-      kind: 'telemetry',
-      unit: storyId,
-      data: {
-        role: 'maker',
-        step_id: `${storyId}:r${round}:maker`,
-        maker_wall_ms: makerWallMs,
-        tokens: dispatch?.tokens ?? { source: 'unavailable' },
-      },
-    })
+    await appendMakerTelemetry(dispatch, round > 1 ? 'rework' : 'ok')
 
     const usdCap = checkUsdCap({
       observed_usd: observedUsd(readEvents()).observed_usd,
@@ -1080,6 +1120,35 @@ async function runStoryImpl(deps, input) {
       ADE_INPUT_DIGEST: observedDigest,
     }
 
+    const checkerStartedAt = deps.now?.() ?? Date.now()
+    /** @type {(dispatch: any, outcome: 'ok' | 'rework' | 'park') => Promise<void>} */
+    const appendCheckerTelemetry = (dispatch, outcome) => deps.journal.append({
+      kind: 'telemetry',
+      unit: storyId,
+      data: buildModelTelemetry({
+        mission_id: missionId,
+        story_id: storyId,
+        step_id: checkerStepId,
+        family: 'codex',
+        role: 'checker_round',
+        effort: 'default',
+        models: modelsFromUsage([], checkerRole.model_id ?? null),
+        duration_ms: Math.max(0, (deps.now?.() ?? Date.now()) - checkerStartedAt),
+        tokens: dispatch?.tokens ?? { source: 'unavailable' },
+        usage: dispatch?.usage,
+        pack: packTelemetry(currentManifest),
+        skills: currentManifest.skills ?? [],
+        sources: (dispatch?.review_result?.sources ?? []).filter((/** @type {unknown} */ x) => typeof x === 'string'),
+        outcome,
+        ttft_ms: null,
+        approval_decisions: 0,
+        network_attempts: 0,
+        files_touched: 0,
+        tool_output_raw_bytes: 0,
+        tool_output_model_bytes: 0,
+      }),
+    })
+
     let checkerDispatch
     try {
       checkerDispatch = await checkerDispatchFn({
@@ -1105,6 +1174,7 @@ async function runStoryImpl(deps, input) {
       })
     } catch (err) {
       const dispatchErrorReason = err instanceof AdeError ? err.code : 'checker_dispatch_failed'
+      await appendCheckerTelemetry(undefined, 'park')
       await deps.journal.append({
         kind: 'story_done',
         unit: storyId,
@@ -1140,6 +1210,8 @@ async function runStoryImpl(deps, input) {
         })
       }
     }
+
+    await appendCheckerTelemetry(checkerDispatch, !reviewDoc ? 'park' : isReviewApproved(reviewDoc).approved ? 'ok' : 'rework')
 
     if (!reviewDoc) {
       const failReason = checkerDispatch?.envelope_error ?? 'no_review_result'

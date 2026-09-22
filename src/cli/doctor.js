@@ -13,6 +13,8 @@ import { diagnoseDocs } from '../docs/projection.js'
 import { exitCodeOf } from './exit-codes.js'
 import { probeImpeccable, PINNED_ENGINE_VERSION } from '../visual/impeccable.js'
 import { checkNativeSqlite } from '../panel/sqlite-index.js'
+import { readJournal } from '../journal/journal.js'
+import { auditHarness, evaluateDefaultPruning } from '../telemetry/harness.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -470,6 +472,29 @@ export function diagnoseSkills({ homeDir = os.homedir(), repoDir = process.cwd()
  * }} [deps]
  * @returns {Promise<number>}
  */
+/**
+ * Diagnóstico do harness pelos journals de todas as missões do repositório, com as decisões de
+ * poda pendentes; nada é inferido da presença de arquivos.
+ *
+ * @param {string} repoDir
+ */
+export function diagnoseHarness(repoDir) {
+  const configPath = path.join(repoDir, '.ade', 'config.json')
+  let config = {}
+  if (existsSync(configPath)) {
+    try {
+      config = JSON.parse(readFileSync(configPath, 'utf8'))
+    } catch (err) {
+      throw new AdeError('config_invalid', `.ade/config.json inválido: ${err instanceof Error ? err.message : String(err)}`, 2)
+    }
+  }
+  const missionsDir = path.join(repoDir, '.ade', 'missions')
+  const events = existsSync(missionsDir)
+    ? readdirSync(missionsDir).sort().flatMap((m) => readJournal(path.join(missionsDir, m, 'journal.jsonl')).events)
+    : []
+  return { ...auditHarness(events, config), pruning: evaluateDefaultPruning({ events, config }) }
+}
+
 export async function main(argv, deps = {}) {
   const env = deps.env ?? process.env
   const stdout = deps.stdout ?? process.stdout
@@ -521,6 +546,18 @@ export async function main(argv, deps = {}) {
     }
     stdout.write(`- Habilidades em quarentena: ${diag.quarantineCount}\n`)
     return 0
+  }
+
+  if (argv.includes('--harness')) {
+    const repoIdx = argv.indexOf('--repo')
+    const repoDir = repoIdx !== -1 && argv[repoIdx + 1] ? argv[repoIdx + 1] : process.cwd()
+    try {
+      stdout.write(JSON.stringify(diagnoseHarness(repoDir), null, 2) + '\n')
+      return 0
+    } catch (err) {
+      stderr.write((err instanceof Error ? err.message : String(err)) + '\n')
+      return exitCodeOf(err)
+    }
   }
 
   if (argv.includes('--native')) {

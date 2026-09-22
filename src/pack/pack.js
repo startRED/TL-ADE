@@ -147,6 +147,21 @@ function sectionHeader(name) {
 }
 
 /**
+ * Bytes de cada seção como ela aparece no pack.md (cabeçalho, corpo e quebra final), para que a
+ * soma das seções da telemetria feche com `manifest.bytes`.
+ *
+ * @param {{ sections: Array<{ section: string, bytes: number, digest: string }> }} manifest
+ * @returns {Array<{ section: string, bytes: number, digest: string }>}
+ */
+export function telemetrySections(manifest) {
+  return manifest.sections.map((s) => ({
+    section: s.section,
+    bytes: Buffer.byteLength(sectionHeader(s.section)) + s.bytes + 1,
+    digest: s.digest,
+  }))
+}
+
+/**
  * @param {Record<string, string>} sections
  * @returns {string}
  */

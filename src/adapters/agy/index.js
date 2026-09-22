@@ -8,6 +8,7 @@ import { safeId } from '../../gates/output.js'
 import { plantCanary, checkCanary } from '../../contain/canary.js'
 import { buildAgyArgs } from './argv.js'
 import { parseAgyFinding, parseAgyOutput, parseAgyUsage } from './parse.js'
+import { buildModelTelemetry, modelsFromUsage } from '../../telemetry/telemetry.js'
 
 let agyAvailable = true
 
@@ -40,8 +41,10 @@ export function setAgyAvailable(available) {
  *   randomUUID?: () => string,
  *   timeoutS?: number,
  *   model?: string,
+ *   now?: () => number,
+ *   missionId?: string,
  * }} opts
- * @returns {Promise<{ finding: any, usage: any, session_ref: string }>}
+ * @returns {Promise<{ finding: any, usage: any, session_ref: string, telemetry: Record<string, any> }>}
  */
 export async function dispatchAgy(opts) {
   const {
@@ -61,6 +64,8 @@ export async function dispatchAgy(opts) {
     randomUUID = crypto.randomUUID,
     timeoutS = 360,
     model = 'gemini-3.8-flash-medium',
+    now = Date.now,
+    missionId = unit,
   } = opts ?? {}
 
   if (!agyAvailable) {
@@ -108,9 +113,39 @@ export async function dispatchAgy(opts) {
   const args = buildAgyArgs({ prompt, model, schema, cwd })
   const input = { unknown, budget, model, step_id: stepId }
 
+  const promptBytes = Buffer.byteLength(prompt)
+  const promptDigest = crypto.createHash('sha256').update(prompt).digest('hex').slice(0, 16)
+  const startedAt = now()
+  /** @param {any} usage @param {'ok' | 'stop'} outcome */
+  const telemetryFor = (usage, outcome) => buildModelTelemetry({
+    mission_id: missionId,
+    story_id: unit,
+    step_id: stepId,
+    family: 'agy',
+    role: 'research',
+    effort: 'default',
+    models: modelsFromUsage(usage?.models ?? [], model),
+    duration_ms: Math.max(0, now() - startedAt),
+    // parseAgyUsage marca os tokens com a origem do custo; lidos do envelope, eles são reportados.
+    tokens: usage?.tokens && usage.tokens.source !== 'unavailable' ? { ...usage.tokens, source: 'reported' } : { source: 'unavailable' },
+    usage,
+    pack: { sections: [{ section: 'prompt', bytes: promptBytes, digest: promptDigest }], bytes: promptBytes },
+    skills: [],
+    sources: [],
+    outcome,
+    ttft_ms: null,
+    approval_decisions: 0,
+    network_attempts: 1,
+    files_touched: 0,
+    tool_output_raw_bytes: 0,
+    tool_output_model_bytes: 0,
+  })
+
   const stepExec = step || (async (/** @type {any} */ _meta, /** @type {() => Promise<any>} */ fn) => ({ result: await fn(), status: 'ok', step_id: stepId }))
 
-  const r = await stepExec(
+  let r
+  try {
+  r = await stepExec(
     { unit, id: stepId, effect_class: 'model_call', input, session_ref: sessionId },
     async () => {
       let workerRes
@@ -166,6 +201,11 @@ export async function dispatchAgy(opts) {
       }
     }
   )
+  } catch (err) {
+    // Falha também é uma model_call: o evento segue no erro para quem registra a chamada.
+    if (err instanceof AdeError) err.details = { ...err.details, telemetry: telemetryFor(undefined, 'stop') }
+    throw err
+  }
 
   const effectRes = r.result || {}
   const rawFinding = effectRes.finding_raw
@@ -210,5 +250,6 @@ export async function dispatchAgy(opts) {
     finding,
     usage,
     session_ref: effectRes.session_ref || sessionId,
+    telemetry: telemetryFor(usage, 'ok'),
   }
 }

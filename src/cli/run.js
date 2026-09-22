@@ -29,6 +29,7 @@ import { resolveBinary } from '../runner/resolve-binary.js'
 import { reconcileAll } from '../step/reconcile.js'
 import { createStepRunner } from '../step/step.js'
 import { loadApprovedSkills } from '../skills/catalog.js'
+import { closeMissionSummary } from '../telemetry/telemetry.js'
 
 const LEASE_TTL_MS = 15_000
 
@@ -97,11 +98,15 @@ export async function runCommand(options, deps = {}) {
   let journal = null
   /** @type {import('../lease/lease.js').Lease | null} */
   let lease = null
+  const journalPath = path.join(missionDir, 'journal.jsonl')
+  // O resumo só fecha missões que chegaram a despachar; recusa de versão ou lease não escreve.
+  let missionStarted = false
+  /** @type {number | null} */
+  let missionExitCode = null
 
   try {
     journal = openJournal({ missionDir, runtimeStamp })
 
-    const journalPath = path.join(missionDir, 'journal.jsonl')
     const { events: existingEvents } = readJournal(journalPath)
     if (options.acceptStaleVersion) {
       await acceptStaleVersionFn(journal, existingEvents)
@@ -190,6 +195,7 @@ export async function runCommand(options, deps = {}) {
     }
 
     const { step } = createStepRunner({ journal, missionDir })
+    missionStarted = true
     const engineDeps = {
       journal,
       step,
@@ -257,6 +263,7 @@ export async function runCommand(options, deps = {}) {
         repoDir,
         missionDir,
       })
+      missionExitCode = storyResult.exitCode
       return storyResult.exitCode
     }
 
@@ -266,8 +273,19 @@ export async function runCommand(options, deps = {}) {
       missionDir,
     })
 
+    missionExitCode = missionResult.exitCode
     return missionResult.exitCode
   } finally {
+    if (journal && missionStarted) {
+      // Um único resumo por missão: 0 conclui, 3 estaciona, o resto (inclusive exceção) interrompe.
+      const summary = closeMissionSummary({
+        mission: { id: missionId, context: /** @type {any} */ (loaded.plan).context },
+        events: readJournal(journalPath).events,
+        outcome: missionExitCode === 0 ? 'completed' : missionExitCode === 3 ? 'parked' : 'interrupted',
+        capabilitiesDigest,
+      })
+      if (summary) await journal.append(summary)
+    }
     if (lease) {
       try {
         await lease.release()

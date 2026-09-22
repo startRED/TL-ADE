@@ -274,24 +274,22 @@ describe('e2e parity', () => {
     const lines = fs.readFileSync(journalPath, 'utf8').trim().split('\n').filter(Boolean)
     const events = lines.map((l) => JSON.parse(l))
 
-    const telemetryEvents = events.filter((e) => e.kind === 'telemetry')
+    const telemetryEvents = events.filter((e) => e.kind === 'telemetry' && e.data.role === 'maker')
     expect(telemetryEvents).toHaveLength(1)
     const telemetry = telemetryEvents[0]
     expect(telemetry.data.unit).toBe('ADE-T1')
     expect(telemetry.data).toMatchObject({
       role: 'maker',
       step_id: 'ADE-T1:r1:maker',
-      tokens: {
-        input: 100,
-        cache_write: 20,
-        cache_read: 500,
-        output: 40,
-        usd: 0.0123,
-        source: 'reported',
-      },
+      tokens_in: 100,
+      cache_write: 20,
+      cache_read: 500,
+      tokens_out: 40,
+      cost_usd: 0.0123,
+      tokens_source: 'reported',
     })
-    expect(typeof telemetry.data.maker_wall_ms).toBe('number')
-    expect(telemetry.data.maker_wall_ms).toBeGreaterThanOrEqual(0)
+    expect(typeof telemetry.data.duration_ms).toBe('number')
+    expect(telemetry.data.duration_ms).toBeGreaterThanOrEqual(0)
   }, 60_000)
 })
 
