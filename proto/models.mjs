@@ -6,33 +6,35 @@
 //    falha vai para um modelo mais inteligente, não para um mais barato.
 
 // Artificial Analysis (artificialanalysis.ai, tabela principal lida em 22/09/2026): ai = Intelligence Index v4.3, cpt = custo em
-// US$ para rodar o índice (proxy de quanto a chamada pesa na cota), tps = tokens de saída por segundo. tb = Terminal-Bench 4.0
+// US$ para rodar o índice (proxy de quanto a chamada pesa na cota), secs = tempo da resposta inteira, pensando junto (tokens por
+// segundo sozinho não vê o pensamento: o Opus 5.5 leva 19 s em high e 177 s em xhigh). Opus 5.5 max sem medida no site: 300 estimado.
+// tb = Terminal-Bench 4.0
 // publicado pela Anthropic no lançamento do Opus 5.5 (só onde há número). Esforço sem linha no site fica fora.
 export const CATALOG = [
-  { family: 'claude', model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'max', ai: 58, cpt: 5.98, tps: 70 },
-  { family: 'claude', model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'xhigh', ai: 56, cpt: 3.46, tps: 74 },
-  { family: 'claude', model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'high', ai: 54, cpt: 1.82, tps: 85, tb: 66.4 },
-  { family: 'claude', model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium', ai: 51, cpt: 1.34, tps: 76 },
-  { family: 'claude', model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'low', ai: 42, cpt: 0.55, tps: 86 },
-  { family: 'claude', model: 'fable', label: 'Fable 5.1', effort: 'xhigh', ai: 53, cpt: 5.98, tps: 59 },
-  { family: 'claude', model: 'fable', label: 'Fable 5.1', effort: 'high', ai: 51, cpt: 3.91, tps: 56, tb: 55.8 },
-  { family: 'claude', model: 'fable', label: 'Fable 5.1', effort: 'medium', ai: 49, cpt: 2.98, tps: 55 },
-  { family: 'claude', model: 'opus', label: 'Opus 5', effort: 'high', ai: 48, cpt: 3.61, tps: 56, tb: 52.3 },
-  { family: 'claude', model: 'opus', label: 'Opus 5', effort: 'medium', ai: 45, cpt: 2.19, tps: 57 },
-  { family: 'claude', model: 'sonnet', label: 'Sonnet 5', effort: 'high', ai: 32, cpt: 1.79, tps: 68 },
-  { family: 'claude', model: 'haiku', label: 'Haiku 4.5', effort: 'high', ai: 17, cpt: 0.21, tps: 104 },
-  { family: 'codex', model: 'gpt-6-astra', label: 'GPT-6 Astra', effort: 'high', ai: 51, cpt: 1.73, tps: 49, tb: 57.9 },
-  { family: 'codex', model: 'gpt-6-astra', label: 'GPT-6 Astra', effort: 'medium', ai: 50, cpt: 1.54, tps: 47 },
-  { family: 'codex', model: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', effort: 'xhigh', ai: 44, cpt: 1.18, tps: 69 },
-  { family: 'codex', model: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', effort: 'high', ai: 42, cpt: 0.81, tps: 64, tb: 37.3 },
-  { family: 'codex', model: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', effort: 'medium', ai: 39, cpt: 0.5, tps: 58 },
-  { family: 'codex', model: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', effort: 'xhigh', ai: 38, cpt: 0.63, tps: 84 },
-  { family: 'codex', model: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', effort: 'high', ai: 34, cpt: 0.34, tps: 77 },
-  { family: 'codex', model: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', effort: 'medium', ai: 30, cpt: 0.18, tps: 77 },
-  { family: 'codex', model: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', effort: 'high', ai: 32, cpt: 0.04, tps: 130 },
-  { family: 'agy', model: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', effort: 'high', ai: 41, cpt: 1.24, tps: 297 },
-  { family: 'agy', model: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', effort: 'medium', ai: 40, cpt: 0.93, tps: 297 },
-  { family: 'agy', model: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro', effort: 'high', ai: 30, cpt: 0.67, tps: 115 },
+  { family: 'claude', model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'max', ai: 58, cpt: 5.98, secs: 300 },
+  { family: 'claude', model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'xhigh', ai: 56, cpt: 3.46, secs: 177 },
+  { family: 'claude', model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'high', ai: 54, cpt: 1.82, secs: 18.6, tb: 66.4 },
+  { family: 'claude', model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium', ai: 51, cpt: 1.34, secs: 29.1 },
+  { family: 'claude', model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'low', ai: 42, cpt: 0.55, secs: 12.8 },
+  { family: 'claude', model: 'fable', label: 'Fable 5.1', effort: 'xhigh', ai: 53, cpt: 5.98, secs: 154 },
+  { family: 'claude', model: 'fable', label: 'Fable 5.1', effort: 'high', ai: 51, cpt: 3.91, secs: 35.2, tb: 55.8 },
+  { family: 'claude', model: 'fable', label: 'Fable 5.1', effort: 'medium', ai: 49, cpt: 2.98, secs: 19.4 },
+  { family: 'claude', model: 'opus', label: 'Opus 5', effort: 'high', ai: 48, cpt: 3.61, secs: 27, tb: 52.3 },
+  { family: 'claude', model: 'opus', label: 'Opus 5', effort: 'medium', ai: 45, cpt: 2.19, secs: 13.6 },
+  { family: 'claude', model: 'sonnet', label: 'Sonnet 5', effort: 'high', ai: 32, cpt: 1.79, secs: 18.6 },
+  { family: 'claude', model: 'haiku', label: 'Haiku 4.5', effort: 'high', ai: 17, cpt: 0.21, secs: 25.8 },
+  { family: 'codex', model: 'gpt-6-astra', label: 'GPT-6 Astra', effort: 'high', ai: 51, cpt: 1.73, secs: 89.3, tb: 57.9 },
+  { family: 'codex', model: 'gpt-6-astra', label: 'GPT-6 Astra', effort: 'medium', ai: 50, cpt: 1.54, secs: 17.1 },
+  { family: 'codex', model: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', effort: 'xhigh', ai: 44, cpt: 1.18, secs: 42.8 },
+  { family: 'codex', model: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', effort: 'high', ai: 42, cpt: 0.81, secs: 25.3, tb: 37.3 },
+  { family: 'codex', model: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', effort: 'medium', ai: 39, cpt: 0.5, secs: 13.7 },
+  { family: 'codex', model: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', effort: 'xhigh', ai: 38, cpt: 0.63, secs: 40.5 },
+  { family: 'codex', model: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', effort: 'high', ai: 34, cpt: 0.34, secs: 10.1 },
+  { family: 'codex', model: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', effort: 'medium', ai: 30, cpt: 0.18, secs: 8.5 },
+  { family: 'codex', model: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', effort: 'high', ai: 32, cpt: 0.04, secs: 19 },
+  { family: 'agy', model: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', effort: 'high', ai: 41, cpt: 1.24, secs: 15.9 },
+  { family: 'agy', model: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', effort: 'medium', ai: 40, cpt: 0.93, secs: 15.9 },
+  { family: 'agy', model: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro', effort: 'high', ai: 30, cpt: 0.67, secs: 37.3 },
 ]
 
 // Planos por empresa. cap = tamanho relativo da cota (o nome do plano: 5x, 20x); só vale enquanto não há leitura de cota, porque
@@ -121,8 +123,8 @@ export function scoreFor(entry, role, { tier, quota, measured, now } = {}) {
     q += adj; parts.push(`medido aqui: revisor aprovou ${Math.round(100 * g.approved / g.reviewed)}% de ${g.reviewed}${g.zero ? `, ${g.zero} chamada(s) sem mudar arquivo` : ''} (${adj >= 0 ? '+' : ''}${adj.toFixed(1)})`)
   }
   // tempo: o medido aqui (minutos por chamada) vale mais que a velocidade de saída do site quando há amostra
-  const sp = g?.timed >= 10 ? Math.log2(6 / (g.min / g.timed)) : Math.log2(entry.tps / 60)
-  const speed = r.speed * 10 * sp; parts.push(g?.timed >= 10 ? `${(g.min / g.timed).toFixed(1)} min por chamada aqui` : `${entry.tps} tokens/s`)
+  const sp = g?.timed >= 10 ? Math.log2(6 / (g.min / g.timed)) : Math.log2(30 / entry.secs)
+  const speed = r.speed * 10 * sp; parts.push(g?.timed >= 10 ? `${(g.min / g.timed).toFixed(1)} min por chamada aqui` : `${entry.secs} s por resposta`)
   const p = pressure(tier, quota, now) // retorno de CAPACIDADE
   const cap = tier?.api ? r.volume * entry.cpt * 4 : r.volume * Math.min(p, 2) * entry.cpt * 10
   parts.push(tier?.api ? `API: US$ ${entry.cpt} por tarefa do índice` : `cota da semana no ritmo atual: ${Math.round(p * 100)}% na renovação`)
@@ -138,12 +140,13 @@ export function buildChains({ plans = {}, quota = {}, measured = {}, blocked = [
     return t?.cap > 0 && (!t.models || t.models.includes(e.model)) && !blocked.includes(e.model)
   })
   const chains = {}, why = {}
-  const rate = (role) => usable.filter((e) => e.ai >= ROLES[role].minAi)
+  // quem atinge o mínimo do papel vem antes; os abaixo só completam a fila (plano pequeno não fica sem reserva nem sem fila)
+  const rate = (role) => usable
     .map((e) => ({ e, s: scoreFor(e, role, { tier: tierOf(e.family), quota: quota[e.family], measured, now }) }))
-    .sort((a, b) => b.s.score - a.s.score)
+    .sort((a, b) => (b.e.ai >= ROLES[role].minAi) - (a.e.ai >= ROLES[role].minAi) || b.s.score - a.s.score)
   // um esforço por modelo; a 2ª posição é de outra empresa quando existe (cota ou falha de uma não para o papel)
   const pick = (rated, avoidFamily = null) => {
-    const one = [...new Map(rated.map((x) => [x.e.model, x])).values()] // rated vem ordenado: o 1º de cada modelo é o melhor esforço
+    const seen = new Set(), one = rated.filter((x) => !seen.has(x.e.model) && seen.add(x.e.model)) // rated vem ordenado: fica o melhor esforço de cada modelo
     const first = one.find((x) => x.e.family !== avoidFamily) || one[0]
     if (!first) return []
     const other = one.find((x) => x.e.family !== first.e.family)
@@ -154,8 +157,9 @@ export function buildChains({ plans = {}, quota = {}, measured = {}, blocked = [
     const rated = rate(role)
     let picked
     if (ROLES[role].ladder) {
-      // escada: começa no melhor custo-benefício e sobe em inteligência (mais esforço no mesmo modelo conta como degrau)
-      const base = rated[0]
+      // escada: começa onde a escrita normal parou (titular de código difícil) e sobe em inteligência; mais esforço no mesmo
+      // modelo conta como degrau. Começar no melhor custo-benefício da própria escada pulava direto para o esforço máximo.
+      const top = chains.impl_hard?.[0], base = rated.find((x) => top && x.e.model === top.model && x.e.effort === top.effort) || rated[0]
       picked = base ? [base, ...rated.filter((x) => x.s.quality > base.s.quality).sort((a, b) => b.s.quality - a.s.quality).slice(0, 2).reverse()] : []
     } else picked = pick(rated, role === 'checker' ? chains.impl?.[0]?.family : null) // quem revisa não é da empresa de quem mais escreve
     chains[role] = picked.map(({ e }) => ({ family: e.family, model: e.model, effort: e.effort }))
