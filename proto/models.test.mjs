@@ -51,7 +51,7 @@ test('pressão projeta o gasto até a renovação; API não pesa; sem plano é i
   assert.equal(pressure(tier('claude', 'max20'), half, NOW), 0.8)
   assert.equal(pressure(tier('claude', 'api'), half, NOW), 0)
   assert.equal(pressure(undefined, half, NOW), Infinity)
-  assert.ok(pressure(tier('agy', 'ultra_750'), undefined, NOW) < pressure(tier('agy', 'ultra'), undefined, NOW), 'sem leitura, plano maior pesa menos')
+  assert.ok(pressure(tier('agy', 'ultra'), undefined, NOW) < pressure(tier('agy', 'ai_pro'), undefined, NOW), 'sem leitura, plano maior pesa menos')
 })
 
 test('medição liga a chamada de quem escreve ao próximo parecer do revisor', () => {

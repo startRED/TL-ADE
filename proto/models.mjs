@@ -58,8 +58,8 @@ export const PLANS = {
     { id: 'none', label: 'Não tenho', cap: 0 },
     { id: 'free', label: 'Gratuito', cap: 0.5, models: ['gemini-3.8-flash'] },
     { id: 'ai_pro', label: 'AI Pro (US$ 20)', cap: 2 },
-    { id: 'ultra', label: 'AI Ultra (US$ 250)', cap: 10 },
-    { id: 'ultra_750', label: 'AI Ultra (US$ 750)', cap: 30 },
+    { id: 'ultra', label: 'AI Ultra (R$ 750)', cap: 10 },
+    { id: 'ultra_1000', label: 'AI Ultra (R$ 1.000)', cap: 13 }, // cota proporcional ao preço até haver número oficial
   ] },
 }
 
@@ -90,7 +90,7 @@ export function pressure(tier, quota, now = Date.now()) {
     const left = Math.min(1, Math.max(0, (new Date(w.resets_at) - now) / WEEK)), elapsed = 1 - left
     return Math.max(0, w.used / Math.max(elapsed, 0.1) / 100) // começo de semana: projeta como se tivesse passado 10% (gasto cedo é sinal)
   }
-  return Math.min(0.8, 3 / tier.cap) // plano maior pesa menos: Ultra 250 → 0.3, Ultra 750 → 0.1
+  return Math.min(0.8, 3 / tier.cap) // plano maior pesa menos: AI Pro → 0.8, Ultra → 0.3
 }
 
 // QUALIDADE medida aqui, do journal do motor: depois de cada chamada de quem escreve, o próximo parecer do revisor, e se a
