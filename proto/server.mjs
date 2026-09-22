@@ -914,7 +914,10 @@ async function claudeCall({ role, prompt, model, effort, tools, skipPermissions,
     readQuota().then(broadcastSoon)
     if (result.is_error) log('engine', `claude reportou erro: ${result.result || result.subtype}`, 'error')
   } else log('engine', `claude saiu com código ${r.code}: ${(r.err || r.out).slice(0, 300)}`, 'error')
-  const failText = !result || result.is_error ? String(result?.result || r.err || r.out || '') : ''
+  // Só a mensagem de erro, nunca r.out: a saída é a conversa inteira em stream-json. m-mu8usf5z, V1-3 (22/09): o Opus 5.5 parou
+  // no teto de turnos (result vazio), a busca caiu no transcript de uma parte que escreve código de cota e "rate limit" bloqueou o
+  // Claude por 1 h com a cota real em 0% e 3%. Teto de turnos também não é cota.
+  const failText = (!result || result.is_error) && result?.subtype !== 'error_max_turns' ? String(result?.result || r.err || '') : ''
   if (state.mission && /usage limit|rate limit|limit reached|out of extra usage/i.test(failText)) {
     await readQuota().catch(() => {})
     const resets = [state.quota.claude?.five_hour, state.quota.claude?.seven_day].filter((w) => w?.resets_at && w.used >= 99 && new Date(w.resets_at) > new Date()).map((w) => +new Date(w.resets_at))
