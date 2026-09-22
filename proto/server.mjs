@@ -19,7 +19,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { skillDescription } from './skill-meta.mjs'
-import { agyPrompt, brokeGreen, climbLast, putBack, treeBelongs, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated, staticCommands, parseDiagnostics, newDiagnostics } from './rounds.mjs'
+import { strictSchema, agyPrompt, brokeGreen, climbLast, putBack, treeBelongs, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated, staticCommands, parseDiagnostics, newDiagnostics } from './rounds.mjs'
 import { PLANNING_POLICY, versionProgram, planIssues, needsPlanCritic, needsScout, scoutKey, skillsForStory, canCombineProof, RISK_WORDS } from './planning.mjs'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
@@ -73,7 +73,7 @@ async function plannerCall(who, opts) {
   return withChain(who.key, { list: [who, ...rest] }, (w) => plannerOnce(w, opts))
 }
 async function plannerOnce(who, { role, prompt, schema, maxTurns, timeoutMs = 30 * 60 * 1000, web = false }) {
-  const schemaFile = async () => { const f = path.join(ADE_DIR, 'schemas', createHash('sha1').update(JSON.stringify(schema)).digest('hex').slice(0, 12) + '.json'); await mkdir(path.dirname(f), { recursive: true }); if (!(await exists(f))) await writeFile(f, JSON.stringify(schema)); return f }
+  const schemaFile = async () => { const sc = who.family === 'codex' ? strictSchema(schema) : schema, f = path.join(ADE_DIR, 'schemas', createHash('sha1').update(JSON.stringify(sc)).digest('hex').slice(0, 12) + '.json'); await mkdir(path.dirname(f), { recursive: true }); if (!(await exists(f))) await writeFile(f, JSON.stringify(sc)); return f }
   // agy (Antigravity) planeja em modo leitura, como na pesquisa: sem isto, o modelo que o usuário escolheu virava Opus na marra
   if (who.family === 'agy') {
     const out = await checkerAgy(prompt, who.model, who.effort, { schema: await schemaFile(), role, need: (x) => !!x })

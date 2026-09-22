@@ -163,3 +163,14 @@ export function treeBelongs(files, { scope = [], blocked = [], interrupted = fal
   if (interrupted) return true
   return scope.length > 0 && files.every((f) => scope.some((r) => r.test(f)))
 }
+
+// A saída estruturada da OpenAI (Codex) só aceita esquema estrito: todo objeto com additionalProperties false e todas as
+// propriedades em required. Esquema sem isso voltava 400 invalid_json_schema e o papel inteiro caía (m-mud7qppy, 22/09: a
+// pesquisa no Luna falhou em 6 s). Campo opcional vira obrigatório; o modelo devolve vazio quando não tem o que pôr.
+export function strictSchema(s) {
+  if (Array.isArray(s)) return s.map(strictSchema)
+  if (!s || typeof s !== 'object') return s
+  const out = Object.fromEntries(Object.entries(s).map(([k, v]) => [k, k === 'properties' ? Object.fromEntries(Object.entries(v).map(([p, ps]) => [p, strictSchema(ps)])) : strictSchema(v)]))
+  if (out.type === 'object' && out.properties) { out.additionalProperties = false; out.required = Object.keys(out.properties) }
+  return out
+}

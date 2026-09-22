@@ -1,7 +1,7 @@
 // node --test proto/rounds.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { AGY_NO_TESTS, agyPrompt, brokeGreen, climbLast, putBack, treeBelongs, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated, staticCommands, parseDiagnostics, newDiagnostics } from './rounds.mjs'
+import { AGY_NO_TESTS, agyPrompt, brokeGreen, climbLast, putBack, treeBelongs, diffArgs, expandImports, importsOf, inheritedFiles, loosenedTimeouts, makerTurns, preexistingReds, truncated, staticCommands, parseDiagnostics, newDiagnostics, strictSchema } from './rounds.mjs'
 
 test('parte de correção herda os arquivos que a parte anterior já tinha alterado', () => {
   const stories = [{ id: 'R2', diff: 'diff --git a/src/lease/process-info.js b/src/lease/process-info.js\n', files: ['src\\adapters\\claude\\index.js'] }]
@@ -166,4 +166,11 @@ test('newDiagnostics: erro que só mudou de linha não é novo; repetido conta',
   assert.equal(after[0].file, 'src/a.js')
   assert.deepEqual(newDiagnostics(before, after).map((d) => d.line), [40])
   assert.deepEqual(parseDiagnostics('lint', 'tests/b.ts:4:11: Variable x unused [Error/eslint(no-unused-vars)]').map((d) => [d.file, d.line]), [['tests/b.ts', 4]])
+})
+
+test('esquema para o Codex vira estrito: objeto fecha campos extras e exige todas as propriedades', () => {
+  const s = strictSchema({ type: 'object', properties: { findings: { type: 'array', items: { type: 'object', properties: { q: { type: 'string' }, fontes: { type: 'array', items: { type: 'string' } } }, required: ['q'] } } }, required: ['findings'] })
+  assert.equal(s.additionalProperties, false)
+  const item = s.properties.findings.items
+  assert.deepEqual([item.additionalProperties, item.required], [false, ['q', 'fontes']])
 })
