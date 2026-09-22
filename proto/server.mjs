@@ -891,7 +891,8 @@ async function claudeCall({ role, prompt, model, effort, tools, skipPermissions,
   const r = await run(CLAUDE_BIN, args, {
     // O token NUNCA entra nas configurações nem no estado (o painel recebe o estado inteiro): fica numa variável de
     // ambiente da máquina e o motor só guarda o NOME dela. Sem a variável, a chamada falha e a cadeia passa ao próximo.
-    cwd: dir, stdin: prompt, env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', ...(base_url ? { ANTHROPIC_BASE_URL: base_url, ANTHROPIC_AUTH_TOKEN: process.env[token_env || ''] || '' } : {}) },
+    // 40 min: com 60 turnos o Opus 5.5 migrando 21 arquivos passou dos 20 min padrão e foi morto no meio (m-mud7qppy, V2-03)
+    cwd: dir, stdin: prompt, timeoutMs: 40 * 60 * 1000, env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', ...(base_url ? { ANTHROPIC_BASE_URL: base_url, ANTHROPIC_AUTH_TOKEN: process.env[token_env || ''] || '' } : {}) },
     onLine: (line) => {
       let ev; try { ev = JSON.parse(line) } catch { return }
       if (ev.type === 'rate_limit_event') noteClaudeRate(ev)
@@ -916,6 +917,9 @@ async function claudeCall({ role, prompt, model, effort, tools, skipPermissions,
     },
   })
   setLive(null)
+  // Morto pelo prazo depois de mexer em arquivos = trabalho inacabado, como o teto de turnos: repete no mesmo degrau. Antes
+  // voltava null, a cadeia passava ao próximo modelo e o Terra terminou em 31 s sem mudar nada sobre a árvore pela metade.
+  if (!result && r.timedOut && touched.size) { result = { subtype: 'error_max_turns', is_error: true, result: 'prazo da chamada esgotado', num_turns: maxTurns || 0, total_cost_usd: 0, usage: {}, timed_out: true }; log('engine', `claude passou do prazo depois de mexer em ${touched.size} arquivo(s): conto como trabalho inacabado e repito no mesmo modelo`, 'warn') }
   if (result) {
     result.touched = [...touched]
     const c = m.cost
