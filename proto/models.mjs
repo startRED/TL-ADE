@@ -149,6 +149,13 @@ export function buildChains({ plans = {}, quota = {}, measured = {}, blocked = [
   // um esforço por modelo; a 2ª posição é de outra empresa quando existe (cota ou falha de uma não para o papel)
   const pick = (rated, avoidFamily = null) => {
     const seen = new Set(), one = rated.filter((x) => !seen.has(x.e.model) && seen.add(x.e.model)) // rated vem ordenado: fica o melhor esforço de cada modelo
+    // revisão: as DUAS primeiras posições são de empresas diferentes de quem escreve. Com só uma, o revisor que falhava (o
+    // Flash esperando provas sem devolver parecer) deixava a parte sem revisão, porque o resto era da empresa de quem
+    // escreveu (m-mud7qppy, V2-03, review_failed).
+    if (avoidFamily) {
+      const good = one.filter((x) => x.e.family !== avoidFamily), top = [good[0], good.find((x) => x.e.family !== good[0]?.e.family)].filter(Boolean)
+      if (top.length) return [...top, ...one.filter((x) => !top.includes(x))].slice(0, 3)
+    }
     const first = one.find((x) => x.e.family !== avoidFamily) || one[0]
     if (!first) return []
     const other = one.find((x) => x.e.family !== first.e.family)

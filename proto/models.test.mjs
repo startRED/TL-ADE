@@ -19,6 +19,7 @@ test('só entram modelos dos planos escolhidos, fora os bloqueados', () => {
 test('revisor é de outra empresa que o titular de código comum', () => {
   const { chains } = buildChains({ plans: { claude: 'max20', codex: 'pro_lite', agy: 'ultra' }, now: NOW })
   assert.notEqual(chains.checker[0].family, chains.impl[0].family)
+  assert.notEqual(chains.checker[1].family, chains.impl[0].family, 'o substituto do revisor também é de outra empresa')
 })
 
 test('escada de correção começa no titular de código difícil e só sobe em inteligência', () => {
