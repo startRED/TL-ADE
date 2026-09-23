@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Badge, Box, Button, Card, Flex, Heading, IconButton, Switch, Text, TextField, Theme } from '@radix-ui/themes'
 import { FolderOpen, FolderSimple, Moon, Sparkle, X } from '@phosphor-icons/react'
 import { apiFetch, postJson, subscribeEvents } from './api.ts'
+import ChatPanel from './Chat.tsx'
 import IntakeFlow from './Intake.tsx'
 import MissionUnits from './Units.tsx'
 
@@ -144,6 +145,7 @@ export default function App() {
             ? <ProjectsPage projects={projects} onOpen={(dir) => act(async () => { await postJson('/api/projects/open', { path: dir }); setPage('home') })} />
             : <Home project={active} snapshot={activeSnapshot} />}
         </main>
+        {page === 'home' && active && <ChatPanel key={`chat:${active.id}`} projectId={active.id} />}
       </div>
     </Theme>
   )
@@ -157,12 +159,12 @@ function Home({ project, snapshot }: { project: Project | null; snapshot: Snapsh
   return (
     <Flex direction="column" gap="4">
       <Heading as="h1" size="7">O que você quer construir em <span className="accent">{project.name}</span>?</Heading>
-      <Card data-testid="project-state">
+      <div data-testid="project-state">
         <Text as="p" size="1" color="gray" className="mono">{project.path}</Text>
-        <Text as="p">
+        <Text as="p" size="2" color="gray">
           {!snapshot ? 'Lendo o estado do projeto…' : count === 0 ? 'Nenhum pedido ainda.' : `${count} pedido(s); o último é ${snapshot.selectedMission?.id}.`}
         </Text>
-      </Card>
+      </div>
       <IntakeFlow key={project.id} projectId={project.id} />
       {snapshot?.selectedMission && <MissionUnits key={`${project.id}:${snapshot.selectedMission.id}`} projectId={project.id} missionId={snapshot.selectedMission.id} />}
     </Flex>

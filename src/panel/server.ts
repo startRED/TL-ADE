@@ -8,6 +8,8 @@ import { AdeError } from '../journal/errors.ts'
 import { approveMission } from '../mission/plan-lifecycle.ts'
 import { requestMissionControl } from '../engine/control.ts'
 import { createInterventionController } from './control.ts'
+import { defaultChatAgent } from './chat/agent.ts'
+import { createChat, type ChatAgent } from './chat/chat.ts'
 import { createSessionManager } from './session.ts'
 import { createIntake, defaultIntent, spawnMissionRun, type IntentPort, type RunMission } from './intake.ts'
 import { assertProjectPath, createOpenProjects } from './open-projects.ts'
@@ -121,6 +123,8 @@ export async function startServer({
             intent?: IntentPort
             /** Execução da missão aprovada (padrão: bin/ade.js run --plan). */
             runMission?: RunMission
+            /** Agente do chat do painel, que roda na cópia do projeto (padrão: a CLI da empresa escolhida). */
+            chatAgent?: ChatAgent
         } & import('./control.ts').TerminalDeps
     } = {}) {
   const sessionManager = createSessionManager({ allowedOrigins: [`http://${host}:${port}`] })
@@ -154,6 +158,12 @@ export async function startServer({
     intent: deps.intent ?? defaultIntent,
     runMission: deps.runMission ?? spawnMissionRun,
     beginActivity: projects.beginActivity,
+    onError: stderrWrite,
+  })
+  const chat = createChat({
+    agent: deps.chatAgent ?? defaultChatAgent,
+    beginActivity: projects.beginActivity,
+    missionRunning: (projectId) => projects.hasActivity(projectId, 'mission'),
     onError: stderrWrite,
   })
   const intervention = createInterventionController({ repoDir: resolvedRepo, terminal: deps })
@@ -271,6 +281,25 @@ export async function startServer({
                 : listUnits(project.path, missionId))
               return
             }
+            const chatMatch = pathname.match(/^\/api\/projects\/([^/]+)\/chat(?:\/(approve|reject|clear))?$/)
+            if (chatMatch) {
+              const project = projects.get(decodeURIComponent(chatMatch[1]))
+              const action = chatMatch[2]
+              if (!action && method === 'GET') {
+                sendJson(res, 200, await chat.read(project))
+                return
+              }
+              if (method === 'POST') {
+                const body = await readJsonBody(req)
+                if (!action) {
+                  await chat.ask(project, body)
+                  sendJson(res, 202, { ok: true })
+                } else {
+                  sendJson(res, 200, action === 'clear' ? await chat.clear(project) : await chat[action as 'approve' | 'reject'](project, body?.id))
+                }
+                return
+              }
+            }
             const intakeMatch = pathname.match(/^\/api\/projects\/([^/]+)\/(requests|intake|intake\/interview|intake\/(?:briefing|plan)\/(?:approve|reject))$/)
             if (intakeMatch) {
               const project = projects.get(decodeURIComponent(intakeMatch[1]))
@@ -322,7 +351,7 @@ export async function startServer({
             }
           } catch (err) {
             if (!(err instanceof AdeError)) throw err
-            const status = err.code === 'project_not_found' || err.code === 'intake_not_found' || err.code === 'unit_not_found' ? 404 : err.exitCode === 5 ? 409 : 400
+            const status = err.code === 'project_not_found' || err.code === 'intake_not_found' || err.code === 'unit_not_found' || err.code === 'chat_proposal_not_found' ? 404 : err.exitCode === 5 ? 409 : 400
             sendJson(res, status, { error: err.code, message: err.message })
             return
           }

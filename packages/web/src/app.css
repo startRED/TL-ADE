@@ -1,6 +1,6 @@
 .shell {
   display: grid;
-  grid-template-columns: 16rem 1fr;
+  grid-template-columns: 16rem minmax(0, 1fr) auto;
   min-height: 100vh;
 }
 
@@ -39,7 +39,39 @@
 .diff-del { background: var(--red-a3); color: var(--red-11); }
 .diff-ctx { color: var(--gray-11); }
 
+/* Conversa: coluna da direita na altura da tela, como a da referência; vai para baixo do conteúdo em tela estreita. */
+.rail {
+  width: 24rem;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+  padding: 1rem;
+  border-left: 1px solid var(--gray-a5);
+  background: var(--gray-a2);
+}
+.rail-turns { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: .75rem; }
+.rail-empty { margin: auto 0; text-align: center; }
+.composer { display: flex; flex-direction: column; gap: .5rem; padding: .5rem; border: 1px solid var(--gray-a6); border-radius: var(--radius-4); background: var(--color-panel-solid); }
+.push { margin-left: auto; }
+.model-field { width: 9rem; }
+
+.chat-turn { display: flex; flex-direction: column; gap: .25rem; }
+.chat-turn.user { align-self: flex-end; max-width: 85%; background: var(--accent-a3); border-radius: var(--radius-3); padding: .5rem .75rem; }
+.chat-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.permission-card { border: 1px solid var(--gray-a6); border-radius: var(--radius-3); padding: .75rem; display: flex; flex-direction: column; gap: .5rem; background: var(--color-panel-solid); }
+
+@media (max-width: 64rem) {
+  .shell { grid-template-columns: 16rem minmax(0, 1fr); }
+  .sidebar { grid-row: 1 / span 2; }
+  .rail { grid-column: 2; width: auto; position: static; height: auto; min-height: 20rem; border-left: 0; border-top: 1px solid var(--gray-a5); }
+}
+
 @media (max-width: 40rem) {
   .shell { grid-template-columns: 1fr; }
-  .sidebar { border-right: 0; border-bottom: 1px solid var(--gray-a5); }
+  .sidebar { grid-row: auto; border-right: 0; border-bottom: 1px solid var(--gray-a5); }
+  .rail { grid-column: auto; }
 }

@@ -112,8 +112,9 @@ export function createOpenProjects() {
       }
     },
 
-    hasActivity(projectId: string): boolean {
-      return (projects.get(projectId)?.activities.size ?? 0) > 0
+    /** Há atividade em execução no projeto (de qualquer tipo, ou só do tipo pedido)? */
+    hasActivity(projectId: string, kind?: ActivityKind): boolean {
+      return [...(projects.get(projectId)?.activities ?? [])].some((token) => !kind || token.description === kind)
     },
 
     closeAll(): void {
