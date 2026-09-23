@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Badge, Box, Button, Card, Flex, Heading, IconButton, Switch, Text, TextField, Theme } from '@radix-ui/themes'
-import { Cpu, FolderOpen, FolderSimple, Moon, Sparkle, X } from '@phosphor-icons/react'
+import { BookOpen, Cpu, FolderOpen, FolderSimple, Moon, SlidersHorizontal, Sparkle, X } from '@phosphor-icons/react'
 import { apiFetch, postJson, subscribeEvents } from './api.ts'
 import ChatPanel from './Chat.tsx'
 import IntakeFlow from './Intake.tsx'
 import ModelsPage from './Models.tsx'
+import OptionsPage from './Options.tsx'
+import SkillsPage from './Skills.tsx'
 import MissionUnits from './Units.tsx'
 
 interface Project {
@@ -21,7 +23,7 @@ interface Snapshot {
 }
 
 type Appearance = 'light' | 'dark'
-type Page = 'home' | 'projects' | 'models'
+type Page = 'home' | 'projects' | 'models' | 'skills' | 'options'
 
 const APPEARANCE_KEY = 'ade.appearance'
 
@@ -134,6 +136,12 @@ export default function App() {
             <Button variant={page === 'models' ? 'solid' : 'soft'} onClick={() => setPage('models')}>
               <Cpu aria-hidden="true" /> Modelos
             </Button>
+            <Button variant={page === 'skills' ? 'solid' : 'soft'} onClick={() => setPage('skills')}>
+              <BookOpen aria-hidden="true" /> Skills
+            </Button>
+            <Button variant={page === 'options' ? 'solid' : 'soft'} onClick={() => setPage('options')}>
+              <SlidersHorizontal aria-hidden="true" /> Opções
+            </Button>
             <Text as="label" size="2">
               <Flex gap="2" align="center">
                 <Switch aria-label="Modo noturno" checked={appearance === 'dark'} onCheckedChange={toggleAppearance} />
@@ -147,9 +155,15 @@ export default function App() {
           {error && <Card className="warn" role="alert"><Text color="red">{error}</Text></Card>}
           {page === 'projects'
             ? <ProjectsPage projects={projects} onOpen={(dir) => act(async () => { await postJson('/api/projects/open', { path: dir }); setPage('home') })} />
-            : page === 'models'
-              ? active ? <ModelsPage key={active.id} projectId={active.id} /> : <Heading as="h1" size="7">Abra uma pasta em Projetos para ver os modelos.</Heading>
-              : <Home project={active} snapshot={activeSnapshot} />}
+            : page === 'home'
+              ? <Home project={active} snapshot={activeSnapshot} />
+              : !active
+                ? <Heading as="h1" size="7">Abra uma pasta em Projetos primeiro.</Heading>
+                : page === 'models'
+                  ? <ModelsPage key={active.id} projectId={active.id} />
+                  : page === 'skills'
+                    ? <SkillsPage key={active.id} projectId={active.id} />
+                    : <OptionsPage key={active.id} projectId={active.id} />}
         </main>
         {page === 'home' && active && <ChatPanel key={`chat:${active.id}`} projectId={active.id} />}
       </div>

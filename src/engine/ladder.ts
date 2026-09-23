@@ -11,8 +11,11 @@ import type { Effort } from '../models/catalog.ts'
 
 // model null = padrão da CLI da família; effort null = padrão da CLI
 export type Rung = { model: string | null; family: string; effort: Effort | null; maxTurns: number; reserve: boolean }
-// extended = a tentativa atual já é a repetição com mais turnos depois de um corte; perRung = rodadas por degrau
-export type LadderState = { ladder: Rung[]; rung: number; rounds: number; perRung: number; maxTurns: number; reserveUsed: boolean; extended: boolean }
+// Tetos do usuário (mission-options.json) só apertam a escada: maxTurns por chamada, maxRounds somando todos os degraus.
+export type LadderCaps = { maxTurns?: number; maxRounds?: number }
+// extended = a tentativa atual já é a repetição com mais turnos depois de um corte; perRung = rodadas por degrau;
+// spent = rodadas reprovadas da parte em todos os degraus
+export type LadderState = { ladder: Rung[]; rung: number; rounds: number; perRung: number; maxTurns: number; reserveUsed: boolean; extended: boolean; caps: LadderCaps; spent: number }
 export type MakerOutcome = { kind: 'ok' | 'max_turns' | 'no_change' | 'env_blocked' | 'rejected' }
 export type Attempt = { kind: 'repeat' | 'next_model' | 'climb' | 'reserve' | 'park'; maxTurns: number; countsAsRound: boolean; state: LadderState }
 
@@ -40,8 +43,10 @@ export function buildLadder(rungs: Array<{ model: string | null; family: string;
   })
 }
 
-export function ladderStart(ladder: Rung[], perRung = roundsPerRung('normal')): LadderState {
-  return { ladder, rung: 0, rounds: 0, perRung, maxTurns: ladder[0].maxTurns, reserveUsed: Boolean(ladder[0].reserve), extended: false }
+const capTurns = (caps: LadderCaps, turns: number) => (caps.maxTurns ? Math.min(turns, caps.maxTurns) : turns)
+
+export function ladderStart(ladder: Rung[], perRung = roundsPerRung('normal'), caps: LadderCaps = {}): LadderState {
+  return { ladder, rung: 0, rounds: 0, perRung, maxTurns: capTurns(caps, ladder[0].maxTurns), reserveUsed: Boolean(ladder[0].reserve), extended: false, caps, spent: 0 }
 }
 
 /** Classifica a saída do maker; corte no teto (dito pela CLI) vem antes de "nada mudou", porque cortado não terminou. */
@@ -54,7 +59,7 @@ export function classifyMakerOutcome(opts: { subtype?: unknown; changed: boolean
 function moveTo(state: LadderState, rung: number, kind: Attempt['kind'], countsAsRound: boolean): Attempt {
   const target = state.ladder[rung]
   // o teto já concedido (inclusive o dobro de um corte) nunca cai na troca de degrau
-  const maxTurns = Math.max(state.maxTurns, target.maxTurns)
+  const maxTurns = capTurns(state.caps, Math.max(state.maxTurns, target.maxTurns))
   return { kind, maxTurns, countsAsRound, state: { ...state, rung, rounds: 0, maxTurns, extended: false, reserveUsed: state.reserveUsed || target.reserve } }
 }
 
@@ -71,9 +76,9 @@ export function nextAttempt(state: LadderState, outcome: MakerOutcome): Attempt 
   const current = state.ladder[state.rung]
   const park = (countsAsRound: boolean): Attempt => ({ kind: 'park', maxTurns: state.maxTurns, countsAsRound, state })
 
-  // Cortado no teto repete no mesmo degrau com o dobro; cortado de novo com o dobro é rodada perdida.
+  // Cortado no teto repete no mesmo degrau com o dobro (até o teto do usuário); cortado de novo é rodada perdida.
   if (outcome.kind === 'max_turns' && !state.extended) {
-    const maxTurns = state.maxTurns * 2
+    const maxTurns = capTurns(state.caps, state.maxTurns * 2)
     return { kind: 'repeat', maxTurns, countsAsRound: false, state: { ...state, maxTurns, extended: true } }
   }
   if (outcome.kind === 'no_change' || outcome.kind === 'env_blocked') {
@@ -83,15 +88,18 @@ export function nextAttempt(state: LadderState, outcome: MakerOutcome): Attempt 
   }
 
   // Rodada reprovada (ou cortada duas vezes): as do risco por degrau, depois sobe; a reserva entra uma vez só.
+  // O teto de rodadas do usuário conta a parte inteira e estaciona antes de qualquer rodada a mais.
   if (current.reserve) return park(true)
+  const spent = state.spent + 1
+  if (state.caps.maxRounds && spent >= state.caps.maxRounds) return park(true)
   const rounds = state.rounds + 1
   if (rounds < state.perRung) {
-    return { kind: 'repeat', maxTurns: state.maxTurns, countsAsRound: true, state: { ...state, rounds, extended: false } }
+    return { kind: 'repeat', maxTurns: state.maxTurns, countsAsRound: true, state: { ...state, rounds, spent, extended: false } }
   }
   const top = climbLast(state.ladder)
-  if (state.rung < top) return moveTo(state, state.rung + 1, 'climb', true)
+  if (state.rung < top) return moveTo({ ...state, spent }, state.rung + 1, 'climb', true)
   const reserve = state.ladder.findIndex((rung, i) => i > state.rung && rung.reserve)
-  if (reserve !== -1 && !state.reserveUsed) return moveTo(state, reserve, 'reserve', true)
+  if (reserve !== -1 && !state.reserveUsed) return moveTo({ ...state, spent }, reserve, 'reserve', true)
   return park(true)
 }
 

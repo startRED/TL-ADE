@@ -83,3 +83,9 @@
 .table-wrap { overflow-x: auto; }
 .usage { border-collapse: collapse; font-size: .85rem; }
 .usage th, .usage td { text-align: left; padding: .35rem .6rem; border-bottom: 1px solid var(--gray-a5); white-space: nowrap; }
+
+/* Páginas Skills e Opções */
+.num-field { max-width: 10rem; }
+.skill-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .75rem; }
+.skill-item { border-bottom: 1px solid var(--gray-a5); padding-bottom: .6rem; }
+.skill-body { white-space: pre-wrap; overflow-x: auto; max-height: 24rem; font-family: var(--code-font-family); font-size: .8rem; background: var(--gray-a2); border-radius: var(--radius-2); padding: .5rem; margin: .35rem 0 0; }

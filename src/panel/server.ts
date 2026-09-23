@@ -15,6 +15,7 @@ import { createLocalQuotaPort } from '../adapters/local/quota.ts'
 import { readModelsView, readUsage, setManualQuota, updateModelSettings, type QuotaPort } from './models-api.ts'
 import { createIntake, defaultIntent, spawnMissionRun, type IntentPort, type RunMission } from './intake.ts'
 import { assertProjectPath, createOpenProjects } from './open-projects.ts'
+import { eligibleSkills, listPlugins, listSkills, readProjectOptions, readSkill, saveProjectOptions, setPlugin } from './options.ts'
 import { listProjects, registerProject } from './projects.ts'
 import { listUnits, readUnit } from './units.ts'
 import { resolveCurrentBuild } from './web-build.ts'
@@ -131,6 +132,8 @@ export async function startServer({
             quotaPort?: QuotaPort
             /** Relógio da página Modelos e do relatório de uso. */
             now?: () => number
+            /** Catálogo de skills sincronizado (padrão: ~/.ade/catalog). */
+            catalogDir?: string
         } & import('./control.ts').TerminalDeps
     } = {}) {
   const sessionManager = createSessionManager({ allowedOrigins: [`http://${host}:${port}`] })
@@ -156,6 +159,7 @@ export async function startServer({
   const { indexPath } = await projects.open(resolvedRepo)
   const quotaPort = deps.quotaPort ?? createLocalQuotaPort({ receiptPath: path.join(homeDir, '.ade', 'quota-receipt.json') })
   const now = deps.now ?? Date.now
+  const catalogDir = deps.catalogDir ?? path.join(homeDir, '.ade', 'catalog')
   const activeProject = () => {
     if (!projects.activeId) throw new AdeError('project_not_found', 'Nenhum projeto aberto.', 2)
     return projects.get(projects.activeId)
@@ -169,6 +173,7 @@ export async function startServer({
   const intake = createIntake({
     intent: deps.intent ?? defaultIntent,
     runMission: deps.runMission ?? spawnMissionRun,
+    eligibleSkills: (repo) => eligibleSkills(catalogDir, repo),
     beginActivity: projects.beginActivity,
     onError: stderrWrite,
   })
@@ -268,8 +273,29 @@ export async function startServer({
           return
         }
 
-        if (pathname.startsWith('/api/projects') || pathname.startsWith('/api/models') || pathname === '/api/usage') {
+        if (pathname.startsWith('/api/projects') || pathname.startsWith('/api/models') || pathname === '/api/usage' || pathname.startsWith('/api/skills')) {
           try {
+            if (pathname === '/api/skills' && method === 'GET') {
+              const filter = (k: string) => parsedUrl.searchParams.get(k) || undefined
+              sendJson(res, 200, listSkills(catalogDir, { domain: filter('domain'), trust: filter('trust'), source: filter('source') }))
+              return
+            }
+            const skillMatch = pathname.match(/^\/api\/skills\/([^/]+)$/)
+            if (skillMatch && method === 'GET') {
+              sendJson(res, 200, readSkill(catalogDir, decodeURIComponent(skillMatch[1])))
+              return
+            }
+            const settingsMatch = pathname.match(/^\/api\/projects\/([^/]+)\/(options|plugins)$/)
+            if (settingsMatch && (method === 'GET' || method === 'POST')) {
+              const repo = projects.get(decodeURIComponent(settingsMatch[1])).path
+              if (settingsMatch[2] === 'options') {
+                sendJson(res, 200, method === 'GET' ? readProjectOptions(repo) : saveProjectOptions(repo, await readJsonBody(req)))
+              } else {
+                if (method === 'POST') setPlugin(catalogDir, repo, await readJsonBody(req))
+                sendJson(res, 200, listPlugins(catalogDir, repo))
+              }
+              return
+            }
             if (pathname === '/api/models' && method === 'GET') {
               sendJson(res, 200, await readModelsView(activeProject().path, now(), quotaPort))
               return
@@ -380,7 +406,7 @@ export async function startServer({
             }
           } catch (err) {
             if (!(err instanceof AdeError)) throw err
-            const status = err.code === 'project_not_found' || err.code === 'intake_not_found' || err.code === 'unit_not_found' || err.code === 'chat_proposal_not_found' ? 404 : err.exitCode === 5 ? 409 : 400
+            const status = err.code === 'project_not_found' || err.code === 'intake_not_found' || err.code === 'unit_not_found' || err.code === 'chat_proposal_not_found' || err.code === 'skill_not_found' ? 404 : err.exitCode === 5 ? 409 : 400
             sendJson(res, status, { error: err.code, message: err.message })
             return
           }
