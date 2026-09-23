@@ -46,7 +46,7 @@ import {
 import { blockingReviewFindings, buildReviewHandoff, testEditViolations, wrongTestClaims, wrongTestVerdict } from './review/contract.ts'
 import { isReviewApproved } from './review/validate.ts'
 import { buildModelTelemetry, modelsFromUsage } from './telemetry/telemetry.ts'
-import { formatMeasureTrailers, storyMeasure } from './telemetry/cost.ts'
+import { commitLines, formatMeasureTrailers, storyMeasure } from './telemetry/cost.ts'
 
 /**
  * Famílias de modelos com canário aprovado no Slice 1 e v0.2.
@@ -1490,6 +1490,8 @@ ${formatMeasureTrailers(measure)}` }),
       maybeEngineFault('after_commit', env)
 
       const commitSha = (commitStepResult.result)?.commit
+      // as linhas aprovadas entram na medida gravada, depois dos rodapés do commit (que ficam como eram)
+      const approvedMeasure = { ...measure, ...await commitLines(wtPort, baseBefore, commitSha ?? null) }
 
       // Noite desatendida (`deliver: false`): o commit revisado é o checkpoint da unidade e a base
       // do operador não anda sozinha durante a noite; o relatório matinal traz o merge de cada
@@ -1505,7 +1507,7 @@ ${formatMeasureTrailers(measure)}` }),
             spec_revision: story.spec_revision,
             unit: storyId,
             verified_tree: treeAfterContain,
-            measure,
+            measure: approvedMeasure,
           },
         })
         return { status: 'committed', exitCode: 0, reason: null, commit: commitSha }
@@ -1532,7 +1534,7 @@ ${formatMeasureTrailers(measure)}` }),
           spec_revision: story.spec_revision,
           unit: storyId,
           verified_tree: treeAfterContain,
-          measure,
+          measure: approvedMeasure,
         },
       })
 

@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -9,6 +10,9 @@ import { calibrate, limitsInForce, pendingCalibration } from '../telemetry/harne
 import { AdeError } from '../journal/errors.ts'
 import { openJournal } from '../journal/journal.ts'
 import { acquireLease } from '../lease/lease.ts'
+import { createLocalQuotaPort } from '../adapters/local/quota.ts'
+import { readEffectiveQuota, usageByCompany } from '../models/usage.ts'
+import type { CompanyUsage } from '../models/usage.ts'
 
 /**
  * Configuração aprovada do repositório dono da missão (`<repo>/.ade/missions/<id>`); ausente vale
@@ -291,7 +295,7 @@ export function renderReport(mission: string, units: Array<{ unit: string; statu
     windows?: Array<{ family: string; role: string; last_5h: number; last_7d: number }>
     receipts?: Array<{ family: string; used_percent: number; reserved_percent: number; observed_at: string; weekly_reset_at: string }>
     governance_metrics?: any
-} | null = null, events: Array<Record<string, any>> = []): string {
+} | null = null, events: Array<Record<string, any>> = [], usage: CompanyUsage[] = []): string {
   let report = `# Relatório da missão ${mission}\n\n`
   if (units.length === 0) {
     report += 'Nenhuma unidade registrada.\n'
@@ -357,10 +361,34 @@ export function renderReport(mission: string, units: Array<{ unit: string; statu
     }
   }
 
+  report += renderUsageByCompany(usage)
   report += renderParkedUnits(events)
   report += renderVisualComparison(events)
 
   return report
+}
+
+const SOURCE_LABEL = { official: 'oficial', manual: 'manual', estimated: 'estimada' } as const
+const ptBR = (n: number, digits: number) => n.toLocaleString('pt-BR', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+
+/**
+ * Uma linha por empresa: cota da semana e a origem, chamadas, partes e linhas aprovadas, dólar equivalente (informativo),
+ * dólar por mil linhas aprovadas e minutos médios por chamada.
+ */
+export function renderUsageByCompany(usage: CompanyUsage[]): string {
+  if (usage.length === 0) return ''
+  let section = '\n## Uso por empresa\n\n'
+  for (const u of usage) {
+    const parts = [u.quota ? `cota ${u.quota.used}% (${SOURCE_LABEL[u.quota.source]})` : 'cota sem leitura', `${u.calls} chamadas`]
+    if (u.approved_stories > 0) parts.push(`${u.approved_stories} partes`)
+    parts.push(u.approved_lines > 0 ? `${ptBR(u.approved_lines, 0)} linhas` : 'sem linhas aprovadas')
+    if (u.usd > 0) parts.push(`US$ ${ptBR(u.usd, 2)}`)
+    if (u.unknown_cost_calls > 0) parts.push(`${u.unknown_cost_calls} chamadas sem custo`)
+    if (u.usd_per_1000_lines !== null) parts.push(`US$ ${ptBR(u.usd_per_1000_lines, 2)} por mil linhas`)
+    if (u.minutes_per_call !== null) parts.push(`${ptBR(u.minutes_per_call, 1)} min por chamada`)
+    section += `- ${u.family}: ${parts.join(' · ')}\n`
+  }
+  return section
 }
 
 /**
@@ -434,6 +462,7 @@ export async function main(argv: string[], deps: {
     stdout?: { write: (s: string) => void } | ((s: string) => void)
     stderr?: { write: (s: string) => void } | ((s: string) => void)
     now?: number | (() => number);
+    quotaPort?: { readReceipt: (p: { family: string; now: number }) => Promise<any> }
     [key: string]: any
 } = {}): Promise<number> {
   const env = deps.env ?? process.env
@@ -480,13 +509,12 @@ export async function main(argv: string[], deps: {
   const now = deps.now ?? Date.now
   const nowMs = typeof now === 'function' ? now() : now
 
-  let reportContent
-  if (values.quota) {
-    const quota = sumQuotaUsage(events, nowMs)
-    reportContent = renderReport(mission, projectUnits(events), costs, quota, events)
-  } else {
-    reportContent = renderReport(mission, projectUnits(events), costs, null, events)
-  }
+  // a cota mora fora do journal (porta oficial e .ade/quota-manual.json do repositório dono da missão): lida agora
+  const quotaPort = deps.quotaPort ?? createLocalQuotaPort({ receiptPath: path.join(env.ADE_HOME ?? os.homedir(), '.ade', 'quota-receipt.json') })
+  const effective = await readEffectiveQuota(path.resolve(missionDir, '..', '..', '..'), nowMs, quotaPort)
+  const usage = usageByCompany(events, nowMs, effective)
+  const quota = values.quota ? sumQuotaUsage(events, nowMs) : null
+  let reportContent = renderReport(mission, projectUnits(events), costs, quota, events, usage)
 
   const pending = pendingCalibration(events, limitsInForce(config))
   if (pending.length > 0) reportContent += `

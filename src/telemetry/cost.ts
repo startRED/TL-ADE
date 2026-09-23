@@ -1,3 +1,4 @@
+import type { GitPort } from '../git/gitport.ts'
 import { isModelCallTelemetry, TelemetryInvalidError } from './telemetry.ts'
 
 type Measure = {
@@ -11,6 +12,9 @@ type Measure = {
   tokens_out: number | null
   tokens_cache: number | null
   minutes: number
+  // medidas no commit da parte, depois dos rodapés: ausentes antes do commit
+  lines_added?: number | null
+  lines_removed?: number | null
 }
 
 function isCount(v: unknown): v is number {
@@ -117,4 +121,21 @@ export function formatMeasureTrailers(measure: Measure): string {
   ]
   if (measure.unknown_cost_calls > 0) lines.push(`ADE-USD-Sem-Custo: ${measure.unknown_cost_calls}`)
   return lines.join('\n')
+}
+
+/**
+ * Linhas adicionadas e removidas no commit da parte contra o commit-base dela (`git diff --numstat`). Sem base
+ * observável ficam null: desconhecido, nunca zero. Arquivo binário não tem linha.
+ */
+export async function commitLines(git: Pick<GitPort, 'run'>, base: string | null, commit: string | null): Promise<{ lines_added: number | null; lines_removed: number | null }> {
+  if (!base || !commit) return { lines_added: null, lines_removed: null }
+  const { text } = await git.run(['diff', '--numstat', '--no-renames', base, commit], { maxBuffer: 1 << 26 })
+  let added = 0
+  let removed = 0
+  for (const line of text.split('\n').filter(Boolean)) {
+    const [a, r] = line.split('\t')
+    if (a !== '-') added += Number(a)
+    if (r !== '-') removed += Number(r)
+  }
+  return { lines_added: added, lines_removed: removed }
 }
