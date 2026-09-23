@@ -17,7 +17,7 @@ function loadSchemaJson() {
 /**
  * Monta o argv para invocar o `claude` real seguindo a ordem fixa de flags decidida para o Slice 1.
  */
-export function buildClaudeArgs(opts: { sessionId: string; packPath: string; maxBudgetUsd: number; model?: string; mcpConfigPath?: string }): string[] {
+export function buildClaudeArgs(opts: { sessionId: string; packPath: string; maxBudgetUsd: number; model?: string; mcpConfigPath?: string; maxTurns?: number }): string[] {
   const { sessionId, packPath, maxBudgetUsd, model } = opts ?? {}
 
   if (typeof sessionId !== 'string' || (!SESSION_ID_RE.test(sessionId) && sessionId !== 's')) {
@@ -57,6 +57,13 @@ export function buildClaudeArgs(opts: { sessionId: string; packPath: string; max
 
   if (model !== undefined) {
     args.push('--model', model)
+  }
+
+  if (opts?.maxTurns !== undefined) {
+    if (!Number.isInteger(opts.maxTurns) || opts.maxTurns < 1) {
+      throw new AdeError('invalid_claude_args', 'maxTurns inválido', 2)
+    }
+    args.push('--max-turns', String(opts.maxTurns))
   }
 
   if (opts?.mcpConfigPath !== undefined) {

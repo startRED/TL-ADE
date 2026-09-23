@@ -10,6 +10,7 @@ import { authorizedStep } from './engine/paid-call.ts'
 import { maybeEngineFault } from './engine/faults.ts'
 import { findStoryCommitted, findStoryStarted } from './engine/resume.ts'
 import { preserveInterruptedTree } from './engine/preserve.ts'
+import { buildLadder, classifyMakerOutcome, correctionRequest, ladderStart, nextAttempt, reserveRung, type MakerOutcome } from './engine/ladder.ts'
 import { dedupStorySection } from './pack/dedup.ts'
 import { measurePackBytes, telemetrySections } from './pack/pack.ts'
 import { buildStoryContext, guardStoryContext } from './context/story.ts'
@@ -602,21 +603,76 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   })
 
   let round = 1
-  const maxReworkRounds = contract.budget?.max_rework_rounds ?? 2
   let previousFindingsDigest = null
   let previousFindings = []
   let openFindings = []
+  // vermelhas cobráveis da última tentativa reprovada por portão ou eval
+  let redTests: string[] = []
   let treeBeforeRound = treeBefore
+  // Escada de quem escreve: os degraus vêm de quem chama; sem eles, só o maker do contrato.
+  const rungs = deps.makerLadder ?? [{ model: makerModel ?? null, family: makerFamily }]
+  if (rungs.some((rung: { family?: unknown }) => rung.family !== makerFamily)) {
+    throw new AdeError('invalid_ladder', `degrau fora da família do maker (${makerFamily}), sem despachante`, 4)
+  }
+  let ladderState = ladderStart(buildLadder(rungs))
+  let attempt = 0
+  let treeBeforeAttempt = treeBefore
+
+  const parkStory = async (reason: string) => {
+    await deps.journal.append({ kind: 'story_done', unit: storyId, data: { status: 'awaiting_operator', reason, unit: storyId, commit: null } })
+    return { status: 'awaiting_operator' as const, exitCode: 3 as const, reason, commit: null }
+  }
+
+  // Aplica a decisão da escada; troca de degrau passa pela reserva de chamadas e, negada, estaciona.
+  const climbLadder = async (outcome: MakerOutcome, rejectReason = 'rework_exhausted') => {
+    const decision = nextAttempt(ladderState, outcome)
+    let parkReason: string | null = null
+    if (decision.kind === 'park') {
+      if (outcome.kind === 'rejected') parkReason = rejectReason
+      // retrabalho que não mexeu em nada com achado grave aberto é achado não corrigido
+      else if (outcome.kind === 'no_change' && round > 1 && openFindings.length > 0) parkReason = 'unresolved_blocking_findings'
+      else parkReason = `maker_${outcome.kind}`
+    } else if (decision.state.rung !== ladderState.rung) {
+      const rungUnit = `${storyId}:rung${decision.state.rung}`
+      const reserved = reserveRung({ events: readEvents(), storyId, rung: decision.state.rung, maxModelCalls: loaded.missionBudget.max_model_calls })
+      if (reserved === 'denied') parkReason = 'ladder_reserve_denied'
+      if (reserved === 'reserved') {
+        await deps.journal.append({
+          kind: 'budget_reserved',
+          unit: rungUnit,
+          data: { unit: rungUnit, calls: 1, usd: authorizedReservation.usd, turns: decision.maxTurns, family: decision.state.ladder[decision.state.rung].family, phase: 'rework' },
+        })
+      }
+    }
+    await deps.journal.append({
+      kind: 'decision',
+      unit: storyId,
+      data: {
+        decision: 'maker_ladder',
+        outcome: outcome.kind,
+        next: parkReason ? 'park' : decision.kind,
+        rung: decision.state.rung,
+        max_turns: decision.maxTurns,
+        counts_as_round: decision.countsAsRound,
+      },
+    })
+    if (!parkReason) ladderState = decision.state
+    return { decision, parkReason }
+  }
 
   while (true) {
+    // Tentativa repetida pela escada ganha passo próprio dentro da mesma rodada.
+    const tag = attempt === 0 ? `r${round}` : `r${round}t${attempt}`
     let currentPackPath = packResult.pack_path
     let currentManifest = packResult.manifest
     if (round > 1) {
+      // O pedido de correção leva as vermelhas cobráveis e os achados graves abertos.
+      const correction = correctionRequest({ redTests, findings: openFindings })
       const reworkHandoff = buildReviewHandoff({
         storyId,
         contractRevision: (story).contract_revision ?? 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
         treeBase: treeBefore,
-        openFindings,
+        openFindings: correction.findings,
         deltas: [{ kind: 'changed', ref: `file:${storyId}` }],
         round,
         notes: `rework round ${round}`,
@@ -629,10 +685,11 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         sections: {
           contract: JSON.stringify(contract),
           policy: 'rework',
-          story: storySection.text,
+          // o texto deduplicado não traz o handoff; o pedido de correção vai junto dele
+          story: JSON.stringify({ ...JSON.parse(storySection.text), correction: { red_tests: correction.red_tests, handoff: reworkHandoff } }, null, 2),
         },
         missionDir,
-        stepId: `${storyId}:r${round}:pack`,
+        stepId: `${storyId}:${tag}:pack`,
       })
       currentPackPath = reworkPack.pack_path
       currentManifest = reworkPack.manifest
@@ -641,13 +698,13 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     // Canário fora da worktree
     const canary = await deps.plantCanary({
       worktreeDir,
-      outsideDir: path.join(missionDir, `canary-r${round}`),
+      outsideDir: path.join(missionDir, `canary-${tag}`),
       unitId: storyId,
     })
 
     maybeEngineFault('before_spawn', env)
 
-    const resultFile = path.join(missionDir, `maker-result-r${round}.json`)
+    const resultFile = path.join(missionDir, `maker-result-${tag}.json`)
     const workerEnv = {
       ...deps.workerEnv,
       ...(deps.workerEnv && !deps.workerEnv.ADE_FAKE_RESULT_FILE
@@ -674,7 +731,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         designServer = await createDesignToolServer({
           toolNames: ['recommend_design', 'compare_design', 'slop_test', 'pre_critique'],
         })
-        mcpConfigPath = path.join(missionDir, `design-tools-r${round}.json`)
+        mcpConfigPath = path.join(missionDir, `design-tools-${tag}.json`)
         fs.writeFileSync(mcpConfigPath, JSON.stringify({
           mcpServers: { ade_design: { type: 'http', url: designServer.url } },
         }), 'utf8')
@@ -697,7 +754,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       data: buildModelTelemetry({
         mission_id: missionId,
         story_id: storyId,
-        step_id: `${storyId}:r${round}:maker`,
+        step_id: `${storyId}:${tag}:maker`,
         family: 'claude',
         role: 'maker',
         effort: 'default',
@@ -731,7 +788,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         ),
         authorization: paidAuthorization,
         unit: storyId,
-        stepId: `${storyId}:r${round}:maker`,
+        stepId: `${storyId}:${tag}:maker`,
         packPath: currentPackPath,
         missionDir,
         missionId,
@@ -742,7 +799,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         env: workerEnv,
         mcpConfigPath,
         // sem isto o maker rodava no padrão da CLI do Claude e o model_id do contrato não valia nada
-        model: makerModel,
+        model: ladderState.ladder[ladderState.rung].model ?? undefined,
+        maxTurns: ladderState.maxTurns,
       })
     } catch (err) {
       await appendMakerTelemetry(undefined, 'stop')
@@ -763,7 +821,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     const doNotTouch = contract.guardrails?.do_not_touch ?? []
     const sensitivePaths = contract.guardrails?.sensitive_paths ?? []
 
-    const containStepId = round === 1 ? `${storyId}:contain` : `${storyId}:r${round}:contain`
+    const containStepId = tag === 'r1' ? `${storyId}:contain` : `${storyId}:${tag}:contain`
     const containStepResult = await deps.step(
       {
         unit: storyId,
@@ -831,6 +889,29 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     }
 
     const changedPaths = containResult.changedPaths ?? []
+
+    // Na primeira tentativa o diff da contenção é o da própria chamada; depois, compara a árvore da tentativa.
+    const makerOutcome = classifyMakerOutcome({
+      subtype: dispatch?.subtype,
+      changed: tag === 'r1' ? changedPaths.length > 0 : tree !== treeBeforeAttempt,
+      resultText: dispatch?.result_text,
+    })
+    if (makerOutcome.kind !== 'ok') {
+      const { decision, parkReason } = await climbLadder(makerOutcome)
+      if (parkReason) {
+        await appendMakerTelemetry(dispatch, 'park')
+        return await parkStory(parkReason)
+      }
+      await appendMakerTelemetry(dispatch, 'rework')
+      treeBeforeAttempt = tree
+      if (decision.countsAsRound) {
+        round++
+        attempt = 0
+      } else {
+        attempt++
+      }
+      continue
+    }
 
     if (round > 1 && previousFindings.length > 0) {
       const unresolvedCheck = detectUnresolvedFindings({
@@ -914,30 +995,22 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       },
     })
 
-    const gateFailed =
-      !gateRes.ok ||
-      gateRes.results.some(
-        // `buildExtract` classifica o gate verde como `success`; `passed`/`ok` são as formas
-        // antigas e continuam aceitas para journal já gravado.
-        (r: any) => r.status !== 'success' && r.status !== 'passed' && r.status !== 'ok',
-      )
-    if (gateFailed) {
-      await deps.journal.append({
-        kind: 'story_done',
-        unit: storyId,
-        data: {
-          status: 'awaiting_operator',
-          reason: 'gate_failed',
-          unit: storyId,
-          commit: null,
-        },
-      })
-      return {
-        status: 'awaiting_operator',
-        exitCode: 3,
-        reason: 'gate_failed',
-        commit: null,
-      }
+    const redGates = gateRes.results.filter(
+      // `buildExtract` classifica o gate verde como `success`; `passed`/`ok` são as formas
+      // antigas e continuam aceitas para journal já gravado.
+      (r: any) => r.status !== 'success' && r.status !== 'passed' && r.status !== 'ok',
+    )
+    // portão que nem deu resultado não é defeito da parte: estaciona sem abrir rodada
+    if (!gateRes.ok && redGates.length === 0) return await parkStory('gate_failed')
+    if (redGates.length > 0) {
+      // vermelha cobrável é rodada reprovada: sobe a escada e a correção leva as provas que a parte deve
+      const { parkReason } = await climbLadder({ kind: 'rejected' }, 'gate_failed')
+      if (parkReason) return await parkStory(parkReason)
+      redTests = redGates.flatMap((r: any) => (r.chargeable_reds?.length ? r.chargeable_reds : [r.gate_id]))
+      treeBeforeAttempt = treeAfterContain
+      round++
+      attempt = 0
+      continue
     }
 
     // Eval verde
@@ -948,6 +1021,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     })
 
     const executedEvalRefs = []
+    const redEvals: string[] = []
     for (let evalIdx = 0; evalIdx < story.evals.length; evalIdx++) {
       const evalDef = story.evals[evalIdx]
       const evalId = evalDef.id ?? `E${evalIdx + 1}`
@@ -958,25 +1032,19 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         tree: treeAfterContain,
         unit: storyId,
       })
-      if (evalRecord.verdict !== 'green') {
-        await deps.journal.append({
-          kind: 'story_done',
-          unit: storyId,
-          data: {
-            status: 'awaiting_operator',
-            reason: 'eval_green_failed',
-            unit: storyId,
-            commit: null,
-          },
-        })
-        return {
-          status: 'awaiting_operator',
-          exitCode: 3,
-          reason: 'eval_green_failed',
-          commit: null,
-        }
-      }
+      if (evalRecord.verdict !== 'green') redEvals.push(evalId)
     }
+    if (redEvals.length > 0) {
+      const { parkReason } = await climbLadder({ kind: 'rejected' }, 'eval_green_failed')
+      if (parkReason) return await parkStory(parkReason)
+      redTests = redEvals
+      treeBeforeAttempt = treeAfterContain
+      round++
+      attempt = 0
+      continue
+    }
+    // portões e evals verdes: a próxima correção, se houver, não deve prova vermelha
+    redTests = []
 
     // Portão do Frontend Quality Engine (FQE) entre gates/evals e Checker
     if (contract.needs_ui) {
@@ -1042,13 +1110,17 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
           message: `${d.criterion}: ${d.fix} (${d.where})`,
           path: d.where,
         }))
-        if (round >= 2 || round > maxReworkRounds) {
+        if (round >= 2) {
           await deps.journal.append({ kind: 'story_done', unit: storyId, data: { status: 'awaiting_operator', reason: 'visual_cut_not_met', unit: storyId, commit: null } })
           return { status: 'awaiting_operator', exitCode: 3, reason: 'visual_cut_not_met', commit: null }
         }
+        const { parkReason } = await climbLadder({ kind: 'rejected' })
+        if (parkReason) return await parkStory(parkReason)
         openFindings = visualFindings
         previousFindings = visualFindings
+        treeBeforeAttempt = treeAfterContain
         round++
+        attempt = 0
         continue
       }
     }
@@ -1388,50 +1460,18 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     const findings = (reviewDoc.action_items ?? reviewDoc.findings ?? []).map(normalizeFinding)
     const currentFindingsDigest = computeFindingsDigest(findings)
 
-    // Orçamento de retrabalho esgotado tem precedência: depois da última rodada permitida o
-    // diagnóstico é o limite, não a repetição de achados.
-    if (round > maxReworkRounds) {
-      await deps.journal.append({
-        kind: 'story_done',
-        unit: storyId,
-        data: {
-          status: 'awaiting_operator',
-          reason: 'rework_exhausted',
-          unit: storyId,
-          commit: null,
-        },
-      })
-      return {
-        status: 'awaiting_operator',
-        exitCode: 3,
-        reason: 'rework_exhausted',
-        commit: null,
-      }
-    }
-
-    if (previousFindingsDigest !== null && currentFindingsDigest === previousFindingsDigest) {
-      await deps.journal.append({
-        kind: 'story_done',
-        unit: storyId,
-        data: {
-          status: 'awaiting_operator',
-          reason: 'stagnation',
-          unit: storyId,
-          commit: null,
-        },
-      })
-      return {
-        status: 'awaiting_operator',
-        exitCode: 3,
-        reason: 'stagnation',
-        commit: null,
-      }
-    }
+    // Rodada reprovada: duas por degrau, depois sobe; esgotada a escada, estaciona. Só a escada limita as rodadas:
+    // achado repetido não estaciona antes dela (o degrau de cima ainda tenta), só dá nome ao fim.
+    const stagnated = previousFindingsDigest !== null && currentFindingsDigest === previousFindingsDigest
+    const { parkReason } = await climbLadder({ kind: 'rejected' }, stagnated ? 'stagnation' : 'rework_exhausted')
+    if (parkReason) return await parkStory(parkReason)
 
     previousFindingsDigest = currentFindingsDigest
     previousFindings = findings
     openFindings = findings.filter(isBlockingFinding)
     treeBeforeRound = treeAfterContain
+    treeBeforeAttempt = treeAfterContain
     round++
+    attempt = 0
   }
 }

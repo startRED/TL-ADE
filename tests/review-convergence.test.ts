@@ -833,8 +833,8 @@ describe('Integrar revisão e correção que convergem', () => {
 
     const { events: exhaustEvents } = readJournal(path.join(exhaustFixture.missionDir, 'journal.jsonl'))
     const checkerReviews = exhaustEvents.filter((e) => e.kind === 'review_result')
-    // Exatamente 3 avaliações de revisão executadas: rodada inicial r1 + 2 rodadas de retrabalho r2 e r3
-    expect(checkerReviews.length).toBe(3)
+    // Escada de um degrau: 2 rodadas reprovadas no degrau esgotam a escada (r1 + r2) antes do teto do contrato
+    expect(checkerReviews.length).toBe(2)
   }, 45000)
 
   // Critério 5: retomada reutiliza resultados duráveis e vincula aprovação à árvore verificada

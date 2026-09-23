@@ -353,7 +353,7 @@ test('CA1_recibo_oficial_valido_permite_despacho_do_cli_ao_runner_dentro_dos_lim
   // A revisão independente passou a ser obrigatória: sem binário da família do Checker
   // (`codex`) a unidade estaciona depois do despacho do Maker, em vez de comitar.
   expect(exitCode).toBe(3)
-  expect(subject.dispatched).toHaveBeenCalledTimes(1)
+  expect(subject.dispatched).toHaveBeenCalledTimes(2) // E1 segue vermelha: a rodada de correção leva a prova e, sem mudança, estaciona
   expect(subject.dispatched).toHaveBeenCalledWith(expect.objectContaining({
     maxBudgetUsd: 25,
   }))
@@ -418,7 +418,7 @@ test('CA3_reserva_e_duravel_e_nao_duplicada_na_retomada', async () => {
 
   // Idem CA1: o estacionamento por falta de Checker não pode duplicar a reserva já durável.
   expect(exitCode).toBe(3)
-  expect(subject.dispatched).toHaveBeenCalledTimes(1)
+  expect(subject.dispatched).toHaveBeenCalledTimes(2) // E1 segue vermelha: 1 rodada de correção; a retomada não despacha de novo
   expect(readReceiptMock).not.toHaveBeenCalled()
   const events = readJournal(path.join(subject.missionDir, 'journal.jsonl')).events
   const reservations = events.filter((e) => e.kind === 'budget_reserved')

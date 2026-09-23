@@ -20,6 +20,7 @@ export async function dispatchClaude(opts: {
     resultFile: string
     maxBudgetUsd: number
     model?: string
+    maxTurns?: number
     resolved: { exe: string; prefixArgs: string[] }
     timeoutS?: number
     env?: Record<string, string>
@@ -38,6 +39,9 @@ export async function dispatchClaude(opts: {
   usage: ReturnType<typeof parseUsage>
   envelope_error: null | 'empty' | 'not_json' | 'truncated_json'
   tokens: ReturnType<typeof parseTokens>
+  subtype: string | null
+  num_turns: number | null
+  result_text: string
 }> {
   const {
     step,
@@ -50,6 +54,7 @@ export async function dispatchClaude(opts: {
     resultFile,
     maxBudgetUsd,
     model,
+    maxTurns,
     resolved,
     timeoutS = 1800,
     env = {},
@@ -64,8 +69,8 @@ export async function dispatchClaude(opts: {
   }
 
   const sessionId = randomUUID()
-  const args = buildClaudeArgs({ sessionId, packPath, maxBudgetUsd, model, mcpConfigPath })
-  const input = { pack_path: packPath, max_budget_usd: maxBudgetUsd, model: model ?? null }
+  const args = buildClaudeArgs({ sessionId, packPath, maxBudgetUsd, model, mcpConfigPath, maxTurns })
+  const input = { pack_path: packPath, max_budget_usd: maxBudgetUsd, model: model ?? null, ...(maxTurns === undefined ? {} : { max_turns: maxTurns }) }
 
   const r = await step({ unit, id: stepId, effect_class: 'model_call', input, session_ref: sessionId }, async () => {
     const result = await runWorkerImpl({
@@ -101,6 +106,10 @@ export async function dispatchClaude(opts: {
       usage,
       envelope_error: error,
       tokens,
+      // a escada de correção lê o corte no teto e o texto final (bloqueio de ambiente)
+      subtype: typeof envelope?.subtype === 'string' ? envelope.subtype : null,
+      num_turns: typeof envelope?.num_turns === 'number' ? envelope.num_turns : null,
+      result_text: typeof envelope?.result === 'string' ? envelope.result : '',
     }
   })
 
@@ -117,5 +126,8 @@ export async function dispatchClaude(opts: {
     usage: effectResult.usage,
     envelope_error: effectResult.envelope_error,
     tokens: effectResult.tokens ?? { source: 'unavailable' },
+    subtype: effectResult.subtype ?? null,
+    num_turns: effectResult.num_turns ?? null,
+    result_text: effectResult.result_text ?? '',
   }
 }
