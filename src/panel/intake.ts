@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assertProductBriefing, brieferFromConfig, generateProductBriefing, LARGE_COMPLEXITIES, versionPlanOf, type ProductBriefing } from '../intent/briefing.ts'
@@ -10,6 +11,7 @@ import { digest16 } from '../journal/canonical.ts'
 import { AdeError } from '../journal/errors.ts'
 import { approveMission, getProjectDiscovery, recordMissionDecision, validateMissionPlan, writeJsonAtomic } from '../mission/plan-lifecycle.ts'
 import { writeMissionOptions, type MissionOptions } from '../mission/options.ts'
+import { refreshQuotaReceipts } from '../adapters/local/official-quota.ts'
 import type { ActivityKind } from './open-projects.ts'
 import { readProjectOptions, type SkillSummary } from './options.ts'
 
@@ -340,19 +342,47 @@ export const defaultIntent: IntentPort = {
   },
 }
 
-/** Porta padrão de execução: `ade run --plan` sem shell, com a saída em run.log; o motor acha as opções ao lado do plano. */
+/** A sonda real do `ade doctor` vale 24 h para o motor; o painel renova antes com folga. */
+const PROBE_FRESH_MS = 20 * 3600 * 1000
+
+/**
+ * Renova a sonda do `ade doctor` quando falta, falhou ou venceu: sem ela o pré-voo para a missão pedindo um comando
+ * que o usuário do painel não roda. Devolve se precisou renovar.
+ */
+export async function ensureFreshProbe({ homeDir = os.homedir(), now = Date.now(), runDoctor }: { homeDir?: string; now?: number; runDoctor: () => Promise<void> }): Promise<boolean> {
+  try {
+    const caps = JSON.parse(fs.readFileSync(path.join(homeDir, '.ade', 'capabilities.json'), 'utf8'))
+    const at = Date.parse(caps.probed_at)
+    if (caps.probe_ok === true && Number.isFinite(at) && now - at >= 0 && now - at < PROBE_FRESH_MS) return false
+  } catch {
+    // sem arquivo ou ilegível: renova
+  }
+  await runDoctor()
+  return true
+}
+
+/** Roda um comando do `ade` sem shell, com a saída no arquivo aberto. */
+function runAde(args: string[], cwd: string, fd: number, what: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn(process.execPath, [ADE_BIN, ...args], { cwd, shell: false, stdio: ['ignore', fd, fd] })
+    child.once('error', reject)
+    child.once('exit', (code) => (code === 0 ? resolve() : reject(new Error(`${what} saiu com código ${code}`))))
+  })
+}
+
+/** Porta padrão de execução: renova a sonda se venceu e roda `ade run --plan` sem shell, com a saída em run.log. */
 export const spawnMissionRun: RunMission = async ({ repoDir, missionId, planPath }) => {
   const logPath = path.join(path.dirname(planPath), 'run.log')
   const fd = fs.openSync(logPath, 'a')
   try {
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn(process.execPath, [ADE_BIN, 'run', '--plan', planPath, '--repo', repoDir], { cwd: repoDir, shell: false, stdio: ['ignore', fd, fd] })
-      child.once('error', reject)
-      child.once('exit', (code) => {
-        if (code === 0) resolve()
-        else reject(new Error(`ade run da missão ${missionId} saiu com código ${code}; saída em ${logPath}`))
-      })
-    })
+    await ensureFreshProbe({ runDoctor: () => runAde(['doctor'], repoDir, fd, 'ade doctor') })
+    // O motor só gasta plano com recibo oficial de cota: lê a do Claude e a do Codex agora.
+    const receipts = await refreshQuotaReceipts()
+    fs.writeSync(fd, `cota oficial: ${receipts.map((r) => `${r.family} ${r.used_percent}% da semana`).join(', ') || 'nenhuma leitura'}
+`)
+    await runAde(['run', '--plan', planPath, '--repo', repoDir], repoDir, fd, `ade run da missão ${missionId}`)
+  } catch (err) {
+    throw new Error(`${err instanceof Error ? err.message : String(err)}; saída em ${logPath}`)
   } finally {
     fs.closeSync(fd)
   }

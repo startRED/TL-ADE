@@ -624,4 +624,13 @@ describe('preflight integration', () => {
     fs.writeFileSync(path.join(repo.dir, 'package.json'), JSON.stringify({ name: 'tarefas', devDependencies: { vitest: '^3.0.0' } }))
     await expect(ports().dependencies.check()).resolves.toEqual({ status: 'blocked', reason: 'dependências ausentes' })
   })
+
+  test('login_do_cli_provado_pela_sonda_real_vale_como_credencial_sem_chave_de_api', async () => {
+    const repo = makeRepo()
+    repoDirs.push(repo.dir)
+    const loaded = buildLoadedPlan(buildContract())
+    const credential = (capabilities: any) => createLocalPreflightPorts({ repoDir: repo.dir, story: loaded.stories[0], loaded, capabilities, gitPort: { dirtyPaths: async () => [] }, execFile: vi.fn(), now: () => 1, env: {} }).credential.check()
+    await expect(credential({ probe_ok: true, probe_mode: 'real', probed_at: 0 })).resolves.toEqual({ status: 'ready', reason: null })
+    await expect(credential({ probe_ok: null, probe_mode: 'help_only', probed_at: 0 })).resolves.toEqual({ status: 'blocked', reason: 'credencial ausente ou vazia' })
+  })
 })

@@ -179,6 +179,10 @@ export function createLocalPreflightPorts(options: LocalPreflightOptions): Recor
           if (typeof apiKey === 'string' && apiKey.trim().length > 0) {
             return { status: 'ready', reason: null }
           }
+          // A TL-ADE roda no plano do usuário: o CLI logado que respondeu à sonda real do ade doctor é a credencial.
+          if (capabilities?.probe_ok === true && capabilities?.probe_mode === 'real') {
+            return { status: 'ready', reason: null }
+          }
           return { status: 'blocked', reason: 'credencial ausente ou vazia' }
         } catch {
           return { status: 'blocked', reason: 'não foi possível verificar credencial' }

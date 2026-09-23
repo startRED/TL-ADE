@@ -6,6 +6,7 @@ import { compileIntent } from '../src/intent/compiler.ts'
 import { digest16 } from '../src/journal/canonical.ts'
 import { readJournal } from '../src/journal/journal.ts'
 import { startServer } from '../src/panel/server.ts'
+import { ensureFreshProbe } from '../src/panel/intake.ts'
 import { makeRepo } from './helpers/git-repo.ts'
 import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 import { apiRequest, freePort, openPanel, startPanelForTest } from './helpers/panel_ui.ts'
@@ -536,4 +537,17 @@ describe('pedido, entrevista, briefing, plano e aprovação no painel', () => {
     await page.getByText('O plano foi recusado: Faltou prova').waitFor()
     expect(ui.consoleErrors).toEqual([])
   }, 180_000)
+
+  test('antes_de_rodar_o_painel_renova_a_sonda_do_doctor_que_falta_ou_venceu', async () => {
+    const home = makeTmpDir('ade-probe-home-')
+    cleanups.push(() => removeTmpDir(home))
+    let runs = 0
+    const runDoctor = async () => { runs++ }
+    expect(await ensureFreshProbe({ homeDir: home, now: Date.parse('2026-09-23T12:00:00Z'), runDoctor })).toBe(true)
+    mkdirSync(path.join(home, '.ade'), { recursive: true })
+    writeFileSync(path.join(home, '.ade', 'capabilities.json'), JSON.stringify({ probe_ok: true, probed_at: '2026-09-23T10:00:00Z' }))
+    expect(await ensureFreshProbe({ homeDir: home, now: Date.parse('2026-09-23T12:00:00Z'), runDoctor })).toBe(false)
+    expect(await ensureFreshProbe({ homeDir: home, now: Date.parse('2026-09-25T12:00:00Z'), runDoctor })).toBe(true)
+    expect(runs).toBe(2)
+  })
 })
