@@ -5,6 +5,7 @@ import { digest16 } from '../journal/canonical.ts'
 import { AdeError } from '../journal/errors.ts'
 import { getOrProduceArtifact } from '../artifacts/cache.ts'
 import { discoverProject } from './discovery.ts'
+import { codeMap, symbolExcerpts } from './code-map.ts'
 import { resolveScopeOwners } from './scope-owners.ts'
 import { GitWorkspace } from '../workspace/git.ts'
 import { FolderWorkspace } from '../workspace/folder.ts'
@@ -164,7 +165,7 @@ export async function buildStoryContext(input: {
     ir?: any
     limits?: { max_pack_bytes?: number; section_bytes?: Record<string, number> }
 } = {}): Promise<{
-    sections: { contract: string; policy: string; story: string; skills: string }
+    sections: { contract: string; policy: string; story: string; retrieved: string; skills: string }
     artifactRefs: string[]
     selectedSkills: Array<{ name: string; source: string; sha256: string; bytes: number; domain?: string; language?: string; content: string; references: any[] }>
     bytes: number
@@ -206,10 +207,12 @@ export async function buildStoryContext(input: {
 
   let snapDigest = 'no-workspace'
   let snapRevision = 'no-workspace'
+  let snapPaths: string[] = []
   if (workspace) {
     const snap = await workspace.snapshot()
     snapDigest = snap.digest
     snapRevision = snap.revision
+    snapPaths = snap.paths
     if (!snapDigest || !snapRevision) {
       throw new AdeError('invalid_workspace_snapshot', 'snapshot do workspace sem digest ou revisão', 4)
     }
@@ -387,6 +390,18 @@ export async function buildStoryContext(input: {
   }
   const skillsSection = skillBodies.join('\n\n')
 
+  // Mapa símbolo@linha dos arquivos do escopo e trechos dos símbolos que as interfaces do contrato nomeiam.
+  const interfaces = story.interfaces ?? contract.interfaces ?? []
+  if (!Array.isArray(interfaces) || interfaces.some((item: unknown) => typeof item !== 'string')) {
+    throw new AdeError('invalid_story_contract', 'interfaces da story deve ser lista de textos', 4)
+  }
+  const interfaceNames = interfaces.flatMap((item: string) => [...item.matchAll(/([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1]))
+  const scopeFiles = snapPaths.filter((p) => isPathInScope(p, scopePaths, doNotTouch))
+  // Trechos antes do mapa: o pack corta a seção pelo fim, e os trechos das interfaces valem mais que o mapa.
+  const retrievedSection = worktreeDir
+    ? [await symbolExcerpts(worktreeDir, scopeFiles, interfaceNames), await codeMap(worktreeDir, scopeFiles)].filter(Boolean).join('\n\n')
+    : ''
+
   const maxPackBytes = deps.limits?.max_pack_bytes ?? 120000
 
   // Função auxiliar para renderizar a seção story
@@ -436,6 +451,7 @@ export async function buildStoryContext(input: {
     contract: contractSection,
     policy: policySection,
     story: storySection,
+    retrieved: retrievedSection,
     skills: skillsSection,
   }
   let totalBytes = measurePackBytes(currentSections)

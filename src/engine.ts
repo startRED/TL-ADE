@@ -549,7 +549,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   const packResult = deps.compilePack({
     missionDir,
     stepId: `${storyId}:r1:maker`,
-    sections: { ...baseSections, story: contextStorySection, skills: storyContext.sections?.skills || '' },
+    sections: { ...baseSections, story: contextStorySection, retrieved: storyContext.sections.retrieved, skills: storyContext.sections?.skills || '' },
     savedBytes: contextSavedBytes,
     skills: storyContext.selectedSkills.map((s) => ({
       name: s.name,
