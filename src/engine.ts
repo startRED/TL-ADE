@@ -46,7 +46,7 @@ import {
 import { blockingReviewFindings, buildReviewHandoff, testEditViolations, wrongTestClaims, wrongTestVerdict } from './review/contract.ts'
 import { isReviewApproved } from './review/validate.ts'
 import { buildModelTelemetry, modelsFromUsage } from './telemetry/telemetry.ts'
-import { commitLines, formatMeasureTrailers, storyMeasure } from './telemetry/cost.ts'
+import { commitLines, formatMeasureTrailers, formatProvenanceTrailers, makerCallOf, storyMeasure } from './telemetry/cost.ts'
 
 /**
  * Famílias de modelos com canário aprovado no Slice 1 e v0.2.
@@ -1474,7 +1474,11 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     if (reviewApproval.approved) {
       maybeEngineFault('before_commit', env)
 
-      const measure = storyMeasure(readEvents(), storyId)
+      const commitEvents = readEvents()
+      const measure = storyMeasure(commitEvents, storyId)
+      // a árvore aprovada saiu da última chamada do maker desta parte; o commit aponta para ela
+      const makerCall = makerCallOf(commitEvents, storyId)
+      if (!makerCall) throw new AdeError('missing_maker_call', `parte ${storyId} aprovada sem chamada do maker no journal`, 4)
       const commitStepResult = await deps.step(
         {
           unit: storyId,
@@ -1484,7 +1488,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         },
         () => wtPort.commit({ message: `ade(${storyId}): ${contract.title}
 
-${formatMeasureTrailers(measure)}` }),
+${formatMeasureTrailers(measure)}
+${formatProvenanceTrailers({ mission: missionId, story: storyId, round, ...makerCall })}` }),
       )
 
       maybeEngineFault('after_commit', env)

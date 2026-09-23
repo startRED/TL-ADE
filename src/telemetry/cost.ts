@@ -1,4 +1,5 @@
 import type { GitPort } from '../git/gitport.ts'
+import { AdeError } from '../journal/errors.ts'
 import { isModelCallTelemetry, TelemetryInvalidError } from './telemetry.ts'
 
 type Measure = {
@@ -138,4 +139,39 @@ export async function commitLines(git: Pick<GitPort, 'run'>, base: string | null
     if (r !== '-') removed += Number(r)
   }
   return { lines_added: added, lines_removed: removed }
+}
+
+type Provenance = { mission: string; story: string; round: number; model: string; callSeq: number }
+
+/** Última chamada do maker da parte no journal: o seq do evento de telemetria e o modelo executor. */
+export function makerCallOf(events: Array<Record<string, any>>, storyId: string): { callSeq: number; model: string } | null {
+  const last = events.filter((e) => isModelCallTelemetry(e) && e.data.story_id === storyId && e.data.role === 'maker').at(-1)
+  if (!last || !isCount(last.seq)) return null
+  const executor = last.data.models.find((m: { role: string }) => m.role === 'executor') ?? last.data.models[0]
+  return { callSeq: last.seq, model: executor.model_id }
+}
+
+/** Trailers Git que ligam o commit à conversa que o gerou. */
+export function formatProvenanceTrailers({ mission, story, round, model, callSeq }: Provenance): string {
+  return [`ADE-Missao: ${mission}`, `ADE-Parte: ${story}`, `ADE-Rodada: ${round}`, `ADE-Modelo: ${model}`, `ADE-Chamada: ${callSeq}`].join('\n')
+}
+
+/**
+ * Origem lida dos trailers do commit: só o último parágrafo, depois do assunto, e só se todas as
+ * linhas dele forem `Chave: valor` (o bloco que o Git reconhece). Sem `ADE-Missao` nesse bloco o
+ * commit não é do motor (null), mesmo que o assunto ou o corpo citem o texto; com ele, rodapé
+ * incompleto ou fora do formato é recusado, e a missão nunca aponta para fora da pasta.
+ */
+export function provenanceOfCommit(message: string): Provenance | null {
+  const paragraphs = message.trim().split(/\n[ \t]*\n/)
+  const block = paragraphs.length > 1 ? (paragraphs.at(-1) as string).split('\n') : []
+  if (!block.every((line) => /^[A-Za-z0-9-]+: /.test(line))) return null
+  const trailer = (key: string) => block.map((line) => line.match(new RegExp(`^ADE-${key}: *(.+?) *$`))?.[1]).find((v) => v !== undefined)
+  const mission = trailer('Missao')
+  if (mission === undefined) return null
+  const [story, round, model, callSeq] = [trailer('Parte'), trailer('Rodada'), trailer('Modelo'), trailer('Chamada')]
+  if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(mission) || !story || !model || !/^[1-9]\d*$/.test(round ?? '') || !/^\d+$/.test(callSeq ?? '')) {
+    throw new AdeError('invalid_provenance', 'rodapé ADE do commit incompleto ou inválido', 2)
+  }
+  return { mission, story, round: Number(round), model, callSeq: Number(callSeq) }
 }
