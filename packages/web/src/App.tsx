@@ -3,6 +3,7 @@ import { Badge, Box, Button, Card, Flex, Heading, IconButton, Switch, Text, Text
 import { FolderOpen, FolderSimple, Moon, Sparkle, X } from '@phosphor-icons/react'
 import { apiFetch, postJson, subscribeEvents } from './api.ts'
 import IntakeFlow from './Intake.tsx'
+import MissionUnits from './Units.tsx'
 
 interface Project {
   id: string
@@ -163,6 +164,7 @@ function Home({ project, snapshot }: { project: Project | null; snapshot: Snapsh
         </Text>
       </Card>
       <IntakeFlow key={project.id} projectId={project.id} />
+      {snapshot?.selectedMission && <MissionUnits key={`${project.id}:${snapshot.selectedMission.id}`} projectId={project.id} missionId={snapshot.selectedMission.id} />}
     </Flex>
   )
 }

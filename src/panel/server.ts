@@ -12,6 +12,7 @@ import { createSessionManager } from './session.ts'
 import { createIntake, defaultIntent, spawnMissionRun, type IntentPort, type RunMission } from './intake.ts'
 import { assertProjectPath, createOpenProjects } from './open-projects.ts'
 import { listProjects, registerProject } from './projects.ts'
+import { listUnits, readUnit } from './units.ts'
 import { resolveCurrentBuild } from './web-build.ts'
 import { createWebSocketHandler } from './websocket.ts'
 import { checkNativeSqlite, readPanelSnapshot, rebuildProjection } from './sqlite-index.ts'
@@ -261,6 +262,15 @@ export async function startServer({
               sendJson(res, 200, await readPanelSnapshot({ repoDir: project.path, indexPath: project.indexPath }))
               return
             }
+            const unitsMatch = pathname.match(/^\/api\/projects\/([^/]+)\/missions\/([^/]+)\/units(?:\/([^/]+))?$/)
+            if (unitsMatch && method === 'GET') {
+              const project = projects.get(decodeURIComponent(unitsMatch[1]))
+              const missionId = decodeURIComponent(unitsMatch[2])
+              sendJson(res, 200, unitsMatch[3]
+                ? await readUnit(project.path, missionId, decodeURIComponent(unitsMatch[3]))
+                : listUnits(project.path, missionId))
+              return
+            }
             const intakeMatch = pathname.match(/^\/api\/projects\/([^/]+)\/(requests|intake|intake\/interview|intake\/(?:briefing|plan)\/(?:approve|reject))$/)
             if (intakeMatch) {
               const project = projects.get(decodeURIComponent(intakeMatch[1]))
@@ -312,7 +322,7 @@ export async function startServer({
             }
           } catch (err) {
             if (!(err instanceof AdeError)) throw err
-            const status = err.code === 'project_not_found' || err.code === 'intake_not_found' ? 404 : err.exitCode === 5 ? 409 : 400
+            const status = err.code === 'project_not_found' || err.code === 'intake_not_found' || err.code === 'unit_not_found' ? 404 : err.exitCode === 5 ? 409 : 400
             sendJson(res, status, { error: err.code, message: err.message })
             return
           }
