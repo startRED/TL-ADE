@@ -377,7 +377,7 @@ function Thinking({ label, hint }: { label: string; hint: string }) {
       className="thinking"
       role="status"
       aria-live="polite"
-      initial={{ opacity: 0, y: 12 }}
+      initial={{ opacity: 0, y: -12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, ease: EASE_OUT }}
     >

@@ -835,9 +835,9 @@ h3.ui-heading, h4.ui-heading { font-size: 1.15rem; }
 @media (prefers-reduced-motion: reduce) { .pulse.running { animation: none; } }
 
 /* ---------- a IA pensando ----------
-   Cartão fixo no canto: pulso da batuta, o que ela faz, segundos em mono e uma régua que corre. Fica visível em qualquer
+   Cartão fixo no alto, à direita (embaixo fica a barra de pedido): pulso da batuta, o que ela faz, segundos em mono e uma régua que corre. Fica visível em qualquer
    altura da página, porque o botão clicado pode estar no fim dela. */
-.thinking { position: fixed; right: var(--gutter); bottom: 1.5rem; z-index: 30; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: .25rem .75rem; width: min(26rem, calc(100vw - 2 * var(--gutter))); padding: 1rem 1.1rem 1.1rem; border: 1px solid var(--baton); background: var(--ground-raised); overflow: hidden; }
+.thinking { position: fixed; right: var(--gutter); top: calc(var(--strip) + 1.25rem); z-index: 30; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: .25rem .75rem; width: min(26rem, calc(100vw - 2 * var(--gutter))); padding: 1rem 1.1rem 1.1rem; border: 1px solid var(--baton); background: var(--ground-raised); overflow: hidden; }
 .thinking .pulse { margin: .45rem 0 0; }
 .thinking-label { display: flex; justify-content: space-between; gap: 1rem; font: 560 15px/1.35 var(--text); color: var(--ink); }
 .thinking-time { font: 500 12px/1.6 var(--mono); color: var(--baton-text); font-variant-numeric: tabular-nums; }

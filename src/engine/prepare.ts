@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createGitPort } from '../git/gitport.ts'
 import { UnexpectedTreeStateError } from '../journal/errors.ts'
+import { removeWorktreeKept } from './preserve.ts'
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
@@ -155,6 +156,16 @@ export async function prepareStory(options: PrepareStoryOptions): Promise<Prepar
   }
 
   
+  // Ids de parte se repetem entre missões (S1, S2…): a pasta ocupada por uma parte de outra missão (parada) é
+  // liberada, com a árvore dela guardada antes em refs/ade/checkpoints; o ramo dela continua no git.
+  if (fs.existsSync(worktreeDir)) {
+    const occupantPort = createGitPort({ worktreeDir })
+    const occupant = (await occupantPort.headInfo()).branch
+    if (occupant?.startsWith('ade/') && !occupant.startsWith(`ade/${missionId}/`)) {
+      await removeWorktreeKept({ gitPort: basePort, wtPort: occupantPort, worktreeDir, label: `kept/${occupant.slice(4)}` })
+    }
+  }
+
   let wtPort: ReturnType<typeof createGitPort>
   if (fs.existsSync(worktreeDir)) {
     wtPort = createGitPort({ worktreeDir })

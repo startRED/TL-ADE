@@ -335,4 +335,23 @@ describe('prepare', () => {
     expect(res.status).toBe('awaiting_operator')
     expect((res as any).reason).toBe('visual_rework_budget_exhausted')
   })
+
+  slowTest('pasta_da_parte_ocupada_por_outra_missao_e_liberada_guardando_o_que_ela_tinha', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    writeFileSync(path.join(repo.dir, 'main.txt'), 'base\n')
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'base'])
+
+    expect((await prepareStory({ repoDir: repo.dir, missionId: 'm-velha', storyId: 'S1' })).status).toBe('ready')
+    const wtDir = path.join(repo.dir, '.ade', 'wt', 'S1')
+    writeFileSync(path.join(wtDir, 'meio-feito.txt'), 'trabalho da parte parada\n')
+
+    const next = await prepareStory({ repoDir: repo.dir, missionId: 'm-nova', storyId: 'S1' })
+    expect(next).toMatchObject({ status: 'ready', branch: 'ade/m-nova/S1' })
+    expect(existsSync(path.join(wtDir, 'meio-feito.txt'))).toBe(false)
+    expect(repo.git(['branch', '--list', 'ade/m-velha/S1']).trim()).not.toBe('')
+    const kept = repo.git(['for-each-ref', '--format=%(refname)', 'refs/ade/checkpoints/kept/m-velha/S1'])
+    expect(repo.git(['show', `${kept.trim().split('\n')[0]}:meio-feito.txt`])).toContain('trabalho da parte parada')
+  })
 })
