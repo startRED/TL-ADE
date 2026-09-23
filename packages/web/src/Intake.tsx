@@ -215,11 +215,17 @@ function RequestBox({ last, busy, compact, onSend }: { last: Intake | null; busy
   }
   const what = last?.rejected_at === 'plan' ? 'O plano' : 'O briefing'
   return (
-    <form className={`composer${compact ? ' compact' : ''}`} onSubmit={submit}>
+    <form className={`composer${compact ? ' compact' : ' terminal'}`} onSubmit={submit}>
+      {!compact && (
+        <ol className="term-tabs" aria-label="Caminho do pedido">
+          {['pedido', 'entrevista', 'briefing', 'plano', 'partes'].map((s, i) => <li key={s} aria-current={i === 0 ? 'step' : undefined}>{s}</li>)}
+        </ol>
+      )}
       {last?.stage === 'recusada' && <p className="note-line warn">{what} foi recusado: {last.reason}</p>}
       {last?.stage === 'concluida' && (
         <p className={`note-line${last.error ? ' warn' : ''}`}>A missão {last.mission_id} terminou{last.error ? ` com erro: ${last.error}` : '.'}</p>
       )}
+      <span className="prompt" aria-hidden="true">›</span>
       <textarea
         className="field"
         aria-label="Pedido"

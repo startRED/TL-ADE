@@ -714,3 +714,45 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 .margin-plate .plate { background: color-mix(in srgb, var(--field) 45%, var(--ink)); }
 :root[data-theme='light'] .margin-plate .plate, :root[data-theme='light'] .movement .plate { background: var(--field); }
 .movement .plate { background: color-mix(in srgb, var(--field) 40%, var(--ink)); }
+
+/* ---------- densidade de terminal ----------
+   Onde se trabalha com dado (rótulos, abas, botões, passos, provas, parecer, custos, diff), a letra é mono e o
+   espaçamento é de terminal; títulos grandes e gravuras ficam para as telas de decisão. Divisórias pontilhadas. */
+.caps { font: 500 10.5px/1.2 var(--mono); letter-spacing: .14em; }
+.tab { font: 500 11px/1 var(--mono); letter-spacing: .16em; }
+.btn { font: 500 11.5px/1 var(--mono); letter-spacing: .12em; min-height: 2.5rem; }
+.wordmark { font: 600 12px/1 var(--mono); letter-spacing: .28em; }
+.chip { font: 400 12.5px/1 var(--mono); }
+.readouts { font-size: 12.5px; }
+.tag { font: 500 10px/1.2 var(--mono); letter-spacing: .1em; }
+.staff-label strong { font: 600 11px/1.1 var(--mono); letter-spacing: .16em; }
+.measure-head .part-state .caps { font-size: 9.5px; }
+.fermata h2 { font: 600 11px/1 var(--mono); letter-spacing: .2em; }
+.leaf h3 { font: 600 10.5px/1 var(--mono); letter-spacing: .18em; color: var(--ink-faint); }
+.leaf > section { padding: 1.1rem 1.5rem 1.25rem; gap: .6rem; border-top-style: dotted; }
+.step { padding: .32rem 0; font: 400 12.5px/1.35 var(--mono); border-bottom-style: dotted; }
+.step-text { font-family: var(--text); font-size: 13px; }
+.step-text .mono { font-size: 10.5px; }
+.step time { font: 400 11px/1.3 var(--mono); }
+.tests li { padding: .32rem 0; font: 400 12.5px/1.35 var(--mono); border-bottom-style: dotted; }
+.findings li { padding: .55rem 0; border-bottom-style: dotted; }
+.finding-meta { font: 600 10px/1.2 var(--mono); letter-spacing: .14em; text-transform: uppercase; font-style: normal; }
+.decisions li, .question, .part-row, .version, .shelf li { border-bottom-style: dotted; }
+.cost-chart figcaption { font: 600 10.5px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; font-style: normal; color: var(--ink-faint); }
+.stems .no { font: 600 11px/1 var(--mono); }
+.diff-file pre { font-size: 12px; line-height: 1.5; }
+
+.terminal { gap: 0; border: 1px solid var(--sage-line); background: color-mix(in srgb, var(--ground) 72%, #000); }
+.overture .terminal { background: color-mix(in srgb, var(--field) 70%, #000); border-color: color-mix(in srgb, var(--field-ink) 22%, var(--field)); }
+.term-tabs { display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--sage-line); }
+.term-tabs li { padding: .6rem .9rem; font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); border-right: 1px dotted var(--sage-line); }
+.term-tabs li[aria-current='step'] { color: var(--ink); background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.terminal .prompt, .composer.compact .prompt { font: 500 18px/1 var(--mono); color: var(--baton-text); }
+.terminal .prompt { position: absolute; top: 3.05rem; left: 1rem; }
+.terminal { position: relative; }
+.terminal .field { font: 400 15px/1.55 var(--mono); padding: .9rem 1rem .9rem 2.4rem; border-bottom: 1px dotted var(--sage-line); }
+.terminal .composer-row { padding: .7rem .7rem .7rem 1rem; }
+.terminal .note-line { font: 400 11.5px/1.3 var(--mono); }
+.composer.compact { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; }
+.composer.compact .field { font: 400 15px/1.5 var(--mono); border-bottom: 0; }
+.composer.compact .note-line { grid-column: 1 / -1; }
