@@ -12,7 +12,7 @@ Fronteira que impede escrita fora do worktree, vazamento de segredo e expansão 
 - `src/contain/secrets.ts`: varredura de segredos no diff integral;
 - `src/contain/canary.ts`: canário de isolamento;
 - precondições `worktree_isolation` e `permitted_effects` da noite desatendida
-  (`src/engine/preflight.js`, `src/cli/run.js`).
+  (`src/engine/preflight.ts`, `src/cli/run.js`).
 
 Por que humano: um falso negativo aqui não aparece em prova nenhuma; ele só vira incidente.
 

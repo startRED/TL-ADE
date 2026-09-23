@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { findStoryCommitted, findStoryStarted } from '../../src/engine/resume.js'
+import { findStoryCommitted, findStoryStarted } from '../../src/engine/resume.ts'
 import { BIN_ADE, cleanupTmpDirs, readCounter, setupE2E } from './fixtures/e2e-fixture.ts'
 
 afterEach(() => {

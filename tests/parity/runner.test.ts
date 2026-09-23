@@ -22,7 +22,7 @@ import {
 import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.ts'
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url))
-const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.js')
+const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.ts')
 
 describe('runner parity', () => {
   let tmpDir: string

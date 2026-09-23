@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'vitest'
 import { validate, validateSupported } from '../src/schema/index.ts'
-import { loadPlan } from '../src/engine/plan-load.js'
+import { loadPlan } from '../src/engine/plan-load.ts'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
 const CHARTER_PATH = path.join(ROOT, 'PROJECT_CHARTER.md')

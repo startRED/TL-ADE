@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'vitest'
-import { parseUsage } from '../../src/adapters/claude/parse.js'
+import { parseUsage } from '../../src/adapters/claude/parse.ts'
 
 const TRANSCRIPTS_DIR = fileURLToPath(new URL('../../fixtures/transcripts/claude/', import.meta.url))
 

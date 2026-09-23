@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from 'vitest'
-import { dispatchClaude } from '../../src/adapters/claude/index.js'
-import * as parseModule from '../../src/adapters/claude/parse.js'
-import { authorizedStep } from '../../src/engine/paid-call.js'
+import { dispatchClaude } from '../../src/adapters/claude/index.ts'
+import * as parseModule from '../../src/adapters/claude/parse.ts'
+import { authorizedStep } from '../../src/engine/paid-call.ts'
 import { digest16 } from '../../src/journal/canonical.ts'
 
 const parseTokens = (parseModule as any).parseTokens

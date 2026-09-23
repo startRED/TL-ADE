@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
-import { classifyGreen, classifyRed } from '../../../src/evals/classify.js'
-import { validateScenarioStrictness } from '../../../src/evals/strictness.js'
+import { classifyGreen, classifyRed } from '../../../src/evals/classify.ts'
+import { validateScenarioStrictness } from '../../../src/evals/strictness.ts'
 import { runCase } from './_caso.mjs'
 
 const report = (total, failed) => ({ numTotalTests: total, numPassedTests: total - failed, numFailedTests: failed })

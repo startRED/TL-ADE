@@ -8,9 +8,9 @@ import {
   installShutdownDrain,
   readMissionControl,
   requestMissionControl,
-} from '../src/engine/control.js'
-import { resumeMission } from '../src/engine/resume.js'
-import { runSequentialMission } from '../src/engine/schedule.js'
+} from '../src/engine/control.ts'
+import { resumeMission } from '../src/engine/resume.ts'
+import { runSequentialMission } from '../src/engine/schedule.ts'
 import { digest16 } from '../src/journal/canonical.ts'
 import { openJournal, readJournal } from '../src/journal/journal.ts'
 import { buildRuntimeStamp } from '../src/journal/stamp.ts'

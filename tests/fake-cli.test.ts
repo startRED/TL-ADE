@@ -4,11 +4,11 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { AdeError } from '../src/journal/errors.ts'
-import { bumpCounter, readCounter, runFakeCli } from '../src/adapters/fake/cli.js'
+import { bumpCounter, readCounter, runFakeCli } from '../src/adapters/fake/cli.ts'
 import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
-const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.js')
+const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.ts')
 
 type EngineSpawnSyncOptions = SpawnSyncOptionsWithStringEncoding & {
   detached?: boolean

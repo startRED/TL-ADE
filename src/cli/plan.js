@@ -3,9 +3,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
-import { dispatchAgy } from '../adapters/agy/index.js'
+import { dispatchAgy } from '../adapters/agy/index.ts'
 import { canonicalize } from '../journal/canonical.ts'
-import { planMission } from '../mission/plan-lifecycle.js'
+import { planMission } from '../mission/plan-lifecycle.ts'
 import { resolveBinary } from '../runner/resolve-binary.ts'
 
 /**

@@ -186,7 +186,7 @@ describe('evidence-review-contracts', () => {
   })
 
   test('CA4: módulo inicial de revisão expõe RESULT_FORMAT_VERSION igual a 2, REQUESTED_ACTIONS congelado e seis prefixos tipados', async () => {
-    const mod = await import('../src/review/validate.js')
+    const mod = await import('../src/review/validate.ts')
     const { RESULT_FORMAT_VERSION, REQUESTED_ACTIONS, REFERENCE_PREFIXES } = mod
 
     expect(RESULT_FORMAT_VERSION).toBe(2)

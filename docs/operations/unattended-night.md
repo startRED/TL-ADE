@@ -20,7 +20,7 @@ ade run --plan <plano.json> --repo <repositório> --unattended
 ## 2. Precondições duras
 
 Antes de qualquer despacho (e portanto antes de qualquer chamada paga) o motor confere, nesta ordem
-(`src/engine/preflight.js`, `HARD_PRECONDITION_ORDER`):
+(`src/engine/preflight.ts`, `HARD_PRECONDITION_ORDER`):
 
 | id | o que exige |
 | --- | --- |
@@ -40,7 +40,7 @@ roda. As portas das precondições são montadas em `src/cli/run.js`.
   `evidence_path` absoluto); unidades independentes seguem, dependentes não rodam.
 - Orçamento de parede esgotado ou teto de estacionadas atingido grava `batch_stopped` com o motivo
   (`wall_clock_exhausted`, `max_parked_units`); a story em curso chega ao checkpoint, não é
-  abortada no meio de um efeito (`src/engine/budget.js`, `src/engine/loop.js`).
+  abortada no meio de um efeito (`src/engine/budget.ts`, `src/engine/loop.ts`).
 - Se `taskkill /T /F /PID` for recusado pelo sistema, o motor usa um encerramento de fallback
   limitado e grava `terminated_by`; nenhuma decisão depende desse resultado.
 

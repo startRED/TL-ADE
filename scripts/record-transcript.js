@@ -6,7 +6,7 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { AdeError } from '../src/journal/errors.ts'
 import { buildArgv, resolveBinary } from '../src/runner/resolve-binary.ts'
-import { buildClaudeArgs } from '../src/adapters/claude/argv.js'
+import { buildClaudeArgs } from '../src/adapters/claude/argv.ts'
 
 const NAME_RE = /^[a-z0-9_]+$/
 

@@ -1,5 +1,5 @@
-import { runContained } from '../gates/command.js'
-import { buildExtract, safeId, writeRawArtifact } from '../gates/output.js'
+import { runContained } from '../gates/command.ts'
+import { buildExtract, safeId, writeRawArtifact } from '../gates/output.ts'
 import { AdeError } from '../journal/errors.ts'
 
 export type FirewallRunOptions = {

@@ -2,7 +2,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
-import { buildCodexArgs } from '../adapters/codex/argv.js'
+import { buildCodexArgs } from '../adapters/codex/argv.ts'
 
 /**
  * @typedef {Object} VisualEvalCriteria

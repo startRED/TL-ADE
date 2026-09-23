@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, test } from 'vitest'
-import { isReviewApproved, validateEvidenceResult } from '../src/review/validate.js'
+import { isReviewApproved, validateEvidenceResult } from '../src/review/validate.ts'
 
 function loadFixture(schemaName: string, kind: 'valid' | 'invalid'): Record<string, any> {
   const raw = readFileSync(

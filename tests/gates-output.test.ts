@@ -2,7 +2,7 @@ import fs, { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSy
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, test, vi } from 'vitest'
-import { buildExtract, EXTRACT_CAPS, MAX_RAW_REF_BYTES, safeId, writeRawArtifact } from '../src/gates/output.js'
+import { buildExtract, EXTRACT_CAPS, MAX_RAW_REF_BYTES, safeId, writeRawArtifact } from '../src/gates/output.ts'
 
 describe('gates output and raw artifacts', () => {
   // CA1: Dado writeRawArtifact({missionDir, ref:'gates/lint/abc123', text:'x'.repeat(50)}),

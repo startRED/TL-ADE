@@ -1,6 +1,6 @@
 import path from 'node:path'
-import { findStoryStarted } from '../engine/resume.js'
-import { safeId } from '../gates/output.js'
+import { findStoryStarted } from '../engine/resume.ts'
+import { safeId } from '../gates/output.ts'
 import { createGitPort } from '../git/gitport.ts'
 import { StateIntegrityError } from '../journal/errors.ts'
 import { openIntents } from '../journal/fold.ts'

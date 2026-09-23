@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
@@ -75,4 +75,54 @@ describe('migração TS do núcleo durável', () => {
     expect(jsdocType.test(' * @typedef {Object} Coisa')).toBe(true)
     expect(jsdocType.test(' * @param nome descrição sem tipo')).toBe(false)
   })
+})
+
+// Diretórios do motor convertidos na segunda parte; engine.ts entra como arquivo solto.
+const ENGINE_DIRS = ['engine', 'adapters', 'review', 'gates', 'evals', 'mission']
+const engineFiles = [
+  ...ENGINE_DIRS.flatMap((d) => listFiles(path.join(ROOT, 'src', d))),
+  ...['engine.js', 'engine.ts'].map((f) => path.join(ROOT, 'src', f)).filter((f) => existsSync(f)),
+]
+const engineTsFiles = engineFiles.filter((f) => f.endsWith('.ts'))
+
+describe('migração TS do motor, adaptadores e revisão', () => {
+  test('ca1_engine_dirs_have_no_js_and_no_jsdoc_types', () => {
+    expect(engineFiles.filter((f) => /\.(c|m)?js$/.test(f)).map(rel)).toEqual([])
+    expect(engineTsFiles.length).toBeGreaterThanOrEqual(34)
+    const offenders = engineTsFiles.flatMap((f) =>
+      readFileSync(f, 'utf8').split('\n')
+        .map((line, i) => (jsdocType.test(line) ? `${rel(f)}:${i + 1}` : null))
+        .filter((x): x is string => x !== null),
+    )
+    expect(offenders).toEqual([])
+  })
+
+  test('ca2_engine_interfaces_keep_their_signatures_as_ts_modules', async () => {
+    const engine = await import('../src/engine.ts')
+    const schedule = await import('../src/engine/schedule.ts')
+    const resume = await import('../src/engine/resume.ts')
+    const deliver = await import('../src/engine/deliver.ts')
+    expect(engine.runStory).toBeTypeOf('function')
+    expect(engine.runStory.length).toBe(2)
+    expect(engine.runSequentialMission).toBe(schedule.runSequentialMission)
+    expect(schedule.runSequentialMission.length).toBe(2)
+    expect(resume.resumeMission.length).toBe(1)
+    expect(deliver.deliverStory.length).toBe(1)
+  })
+
+  test('ca3_engine_ts_compiles_under_strict_without_suppression', () => {
+    expect(engineTsFiles.length).toBeGreaterThanOrEqual(34)
+    const suppression = /@ts-ignore|@ts-expect-error|@ts-nocheck|oxlint-disable|eslint-disable/
+    expect(engineTsFiles.filter((f) => suppression.test(readFileSync(f, 'utf8'))).map(rel)).toEqual([])
+
+    const { config } = ts.readConfigFile(path.join(ROOT, 'tsconfig.json'), ts.sys.readFile)
+    const parsed = ts.parseJsonConfigFileContent(config, ts.sys, ROOT)
+    expect(parsed.options.strict).toBe(true)
+    const program = ts.createProgram(engineTsFiles, parsed.options)
+    const engineSet = new Set(engineTsFiles.map((f) => path.resolve(f)))
+    const errors = ts.getPreEmitDiagnostics(program)
+      .filter((d) => d.file && engineSet.has(path.resolve(d.file.fileName)))
+      .map((d) => `${rel(d.file!.fileName)}: ${ts.flattenDiagnosticMessageText(d.messageText, '\n')}`)
+    expect(errors).toEqual([])
+  }, 180_000)
 })

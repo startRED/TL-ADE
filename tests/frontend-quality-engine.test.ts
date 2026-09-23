@@ -13,7 +13,7 @@ import { judgeVisual, calculateRenormalizedFinal, evaluateCutoff } from '../src/
 import { probeImpeccable, createImpeccableDetector, PINNED_ENGINE_VERSION } from '../src/visual/impeccable.js'
 import { runFrontendQuality } from '../src/visual/evaluate.js'
 import { compileIntent } from '../src/intent/compiler.js'
-import { prepareStory } from '../src/engine/prepare.js'
+import { prepareStory } from '../src/engine/prepare.ts'
 import { renderVisualComparison } from '../src/cli/report.js'
 import { runDoctor } from '../src/cli/doctor.js'
 import { makeRepo, removeRepo } from './helpers/git-repo.ts'

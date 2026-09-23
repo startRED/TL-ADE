@@ -6,14 +6,14 @@ import { AdeError } from '../src/journal/errors.ts'
 import { openJournal, readJournal } from '../src/journal/journal.ts'
 import { createStepRunner } from '../src/step/step.ts'
 import { validate } from '../src/schema/index.ts'
-import { buildClaudeArgs, CLAUDE_PROMPT } from '../src/adapters/claude/argv.js'
-import { parseClaudeOutput, parseUnitResult, parseUsage, stripAnsi } from '../src/adapters/claude/parse.js'
-import { dispatchClaude } from '../src/adapters/claude/index.js'
+import { buildClaudeArgs, CLAUDE_PROMPT } from '../src/adapters/claude/argv.ts'
+import { parseClaudeOutput, parseUnitResult, parseUsage, stripAnsi } from '../src/adapters/claude/parse.ts'
+import { dispatchClaude } from '../src/adapters/claude/index.ts'
 import { runWorker } from '../src/runner/spawn.ts'
 import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
-const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.js')
+const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.ts')
 const SCHEMA_PATH = fileURLToPath(new URL('../schemas/unit-result.schema.json', import.meta.url))
 const TRANSCRIPTS_DIR = fileURLToPath(new URL('../fixtures/transcripts/claude/', import.meta.url))
 

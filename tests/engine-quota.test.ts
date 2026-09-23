@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
-import { runStory } from '../src/engine.js'
+import { runStory } from '../src/engine.ts'
 import { AdeError } from '../src/journal/errors.ts'
 import { openJournal, readJournal } from '../src/journal/journal.ts'
 import { makeRepo, removeRepo } from './helpers/git-repo.ts'
@@ -167,7 +167,7 @@ test('CA4_absolute_cap_parks_and_resume_reuses_official_reservation', async () =
 })
 
 test('CA3_unavailable_local_adapter_never_fabricates_a_receipt', async () => {
-  const { createLocalQuotaPort } = await import('../src/adapters/local/quota.js')
+  const { createLocalQuotaPort } = await import('../src/adapters/local/quota.ts')
   await expect(createLocalQuotaPort().readReceipt({ family: 'claude', now: NOW })).resolves.toBeNull()
 
   const subject = fixture()
@@ -360,7 +360,7 @@ test('CA1_recibo_oficial_valido_permite_despacho_do_cli_ao_runner_dentro_dos_lim
 }, 20000)
 
 test('CA2_ausencia_expiracao_ou_inconsistencia_bloqueia_antes_da_chamada', async () => {
-  const { createLocalQuotaPort } = await import('../src/adapters/local/quota.js')
+  const { createLocalQuotaPort } = await import('../src/adapters/local/quota.ts')
   const repo = makeRepo()
   repos.push(repo.dir)
 
@@ -495,7 +495,7 @@ test('CA5_relatorio_distingue_percentual_oficial_tokens_e_custo_sem_conversao_in
 })
 
 test('CA6_testes_usam_fontes_falsas_controladas_e_disponibilidade_real_e_verificada_separadamente', async () => {
-  const quotaModule = await import('../src/adapters/local/quota.js') as any
+  const quotaModule = await import('../src/adapters/local/quota.ts') as any
   expect(typeof quotaModule.verifyRealQuotaAvailability).toBe('function')
 
   const probeStub = vi.fn().mockResolvedValue({ reachable: true, verified_at: new Date(NOW).toISOString() })

@@ -1,7 +1,7 @@
 // @ts-check
 import fs from 'node:fs'
 import path from 'node:path'
-import { activeTakeover } from '../engine/control.js'
+import { activeTakeover } from '../engine/control.ts'
 import { digest16 } from '../journal/canonical.ts'
 import { readJournal } from '../journal/journal.ts'
 import { validate } from '../schema/index.ts'

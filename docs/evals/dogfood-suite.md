@@ -11,7 +11,7 @@ node node_modules/vitest/vitest.mjs run tests/dogfood-suite.test.ts
 ## O que ela contém
 
 - Catálogo: `fixtures/dogfood/catalog.json`, de 20 a 50 tarefas, cada uma declarando o grupo.
-- Os cinco grupos (`DOGFOOD_GROUPS` em `src/evals/eval-runner.js`): tradutor, jornadas, visual,
+- Os cinco grupos (`DOGFOOD_GROUPS` em `src/evals/eval-runner.ts`): tradutor, jornadas, visual,
   estritez e durabilidade. Cada grupo tem sua checagem em `fixtures/dogfood/checks/`
   (por exemplo `fixtures/dogfood/checks/durabilidade.mjs`).
 - Tarefa instável de controle: `fixtures/dogfood/flaky-task.json`.

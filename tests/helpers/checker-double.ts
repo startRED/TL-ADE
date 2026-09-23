@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { dispatchCodex } from '../../src/adapters/codex/index.js'
-import { computeObservedInputDigest } from '../../src/engine.js'
+import { dispatchCodex } from '../../src/adapters/codex/index.ts'
+import { computeObservedInputDigest } from '../../src/engine.ts'
 import { createGitPort } from '../../src/git/gitport.ts'
 
 // Marcadores que o cenário do Checker falso usa no lugar da árvore e do digest verdadeiros:

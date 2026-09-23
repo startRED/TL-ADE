@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'vitest'
 import { AdeError } from '../../src/journal/errors.ts'
-import { nextReady, validateGraph } from '../../src/engine/schedule.js'
-import { checkMissionBudget } from '../../src/engine/budget.js'
-import { detectLoop, normalize } from '../../src/engine/loop.js'
-import { loadPlan } from '../../src/engine/plan-load.js'
-import { validateEvidenceResult } from '../../src/review/validate.js'
+import { nextReady, validateGraph } from '../../src/engine/schedule.ts'
+import { checkMissionBudget } from '../../src/engine/budget.ts'
+import { detectLoop, normalize } from '../../src/engine/loop.ts'
+import { loadPlan } from '../../src/engine/plan-load.ts'
+import { validateEvidenceResult } from '../../src/review/validate.ts'
 
 describe('policy parity', () => {
   // Parity sources: test_batch_runs_two_dependent_units_and_closes, test_continue_independent_after_block_runs_unrelated_unit

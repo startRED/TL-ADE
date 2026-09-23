@@ -11,7 +11,7 @@ import {
   loadDogfoodCatalog,
   runDogfoodSuite,
   runDogfoodTask,
-} from '../src/evals/eval-runner.js'
+} from '../src/evals/eval-runner.ts'
 import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))

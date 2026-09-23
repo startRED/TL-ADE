@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { runCase } from './_caso.mjs'
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url))
-const FAKE_CLI = path.join(ROOT, 'src/adapters/fake/cli.js')
+const FAKE_CLI = path.join(ROOT, 'src/adapters/fake/cli.ts')
 const REMOTE = process.env.ADE_DOGFOOD_REMOTE
 const RUN = process.env.ADE_DOGFOOD_RUN
 

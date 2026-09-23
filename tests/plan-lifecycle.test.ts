@@ -9,7 +9,7 @@ import {
   approveMission,
   replanRemaining,
   assertApprovedPlan,
-} from '../src/mission/plan-lifecycle.js'
+} from '../src/mission/plan-lifecycle.ts'
 import { main as cliMain } from '../src/cli/index.js'
 import { splitContract } from '../src/intent/split.js'
 import { validateCompiledPlan } from '../src/intent/validate.js'

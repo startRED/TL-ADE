@@ -478,7 +478,7 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
   // de uma habilidade aprovada, então o conjunto congelado não se amplia; em execução desatendida
   // a história para aguardando o operador antes de qualquer despacho.
   test('criterio_8_aprovacao_congela_conjunto_elegivel_e_skill_nova_ou_modificada_estaciona', async () => {
-    const { planMission, approveMission, assertApprovedPlan } = await import('../src/mission/plan-lifecycle.js')
+    const { planMission, approveMission, assertApprovedPlan } = await import('../src/mission/plan-lifecycle.ts')
     const repo = makeRepo()
     tmpDirs.push(repo.dir)
 
@@ -554,8 +554,8 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
   // continua suprimindo habilidades, plugins e memória nativos.
   test('criterio_10_doctor_relata_delta_de_memoria_e_chamada_despachada_suprime_personalizacoes', async () => {
     const { runDoctor } = await import('../src/cli/doctor.js')
-    const { buildClaudeArgs } = await import('../src/adapters/claude/argv.js')
-    const { buildCodexArgs } = await import('../src/adapters/codex/argv.js')
+    const { buildClaudeArgs } = await import('../src/adapters/claude/argv.ts')
+    const { buildCodexArgs } = await import('../src/adapters/codex/argv.ts')
 
     const homeDir = makeTmpDir('ade-doctor-skills-')
     tmpDirs.push(homeDir)

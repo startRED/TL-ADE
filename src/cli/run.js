@@ -5,23 +5,23 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { createLocalPreflightPorts } from '../adapters/local/preflight.js'
-import { createLocalQuotaPort } from '../adapters/local/quota.js'
-import { dispatchClaude } from '../adapters/claude/index.js'
-import { dispatchCodex } from '../adapters/codex/index.js'
+import { createLocalPreflightPorts } from '../adapters/local/preflight.ts'
+import { createLocalQuotaPort } from '../adapters/local/quota.ts'
+import { dispatchClaude } from '../adapters/claude/index.ts'
+import { dispatchCodex } from '../adapters/codex/index.ts'
 import { checkCanary, plantCanary } from '../contain/canary.ts'
 import { contain } from '../contain/contain.ts'
-import { runStory } from '../engine.js'
-import { loadPlan } from '../engine/plan-load.js'
-import { runHardPreconditions, runPreflight } from '../engine/preflight.js'
-import { guardExternalEffects, runUnattendedBatch } from '../engine/loop.js'
-import { prepareStory } from '../engine/prepare.js'
-import { installShutdownDrain, readMissionControl } from '../engine/control.js'
-import { resumeMission } from '../engine/resume.js'
-import { checkApproval } from '../engine/schedule.js'
-import { replanRemaining } from '../mission/plan-lifecycle.js'
-import { createEvalRunner } from '../evals/eval-runner.js'
-import { createGateRunner } from '../gates/gates.js'
+import { runStory } from '../engine.ts'
+import { loadPlan } from '../engine/plan-load.ts'
+import { runHardPreconditions, runPreflight } from '../engine/preflight.ts'
+import { guardExternalEffects, runUnattendedBatch } from '../engine/loop.ts'
+import { prepareStory } from '../engine/prepare.ts'
+import { installShutdownDrain, readMissionControl } from '../engine/control.ts'
+import { resumeMission } from '../engine/resume.ts'
+import { checkApproval } from '../engine/schedule.ts'
+import { replanRemaining } from '../mission/plan-lifecycle.ts'
+import { createEvalRunner } from '../evals/eval-runner.ts'
+import { createGateRunner } from '../gates/gates.ts'
 import { createGitPort } from '../git/gitport.ts'
 import { digest16 } from '../journal/canonical.ts'
 import { AdeError } from '../journal/errors.ts'
@@ -50,11 +50,11 @@ const SHUTDOWN_GRACE_MS = 30_000
  *   repoDir: string,
  *   missionDir: string,
  *   missionId: string,
- *   loaded: import('../engine/plan-load.js').LoadedPlan,
+ *   loaded: import('../engine/plan-load.ts').LoadedPlan,
  *   events: Array<Record<string, any>>,
  *   gitPort: any,
  * }} input
- * @returns {Record<string, { check: () => Promise<import('../engine/preflight.js').PreflightCheckResult> }>}
+ * @returns {Record<string, { check: () => Promise<import('../engine/preflight.ts').PreflightCheckResult> }>}
  */
 function createHardPreconditionPorts({ repoDir, missionDir, missionId, loaded, events, gitPort }) {
   const ready = { status: /** @type {const} */ ('ready'), reason: null }
@@ -265,7 +265,7 @@ export async function runCommand(options, deps = {}) {
     if (env.ADE_FAKE_CLI === '1') {
       resolved = {
         exe: process.execPath,
-        prefixArgs: [fileURLToPath(new URL('../adapters/fake/cli.js', import.meta.url))],
+        prefixArgs: [fileURLToPath(new URL('../adapters/fake/cli.ts', import.meta.url))],
       }
       checkerResolved = resolved
       workerEnv = {

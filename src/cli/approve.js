@@ -2,7 +2,7 @@
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 import { canonicalize } from '../journal/canonical.ts'
-import { approveMission } from '../mission/plan-lifecycle.js'
+import { approveMission } from '../mission/plan-lifecycle.ts'
 
 /**
  * Ponto de entrada do comando `ade approve`.

@@ -4,8 +4,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
-import { loadPlan } from '../engine/plan-load.js'
-import { createEvalRunner, loadDogfoodCatalog } from '../evals/eval-runner.js'
+import { loadPlan } from '../engine/plan-load.ts'
+import { createEvalRunner, loadDogfoodCatalog } from '../evals/eval-runner.ts'
 import { AdeError } from '../journal/errors.ts'
 
 const DOGFOOD_DIR = path.resolve(fileURLToPath(new URL('../../fixtures/dogfood', import.meta.url)))

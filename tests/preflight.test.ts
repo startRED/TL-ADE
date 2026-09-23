@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'vitest'
-import { PREFLIGHT_CHECK_ORDER, runPreflight, type PreflightCheckPort } from '../src/engine/preflight.js'
+import { PREFLIGHT_CHECK_ORDER, runPreflight, type PreflightCheckPort } from '../src/engine/preflight.ts'
 import { AdeError } from '../src/journal/errors.ts'
 
 const ROOT_DIR = fileURLToPath(new URL('..', import.meta.url))

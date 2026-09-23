@@ -2,19 +2,19 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { createLocalPreflightPorts } from '../src/adapters/local/preflight.js'
-import { runPreflight } from '../src/engine/preflight.js'
-import { dispatchClaude } from '../src/adapters/claude/index.js'
+import { createLocalPreflightPorts } from '../src/adapters/local/preflight.ts'
+import { runPreflight } from '../src/engine/preflight.ts'
+import { dispatchClaude } from '../src/adapters/claude/index.ts'
 import { approvedReviewAction, makeCheckerDouble } from './helpers/checker-double.ts'
-import { readCounter } from '../src/adapters/fake/cli.js'
+import { readCounter } from '../src/adapters/fake/cli.ts'
 import { checkCanary, plantCanary } from '../src/contain/canary.ts'
 import { contain } from '../src/contain/contain.ts'
-import { CANARY_FAMILIES, runStory } from '../src/engine.js'
-import { ENGINE_FAULT_POINTS, maybeEngineFault } from '../src/engine/faults.js'
-import { loadPlan } from '../src/engine/plan-load.js'
-import { prepareStory } from '../src/engine/prepare.js'
-import { createEvalRunner } from '../src/evals/eval-runner.js'
-import { createGateRunner } from '../src/gates/gates.js'
+import { CANARY_FAMILIES, runStory } from '../src/engine.ts'
+import { ENGINE_FAULT_POINTS, maybeEngineFault } from '../src/engine/faults.ts'
+import { loadPlan } from '../src/engine/plan-load.ts'
+import { prepareStory } from '../src/engine/prepare.ts'
+import { createEvalRunner } from '../src/evals/eval-runner.ts'
+import { createGateRunner } from '../src/gates/gates.ts'
 import { createGitPort } from '../src/git/gitport.ts'
 import { AdeError } from '../src/journal/errors.ts'
 import { openJournal, readJournal } from '../src/journal/journal.ts'
@@ -25,7 +25,7 @@ import { makeRepo, removeRepo } from './helpers/git-repo.ts'
 import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
-const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.js')
+const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.ts')
 // O schema do task-contract exige o campo `then` no cenário; ele vem como texto JSON (o contrato
 // é gravado em stories/<id>.json) para não virar um objeto literal thenable no código.
 const SCENARIO_C1_JSON =

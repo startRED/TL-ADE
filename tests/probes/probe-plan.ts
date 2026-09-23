@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { observedUsd } from '../../src/engine/budget.js'
+import { observedUsd } from '../../src/engine/budget.ts'
 
 /**
  * Grava o ambiente de testes mínimo no repositório de destino da probe.

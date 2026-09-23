@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, test } from 'vitest'
 import { validate, validateSupported } from '../src/schema/index.ts'
-import { parseClaudeOutput, parseUnitResult } from '../src/adapters/claude/parse.js'
+import { parseClaudeOutput, parseUnitResult } from '../src/adapters/claude/parse.ts'
 
 const SCHEMA_NAMES = [
   'journal-event',

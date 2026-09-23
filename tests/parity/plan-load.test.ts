@@ -3,7 +3,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { digest16 } from '../../src/journal/canonical.ts'
 import { AdeError } from '../../src/journal/errors.ts'
-import { defaultStoryBudget, loadPlan } from '../../src/engine/plan-load.js'
+import { defaultStoryBudget, loadPlan } from '../../src/engine/plan-load.ts'
 import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.ts'
 
 let tmpDirs: string[] = []

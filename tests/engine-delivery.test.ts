@@ -3,14 +3,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { dispatchClaude } from '../src/adapters/claude/index.js'
+import { dispatchClaude } from '../src/adapters/claude/index.ts'
 import { checkCanary, plantCanary } from '../src/contain/canary.ts'
 import { contain } from '../src/contain/contain.ts'
-import { runStory } from '../src/engine.js'
-import { loadPlan } from '../src/engine/plan-load.js'
-import { prepareStory } from '../src/engine/prepare.js'
-import { createEvalRunner } from '../src/evals/eval-runner.js'
-import { createGateRunner } from '../src/gates/gates.js'
+import { runStory } from '../src/engine.ts'
+import { loadPlan } from '../src/engine/plan-load.ts'
+import { prepareStory } from '../src/engine/prepare.ts'
+import { createEvalRunner } from '../src/evals/eval-runner.ts'
+import { createGateRunner } from '../src/gates/gates.ts'
 import { createGitPort } from '../src/git/gitport.ts'
 import { openJournal, readJournal } from '../src/journal/journal.ts'
 import { compilePack } from '../src/pack/pack.ts'
@@ -21,7 +21,7 @@ import { makeRepo, removeRepo } from './helpers/git-repo.ts'
 import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
-const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.js')
+const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.ts')
 const SCENARIO_C1_JSON =
   '{"id":"C1","given":"initial state without hello.txt","when":"maker creates hello.txt with ok",' +
   '"then":"eval check passes","verifiers":["E1"],"evals":["E1"]}'

@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'vitest'
 import { AdeError } from '../src/journal/errors.ts'
-import { loadPlan } from '../src/engine/plan-load.js'
+import { loadPlan } from '../src/engine/plan-load.ts'
 import {
   ABSOLUTE_USD_CAP,
   PHASE_TURN_LIMITS,
   authorizePaidCall,
   observedUsd,
   validateQuotaReceipt,
-} from '../src/engine/budget.js'
+} from '../src/engine/budget.ts'
 
 describe('budget controls', () => {
   // CA1: Teto absoluto de US$ 300 e reservas abertas

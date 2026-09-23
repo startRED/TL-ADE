@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { makeRepo, removeRepo } from './helpers/git-repo.ts'
-import { prepareStory } from '../src/engine/prepare.js'
+import { prepareStory } from '../src/engine/prepare.ts'
 
 let tmpDirs: string[] = []
 

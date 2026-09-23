@@ -15,7 +15,7 @@ import { makeRepo, removeRepo } from './helpers/git-repo.ts'
 import { makeTmpDir } from './helpers/tmp-dir.ts'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
-const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.js')
+const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.ts')
 
 const plantCanary = rawPlantCanary as any
 const checkCanary = rawCheckCanary as any

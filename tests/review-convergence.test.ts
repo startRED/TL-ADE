@@ -2,17 +2,17 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, test } from 'vitest'
-import { dispatchClaude } from '../src/adapters/claude/index.js'
-import { buildCodexArgs } from '../src/adapters/codex/argv.js'
-import { dispatchCodex } from '../src/adapters/codex/index.js'
+import { dispatchClaude } from '../src/adapters/claude/index.ts'
+import { buildCodexArgs } from '../src/adapters/codex/argv.ts'
+import { dispatchCodex } from '../src/adapters/codex/index.ts'
 import { checkCanary, plantCanary } from '../src/contain/canary.ts'
 import { contain } from '../src/contain/contain.ts'
-import { computeObservedInputDigest, runStory } from '../src/engine.js'
-import { readCounter } from '../src/adapters/fake/cli.js'
-import { loadPlan } from '../src/engine/plan-load.js'
-import { prepareStory } from '../src/engine/prepare.js'
-import { createEvalRunner } from '../src/evals/eval-runner.js'
-import { createGateRunner } from '../src/gates/gates.js'
+import { computeObservedInputDigest, runStory } from '../src/engine.ts'
+import { readCounter } from '../src/adapters/fake/cli.ts'
+import { loadPlan } from '../src/engine/plan-load.ts'
+import { prepareStory } from '../src/engine/prepare.ts'
+import { createEvalRunner } from '../src/evals/eval-runner.ts'
+import { createGateRunner } from '../src/gates/gates.ts'
 import { createGitPort } from '../src/git/gitport.ts'
 import { openJournal, readJournal } from '../src/journal/journal.ts'
 import { compilePack } from '../src/pack/pack.ts'
@@ -22,7 +22,7 @@ import { makeRepo, removeRepo } from './helpers/git-repo.ts'
 import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
-const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.js')
+const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.ts')
 
 let repoDirs: string[] = []
 let tmpDirs: string[] = []

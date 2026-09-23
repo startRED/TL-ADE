@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import { makeRepo, removeRepo } from '../helpers/git-repo.ts'
 import { UnexpectedTreeStateError } from '../../src/journal/errors.ts'
 // Importações dos módulos da story (a implementar na fase 2)
-import { prepareStory } from '../../src/engine/prepare.js'
+import { prepareStory } from '../../src/engine/prepare.ts'
 
 let tmpDirs: string[] = []
 
