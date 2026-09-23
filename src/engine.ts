@@ -59,6 +59,15 @@ export const CANARY_FAMILIES: readonly string[] = ['claude', 'codex']
  * Composição do pack para a telemetria. Manifesto sem a lista de seções (compilador sem
  * detalhamento) vira uma seção única `pack` com o total medido, para a soma continuar fechando.
  */
+/** Instrução do revisor de outra empresa: sem ela o modelo real inventava as revisões e citava refs que o motor não verifica. */
+const REVIEW_POLICY = [
+  'Você revisa esta parte e é de outra empresa, não de quem escreveu. Leia o contrato, o review_request e o código na worktree; não altere nada.',
+  '- Aprove só se o código e as provas cumprem os critérios do contrato; senão, liste os achados com severidade e ação.',
+  '- Copie contract_revision e input_revision exatamente como estão em echo_exactly.',
+  '- Em evidence, sources, evidence_refs e result_ref, cite só referências da lista citable_refs.',
+  '- Responda somente pelo schema.',
+].join('\n')
+
 /**
  * Orquestra o ciclo durável de execução de uma story.
  *
@@ -1321,6 +1330,46 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       contractRevision: (story).contract_revision,
     })
 
+    // Referências que o motor consegue verificar: o revisor só pode citar estas (as outras viram unverified_reference).
+    const verifiedRefs = new Set()
+    for (const ref of executedEvalRefs) {
+      verifiedRefs.add(`eval:${ref}`)
+    }
+    for (const g of gateRes.results ?? []) {
+      if (g.id) verifiedRefs.add(`gate:${g.id}`)
+    }
+    for (const p of changedPaths) {
+      verifiedRefs.add(`file:${p}`)
+      const fullPath = path.join(worktreeDir, p)
+      try {
+        if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+          const lines = fs.readFileSync(fullPath, 'utf8').split('\n').length
+          verifiedRefs.add(`file:${p}#L1-L${lines}`)
+          verifiedRefs.add(`file:${p}#L1-L1`)
+        }
+      } catch {
+        // Arquivo ilegível agora (corrida/permissão): a ref com intervalo de linhas fica
+        // sem verificação e o Checker que a citar será recusado por unverified_reference.
+      }
+    }
+    for (const evalDef of story.evals ?? []) {
+      for (const evPath of evalDef.evidence ?? []) {
+        verifiedRefs.add(`file:${evPath}`)
+        const fullPath = path.join(worktreeDir, evPath)
+        try {
+          if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+            const lines = fs.readFileSync(fullPath, 'utf8').split('\n').length
+            verifiedRefs.add(`file:${evPath}#L1-L${lines}`)
+            verifiedRefs.add(`file:${evPath}#L1-L1`)
+          }
+        } catch {
+          // Mesmo caso do laço acima: evidência ilegível não vira ref verificada.
+        }
+      }
+    }
+
+    const expectedContractRevision = (story).contract_revision ?? 'sha256:0000000000000000000000000000000000000000000000000000000000000000'
+
     // O revisor recebe o mesmo contrato do maker, os achados anteriores e a resposta do maker.
     const reviewRequest = buildReviewHandoff({
       contract: {
@@ -1337,8 +1386,14 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     const reviewPack = deps.compilePack({
       sections: {
         contract: JSON.stringify(contract),
-        policy: 'review',
-        story: JSON.stringify({ ...JSON.parse(dedupStorySection(story).text), review_request: reviewRequest }, null, 2),
+        policy: REVIEW_POLICY,
+        // o revisor real não adivinha as revisões nem as refs: copia estas (a validação compara com elas)
+        story: JSON.stringify({
+          ...JSON.parse(dedupStorySection(story).text),
+          review_request: reviewRequest,
+          echo_exactly: { contract_revision: expectedContractRevision, input_revision: { tree: treeAfterContain, digest: observedDigest } },
+          citable_refs: Array.from(verifiedRefs),
+        }, null, 2),
       },
       missionDir,
       stepId: `${storyId}:r${round}:review-pack`,
@@ -1468,45 +1523,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       }
     }
 
-    const verifiedRefs = new Set()
-    for (const ref of executedEvalRefs) {
-      verifiedRefs.add(`eval:${ref}`)
-    }
-    for (const g of gateRes.results ?? []) {
-      if (g.id) verifiedRefs.add(`gate:${g.id}`)
-    }
-    for (const p of changedPaths) {
-      verifiedRefs.add(`file:${p}`)
-      const fullPath = path.join(worktreeDir, p)
-      try {
-        if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
-          const lines = fs.readFileSync(fullPath, 'utf8').split('\n').length
-          verifiedRefs.add(`file:${p}#L1-L${lines}`)
-          verifiedRefs.add(`file:${p}#L1-L1`)
-        }
-      } catch {
-        // Arquivo ilegível agora (corrida/permissão): a ref com intervalo de linhas fica
-        // sem verificação e o Checker que a citar será recusado por unverified_reference.
-      }
-    }
-    for (const evalDef of story.evals ?? []) {
-      for (const evPath of evalDef.evidence ?? []) {
-        verifiedRefs.add(`file:${evPath}`)
-        const fullPath = path.join(worktreeDir, evPath)
-        try {
-          if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
-            const lines = fs.readFileSync(fullPath, 'utf8').split('\n').length
-            verifiedRefs.add(`file:${evPath}#L1-L${lines}`)
-            verifiedRefs.add(`file:${evPath}#L1-L1`)
-          }
-        } catch {
-          // Mesmo caso do laço acima: evidência ilegível não vira ref verificada.
-        }
-      }
-    }
-
     const reviewContext = {
-      contractRevision: (story).contract_revision ?? 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+      contractRevision: expectedContractRevision,
       inputRevision: {
         tree: treeAfterContain,
         digest: observedDigest,

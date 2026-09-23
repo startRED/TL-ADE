@@ -429,6 +429,11 @@ describe('engine', () => {
     expect(events.some((e) => e.kind === 'telemetry' && (e.data as any).role === 'prova')).toBe(true)
     const order = events.map((e) => String(e.step_id ?? ''))
     expect(order.findIndex((id) => id === 'ADE-T1:proof')).toBeLessThan(order.findIndex((id) => id.endsWith(':maker')))
+    // o revisor recebe o que precisa ecoar e o que pode citar
+    const reviewPack = fs.readFileSync(path.join(fixture.missionDir, 'artifacts', 'packs', 'ADE-T1_r1_review-pack', 'pack.md'), 'utf8')
+    expect(reviewPack).toContain('echo_exactly')
+    expect(reviewPack).toContain('citable_refs')
+    expect(reviewPack).toContain('Copie contract_revision e input_revision')
   }, 90_000)
 
   // CA2: Dado um contrato com roles.maker.family 'codex', quando runStory roda, então
