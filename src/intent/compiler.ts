@@ -157,7 +157,8 @@ function buildContract({
     skills,
     roles: {
       maker: { family: 'claude', model_id: 'claude-opus-5-5' }, // 22/09: Terminal-Bench 4.0 66% contra 52% do Opus 5, US$ 4/20
-      checker_round: { family: 'codex', model_id: 'codex-1' },
+      // modelo do catálogo aceito pela conta ChatGPT; 'codex-1' só existe na API e o revisor recebia 400
+      checker_round: { family: 'codex', model_id: 'gpt-6-sol' },
     },
     budget: { max_model_calls: 3, max_rework_rounds: 1 },
     unknowns,

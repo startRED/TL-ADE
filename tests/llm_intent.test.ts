@@ -113,3 +113,17 @@ describe('cérebro do pedido com IA', () => {
     expect(intentRefs(repo(), { roles: { intent_compiler: { primary: { family: 'codex', model_id: 'gpt-6-sol' }, fallbacks: [] } } })).toEqual([{ family: 'codex', model_id: 'gpt-6-sol' }])
   })
 })
+
+describe('papéis do contrato sem planos', () => {
+  test('revisor_padrao_e_um_modelo_do_catalogo_aceito_pela_conta_chatgpt', async () => {
+    const { CATALOG } = await import('../src/models/catalog.ts')
+    const { ask } = fakeAsk({ entender: INTENT, planejar: PLAN })
+    const intent = createLlmIntent({ askFor: () => ask })
+    const dir = repo()
+    const first = await intent.compile({ request: 'Quero anexar imagens no pedido', repoDir: dir, missionId: 'm1', options: {} as any, eligibleSkills: [] })
+    const res = await intent.compile({ request: 'Quero anexar imagens no pedido', repoDir: dir, missionId: 'm1', options: {} as any, eligibleSkills: [], questions: first.questions, understanding: first.understanding, answers: {} })
+    const checker = (res.contracts as any[])[0].roles.checker_round
+    expect(checker.family).toBe('codex')
+    expect(CATALOG.some((m) => m.family === 'codex' && m.model === checker.model_id)).toBe(true)
+  })
+})
