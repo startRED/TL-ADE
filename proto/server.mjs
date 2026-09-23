@@ -7,6 +7,7 @@ import { SCOUT_SCHEMA, scoutPrompt, ENV_GUARD } from './scout.mjs'
 import { findSuites, relatedCommand, runSuites, TOOLCHAINS } from './runners.mjs'
 import { parseJournal, usageReport } from './usage.mjs'
 import { buildChains, measure } from './models.mjs'
+import { startPreview, takeShots } from './shots.mjs'
 import { laneCandidates, laneEngine, createLane, lanePatch, applyPatch, removeLane, LANES_DIR } from './lanes.mjs'
 import { chatWriteTurn, chatCommand, chatIntro, formatHistory, pendingProposal, PENDING_BLOCK, handleChatDecision, discardPending, pendingChatIds, pruneChatWorktrees } from './chat-changes.mjs'
 import http from 'node:http'
@@ -162,6 +163,9 @@ const DEFAULT_SETTINGS = {
   // Filas montadas pelos planos (models.mjs): com auto_chains, as cadeias acima viram só reserva e o motor refaz as filas a cada
   // leitura de cota (5 min) com o ritmo da cota semanal e a aprovação do revisor medida no journal.
   plans: {}, auto_chains: false, blocked_models: ['gpt-6-astra'],
+  // Olho na tela (shots.mjs), por pasta de projeto: { build?: argv, serve: argv (imprime a URL local), path?: '/…', reference_url?: 'http://…' }.
+  // Sem isto a parte com interface segue só com o portão visual estático.
+  ui_preview: {},
   plugins: { disabled: [] }, // plugin inteiro fora do catálogo (nome da pasta em ~/.claude/plugins/cache/<loja>/<plugin>)
 }
 
@@ -1191,6 +1195,7 @@ async function checker(diff, tests, st) {
     (() => { const names = new Set((tests.tests || []).map((t) => t.name)); const gone = (st.red_tests || []).map((t) => t.name).filter((n) => n && !/[\\/]|\.test\./.test(n) && !names.has(n)); return gone.length ? `PROVAS QUE NASCERAM VERMELHAS E NÃO EXISTEM MAIS: ${gone.slice(0, 8).join(' | ')}. Confira se foram só renomeadas; prova apagada ou asserção enfraquecida para passar é achado high.` : '' })(),
     (() => { const loose = loosenedTimeouts(diff, (f) => IS_TEST_FILE(f, st)); return loose.length ? `TEMPO LIMITE DE PROVA AFROUXADO POR ESTE DIFF (conferência do motor): ${loose.slice(0, 8).join(' | ')}. Afrouxar o tempo de uma prova para ela passar esconde instabilidade dentro do projeto, igual a enfraquecer asserção. Em arquivo de prova que NÃO é o desta story é achado high; no arquivo da story, só vale se quem escreveu disser por que a prova ficou legitimamente mais lenta.` : '' })(),
     (() => { const debt = [...diff.matchAll(/^\+(?!\+\+).*\b(TODO|FIXME|XXX|HACK)\b.*$/gm)].map((x) => x[0].slice(1, 160).trim()).filter((l) => !/#\d+|issue/i.test(l)); return debt.length ? `MARCADORES DE DÍVIDA ACRESCENTADOS POR ESTE DIFF (sem referência a item de trabalho): ${debt.slice(0, 8).join(' | ')}. Trabalho declarado como pendente dentro do escopo da story é achado high; fora do escopo, low.` : '' })(),
+    shotsBlock(st, 'revisor'),
     '--- DIFF ---', diff.slice(0, 60000),
   ].join('\n') + skillsBlock(m.skills.checker || [])
   // Receita de chamada curta (architecture.md E16): sem config, regras e skills do usuário; sessão efêmera.
@@ -1211,7 +1216,7 @@ async function checker(diff, tests, st) {
     }
     if (who.family === 'agy') return by(await checkerAgy(prompt, who.model, who.effort))
     if (who.family !== 'codex') { log('engine', `revisão em ${who.family} ainda não é suportada; próximo da cadeia`, 'warn'); return null }
-    return by(await checkerCodex(prompt, who.model, who.effort))
+    return by(await checkerCodex(prompt, who.model, who.effort, (st.ui_shots?.shots || []).map((x) => x.file)))
   })
 }
 // Revisão no Antigravity (19/09, plano Google AI Ultra): Gemini Pro ou Claude via Google pela cota do Google, só leitura (--mode plan
@@ -1233,9 +1238,10 @@ async function checkerAgy(prompt, model, effort, { schema = REVIEW_SCHEMA, role 
   if (role === 'revisão') log('agy', `${review.verdict === 'approve' ? 'aprovou' : 'pediu mudanças'}: ${review.summary}`, 'text')
   return review
 }
-async function checkerCodex(prompt, model, effort) {
+async function checkerCodex(prompt, model, effort, images = []) {
   const m = state.mission, dir = state.project.dir
-  const args = ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${effort}`, '-C', dir, '-m', model, '--output-schema', REVIEW_SCHEMA, '-']
+  // fotos antes das outras opções: -i aceita vários arquivos e engoliria o '-' do fim (prompt pelo stdin)
+  const args = ['exec', ...images.flatMap((f) => ['-i', f]), '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${effort}`, '-C', dir, '-m', model, '--output-schema', REVIEW_SCHEMA, '-']
   log('engine', `codex (revisão, ${model}, esforço ${effort})`)
   let lastMessage = null, usage = null
   const t0 = Date.now()
@@ -1304,6 +1310,39 @@ async function makeAssets() {
   readQuota().then(broadcastSoon)
   if (m.assets_done.length) { await gitCommit(dir, `ade: ${m.assets_done.length} imagem(ns) gerada(s) pelo Codex`); await refreshProject(); log('engine', `commit feito: ${m.assets_done.length} imagem(ns)`) }
   setStep('assets', m.assets_done.length === wanted.length ? 'done' : 'warn')
+}
+
+// ---------- olho na tela: fotos num navegador sem janela ----------
+function uiPreviewCfg() { const c = state.settings.ui_preview?.[state.project.dir]; return c?.serve?.length ? c : null }
+async function uiShots(st, round) {
+  const cfg = uiPreviewCfg(), m = state.mission, dir = state.project.dir
+  if (!cfg) return null
+  const outDir = path.join(ADE_DIR, 'shots', m.id)
+  setLive({ source: 'engine', kind: 'thinking', text: 'olho na tela: subindo a interface para fotografar…' })
+  try {
+    if (cfg.build?.length) {
+      const b = await run(cfg.build[0], cfg.build.slice(1), { cwd: dir, timeoutMs: 6 * 60 * 1000 })
+      if (b.code !== 0) { const out = (b.err || b.out).trim().slice(-800); log('engine', `olho na tela: a interface não compila (${cfg.build.join(' ')}): ${out.slice(-200)}`, 'warn'); return { error: `build falhou: ${out}` } }
+    }
+    const pv = await startPreview(cfg.serve, { cwd: dir })
+    if (pv.error) { log('engine', `olho na tela: ${pv.error.slice(0, 240)}`, 'warn'); return { error: pv.error } }
+    try {
+      const shots = await takeShots(pv.url.replace(/\/$/, '') + (cfg.path || ''), { outDir, name: `${st.id}-r${round}` })
+      if (cfg.reference_url && !m.ui_reference) m.ui_reference = await takeShots(cfg.reference_url, { outDir, name: 'referencia' }).catch(() => null)
+      const errs = [...new Set(shots.flatMap((x) => x.errors))]
+      log('engine', `olho na tela: ${shots.length} foto(s) da interface (${shots.map((x) => x.width + ' px').join(', ')})${errs.length ? `; ${errs.length} erro(s) no console: ${errs.slice(0, 3).join(' | ')}` : ', console sem erro'}`, errs.length ? 'warn' : 'info')
+      return { shots, errors: errs }
+    } finally { pv.stop() }
+  } catch (err) { log('engine', `olho na tela falhou: ${err.message}`, 'warn'); return { error: err.message } } finally { setLive(null) }
+}
+// Bloco das fotos para o prompt de quem revisa e de quem escreve. Cada CLI abre imagem local (Claude: Read; Codex: -i e view_image).
+function shotsBlock(st, who) {
+  const u = st.ui_shots; if (!u) return ''
+  if (u.error) return `OLHO NA TELA (motor): a interface NÃO subiu para foto: ${u.error.slice(0, 600)}. Isso é defeito desta parte se ela mexe na interface.`
+  const ref = state.mission.ui_reference
+  return [`OLHO NA TELA (o motor subiu a interface depois das provas e fotografou num navegador sem janela). ${who === 'revisor' ? 'Abra CADA foto e julgue a tela de verdade: a parte só está pronta se o que o critério pede aparece e funciona na tela; tela vazia, presa em carregando, quebrada no celular ou diferente da referência é achado high.' : 'Abra as fotos e confira na tela o que o revisor apontou antes de mexer.'}`,
+    ...u.shots.map((x) => `- foto ${x.width} px: ${x.file}${x.errors.length ? ` (erros no console: ${x.errors.join(' | ')})` : ''}`),
+    ref?.length ? `Referência de visual (o que o pedido quer igual, mais caprichado): ${ref.map((x) => x.file).join(', ')}` : ''].filter(Boolean).join('\n')
 }
 
 // ---------- portão visual: Impeccable detect ----------
@@ -1671,6 +1710,7 @@ function testPrompt(st, pack, together = false) {
 function fixPrompt(st, round, review, visual, pack, turns = 30) {
   const red = st.red_tests.map((t) => `- ${t.name}: ${t.message}`).join('\n')
   const base = [`Pedido original do usuário: ${state.mission.request}`, ...common(st), pack,
+    shotsBlock(st, 'maker'),
     // Rodada aberta pelo REVISOR começa com as provas verdes, e st.red_tests ainda guarda o vermelho da rodada 1. Repetir
     // aquele texto manda o modelo mais caro da cadeia caçar um erro que já foi corrigido (m-mu8usf5z, v03-s4 rodada 3: o
     // Opus abriu com "Failed to load url ../src/mission/plan-lifecycle.js" de um arquivo que já existia havia duas rodadas).
@@ -2389,7 +2429,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
   let early = null
   // diff igual ao que o revisor já aprovou (rodada de correção que não mudou nada, só provas instáveis): vale a aprovação
   if (quick?.ok && st.diff.trim() && st.last_review?.verdict === 'approve' && st.reviewed_diff === st.diff) { log('engine', 'diff igual ao que o revisor já aprovou; não reviso de novo'); early = Promise.resolve(st.last_review) }
-  else if (quick?.ok && st.diff.trim()) { setStep('checker', 'running'); st.reviewed_diff = st.diff; early = checker(st.diff, quick, st); early.catch(() => {}) }
+  else if (quick?.ok && st.diff.trim() && !(m.plan.needs_ui && uiPreviewCfg())) { setStep('checker', 'running'); st.reviewed_diff = st.diff; early = checker(st.diff, quick, st); early.catch(() => {}) }
   // suite_scope 'epic': por parte só as provas ligadas aos arquivos mudados (runner que sabe); a suíte inteira fica para o fim do épico
   const byEpic = state.settings.suite_scope === 'epic' && quick?.ok
   const related = byEpic ? await runTests(state.project, { related: diffFiles(st.diff) }) : null // diff tem caminho da raiz do git; runner quer do projeto
@@ -2498,6 +2538,7 @@ async function runStory(st, round = 1, previousReview = null, previousVisual = n
     }
     return stop('tests_red')
   }
+  st.ui_shots = m.plan.needs_ui ? await uiShots(st, round) : null // trilho paralelo tem outra pasta: sem configuração, sem foto
   if (m.plan.needs_ui && state.settings.visual_gate) {
     setStep('visual', 'running'); st.visual = newFindings(await visualGate(), st.visual_before)
     if (!st.visual.available) { setStep('visual', 'skipped'); log('engine', 'portão visual indisponível (Impeccable não encontrado)') }
