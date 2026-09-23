@@ -1,11 +1,11 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { main as indexMain } from '../../src/cli/index.js'
-import { main as journalMain } from '../../src/cli/journal.js'
-import { projectUnits } from '../../src/cli/project.js'
-import { main as reportMain, renderReport } from '../../src/cli/report.js'
-import { main } from '../../src/cli/status.js'
+import { main as indexMain } from '../../src/cli/index.ts'
+import { main as journalMain } from '../../src/cli/journal.ts'
+import { projectUnits } from '../../src/cli/project.ts'
+import { main as reportMain, renderReport } from '../../src/cli/report.ts'
+import { main } from '../../src/cli/status.ts'
 import { digest16 } from '../../src/journal/canonical.ts'
 import { openJournal } from '../../src/journal/journal.ts'
 import { buildRuntimeStamp } from '../../src/journal/stamp.ts'
@@ -61,7 +61,7 @@ async function makeJournal(
 
 describe('ade status', () => {
   // CA1: Dado um journal com story_started e story_done {unit:'ADE-T1', status:'committed', commit:'abc123def4567890'},
-  // quando main(['--mission',dir]) de src/cli/status.js roda, então sai com 0 e o stdout é
+  // quando main(['--mission',dir]) de src/cli/status.ts roda, então sai com 0 e o stdout é
   // 'missão <basename> (seq 2)\nADE-T1 committed abc123def456\n'
   // Borda: projectUnits([]) -> []
   test('status_prints_committed_unit', async () => {
@@ -194,7 +194,7 @@ describe('ade status', () => {
 
 describe('ade journal', () => {
   // CA1: Dado um journal com os eventos seq 1 story_started ADE-T1 e seq 2 story_done ADE-T1,
-  // quando main(['--mission',dir]) de src/cli/journal.js roda, então sai com 0 e o stdout é
+  // quando main(['--mission',dir]) de src/cli/journal.ts roda, então sai com 0 e o stdout é
   // '1 story_started ADE-T1\n2 story_done ADE-T1\n'
   test('journal_lists_events_in_order', async () => {
     const dir = await makeJournal(
@@ -260,7 +260,7 @@ describe('ade journal', () => {
   })
 
   // CA3: Dado o journal com um caractere trocado na linha 2,
-  // quando o main de src/cli/index.js recebe ['journal','--mission',dir], então devolve 2
+  // quando o main de src/cli/index.ts recebe ['journal','--mission',dir], então devolve 2
   test('tampered_journal_command_exits_2', async () => {
     const dir = await makeJournal(
       [
@@ -290,7 +290,7 @@ describe('ade journal', () => {
   })
 
   // CA4: Dado env {ADE_MISSION_DIR: dir} e nenhum --mission,
-  // quando main([], {env}) de src/cli/journal.js roda, então sai com 0 e lista os mesmos 2 eventos de CA1
+  // quando main([], {env}) de src/cli/journal.ts roda, então sai com 0 e lista os mesmos 2 eventos de CA1
   test('journal_uses_ade_mission_dir_env', async () => {
     const dir = await makeJournal(
       [
@@ -343,7 +343,7 @@ describe('ade journal', () => {
 
 describe('ade report', () => {
   // CA1: Dado um journal na missão 'm1' com ADE-T1 committed (commit 'abc123def4567890'),
-  // quando main(['--mission',dir]) de src/cli/report.js roda, então sai com 0 e <dir>/report.md
+  // quando main(['--mission',dir]) de src/cli/report.ts roda, então sai com 0 e <dir>/report.md
   // contém a linha '| ADE-T1 | committed | - | abc123def456 |' e a linha '- ADE-T1: git merge --ff-only ade/m1/ADE-T1'
   test('report_lists_units_and_merge_command', async () => {
     const dir = await makeJournal(

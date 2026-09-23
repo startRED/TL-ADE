@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { main, renderReport, sumQuotaUsage, sumTokensByRole } from '../src/cli/report.js'
+import { main, renderReport, sumQuotaUsage, sumTokensByRole } from '../src/cli/report.ts'
 import { digest16 } from '../src/journal/canonical.ts'
 import { openJournal } from '../src/journal/journal.ts'
 import { buildRuntimeStamp } from '../src/journal/stamp.ts'

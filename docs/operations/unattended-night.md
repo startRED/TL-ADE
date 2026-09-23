@@ -32,7 +32,7 @@ Antes de qualquer despacho (e portanto antes de qualquer chamada paga) o motor c
 | `permitted_effects` | efeitos externos só os de `authorization.permitted_effects` |
 
 Qualquer falha grava `unattended_refused` no journal com a lista de falhas e sai com **exit 2**; nada
-roda. As portas das precondições são montadas em `src/cli/run.js`.
+roda. As portas das precondições são montadas em `src/cli/run.ts`.
 
 ## 3. Durante a noite
 
@@ -53,7 +53,7 @@ precondição.
 ade report --mission .ade/missions/<id>
 ```
 
-O relatório (`src/cli/report.js`) traz:
+O relatório (`src/cli/report.ts`) traz:
 
 - a tabela de unidades com estado, motivo e commit;
 - **Próximos passos**: o `git merge --ff-only` de cada unidade comitada e o motivo de cada unidade

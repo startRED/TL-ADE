@@ -4,18 +4,18 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test, vi, beforeAll, afterAll } from 'vitest'
 
-import { discoverDesignSignals } from '../src/visual/design-discovery.js'
-import { buildDesignBrief } from '../src/visual/design-brief.js'
-import { recommendDesign } from '../src/visual/design-retrieval.js'
-import { createDesignToolServer } from '../src/visual/design-server.js'
-import { runVisualGates } from '../src/visual/gates.js'
-import { judgeVisual, calculateRenormalizedFinal, evaluateCutoff } from '../src/visual/judge.js'
-import { probeImpeccable, createImpeccableDetector, PINNED_ENGINE_VERSION } from '../src/visual/impeccable.js'
-import { runFrontendQuality } from '../src/visual/evaluate.js'
-import { compileIntent } from '../src/intent/compiler.js'
+import { discoverDesignSignals } from '../src/visual/design-discovery.ts'
+import { buildDesignBrief } from '../src/visual/design-brief.ts'
+import { recommendDesign } from '../src/visual/design-retrieval.ts'
+import { createDesignToolServer } from '../src/visual/design-server.ts'
+import { runVisualGates } from '../src/visual/gates.ts'
+import { judgeVisual, calculateRenormalizedFinal, evaluateCutoff } from '../src/visual/judge.ts'
+import { probeImpeccable, createImpeccableDetector, PINNED_ENGINE_VERSION } from '../src/visual/impeccable.ts'
+import { runFrontendQuality } from '../src/visual/evaluate.ts'
+import { compileIntent } from '../src/intent/compiler.ts'
 import { prepareStory } from '../src/engine/prepare.ts'
-import { renderVisualComparison } from '../src/cli/report.js'
-import { runDoctor } from '../src/cli/doctor.js'
+import { renderVisualComparison } from '../src/cli/report.ts'
+import { runDoctor } from '../src/cli/doctor.ts'
 import { makeRepo, removeRepo } from './helpers/git-repo.ts'
 import { validate } from '../src/schema/index.ts'
 
@@ -320,7 +320,7 @@ describe('v0.4a Frontend Quality Engine (FQE) Acceptance Tests', () => {
       close: vi.fn().mockResolvedValue(undefined),
     }
 
-    const { captureVisualSurface } = await import('../src/visual/browser.js')
+    const { captureVisualSurface } = await import('../src/visual/browser.ts')
     const captures = await captureVisualSurface({
       browser: mockBrowser,
       url: 'http://127.0.0.1:4173',

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { projectUnits } from '../cli/project.js'
+import { projectUnits } from '../cli/project.ts'
 import { AdeError, JournalCorruptError } from '../journal/errors.ts'
 import { readJournal } from '../journal/journal.ts'
 import { validate } from '../schema/index.ts'

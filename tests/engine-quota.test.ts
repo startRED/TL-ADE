@@ -337,7 +337,7 @@ function makePlanFixture(repoDir: string) {
 }
 
 test('CA1_recibo_oficial_valido_permite_despacho_do_cli_ao_runner_dentro_dos_limites', async () => {
-  const { runCommand } = await import('../src/cli/run.js')
+  const { runCommand } = await import('../src/cli/run.ts')
   const subject = fixture()
   const { planPath } = makePlanFixture(subject.repoDir)
 
@@ -385,7 +385,7 @@ test('CA2_ausencia_expiracao_ou_inconsistencia_bloqueia_antes_da_chamada', async
 })
 
 test('CA3_reserva_e_duravel_e_nao_duplicada_na_retomada', async () => {
-  const { runCommand } = await import('../src/cli/run.js')
+  const { runCommand } = await import('../src/cli/run.ts')
   const subject = fixture()
   const { planPath } = makePlanFixture(subject.repoDir)
 
@@ -456,7 +456,7 @@ test('CA4_contexto_que_excede_o_pack_bloqueia_antes_do_despacho', async () => {
 })
 
 test('CA5_relatorio_distingue_percentual_oficial_tokens_e_custo_sem_conversao_inventada', async () => {
-  const { sumQuotaUsage, renderReport } = await import('../src/cli/report.js')
+  const { sumQuotaUsage, renderReport } = await import('../src/cli/report.ts')
 
   const events = [
     {

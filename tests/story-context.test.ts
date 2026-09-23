@@ -25,7 +25,7 @@ afterEach(() => {
 // Carrega o módulo sob teste dinamicamente para garantir registro e execução das provas nesta fase
 async function getStoryContextModule() {
   try {
-    return await import('../src/context/story.js')
+    return await import('../src/context/story.ts')
   } catch {
     return null
   }
@@ -37,7 +37,7 @@ describe('Montar contexto compacto por story', () => {
   // com referências para consultar a evidência completa.
   test('criterio_1_story_aprovada_pacote_contem_apenas_escopo_relevante_com_referencias', async () => {
     const mod = await getStoryContextModule()
-    expect(mod, 'módulo src/context/story.js deve ser importável').not.toBeNull()
+    expect(mod, 'módulo src/context/story.ts deve ser importável').not.toBeNull()
     const { buildStoryContext } = mod!
 
     const repo = makeRepo()
@@ -145,7 +145,7 @@ describe('Montar contexto compacto por story', () => {
   // conjunto aprovado entra e cada inclusão registra origem, resumo criptográfico e tamanho.
   test('criterio_2_skills_conhecidas_selecao_deterministica_ate_tres_skills_aprovadas_com_metadados', async () => {
     const mod = await getStoryContextModule()
-    expect(mod, 'módulo src/context/story.js deve ser importável').not.toBeNull()
+    expect(mod, 'módulo src/context/story.ts deve ser importável').not.toBeNull()
     const { selectEligibleSkills, buildStoryContext } = mod!
 
     const repo = makeRepo()
@@ -224,7 +224,7 @@ describe('Montar contexto compacto por story', () => {
   // então o artefato certificado é reutilizado e nenhuma análise cara é repetida.
   test('criterio_3_mesma_arvore_contrato_e_configuracao_reutiliza_artefato_sem_analise_cara', async () => {
     const mod = await getStoryContextModule()
-    expect(mod, 'módulo src/context/story.js deve ser importável').not.toBeNull()
+    expect(mod, 'módulo src/context/story.ts deve ser importável').not.toBeNull()
     const { buildStoryContext } = mod!
 
     const repo = makeRepo()
@@ -307,7 +307,7 @@ describe('Montar contexto compacto por story', () => {
   // e o contrato aprovado não é alterado.
   test('criterio_4_notas_operador_ate_600_bytes_drenadas_uma_vez_preservando_contrato', async () => {
     const mod = await getStoryContextModule()
-    expect(mod, 'módulo src/context/story.js deve ser importável').not.toBeNull()
+    expect(mod, 'módulo src/context/story.ts deve ser importável').not.toBeNull()
     const { buildStoryContext } = mod!
 
     const repo = makeRepo()
@@ -378,7 +378,7 @@ describe('Montar contexto compacto por story', () => {
   // acima de 32.000 bytes, a story retorna story_pack_overflow para divisão e nenhum modelo é despachado.
   test('criterio_5_contexto_recuperavel_reduzido_e_contrato_acima_32000_retorna_story_pack_overflow', async () => {
     const mod = await getStoryContextModule()
-    expect(mod, 'módulo src/context/story.js deve ser importável').not.toBeNull()
+    expect(mod, 'módulo src/context/story.ts deve ser importável').not.toBeNull()
     const { buildStoryContext, prepareStoryContext } = mod!
 
     const repo = makeRepo()
@@ -483,7 +483,7 @@ describe('Montar contexto compacto por story', () => {
   // quando a story é preparada, então ela é recusada antes de reservar cota ou iniciar o agente.
   test('criterio_6_verificador_com_comando_ausente_no_workspace_recusado_antes_de_cota_ou_agente', async () => {
     const mod = await getStoryContextModule()
-    expect(mod, 'módulo src/context/story.js deve ser importável').not.toBeNull()
+    expect(mod, 'módulo src/context/story.ts deve ser importável').not.toBeNull()
     const { prepareStoryContext } = mod!
 
     const repo = makeRepo()

@@ -92,7 +92,7 @@ async function main() {
       }
       return append.call(this, event)
     }
-    const { main: runCommand } = await import('../../src/cli/index.js')
+    const { main: runCommand } = await import('../../src/cli/index.ts')
     process.exit(await runCommand(['run', '--plan', missionDir, '--repo', worktreeDir]))
   }
   const journal = openJournal({ missionDir, runtimeStamp: RUNTIME_STAMP })

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { buildInterview, classifyIntent, compileIntent } from '../../../src/intent/compiler.js'
+import { buildInterview, classifyIntent, compileIntent } from '../../../src/intent/compiler.ts'
 import { runCase } from './_caso.mjs'
 
 const fixture = (name) => JSON.parse(readFileSync(new URL(`../../intent/${name}.json`, import.meta.url), 'utf8'))

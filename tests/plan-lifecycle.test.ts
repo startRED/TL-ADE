@@ -10,9 +10,9 @@ import {
   replanRemaining,
   assertApprovedPlan,
 } from '../src/mission/plan-lifecycle.ts'
-import { main as cliMain } from '../src/cli/index.js'
-import { splitContract } from '../src/intent/split.js'
-import { validateCompiledPlan } from '../src/intent/validate.js'
+import { main as cliMain } from '../src/cli/index.ts'
+import { splitContract } from '../src/intent/split.ts'
+import { validateCompiledPlan } from '../src/intent/validate.ts'
 import { readJournal, openJournal } from '../src/journal/journal.ts'
 import { validate } from '../src/schema/index.ts'
 import { digest16 } from '../src/journal/canonical.ts'

@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -122,6 +123,73 @@ describe('migração TS do motor, adaptadores e revisão', () => {
     const engineSet = new Set(engineTsFiles.map((f) => path.resolve(f)))
     const errors = ts.getPreEmitDiagnostics(program)
       .filter((d) => d.file && engineSet.has(path.resolve(d.file.fileName)))
+      .map((d) => `${rel(d.file!.fileName)}: ${ts.flattenDiagnosticMessageText(d.messageText, '\n')}`)
+    expect(errors).toEqual([])
+  }, 180_000)
+})
+
+// Borda convertida na terceira parte; ao fim dela src não tem mais JS de produção.
+const EDGE_DIRS = ['intent', 'context', 'skills', 'visual', 'panel', 'cli']
+const VENDOR_AXE = 'src/visual/vendor/axe.min.js'
+const edgeTsFiles = EDGE_DIRS.flatMap((d) => listFiles(path.join(ROOT, 'src', d))).filter((f) => f.endsWith('.ts'))
+
+function runBin(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    execFile(process.execPath, [path.join(ROOT, 'bin', 'ade.js'), ...args], { cwd: ROOT, maxBuffer: 1024 * 1024, timeout: 60_000 }, (err, stdout, stderr) => {
+      const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0
+      resolve({ code, stdout, stderr })
+    })
+  })
+}
+
+describe('migração TS da borda e fim do JS', () => {
+  test('ca1_src_scan_finds_only_vendor_axe_as_js', () => {
+    const js = listFiles(path.join(ROOT, 'src')).filter((f) => /\.(c|m)?js$/.test(f)).map(rel)
+    expect(js).toEqual([VENDOR_AXE])
+    expect(edgeTsFiles.length).toBeGreaterThanOrEqual(57)
+  })
+
+  test('ca2_bin_help_exits_zero_without_build_step', async () => {
+    expect(readFileSync(path.join(ROOT, 'bin', 'ade.js'), 'utf8')).toContain("'../src/cli/index.ts'")
+    const help = await runBin(['--help'])
+    expect(help.code).toBe(0)
+    expect(help.stdout).toContain('uso: ade <run|')
+  }, 90_000)
+
+  test('ca2_bin_unknown_command_still_fails_with_usage', async () => {
+    const bad = await runBin(['comando-que-nao-existe'])
+    expect(bad.code).toBe(4)
+    expect(bad.stderr).toContain('uso: ade <run|')
+  }, 90_000)
+
+  test('ca3_tsconfig_keeps_strict_and_stops_checking_production_js', () => {
+    const { config } = ts.readConfigFile(path.join(ROOT, 'tsconfig.json'), ts.sys.readFile)
+    expect(config.compilerOptions.strict).toBe(true)
+    expect(config.include).not.toContain('src/**/*.js')
+    const parsed = ts.parseJsonConfigFileContent(config, ts.sys, ROOT)
+    expect(parsed.options.strict).toBe(true)
+    const srcJs = parsed.fileNames.map(rel).filter((f) => f.startsWith('src/') && /\.(c|m)?js$/.test(f))
+    expect(srcJs).toEqual([])
+  })
+
+  test('ca4_edge_ts_compiles_under_strict_without_suppression_or_jsdoc_types', () => {
+    expect(edgeTsFiles.length).toBeGreaterThanOrEqual(57)
+    const suppression = /@ts-ignore|@ts-expect-error|@ts-nocheck|oxlint-disable|eslint-disable/
+    expect(edgeTsFiles.filter((f) => suppression.test(readFileSync(f, 'utf8'))).map(rel)).toEqual([])
+    const offenders = edgeTsFiles.flatMap((f) =>
+      readFileSync(f, 'utf8').split('\n')
+        .map((line, i) => (jsdocType.test(line) ? `${rel(f)}:${i + 1}` : null))
+        .filter((x): x is string => x !== null),
+    )
+    expect(offenders).toEqual([])
+
+    const { config } = ts.readConfigFile(path.join(ROOT, 'tsconfig.json'), ts.sys.readFile)
+    const parsed = ts.parseJsonConfigFileContent(config, ts.sys, ROOT)
+    const program = ts.createProgram(edgeTsFiles, parsed.options)
+    expect(program.getSourceFile(path.join(ROOT, VENDOR_AXE))).toBeUndefined()
+    const edgeSet = new Set(edgeTsFiles.map((f) => path.resolve(f)))
+    const errors = ts.getPreEmitDiagnostics(program)
+      .filter((d) => d.file && edgeSet.has(path.resolve(d.file.fileName)))
       .map((d) => `${rel(d.file!.fileName)}: ${ts.flattenDiagnosticMessageText(d.messageText, '\n')}`)
     expect(errors).toEqual([])
   }, 180_000)

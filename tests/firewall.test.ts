@@ -3,7 +3,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 import { run } from '../src/pack/firewall.ts'
-import { main, openerCommand, resolveRef } from '../src/cli/show.js'
+import { main, openerCommand, resolveRef } from '../src/cli/show.ts'
 import { AdeError } from '../src/journal/errors.ts'
 
 let tmpDirs: string[] = []

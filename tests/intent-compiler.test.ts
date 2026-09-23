@@ -12,7 +12,7 @@ import {
   validateCompiledPlan,
   selectEligibleSkills,
   runResearchStep,
-} from '../src/intent/compiler.js'
+} from '../src/intent/compiler.ts'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
 

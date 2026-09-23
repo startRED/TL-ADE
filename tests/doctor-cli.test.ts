@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
-import { main, runDoctor } from '../src/cli/doctor.js'
+import { main, runDoctor } from '../src/cli/doctor.ts'
 import { validate } from '../src/schema/index.ts'
 import { AdeError } from '../src/journal/errors.ts'
 

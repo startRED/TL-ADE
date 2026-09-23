@@ -26,7 +26,7 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
   // então somente os caminhos declarados são materializados, o índice reconstruível registra origem, commit,
   // licença, hashes e tamanho, e repetir a sincronização produz o mesmo resultado.
   test('criterio_1_sync_materializa_apenas_paths_declarados_e_e_idempotente', async () => {
-    const { syncCatalog } = await import('../src/skills/catalog.js')
+    const { syncCatalog } = await import('../src/skills/catalog.ts')
     const catalogDir = makeTmpDir('ade-catalog-')
     tmpDirs.push(catalogDir)
 
@@ -102,7 +102,7 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
   // estrutura inválida ou caminho fora da lista permitida, quando a sincronização é solicitada,
   // então ela é recusada com motivo específico e nenhum conteúdo dessa fonte se torna elegível.
   test('criterio_2_sync_recusa_fontes_nao_autorizadas_ou_sem_commit_ou_licenca_bloqueada', async () => {
-    const { syncCatalog } = await import('../src/skills/catalog.js')
+    const { syncCatalog } = await import('../src/skills/catalog.ts')
     const catalogDir = makeTmpDir('ade-catalog-')
     tmpDirs.push(catalogDir)
 
@@ -186,7 +186,7 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
   // envia os casos suspeitos e qualquer habilidade com scripts para quarentena, mantém casos benignos utilizáveis
   // e nunca executa conteúdo do catálogo.
   test('criterio_3_skillguard_detecta_padroes_hostis_e_scripts_e_quarentena', async () => {
-    const { scanSkill } = await import('../src/skills/skillguard.js')
+    const { scanSkill } = await import('../src/skills/skillguard.ts')
 
     // Hostil 1: zero-width characters
     const resZeroWidth = scanSkill({
@@ -232,7 +232,7 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
   // então consegue filtrar e auditar metadados, achados e quarentena; o corpo só é exibido quando
   // solicitado explicitamente e scripts nunca são exibidos nem materializados para o agente.
   test('criterio_4_catalog_list_e_inspect_com_filtros_e_ocultacao_de_scripts_e_corpo', async () => {
-    const { listCatalog, inspectCatalog } = await import('../src/skills/catalog.js')
+    const { listCatalog, inspectCatalog } = await import('../src/skills/catalog.ts')
 
     const mockIndex = {
       format_version: 1,
@@ -309,8 +309,8 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
   // então o top-8 atinge recall mínimo de 0,85, a seleção final atinge precisão mínima de 0,75,
   // não inclui itens proibidos e mantém resultado determinístico em empates.
   test('criterio_5_bm25_e_selecao_atingem_recall_e_precisao_minimos_e_determinismo', async () => {
-    const { rankSkills } = await import('../src/skills/bm25.js')
-    const { selectStorySkills } = await import('../src/skills/select.js')
+    const { rankSkills } = await import('../src/skills/bm25.ts')
+    const { selectStorySkills } = await import('../src/skills/select.ts')
 
     const catalogPath = path.resolve('fixtures/catalog/index-2026-09.json')
     const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'))
@@ -363,7 +363,7 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
   // quando o contexto da história é preparado, então no máximo três corpos sanitizados são injetados em ordem estável,
   // cada um respeita o teto de 7,5 mil tokens, o conjunto respeita 20 mil tokens e o manifesto registra nome, origem, hash e tamanho.
   test('criterio_6_injecao_no_contexto_respeita_ordem_estavel_e_tetos_de_tokens_e_manifesto', async () => {
-    const { buildStoryContext } = await import('../src/context/story.js')
+    const { buildStoryContext } = await import('../src/context/story.ts')
     const repo = makeRepo()
     tmpDirs.push(repo.dir)
     const missionDir = makeTmpDir('ade-mission-')
@@ -553,7 +553,7 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
   // monitoradas, então o delta de hashes é relatado sem bloquear por si só; a chamada despachada
   // continua suprimindo habilidades, plugins e memória nativos.
   test('criterio_10_doctor_relata_delta_de_memoria_e_chamada_despachada_suprime_personalizacoes', async () => {
-    const { runDoctor } = await import('../src/cli/doctor.js')
+    const { runDoctor } = await import('../src/cli/doctor.ts')
     const { buildClaudeArgs } = await import('../src/adapters/claude/argv.ts')
     const { buildCodexArgs } = await import('../src/adapters/codex/argv.ts')
 
@@ -595,7 +595,7 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
   // quando passam pelo novo portão de habilidades, então continuam sendo compilados e executados
   // com suas fixtures ajustadas, sem exigir catálogo quando nenhuma habilidade foi solicitada.
   test('criterio_11_fluxos_existentes_executam_normalmente_sem_exigir_catalogo', async () => {
-    const { buildStoryContext } = await import('../src/context/story.js')
+    const { buildStoryContext } = await import('../src/context/story.ts')
     const repo = makeRepo()
     tmpDirs.push(repo.dir)
     const missionDir = makeTmpDir('ade-existing-flow-')

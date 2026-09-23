@@ -2,13 +2,13 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { compileIntent } from '../intent/compiler.js'
-import { applyInterviewAnswer } from '../intent/interview.js'
-import { validateCompiledPlan } from '../intent/validate.js'
+import { compileIntent } from '../intent/compiler.ts'
+import { applyInterviewAnswer } from '../intent/interview.ts'
+import { validateCompiledPlan } from '../intent/validate.ts'
 import { digest16 } from '../journal/canonical.ts'
 import { openJournal, readJournal } from '../journal/journal.ts'
 import { buildRuntimeStamp } from '../journal/stamp.ts'
-import { loadApprovedSkills } from '../skills/catalog.js'
+import { loadApprovedSkills } from '../skills/catalog.ts'
 
 /**
  * Escreve um arquivo de forma atômica utilizando arquivo temporário e renomeação.

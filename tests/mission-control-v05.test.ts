@@ -14,7 +14,7 @@ import { runSequentialMission } from '../src/engine/schedule.ts'
 import { digest16 } from '../src/journal/canonical.ts'
 import { openJournal, readJournal } from '../src/journal/journal.ts'
 import { buildRuntimeStamp } from '../src/journal/stamp.ts'
-import { startServer } from '../src/panel/server.js'
+import { startServer } from '../src/panel/server.ts'
 import { terminateProcessTree } from '../src/runner/spawn.ts'
 
 const MISSION_ID = 'mission-ctl'

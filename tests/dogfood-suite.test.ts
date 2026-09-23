@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
-import { main } from '../src/cli/index.js'
+import { main } from '../src/cli/index.ts'
 import {
   assertTempRemote,
   DOGFOOD_GROUPS,

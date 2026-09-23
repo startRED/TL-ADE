@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
-import { inferSurfaceMode } from '../../../src/visual/design-brief.js'
-import { calculateRenormalizedFinal, evaluateCutoff } from '../../../src/visual/judge.js'
+import { inferSurfaceMode } from '../../../src/visual/design-brief.ts'
+import { calculateRenormalizedFinal, evaluateCutoff } from '../../../src/visual/judge.ts'
 import { runCase } from './_caso.mjs'
 
 const criteria = (scores) => Object.entries(scores).map(([id, score]) => ({ id, score, weight: 1 }))

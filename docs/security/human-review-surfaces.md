@@ -12,7 +12,7 @@ Fronteira que impede escrita fora do worktree, vazamento de segredo e expansão 
 - `src/contain/secrets.ts`: varredura de segredos no diff integral;
 - `src/contain/canary.ts`: canário de isolamento;
 - precondições `worktree_isolation` e `permitted_effects` da noite desatendida
-  (`src/engine/preflight.ts`, `src/cli/run.js`).
+  (`src/engine/preflight.ts`, `src/cli/run.ts`).
 
 Por que humano: um falso negativo aqui não aparece em prova nenhuma; ele só vira incidente.
 
@@ -20,9 +20,9 @@ Por que humano: um falso negativo aqui não aparece em prova nenhuma; ele só vi
 
 O painel é projeção do journal; o único efeito é o takeover por comando.
 
-- `src/panel/server.js`: escuta restrita a `127.0.0.1` e token de sessão (`x-ade-session`);
-- `src/panel/session.js`, `src/panel/control.js`: sessão e takeover sob lease;
-- `src/panel/websocket.js`: canal com o navegador.
+- `src/panel/server.ts`: escuta restrita a `127.0.0.1` e token de sessão (`x-ade-session`);
+- `src/panel/session.ts`, `src/panel/control.ts`: sessão e takeover sob lease;
+- `src/panel/websocket.ts`: canal com o navegador.
 
 Por que humano: qualquer rota nova é superfície de rede alcançável por outra página do mesmo
 computador.
@@ -31,9 +31,9 @@ computador.
 
 Skills de terceiros entram no contexto dos agentes.
 
-- `src/skills/catalog.js`: sincronização e digest do catálogo;
-- `src/skills/skillguard.js`: inspeção e quarentena;
-- `src/cli/catalog.js`: comando `ade catalog`.
+- `src/skills/catalog.ts`: sincronização e digest do catálogo;
+- `src/skills/skillguard.ts`: inspeção e quarentena;
+- `src/cli/catalog.ts`: comando `ade catalog`.
 
 Por que humano: prompt injection não tem defesa confiável; o que entra no catálogo é o que o agente
 lê como instrução.

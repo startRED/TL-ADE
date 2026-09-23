@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { acquireLease } from '../../src/lease/lease.ts'
-import * as reportModule from '../../src/cli/report.js'
+import * as reportModule from '../../src/cli/report.ts'
 import { BIN_ADE, cleanupTmpDirs, readCounter, setupE2E } from './fixtures/e2e-fixture.ts'
 
 afterEach(() => {
