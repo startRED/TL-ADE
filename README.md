@@ -46,7 +46,8 @@ Os 66 invariantes de durabilidade estão catalogados em `docs/research/runtime-p
 ## Superfície de comandos e painel local (v0.4b)
 
 - `ade init [--repo <pasta>]`: inicializa o projeto de forma idempotente, registra em `~/.ade/projects.json` e gera o script de inicialização `ade.bat`.
-- `ade serve [--repo <pasta>] [--port <n>] [--no-open]`: inicia o servidor local em `127.0.0.1` com token de sessão aleatório efêmero, abre o navegador padrão na página pronta e serve o painel estático (`index.html` + `packages/web`).
+- `ade serve [--repo <pasta>] [--port <n>] [--no-open]`: inicia o servidor local em `127.0.0.1` com token de sessão aleatório efêmero, abre o navegador padrão na página pronta e serve o painel React do último build que passou (`packages/web/dist/current.json`); sem build promovido, serve o `index.html` da raiz. O painel abre vários projetos, cada um com o próprio lease, pelas rotas `/api/projects*` (ADR 0034).
+- `npm run build:web`: checa os tipos e roda o vite build de `packages/web` numa pasta nova e só então troca o ponteiro do build servido; build que falha não muda o que está no ar.
 - `ade index --rebuild [--repo <pasta>]`: reconstrói atomicamente `.ade/index.sqlite` a partir das fontes duráveis da missão (`plan.json`, `journal.jsonl`, `artifacts/`), com conteúdo byte a byte determinístico.
 - `ade plan [--request <pedido>] [--repo <pasta>] [--from <missao>] [--non-interactive]`: planeja a missão, gera contratos válidos e apresenta dúvidas necessárias.
 - `ade validate [--plan <arquivo>]`: valida deterministicamente planos e contratos sem efeitos colaterais.

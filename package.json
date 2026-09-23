@@ -13,6 +13,7 @@
     "ade": "bin/ade.js"
   },
   "scripts": {
+    "build:web": "node scripts/build-web.js",
     "lint": "node node_modules/oxlint/bin/oxlint src tests",
     "test": "node node_modules/vitest/vitest.mjs run",
     "test:durability-coverage": "node node_modules/vitest/vitest.mjs run --coverage.enabled=true --coverage.reporter=json-summary --coverage.reportsDirectory=coverage tests/parity/ tests/journal.test.ts tests/step.test.ts tests/lease.test.ts tests/contain.test.ts tests/receipt.test.ts tests/reconcile.test.ts && node scripts/check-durability-coverage.js",

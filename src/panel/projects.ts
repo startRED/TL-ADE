@@ -38,7 +38,8 @@ export function listProjects({ homeDir = os.homedir(), repoDir }: { homeDir?: st
   const filePath = getProjectsFilePath(homeDir)
   const projects = readProjectsFile(filePath).projects
 
-  // Se repoDir fornecido e não estiver na lista, inclui temporariamente
+  // Se repoDir fornecido e não estiver na lista, inclui temporariamente;
+  // a data é a de criação da pasta, para duas leituras do mesmo projeto darem a mesma projeção.
   if (repoDir) {
     const resolved = path.resolve(repoDir)
     const exists = projects.some((p) => path.resolve(p.path) === resolved)
@@ -47,7 +48,7 @@ export function listProjects({ homeDir = os.homedir(), repoDir }: { homeDir?: st
         id: path.basename(resolved),
         name: path.basename(resolved),
         path: resolved,
-        registered_at: new Date().toISOString(),
+        registered_at: fs.statSync(resolved).birthtime.toISOString(),
       })
     }
   }

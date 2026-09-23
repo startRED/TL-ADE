@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AdeError } from '../journal/errors.ts'
@@ -8,7 +9,9 @@ import { approveMission } from '../mission/plan-lifecycle.ts'
 import { requestMissionControl } from '../engine/control.ts'
 import { createInterventionController } from './control.ts'
 import { createSessionManager } from './session.ts'
-import { acquireServeLease } from './serve-lease.ts'
+import { assertProjectPath, createOpenProjects } from './open-projects.ts'
+import { listProjects, registerProject } from './projects.ts'
+import { resolveCurrentBuild } from './web-build.ts'
 import { createWebSocketHandler } from './websocket.ts'
 import { checkNativeSqlite, readPanelSnapshot, rebuildProjection } from './sqlite-index.ts'
 
@@ -28,6 +31,41 @@ const MIME_TYPES: Record<string, string> = {
 const XTERM_FILES: Record<string, string> = {
   '/vendor/xterm.js': path.join('lib', 'xterm.js'),
   '/vendor/xterm.css': path.join('css', 'xterm.css'),
+}
+
+function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { 'Content-Type': 'application/json' })
+  res.end(JSON.stringify(body))
+}
+
+/** Lê o corpo JSON; corpo malformado é erro de entrada (400), não objeto vazio. */
+async function readJsonBody(req: http.IncomingMessage): Promise<any> {
+  let text = ''
+  for await (const chunk of req) text += chunk
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw new AdeError('invalid_json', 'Corpo da requisição não é JSON válido.', 2)
+  }
+}
+
+/**
+ * Arquivo do build para o caminho pedido: o próprio arquivo, ou o index.html para caminho de tela.
+ * Qualquer segmento '..' (cru ou codificado) fica de fora: null vira 404.
+ */
+function resolveBuildFile(buildDir: string, rawUrl: string): string | null {
+  let rawPath: string
+  try {
+    rawPath = decodeURIComponent(rawUrl.split('?')[0])
+  } catch {
+    return null
+  }
+  if (rawPath.split(/[\\/]/).includes('..')) return null
+  const candidate = path.resolve(buildDir, `.${rawPath}`)
+  const relative = path.relative(buildDir, candidate)
+  if (relative.startsWith('..') || path.isAbsolute(relative)) return null
+  if (relative && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate
+  return path.extname(rawPath) ? null : path.join(buildDir, 'index.html')
 }
 
 /**
@@ -62,13 +100,17 @@ export async function startServer({
   port = 4173,
   host = '127.0.0.1',
   openBrowser = true,
+  webDistDir,
   deps = {},
 }: {
         repoDir?: string
         port?: number
         host?: string
         openBrowser?: boolean
+        /** Raiz dos builds do painel (current.json + builds/); padrão packages/web/dist. */
+        webDistDir?: string
         deps?: {
+            homeDir?: string
             stdout?: { write: (s: string) => void } | ((s: string) => void)
             stderr?: { write: (s: string) => void } | ((s: string) => void)
             openBrowser?: (url: string) => Promise<void>
@@ -87,19 +129,15 @@ export async function startServer({
   }
 
   const resolvedRepo = path.resolve(repoDir)
+  const homeDir = deps.homeDir ?? os.homedir()
 
   // 2. Verificação antecipada da dependência nativa
   const probeFn = deps.checkNativeSqlite ?? checkNativeSqlite
   probeFn()
 
-  // 3. Obtenção do lease exclusivo (critério 11: exit 5 se colisão)
-  const lease = acquireServeLease({ repoDir: resolvedRepo })
-
-  // 4. Assegura a projeção inicial
-  const indexPath = path.join(resolvedRepo, '.ade', 'index.sqlite')
-  if (!fs.existsSync(indexPath)) {
-    await rebuildProjection({ repoDir: resolvedRepo, indexPath })
-  }
+  // 3 e 4. Projetos abertos, cada um com o próprio lease exclusivo (exit 5 se colisão) e projeção inicial
+  const projects = createOpenProjects()
+  const { indexPath } = await projects.open(resolvedRepo)
 
   // 5. Canal WebSocket unidirecional
   const stderrWrite =
@@ -119,20 +157,13 @@ export async function startServer({
   const packageDir = fileURLToPath(new URL('../..', import.meta.url))
   const rootIndexHtml = path.join(packageDir, 'index.html')
   const webPkgDir = path.join(packageDir, 'packages', 'web')
+  const distRoot = webDistDir ?? path.join(webPkgDir, 'dist')
 
   const server = http.createServer(async (req, res) => {
     try {
       const parsedUrl = new URL(req.url || '/', `http://${host}:${port}`)
       const pathname = parsedUrl.pathname
       const method = req.method || 'GET'
-
-      // Rotas estáticas públicas da aplicação web
-      if (pathname === '/' || pathname === '/index.html') {
-        const content = fs.readFileSync(rootIndexHtml)
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-        res.end(content)
-        return
-      }
 
       const xtermFile = XTERM_FILES[pathname]
       if (xtermFile) {
@@ -163,6 +194,25 @@ export async function startServer({
         }
       }
 
+      // Build promovido servido como SPA; sem ele, o index.html da raiz (ponteiro relido a cada pedido).
+      if (!pathname.startsWith('/api/') && method === 'GET') {
+        const buildDir = resolveCurrentBuild(distRoot)
+        if (!buildDir) {
+          if (pathname === '/' || pathname === '/index.html') {
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+            res.end(fs.readFileSync(rootIndexHtml))
+            return
+          }
+        } else {
+          const file = resolveBuildFile(buildDir, req.url || '/')
+          if (file) {
+            res.writeHead(200, { 'Content-Type': MIME_TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream' })
+            res.end(fs.readFileSync(file))
+            return
+          }
+        }
+      }
+
       // Rotas da API protegidas por sessão e origem (critérios 7 e 8)
       if (pathname.startsWith('/api/')) {
         const tokenHeader = req.headers['x-ade-session']
@@ -182,6 +232,53 @@ export async function startServer({
           res.writeHead(403, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: 'forbidden_origin', code: 403 }))
           return
+        }
+
+        if (pathname.startsWith('/api/projects')) {
+          try {
+            if (pathname === '/api/projects' && method === 'GET') {
+              const open = projects.list()
+              const registered = listProjects({ homeDir })
+                .filter((r) => !open.some((p) => p.path === path.resolve(r.path)))
+                .map((r) => ({ id: r.id, name: r.name, path: path.resolve(r.path), open: false, active: false }))
+              sendJson(res, 200, [...open.map((p) => ({ ...p, open: true })), ...registered])
+              return
+            }
+            const snapshotMatch = pathname.match(/^\/api\/projects\/([^/]+)\/snapshot$/)
+            if (snapshotMatch && method === 'GET') {
+              const project = projects.get(decodeURIComponent(snapshotMatch[1]))
+              sendJson(res, 200, await readPanelSnapshot({ repoDir: project.path, indexPath: project.indexPath }))
+              return
+            }
+            if (method === 'POST' && pathname === '/api/projects/open') {
+              const repoPath = assertProjectPath((await readJsonBody(req))?.path)
+              const wasOpen = projects.list().some((p) => p.path === repoPath)
+              const { id, name, path: openedPath } = await projects.open(repoPath)
+              try {
+                registerProject({ repoDir: openedPath, homeDir })
+              } catch (err) {
+                // Registro falhou: desfaz a abertura para o estado bater com a resposta de erro.
+                if (!wasOpen) projects.close(id)
+                throw err
+              }
+              projects.select(id)
+              sendJson(res, 200, { id, name, path: openedPath })
+              return
+            }
+            if (method === 'POST' && (pathname === '/api/projects/close' || pathname === '/api/projects/select')) {
+              const id = (await readJsonBody(req))?.id
+              if (typeof id !== 'string') throw new AdeError('project_id_invalid', 'Informe o id do projeto.', 2)
+              if (pathname.endsWith('/close')) projects.close(id)
+              else projects.select(id)
+              sendJson(res, 200, { ok: true })
+              return
+            }
+          } catch (err) {
+            if (!(err instanceof AdeError)) throw err
+            const status = err.code === 'project_not_found' ? 404 : err.exitCode === 5 ? 409 : 400
+            sendJson(res, status, { error: err.code, message: err.message })
+            return
+          }
         }
 
         if (pathname === '/api/snapshot' && method === 'GET') {
@@ -306,7 +403,7 @@ export async function startServer({
   // Escuta de porta
   await new Promise((resolve, reject) => {
     server.once('error', (err) => {
-      lease.release()
+      projects.closeAll()
       if ((err as any).code === 'EADDRINUSE') {
         reject(new AdeError('port_in_use', `Porta ${port} já está em uso por outro processo`, 1, { port }))
       } else {
@@ -341,7 +438,7 @@ export async function startServer({
     closed = true
     wsHandler.closeAll()
     await intervention.closeAll()
-    lease.release()
+    projects.closeAll()
     await new Promise((resolve) => {
       server.close(() => resolve(undefined))
     })
@@ -352,6 +449,7 @@ export async function startServer({
     port,
     sessionToken: sessionManager.token,
     url: serverUrl,
+    projects,
     close,
   }
 }
