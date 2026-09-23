@@ -9,6 +9,7 @@ import { deliverStory, withDeliveryFlag } from './engine/deliver.ts'
 import { authorizedStep } from './engine/paid-call.ts'
 import { maybeEngineFault } from './engine/faults.ts'
 import { findStoryCommitted, findStoryStarted } from './engine/resume.ts'
+import { preserveInterruptedTree } from './engine/preserve.ts'
 import { dedupStorySection } from './pack/dedup.ts'
 import { measurePackBytes, telemetrySections } from './pack/pack.ts'
 import { buildStoryContext, guardStoryContext } from './context/story.ts'
@@ -406,6 +407,13 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     baseRef = started.base_ref
     baseBefore = started.base_before
     wtPort = deps.gitPortFor(worktreeDir)
+    const kept = await preserveInterruptedTree({
+      gitPort: wtPort,
+      treeBefore,
+      label: `interrupted/${storyId}`,
+      scope: contract.guardrails?.scope_paths ?? [],
+      blocked: contract.guardrails?.do_not_touch ?? [],
+    })
     await deps.journal.append({
       kind: 'story_resumed',
       unit: storyId,
@@ -414,6 +422,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         reason: 'story_started_in_journal',
         worktree_dir: worktreeDir,
         tree_before: treeBefore,
+        interrupted_ref: kept.ref,
+        interrupted_reapplied: kept.reapplied,
       },
     })
   } else {

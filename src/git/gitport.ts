@@ -97,7 +97,7 @@ export type GitPort = {
   gitPath: (name: string) => Promise<string>
   commit: (options: { message: string }) => Promise<CommitResult>
   worktreeTree: () => Promise<string>
-  dirtyPaths: () => Promise<string[]>
+  dirtyPaths: (base?: string) => Promise<string[]>
   checkpoint: (label: string) => Promise<CheckpointResult>
   restoreTree: (tree: string, options: { label: string }) => Promise<RestoreTreeResult>
   restore: (tree: string, options: { label: string }) => Promise<RestoreTreeResult>
@@ -222,9 +222,14 @@ export function createGitPort(options: { worktreeDir: string }): GitPort {
 
   /**
    * Lista os caminhos com alterações no worktree, incluindo untracked e ambos os lados de rename/cópia.
+   * Com `base` (commit ou árvore de largada da parte) mede contra ela, nunca contra o índice: staged,
+   * não staged e o que quem escreve commitou no meio contam (lição da demo, rounds.mjs diffArgs).
    *
    */
-  async function dirtyPaths(): Promise<string[]> {
+  async function dirtyPaths(base?: string): Promise<string[]> {
+    if (base !== undefined && (typeof base !== 'string' || !/^[0-9a-f]{40}$/.test(base))) {
+      throw new GitInvalidInputError('base inválida', { base })
+    }
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ade-idx-'))
     const idx = path.join(tmp, 'index')
     const realIndex = await gitPath('index')
@@ -237,36 +242,38 @@ export function createGitPort(options: { worktreeDir: string }): GitPort {
 
       const set = new Set<string>()
 
-      // Consulta status com saída NUL
-      const { stdout: statusOut } = await run(
-        ['status', '--porcelain', '-z', '--untracked-files=all'],
-        {
-          maxBuffer: 1 << 30,
-          env: { GIT_INDEX_FILE: idx },
-        },
-      )
-      const fields = statusOut.toString('utf8').split('\0')
-      for (let i = 0; i < fields.length; i++) {
-        const field = fields[i]
-        if (!field) {
-          continue
-        }
-        const status = field.slice(0, 2)
-        const target = field.slice(3)
-        set.add(target)
-        if (status[0] === 'R' || status[0] === 'C' || status[1] === 'R' || status[1] === 'C') {
-          i += 1
-          if (i < fields.length && fields[i]) {
-            set.add(fields[i])
+      // Consulta status com saída NUL (só sem base: o status mede contra HEAD)
+      if (base === undefined) {
+        const { stdout: statusOut } = await run(
+          ['status', '--porcelain', '-z', '--untracked-files=all'],
+          {
+            maxBuffer: 1 << 30,
+            env: { GIT_INDEX_FILE: idx },
+          },
+        )
+        const fields = statusOut.toString('utf8').split('\0')
+        for (let i = 0; i < fields.length; i++) {
+          const field = fields[i]
+          if (!field) {
+            continue
+          }
+          const status = field.slice(0, 2)
+          const target = field.slice(3)
+          set.add(target)
+          if (status[0] === 'R' || status[0] === 'C' || status[1] === 'R' || status[1] === 'C') {
+            i += 1
+            if (i < fields.length && fields[i]) {
+              set.add(fields[i])
+            }
           }
         }
       }
 
-      // Consulta diff com saída NUL contra HEAD se houver commit
-      const head = await headInfo()
-      if (head.commit) {
+      // Consulta diff com saída NUL contra a base, ou contra HEAD se houver commit
+      const against = base ?? ((await headInfo()).commit ? 'HEAD' : null)
+      if (against) {
         const { stdout: diffOut } = await run(
-          ['diff-index', '--cached', '-z', '-M', 'HEAD'],
+          ['diff-index', '--cached', '-z', '-M', against],
           {
             maxBuffer: 1 << 30,
             env: { GIT_INDEX_FILE: idx },

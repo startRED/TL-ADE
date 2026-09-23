@@ -11,6 +11,7 @@ import { createStepRunner } from '../step/step.ts'
 import { loadPlan } from './plan-load.ts'
 import { drainMission, readMissionControl, clearControlRequest } from './control.ts'
 import { readLineageCallBudget } from './resume.ts'
+import { removeWorktreeKept } from './preserve.ts'
 
 /**
  * Retorna as dependências declaradas de uma story, suportando story.depends_on e story.contract.depends_on.
@@ -584,14 +585,8 @@ export async function runSequentialMission(deps: Record<string, any>, { loaded, 
         : createGitPort({ worktreeDir: repoDir })
       const oldWtDir = path.join(repoDir, '.ade', 'wt', story.id)
       if (fs.existsSync(oldWtDir)) {
-        try {
-          await gitPort.run(['worktree', 'remove', '--force', oldWtDir], { maxBuffer: 1 << 24 })
-        } catch {
-          // `worktree remove` recusa worktree com arquivos travados no Windows; a remoção direta
-          // seguida de prune é o fallback, e falha dela sobe.
-          fs.rmSync(oldWtDir, { recursive: true, force: true })
-          await gitPort.run(['worktree', 'prune'], { maxBuffer: 1 << 24 })
-        }
+        const wtPort = deps.gitPortFor ? deps.gitPortFor(oldWtDir) : createGitPort({ worktreeDir: oldWtDir })
+        await removeWorktreeKept({ gitPort, wtPort, worktreeDir: oldWtDir, label: `removed/${story.id}` })
       }
 
       // Replaneja o trabalho restante
