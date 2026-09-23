@@ -124,6 +124,10 @@ export async function main(argv: string[], deps: {
         for (const o of q.options) stdout.write(`    ${o.id}: ${o.label}${o.recommended ? ' (recomendada)' : ''}\n`)
       }
       stdout.write(`responda com: ade plan --mission ${result.missionId} --answers <arquivo.json>\n`)
+    } else if (result.state === 'awaiting_briefing_approval') {
+      stdout.write(`missão ${result.missionId} aguarda aprovação do briefing de produto (digest ${result.digest})\n`)
+      stdout.write(`briefing gravado em: ${path.join(String(repoDir), '.ade', 'missions', result.missionId, 'briefing.json')}\n`)
+      stdout.write(`aprove com: ade approve --mission ${result.missionId} --digest ${result.digest}\n`)
     } else {
       stdout.write(`missão criada: ${result.missionId} (digest ${result.digest})\n`)
       stdout.write(`plano gravado em: ${result.planPath}\n`)

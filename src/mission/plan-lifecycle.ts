@@ -2,7 +2,8 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { compileIntent, missionIdOf } from '../intent/compiler.ts'
+import { assertProductBriefing, brieferFromConfig, generateProductBriefing, LARGE_COMPLEXITIES, versionPlanOf, type ProductBriefing } from '../intent/briefing.ts'
+import { classifyIntent, compileIntent, missionIdOf } from '../intent/compiler.ts'
 import { applyInterviewAnswer, buildInterview, unknownsFromRequest, type Decision } from '../intent/interview.ts'
 import { AdeError } from '../journal/errors.ts'
 import { validateCompiledPlan } from '../intent/validate.ts'
@@ -115,7 +116,7 @@ function applyAnswers(contracts: any[], questions: any[], answers: InterviewAnsw
 
 /**
  * Estado de uma missão lido do disco: 'awaiting_answers' enquanto só a entrevista foi
- * gravada; com plano, 'approved', 'awaiting_approval' ou 'planned'. Null quando não existe.
+ * gravada, 'awaiting_briefing_approval' enquanto só o briefing de produto foi; com plano, 'approved', 'awaiting_approval' ou 'planned'. Null quando não existe.
  */
 function missionStateOf(missionDir: string): string | null {
   const planPath = path.join(missionDir, 'plan.json')
@@ -163,6 +164,13 @@ async function withMissionLock<T>(missionDir: string, missionId: string, fn: () 
     fs.closeSync(lockFd)
     fs.rmSync(lockPath, { force: true })
   }
+}
+
+/** Decisão 'briefing_approved' gravada no journal da missão, ou null. */
+function briefingApprovalOf(missionDir: string): any {
+  const journalPath = path.join(missionDir, 'journal.jsonl')
+  if (!fs.existsSync(journalPath)) return null
+  return readJournal(journalPath).events.find((e) => e.kind === 'decision' && e.data?.decision === 'briefing_approved')?.data ?? null
 }
 
 /** Carimbo de runtime usado pelas decisões de planejamento gravadas no journal. */
@@ -241,7 +249,7 @@ export async function planMission({ request, repoDir, fromMissionId, nonInteract
       missionId: replanRes.missionId,
       planPath,
       digest,
-      state: 'planned',
+      state: approvalReasons(planObj).length > 0 ? 'awaiting_approval' : 'planned',
       questions: [],
     }
   }
@@ -340,7 +348,7 @@ export async function resumeMissionAnswers(
  * plano e contexto herdável na pasta da missão.
  */
 async function compileAndWritePlan(
-  { missionId, request, repoDir: resolvedRepoDir, discovery, unknowns, interview, answers }: {
+  { missionId, request, repoDir: resolvedRepoDir, discovery, unknowns, interview, answers, classification: givenClassification, product }: {
     missionId: string
     request: string
     repoDir: string
@@ -348,16 +356,45 @@ async function compileAndWritePlan(
     unknowns: any[]
     interview: any[]
     answers: InterviewAnswer[]
+    classification?: any
+    /** Briefing de produto já aprovado: o plano cobre a primeira versão dele. */
+    product?: ProductBriefing
   },
   deps: any,
 ): Promise<PlanResult> {
+  const missionDir = path.join(resolvedRepoDir, '.ade', 'missions', missionId)
+  const classification = givenClassification ?? (await classifyIntent({ request, discovery, repoIr: deps.repoIr || {} }, deps.advisor))
+  // Pedido grande para no briefing de produto: nenhum plano técnico antes da aprovação dele.
+  if (!product && LARGE_COMPLEXITIES.has(classification.complexity)) {
+    const briefer = deps.briefer ?? brieferFromConfig(deps.adeConfig, {
+      missionId,
+      repoDir: resolvedRepoDir,
+      env: deps.env,
+      runWorkerImpl: deps.runWorkerImpl,
+      resolveBinaryImpl: deps.resolveBinary,
+    })
+    const briefing = await generateProductBriefing({ request, discovery, classification }, briefer)
+    writeJsonAtomic(path.join(missionDir, 'briefing.json'), briefing)
+    writeJsonAtomic(path.join(missionDir, 'context.json'), {
+      state: 'awaiting_briefing_approval',
+      request,
+      discovery,
+      unknowns,
+      questions: interview,
+      answers,
+      classification,
+    })
+    return { missionId, planPath: null, digest: digest16(briefing), state: 'awaiting_briefing_approval', questions: [] }
+  }
+  const version = product ? versionPlanOf(product, 0) : null
+
   // As respostas viram decisões antes da compilação: resposta inválida falha sem chamar modelo
   // e as escolhas orientam os contratos compilados.
   const interviewDecisions = interview.map(
     (q) => applyInterviewAnswer({}, q, answers.find((a) => a.question_id === q.id)?.option_id).decision,
   )
   const compiled = await compileIntent({
-    request,
+    request: version?.request ?? request,
     discovery,
     repoIr: deps.repoIr || {},
     eligibleSkills: deps.eligibleSkills || [],
@@ -365,6 +402,8 @@ async function compileAndWritePlan(
     unknowns,
     interview,
     decisions: interviewDecisions,
+    classification,
+    deliverables: version?.deliverables,
     researcher: deps.researcher,
     policy: deps.policy,
     adeConfig: deps.adeConfig,
@@ -376,7 +415,7 @@ async function compileAndWritePlan(
   applyAnswers(contracts, interview, answers)
   const decisions: Decision[] = plan.briefing.decisions || []
   plan.mission_id = missionId
-  const missionDir = path.join(resolvedRepoDir, '.ade', 'missions', missionId)
+  if (version) Object.assign(plan.briefing, version.briefing)
   const storiesDir = path.join(missionDir, 'stories')
 
   // Gravações atômicas dos contratos das stories
@@ -541,6 +580,8 @@ export async function approveMission(
   permittedEffects?: string[]
   reason?: string
   errors?: any[]
+  state?: string
+  planDigest?: string | null
 }> {
   if (!missionId || !expectedDigest) {
     return {
@@ -555,6 +596,10 @@ export async function approveMission(
     missionDir = resolvedRepoDir
   }
   const planPath = path.join(missionDir, 'plan.json')
+
+  if (!fs.existsSync(planPath) && missionStateOf(missionDir) === 'awaiting_briefing_approval') {
+    return approveBriefing({ missionDir, missionId, repoDir: resolvedRepoDir, expectedDigest, source }, deps)
+  }
 
   if (!fs.existsSync(planPath)) {
     return {
@@ -587,6 +632,19 @@ export async function approveMission(
       approved: false,
       reason: 'plano ou contratos inválidos',
       errors: valResult.errors,
+    }
+  }
+
+  // Plano de briefing de produto só é aprovável com o mesmo briefing que o usuário aprovou.
+  if (planObj.briefing?.product) {
+    const approvedDigest = briefingApprovalOf(missionDir)?.digest ?? null
+    const briefingPath = path.join(missionDir, 'briefing.json')
+    const savedDigest = fs.existsSync(briefingPath) ? digest16(readJsonIfExists(briefingPath)) : null
+    if (!approvedDigest || approvedDigest !== savedDigest || approvedDigest !== digest16(planObj.briefing.product)) {
+      return {
+        approved: false,
+        reason: `digest do briefing divergente: aprovado ${approvedDigest ?? 'ausente'}, gravado ${savedDigest ?? 'ausente'}`,
+      }
     }
   }
 
@@ -671,6 +729,60 @@ export async function approveMission(
     eligibleSkillPins,
     permittedEffects,
   }
+}
+
+/**
+ * Aprova o briefing de produto pelo digest, registra 'briefing_approved' e compila o plano da
+ * primeira versão, que para em 'awaiting_approval' esperando a segunda aprovação.
+ */
+async function approveBriefing(
+  { missionDir, missionId, repoDir, expectedDigest, source }: {
+    missionDir: string
+    missionId: string
+    repoDir: string
+    expectedDigest: string
+    source?: string
+  },
+  deps: any,
+): Promise<{ approved: boolean; digest?: string; reason?: string; state?: string; planDigest?: string | null }> {
+  return withMissionLock(missionDir, missionId, async () => {
+    const state = missionStateOf(missionDir)
+    if (state !== 'awaiting_briefing_approval') {
+      return { approved: false, reason: `missão ${missionId} está em ${state}, não aguarda aprovação do briefing` }
+    }
+    const briefing = readJsonIfExists(path.join(missionDir, 'briefing.json'))
+    assertProductBriefing(briefing)
+    const digest = digest16(briefing)
+    if (digest !== expectedDigest) {
+      return { approved: false, reason: `digest do briefing incompatível: esperado ${expectedDigest}, atual ${digest}` }
+    }
+    // Compilação que falhou depois da aprovação pode ser retomada, mas só com o mesmo briefing.
+    const previous = briefingApprovalOf(missionDir)
+    if (previous && previous.digest !== digest) {
+      return { approved: false, reason: `briefing alterado depois da aprovação: aprovado ${previous.digest}, atual ${digest}` }
+    }
+    if (!previous) {
+      const journal = openJournal({ missionDir, runtimeStamp: planningRuntimeStamp() })
+      await journal.append({ kind: 'decision', source: source || 'operator', data: { decision: 'briefing_approved', digest } })
+      await journal.close()
+    }
+    const context = readJsonIfExists(path.join(missionDir, 'context.json'))
+    const planned = await compileAndWritePlan(
+      {
+        missionId,
+        request: context.request,
+        repoDir,
+        discovery: context.discovery,
+        unknowns: context.unknowns,
+        interview: context.questions,
+        answers: context.answers,
+        classification: context.classification,
+        product: briefing,
+      },
+      deps,
+    )
+    return { approved: true, digest, state: planned.state, planDigest: planned.digest }
+  })
 }
 
 /**
@@ -852,9 +964,23 @@ export async function replanRemaining(
   // Determinar requisição restante
   const effectiveRequest = request || oldPlan.intent
 
+  // Plano de briefing de produto: versão entregue passa para a seguinte do mesmo briefing
+  // aprovado, sem nova aprovação dele; versão incompleta é replanejada na mesma versão.
+  const product = oldPlan.briefing?.product
+  let version: ReturnType<typeof versionPlanOf> | null = null
+  if (product) {
+    if (briefingApprovalOf(oldMissionDir)?.digest !== digest16(product)) {
+      throw new AdeError('briefing_not_approved', `briefing da missão ${fromMissionId} não tem aprovação válida`, 2, { mission_id: fromMissionId })
+    }
+    const oldIndex = oldPlan.briefing.version_index ?? 0
+    const delivered = storyIdsOf(oldPlan).every((id) => completedResults.has(id))
+    version = versionPlanOf(product, delivered ? oldIndex + 1 : oldIndex)
+  }
+
   // Compilar novas stories
   const compiled = await compileIntent({
-    request: effectiveRequest,
+    request: version?.request ?? effectiveRequest,
+    ...(version ? { deliverables: version.deliverables, classification: oldPlan.briefing.classification } : {}),
     discovery,
     repoIr: deps.repoIr || {},
     eligibleSkills: oldPlan.authorization?.eligible_skills || deps.eligibleSkills || [],
@@ -956,6 +1082,7 @@ export async function replanRemaining(
       replan_from: fromMissionId,
       replan_count: previousReplanCount + 1,
       discovery,
+      ...version?.briefing,
     },
   }
   newPlan.immutable_digest = digest16(newPlan)
@@ -988,6 +1115,14 @@ export async function replanRemaining(
       preserved: preservedResults,
     },
   })
+  if (product) {
+    writeJsonAtomic(path.join(newMissionDir, 'briefing.json'), product)
+    await newJournal.append({
+      kind: 'decision',
+      source: 'operator',
+      data: { decision: 'briefing_approved', digest: digest16(product), from_mission: fromMissionId },
+    })
+  }
   await newJournal.close()
 
   // Marcação durável de substituição na missão anterior

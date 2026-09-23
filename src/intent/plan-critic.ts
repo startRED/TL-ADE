@@ -45,6 +45,8 @@ const PLAN_CRITIC_SCHEMA = {
 
 type ModelRef = { family: string; model_id: string; effort?: string }
 type CriticInput = { plan: any; contracts: any[] }
+/** Chamada somente leitura de um papel: prompt e schema da resposta, na pasta da missão. */
+export type ModelCall = { missionId: string; stepId: string; prompt: string; schema: object }
 type RunOpts = {
   repoDir: string
   env: Record<string, string | undefined>
@@ -69,13 +71,14 @@ function workerRequest(stepId: string, repoDir: string, argv: string[], resultFi
   return { unit: stepId, authorization: 'unattended', cwd: repoDir, argv, timeout: CRITIC_TIMEOUT_S, result_file: resultFile }
 }
 
-async function codexCritique(ref: ModelRef, input: CriticInput, missionDir: string, opts: RunOpts): Promise<unknown> {
-  const stepId = 'plan-critic-codex'
+async function codexCall(ref: ModelRef, call: ModelCall, missionDir: string, opts: RunOpts): Promise<unknown> {
+  const stepId = `${call.stepId}-codex`
   const resultFile = path.join(missionDir, `${stepId}.json`)
-  const schemaPath = path.join(missionDir, 'plan-critic.schema.json')
+  const schemaPath = path.join(missionDir, `${call.stepId}.schema.json`)
   // Mesma missão, mesmo arquivo: resposta de um `ade plan` anterior não pode passar por nova.
   fs.rmSync(resultFile, { force: true })
-  fs.writeFileSync(schemaPath, JSON.stringify(PLAN_CRITIC_SCHEMA))
+  fs.mkdirSync(missionDir, { recursive: true })
+  fs.writeFileSync(schemaPath, JSON.stringify(call.schema))
   const resolved = opts.resolveBinaryImpl('codex')
   const args = buildCodexArgs({ role: 'checker_plan', cwd: opts.repoDir, schemaPath, resultFile, model: ref.model_id, effort: ref.effort })
   const res = await opts.runWorkerImpl({
@@ -83,36 +86,36 @@ async function codexCritique(ref: ModelRef, input: CriticInput, missionDir: stri
     args,
     cwd: opts.repoDir,
     missionDir,
-    missionId: input.plan.mission_id,
+    missionId: call.missionId,
     stepId,
     request: workerRequest(stepId, opts.repoDir, [resolved.exe, ...resolved.prefixArgs, ...args], resultFile),
     timeoutS: CRITIC_TIMEOUT_S,
     env: opts.env as Record<string, string>,
-    stdinData: criticPrompt(input),
+    stdinData: call.prompt,
   })
   const { envelope, error } = parseCodexOutput(res.stdout, resultFile)
   if (!envelope) throw new AdeError('codex_output_invalid', `codex saiu com código ${res.exitCode} sem resposta (${error})`, 2)
   return envelope.structured_output ?? envelope
 }
 
-async function agyCritique(ref: ModelRef, input: CriticInput, missionDir: string, opts: RunOpts): Promise<unknown> {
+async function agyCall(ref: ModelRef, call: ModelCall, missionDir: string, opts: RunOpts): Promise<unknown> {
   if (!isAgyAvailable()) throw new AdeError('family_unavailable', 'família agy indisponível após violação de contenção', 4)
-  const stepId = 'plan-critic-agy'
+  const stepId = `${call.stepId}-agy`
   const resolved = opts.resolveBinaryImpl('agy')
   const canary = plantCanary({
     worktreeDir: opts.repoDir,
     outsideDir: path.join(os.tmpdir(), `tl-ade-canary-${stepId}-${crypto.randomUUID()}`),
     unitId: stepId,
   })
-  const prompt = `${criticPrompt(input)}\nTeste de contenção controlado: ${canary.instruction}`
-  const args = buildAgyArgs({ prompt, model: ref.model_id, schema: PLAN_CRITIC_SCHEMA, cwd: opts.repoDir })
+  const prompt = `${call.prompt}\nTeste de contenção controlado: ${canary.instruction}`
+  const args = buildAgyArgs({ prompt, model: ref.model_id, schema: call.schema, cwd: opts.repoDir })
   const run = await opts
     .runWorkerImpl({
       resolved,
       args,
       cwd: opts.repoDir,
       missionDir,
-      missionId: input.plan.mission_id,
+      missionId: call.missionId,
       stepId,
       request: workerRequest(stepId, opts.repoDir, [resolved.exe, ...resolved.prefixArgs, ...args], path.join(missionDir, `${stepId}.json`)),
       timeoutS: CRITIC_TIMEOUT_S,
@@ -152,13 +155,47 @@ export function planCriticsFromConfig(
     for (const ref of refs) {
       if (!CRITIC_FAMILIES.includes(ref.family)) continue
       if (critics.some((c) => c.family === ref.family && c.model === ref.model_id)) continue
-      const critique = ref.family === 'codex' ? codexCritique : agyCritique
+      const modelCall = ref.family === 'codex' ? codexCall : agyCall
       critics.push({
         family: ref.family,
         model: ref.model_id,
-        critique: (input: CriticInput) => critique(ref, input, path.join(repoDir, '.ade', 'missions', input.plan.mission_id), opts),
+        critique: (input: CriticInput) =>
+          modelCall(
+            ref,
+            { missionId: input.plan.mission_id, stepId: 'plan-critic', prompt: criticPrompt(input), schema: PLAN_CRITIC_SCHEMA },
+            path.join(repoDir, '.ade', 'missions', input.plan.mission_id),
+            opts,
+          ),
       })
     }
   }
   return critics
+}
+
+/**
+ * Chamada pelas cadeias codex/agy de um papel de .ade/config.json, na ordem primária e
+ * fallbacks: a primeira que responde vale. Null quando o papel não tem cadeia codex nem agy.
+ */
+export function roleModelCall(
+  adeConfig: any,
+  roleName: string,
+  { repoDir, env = process.env, runWorkerImpl = runWorker, resolveBinaryImpl = resolveBinary }: { repoDir: string } & Partial<Omit<RunOpts, 'repoDir'>>,
+): ((call: ModelCall) => Promise<unknown>) | null {
+  const opts: RunOpts = { repoDir, env, runWorkerImpl, resolveBinaryImpl }
+  const role = adeConfig?.roles?.[roleName]
+  const refs: ModelRef[] = (role ? [role.primary, ...(role.fallbacks ?? [])] : []).filter((ref: ModelRef) => CRITIC_FAMILIES.includes(ref?.family))
+  if (refs.length === 0) return null
+  return async (call) => {
+    const errors: string[] = []
+    for (const ref of refs) {
+      try {
+        return await (ref.family === 'codex' ? codexCall : agyCall)(ref, call, path.join(repoDir, '.ade', 'missions', call.missionId), opts)
+      } catch (err) {
+        // Fuga do canário não é falha da cadeia: interrompe a chamada.
+        if (err instanceof AdeError && err.code === 'canary_escaped') throw err
+        errors.push(`${ref.family}/${ref.model_id}: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    throw new AdeError('role_call_failed', `papel ${roleName} sem resposta: ${errors.join('; ')}`, 2, { role: roleName })
+  }
 }

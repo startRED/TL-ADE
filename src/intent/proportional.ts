@@ -104,6 +104,11 @@ export function approvalReasons(plan: any): string[] {
   const reasons = Object.entries(plan?.briefing?.human_decisions || {}).map(
     ([id, decision]: [string, any]) => `${id}: ${decision.reason}`,
   )
+  // Plano nascido de briefing de produto nunca segue sem aprovação (lição de proto/server.mjs).
+  const product = plan?.briefing?.product
+  if (product) {
+    reasons.push(`plano da versão ${product.versions?.[plan.briefing.version_index]?.name ?? '?'} do briefing "${product.title}" exige aprovação`)
+  }
   const critic = plan?.briefing?.plan_critic
   if (critic && critic.verdict !== 'ready') {
     reasons.push(

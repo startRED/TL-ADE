@@ -60,6 +60,9 @@ export async function main(argv: string[], deps: {
 
     if (values.json) {
       stdout.write(canonicalize(result) + '\n')
+    } else if (result.planDigest !== undefined) {
+      stdout.write(`briefing aprovado: ${missionId} (digest ${result.digest})\n`)
+      stdout.write(`plano da primeira versão em ${result.state}: ade approve --mission ${missionId} --digest ${result.planDigest}\n`)
     } else {
       stdout.write(`missão aprovada: ${missionId} (digest ${result.digest})\n`)
     }

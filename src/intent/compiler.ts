@@ -180,6 +180,8 @@ export async function compileIntent({
   budget = {},
   interview,
   decisions = [],
+  classification: givenClassification,
+  deliverables: givenDeliverables,
 }: {
         request: string
         discovery?: any
@@ -195,12 +197,16 @@ export async function compileIntent({
         interview?: any[]
         /** Decisões da entrevista já respondida: orientam as tarefas dos contratos e abrem o briefing. */
         decisions?: Decision[]
+        /** Classificação já feita pelo planejamento: o advisor não é chamado de novo. */
+        classification?: Awaited<ReturnType<typeof classifyIntent>>
+        /** Entregas da versão do briefing de produto aprovado: substituem a divisão do pedido. */
+        deliverables?: string[]
     }): Promise<{ briefing: any; plan: any; contracts: any[]; stories: PlanStory[]; questions: any[]; refusedQuestions: any[] }> {
   if (typeof request !== 'string' || request.trim() === '') {
     throw new TypeError('compileIntent: request é obrigatório')
   }
 
-  const classification = await classifyIntent({ request, discovery, repoIr }, advisor)
+  const classification = givenClassification ?? (await classifyIntent({ request, discovery, repoIr }, advisor))
   const risk = assessRisk({ request, discovery, classification })
   const briefing = generateBriefing({ request, discovery, classification, risk })
 
@@ -398,8 +404,8 @@ export async function compileIntent({
   })
 
   // A quantidade de stories segue as entregas do pedido, sem mínimo nem máximo fixos.
-  const deliverables = splitDeliverables(request)
-  const immediate = deliverables.length > 1 ? deliverables : [request]
+  const deliverables = givenDeliverables ?? splitDeliverables(request)
+  const immediate = givenDeliverables || deliverables.length > 1 ? deliverables : [request]
 
   const researchRefs = researchFindings.map((f) => f.ref)
 
