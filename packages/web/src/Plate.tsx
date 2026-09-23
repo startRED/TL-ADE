@@ -51,12 +51,13 @@ export default function Plate({ name, className = '', decorative = false, depth 
   return (
     <figure className={`plate-field ${className}`}>
       <motion.span className="plate-dots" aria-hidden="true" style={still ? undefined : { x: dotX, y: dotY }} />
-      <motion.img
+      {/* A gravura é máscara: a tinta vem do tema (branca à noite, marinho de dia), sem precisar de duas tiragens. */}
+      <motion.span
         className="plate"
-        src={src}
-        alt={decorative ? '' : alt}
+        role={decorative ? undefined : 'img'}
+        aria-label={decorative ? undefined : alt}
         aria-hidden={decorative || undefined}
-        style={still ? undefined : { x: px, y: imgY, scale: 1.04 }}
+        style={{ maskImage: `url(${src})`, WebkitMaskImage: `url(${src})`, ...(still ? {} : { x: px, y: imgY, scale: 1.04 }) }}
       />
     </figure>
   )
