@@ -137,7 +137,7 @@ describe('relatório de custo e cota (ade report --quota)', () => {
 
     const stdout = makeSink()
     const stderr = makeSink()
-    const exitCode = await main(['--mission', dir], { env: {}, stdout, stderr })
+    const exitCode = await main(['--mission', dir], { env: {}, stdout, stderr, readCommits: async () => [] })
     expect(exitCode).toBe(0)
 
     const reportContent = readFileSync(path.join(dir, 'report.md'), 'utf8')
@@ -195,6 +195,7 @@ describe('relatório de custo e cota (ade report --quota)', () => {
       env: {},
       stdout,
       stderr,
+      readCommits: async () => [],
       now: () => new Date(fixedTime).getTime(),
     })
     expect(exitCode).toBe(0)
@@ -270,6 +271,7 @@ describe('relatório de custo e cota (ade report --quota)', () => {
       env: {},
       stdout,
       stderr,
+      readCommits: async () => [],
       now: () => nowMs,
     })
     expect(exitCode).toBe(0)
@@ -365,6 +367,7 @@ describe('relatório de custo e cota (ade report --quota)', () => {
       env: {},
       stdout,
       stderr,
+      readCommits: async () => [],
       now: () => fixedNow,
     })
     expect(exitCode).toBe(0)
@@ -469,6 +472,7 @@ describe('relatório de custo e cota (ade report --quota)', () => {
       env: {},
       stdout,
       stderr,
+      readCommits: async () => [],
       now: () => fixedNow,
     })
     expect(exitCode).toBe(0)

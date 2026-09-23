@@ -13,6 +13,9 @@ import { acquireLease } from '../lease/lease.ts'
 import { createLocalQuotaPort } from '../adapters/local/quota.ts'
 import { readEffectiveQuota, usageByCompany } from '../models/usage.ts'
 import type { CompanyUsage } from '../models/usage.ts'
+import { createGitPort } from '../git/gitport.ts'
+import { deliveryMetrics, gitCommitsSince, renderDeliveryMetrics } from '../telemetry/delivery.ts'
+import type { Commit } from '../telemetry/delivery.ts'
 
 /**
  * Configuração aprovada do repositório dono da missão (`<repo>/.ade/missions/<id>`); ausente vale
@@ -463,6 +466,7 @@ export async function main(argv: string[], deps: {
     stderr?: { write: (s: string) => void } | ((s: string) => void)
     now?: number | (() => number);
     quotaPort?: { readReceipt: (p: { family: string; now: number }) => Promise<any> }
+    readCommits?: (repoDir: string, since: string) => Promise<Commit[] | null>
     [key: string]: any
 } = {}): Promise<number> {
   const env = deps.env ?? process.env
@@ -515,6 +519,12 @@ export async function main(argv: string[], deps: {
   const usage = usageByCompany(events, nowMs, effective)
   const quota = values.quota ? sumQuotaUsage(events, nowMs) : null
   let reportContent = renderReport(mission, projectUnits(events), costs, quota, events, usage)
+
+  // sem commit do motor não há correção possível: o git só é lido quando a missão tem commit
+  const repoDir = path.resolve(missionDir, '..', '..', '..')
+  const readCommits = deps.readCommits ?? ((dir: string, since: string) => gitCommitsSince(createGitPort({ worktreeDir: dir }), since))
+  const commits = events.some((e) => e.kind === 'story_done' && e.data?.commit) ? await readCommits(repoDir, String(events[0].at)) : []
+  reportContent += renderDeliveryMetrics(deliveryMetrics(events, commits ?? []), commits !== null)
 
   const pending = pendingCalibration(events, limitsInForce(config))
   if (pending.length > 0) reportContent += `
