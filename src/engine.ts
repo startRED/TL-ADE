@@ -10,6 +10,7 @@ import { authorizedStep } from './engine/paid-call.ts'
 import { maybeEngineFault } from './engine/faults.ts'
 import { findStoryCommitted, findStoryStarted } from './engine/resume.ts'
 import { preserveInterruptedTree } from './engine/preserve.ts'
+import { writeProof } from './engine/proof.ts'
 import { classifyCallFailure, pauseForQuota, refreshChains, waitQuotaPause } from './engine/quota.ts'
 import { buildLadder, classifyMakerOutcome, correctionRequest, ladderStart, nextAttempt, reserveRung, roundsPerRung, type MakerOutcome } from './engine/ladder.ts'
 import { readMissionOptionsBesidePlan } from './mission/options.ts'
@@ -17,7 +18,7 @@ import { blockedInContract, cliModel } from './models/route.ts'
 import { readModelSettings } from './models/settings.ts'
 import { storyRisk } from './intent/risk.ts'
 import { dedupStorySection } from './pack/dedup.ts'
-import { measurePackBytes, telemetrySections } from './pack/pack.ts'
+import { measurePackBytes, packTelemetry } from './pack/pack.ts'
 import { buildStoryContext, guardStoryContext } from './context/story.ts'
 import { dispatchClaude } from './adapters/claude/index.ts'
 import { dispatchCodex } from './adapters/codex/index.ts'
@@ -58,11 +59,6 @@ export const CANARY_FAMILIES: readonly string[] = ['claude', 'codex']
  * Composição do pack para a telemetria. Manifesto sem a lista de seções (compilador sem
  * detalhamento) vira uma seção única `pack` com o total medido, para a soma continuar fechando.
  */
-function packTelemetry(manifest: any) {
-  if (Array.isArray(manifest?.sections)) return { sections: telemetrySections(manifest), bytes: manifest.bytes }
-  return { sections: [{ section: 'pack', bytes: manifest.bytes, digest: String(manifest.digest ?? '') }], bytes: manifest.bytes }
-}
-
 /**
  * Orquestra o ciclo durável de execução de uma story.
  *
@@ -585,6 +581,27 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     }
   }
 
+  const proofWriterFor = async () => {
+    const now = deps.now?.() ?? Date.now()
+    const cap = loaded.missionBudget.max_subscription_weekly_percent ?? 50
+    const slots: Array<{ family: string; model?: string; effort?: string | null }> = routed
+      ? [...routed.chains.checker, ...routed.chains.fix].map((slot) => ({ family: slot.family, model: cliModel(slot), effort: slot.effort ?? null }))
+      : [
+          ...(checkerRole ? [{ family: checkerRole.family as string, model: checkerRole.model_id as string | undefined }] : []),
+          { family: makerFamily as string, model: makerModel as string | undefined },
+        ]
+    const ordered = [...slots.filter((slot) => slot.family !== writerFamily), ...slots.filter((slot) => slot.family === writerFamily)]
+    for (const slot of ordered) {
+      const dispatch = dispatcherFor(slot.family)
+      const resolved = binaryFor(slot.family)
+      if (!dispatch || !resolved) continue
+      const receipt = routed ? routed.receipts[slot.family as keyof typeof routed.receipts] ?? null : await deps.quotaPort.readReceipt({ family: slot.family, now })
+      if (!validateQuotaReceipt(receipt, { family: slot.family, max_percent: cap, now }).ok) continue
+      return { ...slot, dispatch, resolved, receipt }
+    }
+    return null
+  }
+
   const redGitPort = started
     ? {
         ...wtPort,
@@ -598,31 +615,72 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     gitPort: redGitPort,
   })
 
-  // Eval vermelho
-  for (const evalDef of story.evals) {
-    const evalRecord = await runRedEval({
-      eval: evalDef,
-      phase: 'red',
-      tree: treeBefore,
-      unit: storyId,
-    })
-    if (evalRecord.verdict !== 'red' && evalRecord.verdict !== 'red_valid') {
-      await deps.journal.append({
-        kind: 'story_done',
-        unit: storyId,
-        data: {
-          status: 'awaiting_operator',
-          reason: 'eval_red_not_red',
-          unit: storyId,
-          commit: null,
-        },
+  // Despachante e binário de cada empresa (quem escreve provas, quem escreve código e quem revisa).
+  const dispatcherFor = (family: string) => ({ claude: deps.dispatchClaude ?? dispatchClaude, codex: deps.dispatchCodex ?? dispatchCodex, agy: deps.dispatchAgy ?? dispatchAgyUnit } as Record<string, ((opts: any) => Promise<any>) | undefined>)[family]
+  // cada empresa usa o binário que a fiação resolveu para ela; `null` explícito = não achou; sem fiação (dublês), o do Claude
+  const binaryFor = (family: string) => {
+    const own = family === 'codex' ? deps.checkerResolved : family === 'agy' ? deps.agyResolved : deps.resolved
+    return own === undefined ? deps.resolved : own
+  }
+
+  // Eval vermelho. Sem prova que falhe antes do código (pedido do painel traz critérios, não testes), a etapa de prova
+  // escreve os testes dos critérios e o vermelho roda de novo sobre eles (ADR 0036). Retomada já tem as provas na árvore.
+  const redIsValid = async (tree: string) => {
+    for (const evalDef of story.evals) {
+      const evalRecord = await runRedEval({ eval: evalDef, phase: 'red', tree, unit: storyId })
+      if (evalRecord.verdict !== 'red' && evalRecord.verdict !== 'red_valid') return false
+    }
+    return true
+  }
+  let redValid = await redIsValid(treeBefore)
+  if (!redValid && !started) {
+    const writer = await proofWriterFor()
+    if (writer) {
+      const proof = await writeProof({
+        storyId,
+        missionId,
+        missionDir,
+        worktreeDir,
+        wtPort,
+        treeBefore,
+        contract,
+        testCommand: story.evals[0]?.argv ?? [],
+        writer,
+        step: deps.step,
+        journal: deps.journal,
+        events: readEvents,
+        compilePack: deps.compilePack,
+        maxModelCalls: effectiveMaxCalls,
+        usd: authorizedReservation.usd,
+        quotaReceipt: writer.receipt,
+        contextBytes,
+        weeklyCap: loaded.missionBudget.max_subscription_weekly_percent ?? 50,
+        workerEnv: deps.workerEnv,
+        now: () => deps.now?.() ?? Date.now(),
       })
-      return {
-        status: 'awaiting_operator',
-        exitCode: 3,
-        reason: 'eval_red_not_red',
-        commit: null,
+      if (proof.kind === 'park') return await parkStory(proof.reason)
+      if (proof.kind === 'written') {
+        treeBefore = proof.tree
+        redValid = await redIsValid(treeBefore)
       }
+    }
+  }
+  if (!redValid) {
+    await deps.journal.append({
+      kind: 'story_done',
+      unit: storyId,
+      data: {
+        status: 'awaiting_operator',
+        reason: 'eval_red_not_red',
+        unit: storyId,
+        commit: null,
+      },
+    })
+    return {
+      status: 'awaiting_operator',
+      exitCode: 3,
+      reason: 'eval_red_not_red',
+      commit: null,
     }
   }
 
@@ -644,12 +702,6 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   let treeBeforeRound = treeBefore
   // Escada de quem escreve: a fila `fix` com planos; sem eles, os degraus de quem chama ou só o maker do contrato. Cada
   // degrau vai pelo despachante da sua empresa; com planos, as rodadas por degrau seguem o risco da parte.
-  const dispatcherFor = (family: string) => ({ claude: deps.dispatchClaude ?? dispatchClaude, codex: deps.dispatchCodex ?? dispatchCodex, agy: deps.dispatchAgy ?? dispatchAgyUnit } as Record<string, ((opts: any) => Promise<any>) | undefined>)[family]
-  // cada empresa usa o binário que a fiação resolveu para ela; `null` explícito = não achou; sem fiação (dublês), o do Claude
-  const binaryFor = (family: string) => {
-    const own = family === 'codex' ? deps.checkerResolved : family === 'agy' ? deps.agyResolved : deps.resolved
-    return own === undefined ? deps.resolved : own
-  }
   // Tetos fixados na aprovação do painel, ao lado do plano; usd_informative não entra em decisão nenhuma.
   const ceilings = loaded.planDir ? readMissionOptionsBesidePlan(path.join(loaded.planDir, 'plan.json'))?.ceilings : undefined
   const caps = { maxTurns: ceilings?.max_turns ?? undefined, maxRounds: ceilings?.max_rounds ?? undefined }

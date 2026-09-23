@@ -5,7 +5,7 @@ import os from 'node:os'
 import { AdeError } from '../journal/errors.ts'
 import { runContained } from '../gates/command.ts'
 import { EXTRACT_CAPS, safeId, writeRawArtifact } from '../gates/output.ts'
-import { classifyGreen, classifyRed, parseReporterJson } from './classify.ts'
+import { classifyGreen, classifyRed, parseReporterJson, parseRunnerSummary } from './classify.ts'
 import { validateScenarioStrictness } from './strictness.ts'
 
 interface EvalDef {
@@ -275,7 +275,7 @@ export function createEvalRunner({ step, missionDir, gitPort }: CreateEvalRunner
     })
     const raw_ref = `art:${artRef}`
 
-    const report = parseReporterJson(contained.stdout)
+    const report = parseReporterJson(contained.stdout) ?? parseRunnerSummary(`${contained.stdout}\n${contained.stderr}`)
     const { red_reason, num_total_tests } = classifyRed({
       exitCode: contained.exitCode,
       expectExit: evalDef.expect_exit,

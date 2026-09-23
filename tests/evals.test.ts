@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { classifyGreen, classifyRed, parseReporterJson } from '../src/evals/classify.ts'
+import { classifyGreen, classifyRed, parseReporterJson, parseRunnerSummary } from '../src/evals/classify.ts'
 import { createEvalRunner } from '../src/evals/eval-runner.ts'
 import { validateScenarioStrictness } from '../src/evals/strictness.ts'
 import { openJournal, readJournal } from '../src/journal/journal.ts'
@@ -1571,5 +1571,20 @@ describe('eval output cap by max_output_bytes', () => {
     })
 
     expect(Buffer.byteLength(record.stdout_excerpt, 'utf8')).toBeLessThanOrEqual(8192)
+  })
+})
+
+describe('resumo do executor sem reporter JSON', () => {
+  test('le_a_contagem_do_node_test_do_vitest_e_do_jest_e_a_falha_de_assercao_vira_vermelha_valida', () => {
+    const nodeSpec = '✖ apaga a do meio (1.2ms)\nℹ tests 3\nℹ suites 0\nℹ pass 2\nℹ fail 1\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\n'
+    expect(parseRunnerSummary(nodeSpec)).toEqual({ numTotalTests: 3, numPassedTests: 2, numFailedTests: 1, numPendingTests: 0, numTodoTests: 0 })
+    expect(parseRunnerSummary('# tests 2\n# pass 2\n# fail 0\n')).toMatchObject({ numTotalTests: 2, numFailedTests: 0 })
+    expect(parseRunnerSummary('\u001b[2m Tests \u001b[22m 1 failed | 2 passed | 1 skipped (4)')).toEqual({ numTotalTests: 4, numPassedTests: 2, numFailedTests: 1, numPendingTests: 1, numTodoTests: 0 })
+    expect(parseRunnerSummary('Tests:       1 failed, 2 passed, 3 total')).toMatchObject({ numTotalTests: 3, numFailedTests: 1 })
+    expect(parseRunnerSummary('nada aqui')).toBeNull()
+    const report = parseRunnerSummary(nodeSpec)
+    expect(classifyRed({ exitCode: 1, expectExit: 0, timedOut: false, stdout: nodeSpec, stderr: '', report }).red_reason).toBe('assertion')
+    const importError = 'SyntaxError: The requested module does not provide an export named apagar\nℹ tests 1\nℹ pass 0\nℹ fail 1\n'
+    expect(classifyRed({ exitCode: 1, expectExit: 0, timedOut: false, stdout: importError, stderr: '', report: parseRunnerSummary(importError) }).red_reason).toBe('compile_error')
   })
 })

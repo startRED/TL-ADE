@@ -72,6 +72,8 @@ interface SetupFixtureOptions {
   preflight?: any
   planMaxModelCalls?: number
   storyMaxModelCalls?: number
+  /** Pedido sem prova escrita: o eval passa na base até existir tests/proof.txt, que a etapa de prova escreve. */
+  proof?: boolean
 }
 
 function setupStoryFixture(options: SetupFixtureOptions = {}) {
@@ -83,6 +85,7 @@ function setupStoryFixture(options: SetupFixtureOptions = {}) {
   const checkCode = [
     "import fs from 'node:fs'",
     'let ok = false',
+    ...(options.proof ? ["if (!fs.existsSync('tests/proof.txt')) { process.stdout.write(JSON.stringify({ numTotalTests: 1, numPassedTests: 1, numFailedTests: 0 }) + '\\n'); process.exit(0) }"] : []),
     'try {',
     "  const content = fs.readFileSync('src/hello.txt', 'utf8')",
     "  ok = content.includes('ok')",
@@ -154,7 +157,7 @@ function setupStoryFixture(options: SetupFixtureOptions = {}) {
       evidence: [],
     },
     guardrails: {
-      scope_paths: ['src/**', 'tests/**'],
+      scope_paths: options.proof ? ['src/**', 'tests/**', 'tests/proof.txt'] : ['src/**', 'tests/**'],
       do_not_touch: ['.ade/**'],
       autonomy: 'safe',
     },
@@ -242,6 +245,7 @@ function setupStoryFixture(options: SetupFixtureOptions = {}) {
   })
 
   const makerActions = [
+    ...(options.proof ? [{ files: { 'tests/proof.txt': 'hello.txt precisa dizer ok\n' }, result: { format_version: 1, story_id: 'ADE-T1', state: 'done', phase: 'red', round: 1, tree_before: '0123456789abcdef', tree_after: 'fedcba9876543210', eval_records: [], gate_records: [], passes: false, reason: 'provas escritas', sources: ['contract'] }, stdout: fakeStdout }] : []),
     {
       files: {
         'src/hello.txt': 'ok\n',
@@ -408,6 +412,24 @@ describe('engine', () => {
     expect(wallMs).toBeGreaterThanOrEqual(0)
     expect(telemetry?.data).not.toHaveProperty('first_source_edit_ms')
   }, 60_000)
+
+  // ADR 0036: pedido sem prova escrita. O eval passa na base, a etapa de prova escreve tests/proof.txt (só o arquivo
+  // de prova), o vermelho vale, o maker escreve o código e a parte é entregue.
+  test('sem_prova_que_falhe_a_etapa_de_prova_escreve_os_testes_e_a_parte_segue_ate_a_entrega', async () => {
+    const fixture = setupStoryFixture({ proof: true })
+    const result = await runStory(fixture.deps, fixture.input)
+    expect(result).toMatchObject({ status: 'delivered', reason: null })
+
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    const reds = events.filter((e) => e.kind === 'step_result' && String(e.step_id).includes(':red:'))
+    expect(reds.map((e) => (e.data as any).result.verdict)).toEqual(['eval_born_green', 'red_valid'])
+    const written = events.find((e) => e.kind === 'decision' && (e.data as any).decision === 'proof_written')
+    expect(written?.data).toMatchObject({ family: 'claude', files: ['tests/proof.txt'] })
+    expect(events.some((e) => e.kind === 'budget_reserved' && (e.data as any).phase === 'proof')).toBe(true)
+    expect(events.some((e) => e.kind === 'telemetry' && (e.data as any).role === 'prova')).toBe(true)
+    const order = events.map((e) => String(e.step_id ?? ''))
+    expect(order.findIndex((id) => id === 'ADE-T1:proof')).toBeLessThan(order.findIndex((id) => id.endsWith(':maker')))
+  }, 90_000)
 
   // CA2: Dado um contrato com roles.maker.family 'codex', quando runStory roda, então
   // lança AdeError com code 'family_without_canary' e exit 4, e o journal não tem nenhum

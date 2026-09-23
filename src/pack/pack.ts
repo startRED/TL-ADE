@@ -336,3 +336,9 @@ export function compilePack(options: CompilePackOptions): CompilePackResult {
 
   return { pack_path: packPath, manifest_path: manifestPath, manifest }
 }
+
+/** Pack da chamada para a telemetria: seções com bytes e digest, ou o pack inteiro quando o manifesto não as lista. */
+export function packTelemetry(manifest: any) {
+  if (Array.isArray(manifest?.sections)) return { sections: telemetrySections(manifest), bytes: manifest.bytes }
+  return { sections: [{ section: 'pack', bytes: manifest.bytes, digest: String(manifest.digest ?? '') }], bytes: manifest.bytes }
+}

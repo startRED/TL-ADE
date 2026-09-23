@@ -72,6 +72,37 @@ export function parseReporterJson(stdout: string): ReporterReport | null {
   return result
 }
 
+/**
+ * Contagem de provas lida do resumo que o executor imprime quando não há reporter JSON: `node --test` (spec e TAP),
+ * Vitest e Jest. Sem ela, projeto de outro executor nunca teria prova vermelha válida (tudo virava "ambiente").
+ */
+export function parseRunnerSummary(output: string): ReporterReport | null {
+  if (typeof output !== 'string') return null
+  // cores do terminal saem antes de ler (ESC montado à parte para a regex não ter caractere de controle)
+  const clean = output.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g'), '')
+  const node = (name: string) => {
+    const m = new RegExp(`^[ \\t]*(?:ℹ|#)[ \\t]*${name}[ \\t]+(\\d+)[ \\t]*$`, 'm').exec(clean)
+    return m ? Number(m[1]) : null
+  }
+  const total = node('tests')
+  const pass = node('pass')
+  const fail = node('fail')
+  if (total !== null && pass !== null && fail !== null) {
+    return { numTotalTests: total, numPassedTests: pass, numFailedTests: fail, numPendingTests: node('skipped') ?? 0, numTodoTests: node('todo') ?? 0 }
+  }
+  // Vitest: "Tests  1 failed | 2 passed | 1 skipped (4)"; Jest: "Tests:       1 failed, 2 passed, 3 total"
+  const line = /^[ \t]*Tests:?[ \t]+(.+)$/m.exec(clean)?.[1]
+  if (!line) return null
+  const count = (word: string) => Number(new RegExp(`(\\d+) ${word}`).exec(line)?.[1] ?? 0)
+  const passed = count('passed')
+  const failed = count('failed')
+  const skipped = count('skipped')
+  const todo = count('todo')
+  const declared = /\((\d+)\)\s*$/.exec(line)?.[1] ?? /(\d+) total/.exec(line)?.[1]
+  if (passed + failed + skipped + todo === 0 && declared === undefined) return null
+  return { numTotalTests: declared !== undefined ? Number(declared) : passed + failed + skipped + todo, numPassedTests: passed, numFailedTests: failed, numPendingTests: skipped, numTodoTests: todo }
+}
+
 interface ClassifyRedParams {
   exitCode: number | null
   expectExit: number

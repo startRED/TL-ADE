@@ -24,7 +24,7 @@ interface Detail {
  */
 const STAVES = [
   { key: 'escreve', label: 'Escreve', test: /maker|fix|impl/i },
-  { key: 'prova', label: 'Prova', test: /eval|gate|test|prova|suite/i },
+  { key: 'prova', label: 'Prova', test: /proof|eval|gate|test|prova|suite/i },
   { key: 'revisa', label: 'Revisa', test: /review|check|revis/i },
   { key: 'motor', label: 'Motor', test: /./ },
 ] as const
@@ -35,7 +35,8 @@ const staffOf = (name: string): StaffKey => STAVES.find((s) => s.test.test(name)
 function stepSentence(name: string): string {
   const r = /:r(\d+):(maker|fix|review|check\w*)/.exec(name)
   if (r) return /maker|fix/.test(r[2]) ? `Rodada ${r[1]}: escreveu o código` : `Rodada ${r[1]}: revisão de outra empresa`
-  if (/:red:/.test(name)) return 'Prova escrita antes do código (nasce vermelha)'
+  if (/:proof$/.test(name)) return 'Escreveu as provas dos critérios, antes do código'
+  if (/:red:/.test(name)) return 'Prova rodada antes do código (precisa falhar)'
   if (/:green:/.test(name)) return 'Prova conferida depois do código'
   if (/prepare/.test(name)) return 'Preparou a cópia de trabalho'
   if (/deliver|commit/.test(name)) return 'Entregou a parte (commit)'
@@ -90,7 +91,7 @@ function cellSentence(role: StaffKey, steps: Step[]): string {
   const last = steps[steps.length - 1]
   const mark = markOf(last.state)
   if (role === 'escreve') return mark === 'live' ? 'escrevendo' : mark === 'fail' ? 'falhou ao escrever' : steps.length > 1 ? `escreveu ${steps.length} vezes` : 'escreveu'
-  if (role === 'prova') return mark === 'live' ? 'rodando a prova' : mark === 'fail' ? 'prova falhou' : /:green:/.test(last.name) ? 'prova passou' : 'prova escrita'
+  if (role === 'prova') return mark === 'live' ? 'rodando a prova' : mark === 'fail' ? 'prova falhou' : /:green:/.test(last.name) ? 'prova passou' : /:proof$/.test(last.name) ? 'provas escritas' : 'prova falhou antes do código'
   if (role === 'revisa') return mark === 'live' ? 'revisando' : mark === 'fail' ? 'pediu correção' : 'revisou'
   return mark === 'live' ? 'trabalhando' : mark === 'fail' ? 'parou' : /deliver|commit/.test(last.name) ? 'entregou' : 'preparou'
 }
