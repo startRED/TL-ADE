@@ -47,6 +47,9 @@ const REGISTRY = {
   ] },
   codex: { label: 'Codex (OpenAI)', models: [
     { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', price: [2, 12], note: 'equilibrado e rápido (84 tokens/s, IOI 88%); padrão para escrever' },
+    // 23/09: sem preço aqui o painel mostrava "—" para 52 chamadas do GPT-6 Sol e o custo da missão ficava subcontado
+    { id: 'gpt-6-sol', label: 'GPT-6 Sol', price: [2, 10], note: 'AA 43 no high por US$ 0,37 a tarefa; revisor e reserva de código (exige Codex CLI 0.156+)' },
+    { id: 'gpt-6-luna', label: 'GPT-6 Luna', price: [0.1, 0.5], note: 'AA 32 no high por US$ 0,03; batedor e pesquisa' },
     { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', price: [5, 30], note: 'topo da 5.6 (AA 47, IOI 91%); parte difícil e correção' },
     { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', price: [0.2, 1.2], note: 'econômico (AA 38 a US$ 0,18, 130 tokens/s); partes leves' },
     { id: 'gpt-6-astra', label: 'GPT-6 Astra', price: [10, 50], note: 'o mais forte (AA 53, Terminal-Bench 4.0 57%, ARC-AGI-2 95%) pela metade do custo do Fable; épicos, plano, correção difícil' },
