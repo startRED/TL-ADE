@@ -272,6 +272,9 @@ export async function runWorker(options: RunWorkerOptions): Promise<RunWorkerRes
     const stdoutChunks: string[] = []
     const stderrChunks: string[] = []
     let runningReceiptPromise: Promise<import('./receipt.ts').Receipt>|null = null
+    // Processo que já saiu não tem identidade a gravar: o recibo running não espera o powershell (~1 s por chamada no Windows).
+    let markClosed = () => {}
+    const closed = new Promise<null>((resolve) => { markClosed = () => resolve(null) })
 
     async function finalize(state: 'exited'|'timeout'|'crashed'|'start_failed', reason: 'exit'|'timeout'|'dead_man'|'spawn_error', exitCode: number|null, failureClass: 'environment'|null, pid: number|null) {
       if (finalizado) return
@@ -406,6 +409,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<RunWorkerRes
     })
 
     child.once('close', (code) => {
+      markClosed()
       const exitCode = typeof code === 'number' ? code : null
       let state: 'exited'|'timeout'|'crashed'
       let reason: 'exit'|'timeout'|'dead_man'
@@ -458,7 +462,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<RunWorkerRes
       runningReceiptPromise = (async () => {
         let startTime = null
         try {
-          startTime = await getStartTime(childPid)
+          startTime = await Promise.race([getStartTime(childPid), closed])
         } catch {
           // ignora
         }

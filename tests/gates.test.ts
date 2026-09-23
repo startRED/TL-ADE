@@ -22,7 +22,7 @@ describe('typecheck gate', () => {
     expect(tsconfig.compilerOptions?.noEmit).toBe(true)
     expect(tsconfig.compilerOptions?.module).toBe('NodeNext')
     expect(tsconfig.compilerOptions?.moduleResolution).toBe('NodeNext')
-    expect(tsconfig.include).toContain('src/**/*.js')
+    expect(tsconfig.include).toContain('src/**/*.ts')
     expect(tsconfig.include).toContain('tests/**/*.ts')
 
     const pkgPath = path.join(ROOT, 'package.json')
@@ -88,7 +88,9 @@ describe('typecheck gate', () => {
     const srcFiles = getFiles(path.join(ROOT, 'src'))
     expect(srcFiles.length).toBeGreaterThan(0)
     for (const file of srcFiles) {
-      expect(file.endsWith('.js'), `Arquivo em src/ não termina em .js: ${file}`).toBe(true)
+      // ADR 0030: produção migrou para .ts; só o vendor de terceiro segue .js
+      const isVendor = file.includes(`${path.sep}vendor${path.sep}`)
+      expect(file.endsWith('.ts') || isVendor, `Arquivo em src/ fora de .ts: ${file}`).toBe(true)
     }
 
     const testFiles = getFiles(path.join(ROOT, 'tests'))

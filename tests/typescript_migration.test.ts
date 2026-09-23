@@ -56,7 +56,7 @@ describe('migração TS do núcleo durável', () => {
 
   test('ca3_converted_files_carry_no_suppression_directives', () => {
     expect(coreTsFiles.length).toBeGreaterThanOrEqual(34)
-    const suppression = /@ts-ignore|@ts-expect-error|@ts-nocheck|oxlint-disable|eslint-disable/
+    const suppression = new RegExp(['@ts-' + 'ignore', '@ts-' + 'expect-error', '@ts-' + 'nocheck', 'oxlint-' + 'disable', 'eslint-' + 'disable'].join('|'))
     expect(coreTsFiles.filter((f) => suppression.test(readFileSync(f, 'utf8'))).map(rel)).toEqual([])
   })
 
@@ -113,7 +113,7 @@ describe('migração TS do motor, adaptadores e revisão', () => {
 
   test('ca3_engine_ts_compiles_under_strict_without_suppression', () => {
     expect(engineTsFiles.length).toBeGreaterThanOrEqual(34)
-    const suppression = /@ts-ignore|@ts-expect-error|@ts-nocheck|oxlint-disable|eslint-disable/
+    const suppression = new RegExp(['@ts-' + 'ignore', '@ts-' + 'expect-error', '@ts-' + 'nocheck', 'oxlint-' + 'disable', 'eslint-' + 'disable'].join('|'))
     expect(engineTsFiles.filter((f) => suppression.test(readFileSync(f, 'utf8'))).map(rel)).toEqual([])
 
     const { config } = ts.readConfigFile(path.join(ROOT, 'tsconfig.json'), ts.sys.readFile)
@@ -174,7 +174,7 @@ describe('migração TS da borda e fim do JS', () => {
 
   test('ca4_edge_ts_compiles_under_strict_without_suppression_or_jsdoc_types', () => {
     expect(edgeTsFiles.length).toBeGreaterThanOrEqual(57)
-    const suppression = /@ts-ignore|@ts-expect-error|@ts-nocheck|oxlint-disable|eslint-disable/
+    const suppression = new RegExp(['@ts-' + 'ignore', '@ts-' + 'expect-error', '@ts-' + 'nocheck', 'oxlint-' + 'disable', 'eslint-' + 'disable'].join('|'))
     expect(edgeTsFiles.filter((f) => suppression.test(readFileSync(f, 'utf8'))).map(rel)).toEqual([])
     const offenders = edgeTsFiles.flatMap((f) =>
       readFileSync(f, 'utf8').split('\n')

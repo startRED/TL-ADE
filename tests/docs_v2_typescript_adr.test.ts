@@ -111,7 +111,7 @@ describe('ADR 0030: TypeScript no motor e build do painel', () => {
     expect(tsconfig.compilerOptions.erasableSyntaxOnly).toBe(true)
     expect(tsconfig.compilerOptions.allowImportingTsExtensions).toBe(true)
     expect(tsconfig.compilerOptions.noEmit).toBe(true)
-    expect(tsconfig.include).toEqual(expect.arrayContaining(['src/**/*.ts', 'src/**/*.js']))
+    expect(tsconfig.include).toEqual(expect.arrayContaining(['src/**/*.ts', 'tests/**/*.ts']))
 
     const pkg = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
     expect(pkg.engines.node).toBe('>=24')
