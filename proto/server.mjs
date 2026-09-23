@@ -316,9 +316,11 @@ function trackModelCost(event) {
   }
   // modelo que ficou sem preço (entrou no catálogo antes do registro) e agora tem: refaz o dele pelo journal. O GPT-6 Sol
   // ficou com 52 chamadas a "—" no painel mesmo depois de ganhar preço (m-mud7qppy, 23/09)
-  if (m.cost.models[event.model]?.priced === false && priceOf(event.model)) {
-    delete m.cost.models[event.model]
-    try { for (const l of readFileSync(path.join(ADE_DIR, 'journal.jsonl'), 'utf8').split('\n')) { if (!l.includes(m.id) || !l.includes(event.model)) continue; const e = JSON.parse(l); if (e.mission === m.id && e.type === 'model_call' && e.model === event.model) addModelCost(m.cost.models, e) } } catch {}
+  // Vale em qualquer chamada: esperar a próxima do próprio modelo deixava o "—" até ele voltar à fila.
+  const stale = Object.keys(m.cost.models).filter((k) => m.cost.models[k].priced === false && priceOf(k))
+  if (stale.length) {
+    for (const k of stale) delete m.cost.models[k]
+    try { for (const l of readFileSync(path.join(ADE_DIR, 'journal.jsonl'), 'utf8').split('\n')) { if (!l.includes(m.id) || !l.includes('"model_call"')) continue; const e = JSON.parse(l); if (e.mission === m.id && e.type === 'model_call' && stale.includes(e.model)) addModelCost(m.cost.models, e) } } catch {}
   }
   addModelCost(m.cost.models, event)
   // orçamento por parte: só o Claude informa preço real; sem isto, Codex e agy gastavam rodadas sem teto
