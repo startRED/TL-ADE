@@ -360,13 +360,15 @@ function setStep(name, status, extra = {}) {
 // Windows: sem windows.sandbox (o [windows] do config.toml some com --ignore-user-config) o Codex rebaixa workspace-write para
 // read-only calado e, em read-only, recusa todo comando ("blocked by policy"). Missões m-mu81n0ms (13 chamadas de código sem gravar)
 // e m-mu8kjr1p (o planejador não leu um arquivo e pediu ao Erick que colasse o projeto).
+// 23/09: o modo elevated passou a falhar ("apply deny-read ACLs") na 0.154 e na 0.156; unelevated lê, grava e roda comando.
 // Ferramentas do Codex que a missão não usa: cada uma vai no contexto de todo passo (medido 19/09: 2,5k tokens a menos por passo).
 // A chamada de imagens ($imagegen) não usa --ignore-user-config e fica com tudo.
 const CODEX_UNUSED = ['apps', 'browser_use', 'browser_use_external', 'computer_use', 'image_generation', 'multi_agent', 'plugins', 'remote_plugin', 'goals', 'in_app_browser', 'in_app_chat', 'skill_search', 'tool_suggest', 'sleep_tool']
 function guardPrompt(cmd, args, stdin) {
   if (cmd === 'agy') return { args: args.map((a) => a.startsWith('--print=') ? `--print=${ENV_GUARD} ${a.slice(8)}` : a), stdin }
-  if (cmd !== 'codex' || args[0] !== 'exec') return { args, stdin }
-  if (IS_WIN && !args.some((a) => a.startsWith('windows.sandbox'))) args = ['exec', '-c', 'windows.sandbox=elevated', ...args.slice(1)]
+  // CODEX_BIN pode ser caminho completo: comparar só com 'codex' deixou o GPT-6 Sol sem sandbox e com os apps da conta (23/09).
+  if ((cmd !== 'codex' && cmd !== CODEX_BIN) || args[0] !== 'exec') return { args, stdin }
+  if (IS_WIN && !args.some((a) => a.startsWith('windows.sandbox'))) args = ['exec', '-c', 'windows.sandbox=unelevated', ...args.slice(1)]
   if (args.includes('--ignore-user-config')) args = ['exec', ...CODEX_UNUSED.flatMap((f) => ['-c', `features.${f}=false`]), ...args.slice(1)]
   if (stdin != null) return { args, stdin: `${ENV_GUARD}
 
