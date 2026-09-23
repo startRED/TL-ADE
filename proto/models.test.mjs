@@ -1,7 +1,7 @@
 // node --test proto/models.test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildChains, measure, pressure, PLANS } from './models.mjs'
+import { buildChains, measure, pressure, PLANS, CATALOG } from './models.mjs'
 
 const NOW = Date.parse('2026-09-22T12:00:00Z')
 const tier = (family, id) => PLANS[family].tiers.find((t) => t.id === id)
@@ -43,8 +43,15 @@ test('cota adiantada na semana tira o esforço caro das funções de volume', ()
   const calm = buildChains({ plans, quota: { claude: { seven_day: { used: 5, resets_at: reset } } }, now: NOW }).chains
   const tight = buildChains({ plans, quota: { claude: { seven_day: { used: 80, resets_at: reset } } }, now: NOW }).chains
   const heavy = (w) => w.family === 'claude' && ['high', 'xhigh', 'max'].includes(w.effort)
-  assert.ok(heavy(calm.impl[0]))
+  assert.ok(heavy(calm.impl_hard[0]), 'código difícil com cota folgada fica no Opus pensando')
   assert.ok(!heavy(tight.impl[0]))
+})
+
+test('tarefa leve vai para modelo mais barato que tarefa difícil, mesmo com cota sobrando', () => {
+  const { chains } = buildChains({ plans: { claude: 'max20', codex: 'pro_lite', agy: 'ultra' }, now: NOW })
+  const cost = (w) => CATALOG.find((e) => e.model === w.model && e.effort === w.effort).cpt
+  assert.ok(cost(chains.impl_light[0]) < cost(chains.impl_hard[0]) / 2)
+  assert.ok(cost(chains.plan_edit[0]) < cost(chains.plan[0]))
 })
 
 test('pressão projeta o gasto até a renovação; API não pesa; sem plano é infinita', () => {

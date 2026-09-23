@@ -80,17 +80,22 @@ export const PLANS = {
 // (Erick, 22/09: o que mais importa é o tempo até terminar). minAi = abaixo disso não entra. ladder = fila em ordem crescente de
 // qualidade (a escada sobe a cada duas rodadas que falham). maker = papel de quem escreve: só nele vale o medido aqui (aprovação
 // do revisor e minutos por chamada são de quem escreveu; não dizem se o modelo revisa ou planeja bem). cross = precisa de 2 empresas (quem escreve nunca revisa).
+// need = inteligência que a tarefa pede. Acima dela cada ponto vale só 0,2 (e o custo continua pesando); abaixo, cada ponto
+// que falta custa 1,5. Sem isto, com cota sobrando, o mais inteligente ganhava tudo: Opus 5.5 high até em código leve e em
+// corrigir o plano (Erick, 23/09: modelo e esforço ideais para cada tipo de tarefa; a cota é MAIS um motivo para economizar).
 export const ROLES = {
-  epics: { minAi: 48, speed: 0.1, volume: 0.05, label: 'dividir em épicos' },
-  plan: { minAi: 44, speed: 0.2, volume: 0.2, label: 'planejar' },
-  plan_edit: { minAi: 30, speed: 0.6, volume: 0.2, label: 'corrigir o plano' },
-  prova: { minAi: 34, speed: 0.6, volume: 1, maker: true, label: 'escrever a prova' },
-  impl_light: { minAi: 30, speed: 0.7, volume: 1, maker: true, label: 'código leve' },
-  impl: { minAi: 38, speed: 0.5, volume: 1, maker: true, label: 'código comum' },
-  impl_hard: { minAi: 45, speed: 0.2, volume: 0.6, maker: true, label: 'código difícil' },
-  fix: { minAi: 38, speed: 0.2, volume: 0.6, ladder: true, maker: true, label: 'correção (escada)' },
-  checker: { minAi: 38, speed: 0.5, volume: 1, cross: true, label: 'revisar' },
+  epics: { minAi: 48, need: 54, speed: 0.1, volume: 0.05, label: 'dividir em épicos' },
+  plan: { minAi: 44, need: 54, speed: 0.2, volume: 0.2, label: 'planejar' },
+  plan_edit: { minAi: 30, need: 38, speed: 0.6, volume: 0.2, label: 'corrigir o plano' },
+  prova: { minAi: 34, need: 42, speed: 0.6, volume: 1, maker: true, label: 'escrever a prova' },
+  impl_light: { minAi: 30, need: 34, speed: 0.7, volume: 1, maker: true, label: 'código leve' },
+  impl: { minAi: 38, need: 46, speed: 0.5, volume: 1, maker: true, label: 'código comum' },
+  impl_hard: { minAi: 45, need: 54, speed: 0.2, volume: 0.6, maker: true, label: 'código difícil' },
+  fix: { minAi: 38, need: 54, speed: 0.2, volume: 0.6, ladder: true, maker: true, label: 'correção (escada)' },
+  checker: { minAi: 38, need: 50, speed: 0.5, volume: 1, cross: true, label: 'revisar' },
 }
+// custo que pesa mesmo com a cota folgada (economizar é sempre um motivo); a pressão da cota soma por cima
+const BASE_COST = 4
 
 const WEEK = 7 * 24 * 3600 * 1000
 // CAPACIDADE: fração da cota semanal que a família terá gasto na renovação se o ritmo seguir (1 = acaba junto com a semana).
@@ -147,9 +152,11 @@ export function scoreFor(entry, role, { tier, quota, measured, now } = {}) {
   const sp = tm?.timed >= 10 ? Math.log2(6 / (tm.min / tm.timed)) : Math.log2(30 / Math.max(15, entry.secs))
   const speed = r.speed * 10 * sp; parts.push(tm?.timed >= 10 ? `${(tm.min / tm.timed).toFixed(1)} min por chamada aqui` : `${entry.secs} s por resposta`)
   const p = pressure(tier, quota, now) // retorno de CAPACIDADE
-  const cap = tier?.api ? r.volume * entry.cpt * 4 : r.volume * Math.min(p, 2) * entry.cpt * 10
+  const cap = tier?.api ? r.volume * entry.cpt * 4 : r.volume * (BASE_COST + Math.min(p, 2) * 10) * entry.cpt
   parts.push(tier?.api ? `API: US$ ${entry.cpt} por tarefa do índice` : `cota da semana no ritmo atual: ${Math.round(p * 100)}% na renovação`)
-  return { score: q + speed - cap, quality: q, parts }
+  const gap = q - r.need, fit = r.need + (gap >= 0 ? gap * 0.2 : gap * 1.5)
+  parts.push(gap >= 0 ? `sobra ${gap.toFixed(0)} sobre o que a tarefa pede (${r.need})` : `falta ${(-gap).toFixed(0)} para o que a tarefa pede (${r.need})`)
+  return { score: fit + speed - cap, quality: q, parts }
 }
 
 // Monta a fila de cada papel. Um esforço por modelo (o de melhor nota no papel); até 3 modelos; papel que cruza empresas
