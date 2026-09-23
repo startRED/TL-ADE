@@ -4,7 +4,7 @@ import { AdeError } from '../journal/errors.ts'
 import { readJournal } from '../journal/journal.ts'
 import { checkMissionBudget } from './budget.ts'
 import { findStoryStarted } from './resume.ts'
-import { nextReady } from './schedule.ts'
+import { laneCandidates, laneLimit, lanesDir } from './lanes.ts'
 
 /**
  * Classe de efeito do step → efeito externo que o plano aprovado precisa autorizar.
@@ -101,34 +101,42 @@ export async function runUnattendedBatch(deps: any, { loaded, repoDir, missionDi
   // A aprovação congelada já foi conferida como primeira precondição dura em `ade run`.
   
   let stopReason: string | null = null
+  // Trilhos (ADR 0031): com `deliver: false` a base não anda, então partes de escopo disjunto rodam juntas,
+  // cada uma na própria worktree e branch, sob a pasta de trilhos fora do projeto. Limite 1 é o laço serial de antes.
+  const limit = laneLimit(deps.env)
+  const laneDeps = limit > 1
+    ? { ...deps, prepareStory: (o: Record<string, unknown>) => deps.prepareStory({ ...o, worktreesDir: lanesDir(repoDir, deps.env) }) }
+    : deps
+  type LaneOutcome = { story: (typeof loaded.stories)[number]; result?: any; error?: unknown }
+  const running: Map<string, Promise<LaneOutcome>> = new Map()
+  const busy = () => loaded.stories.filter((s) => running.has(s.id))
 
-  while (stopReason === null) {
-    
-    const states: Record<string, any> = {}
-    for (const id of completed) states[id] = { status: 'completed' }
-    for (const [id, item] of parked) states[id] = { status: 'awaiting_operator', reason: item.reason }
+  while (true) {
+    if (stopReason === null) {
+      const states: Record<string, any> = {}
+      for (const id of completed) states[id] = { status: 'completed' }
+      for (const [id, item] of parked) states[id] = { status: 'awaiting_operator', reason: item.reason }
 
-    const gate = checkMissionBudget({ events: readEvents(), budget, now: now(), states })
-    if (!gate.allowed) {
-      stopReason = gate.reason
-      break
+      const gate = checkMissionBudget({ events: readEvents(), budget, now: now(), states })
+      if (!gate.allowed) stopReason = gate.reason
+      else {
+        for (const story of laneCandidates(loaded.stories, states, busy(), limit)) {
+          // `deliver: false`: a unidade para no próprio commit revisado. A base do operador não anda
+          // durante a noite; o relatório matinal traz o merge de cada unidade comitada.
+          running.set(story.id, Promise.resolve()
+            .then(() => runStoryFn(laneDeps, { loaded: storyLoaded, story, repoDir, missionDir, deliver: false }))
+            .then((result) => ({ story, result }), (error) => ({ story, error })))
+        }
+      }
     }
-
-    const next = nextReady(loaded.stories, states)
-    if (!next) break
-
-    const story = loaded.stories.find((s) => s.id === next.id)
-    if (!story) throw new AdeError('story_missing', `story ${next.id} ausente no plano carregado`, 4)
-
-    // `deliver: false`: a unidade para no próprio commit revisado. A base do operador não anda
-    // durante a noite; o relatório matinal traz o merge de cada unidade comitada.
-    const result = await runStoryFn(deps, {
-      loaded: storyLoaded,
-      story,
-      repoDir,
-      missionDir,
-      deliver: false,
-    })
+    // A unidade em curso sempre chega ao próprio checkpoint: parada do lote só impede despacho novo.
+    if (running.size === 0) break
+    const { story, result, error } = await Promise.race(running.values())
+    running.delete(story.id)
+    if (error !== undefined) {
+      await Promise.all(running.values())
+      throw error
+    }
 
     if (result.status === 'committed' || result.status === 'delivered') {
       completed.push(story.id)

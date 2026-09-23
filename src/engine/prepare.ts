@@ -32,6 +32,8 @@ interface PrepareStoryOptions {
   repoDir: string
   missionId: string
   storyId: string
+  /** Pasta das worktrees; ausente, `.ade/wt` do projeto. Trilhos paralelos passam `lanesDir` (fora do projeto). */
+  worktreesDir?: string
 }
 
 interface PrepareReadyResult {
@@ -81,9 +83,13 @@ export async function prepareStory(options: PrepareStoryOptions): Promise<Prepar
     throw new TypeError('parâmetro de prepare inválido')
   }
 
+  if (options.worktreesDir !== undefined && (typeof options.worktreesDir !== 'string' || !path.isAbsolute(options.worktreesDir))) {
+    throw new TypeError('parâmetro de prepare inválido')
+  }
   const { repoDir, missionId, storyId } = options
   const branch = `ade/${missionId}/${storyId}`
-  const worktreeDir = path.join(repoDir, '.ade', 'wt', storyId)
+  const worktreesDir = options.worktreesDir ?? path.join(repoDir, '.ade', 'wt')
+  const worktreeDir = path.join(worktreesDir, storyId)
   const basePort = createGitPort({ worktreeDir: repoDir })
 
   if ((options as Record<string, any>).contract?.unknowns?.some((unknown: any) => unknown.parked === true || unknown.resolved_by === 'parked')) {
@@ -222,7 +228,7 @@ export async function prepareStory(options: PrepareStoryOptions): Promise<Prepar
       }
     }
 
-    fs.mkdirSync(path.join(repoDir, '.ade', 'wt'), { recursive: true })
+    fs.mkdirSync(worktreesDir, { recursive: true })
     const addArgs = branchExists
       ? ['worktree', 'add', worktreeDir, branch]
       : ['worktree', 'add', '-b', branch, worktreeDir, 'HEAD']

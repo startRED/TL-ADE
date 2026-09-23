@@ -46,7 +46,7 @@ export type CanaryCheckResult = {
  * ser, ele mesmo, um link.
  *
  */
-function resolveRealPathAllowingMissing(targetPath: string): string {
+export function resolveRealPathAllowingMissing(targetPath: string): string {
   let current = path.resolve(targetPath)
   const missingSegments = []
   while (!fs.existsSync(current)) {
