@@ -16,10 +16,10 @@ test('só entram modelos dos planos escolhidos, fora os bloqueados', () => {
   }
 })
 
-test('revisor é de outra empresa que o titular de código comum', () => {
+test('fila de revisão tem um de cada empresa: quem escrever, sobram dois revisores de fora', () => {
   const { chains } = buildChains({ plans: { claude: 'max20', codex: 'pro_lite', agy: 'ultra' }, now: NOW })
-  assert.notEqual(chains.checker[0].family, chains.impl[0].family)
-  assert.notEqual(chains.checker[1].family, chains.impl[0].family, 'o substituto do revisor também é de outra empresa')
+  assert.equal(new Set(chains.checker.map((w) => w.family)).size, 3)
+  for (const role of ['impl', 'impl_hard', 'impl_light', 'prova']) assert.equal(chains.checker.filter((w) => w.family !== chains[role][0].family).length, 2)
 })
 
 test('escada de correção começa no titular de código difícil e só sobe em inteligência', () => {

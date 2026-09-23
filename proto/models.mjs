@@ -186,16 +186,17 @@ export function buildChains({ plans = {}, quota = {}, measured = {}, blocked = [
     .map((e) => ({ e, s: scoreFor(e, role, { tier: tierOf(e.family), quota: quota[e.family], measured, now, base }) }))
     .sort((a, b) => (b.e.ai >= ROLES[role].minAi) - (a.e.ai >= ROLES[role].minAi) || b.s.score - a.s.score)
   // um esforço por modelo; a 2ª posição é de outra empresa quando existe (cota ou falha de uma não para o papel)
-  const pick = (rated, avoidFamily = null) => {
+  const pick = (rated, cross = false) => {
     const seen = new Set(), one = rated.filter((x) => !seen.has(x.e.model) && seen.add(x.e.model)) // rated vem ordenado: fica o melhor esforço de cada modelo
-    // revisão: as DUAS primeiras posições são de empresas diferentes de quem escreve. Com só uma, o revisor que falhava (o
-    // Flash esperando provas sem devolver parecer) deixava a parte sem revisão, porque o resto era da empresa de quem
-    // escreveu (m-mud7qppy, V2-03, review_failed).
-    if (avoidFamily) {
-      const good = one.filter((x) => x.e.family !== avoidFamily), top = [good[0], good.find((x) => x.e.family !== good[0]?.e.family)].filter(Boolean)
-      if (top.length) return [...top, ...one.filter((x) => !top.includes(x))].slice(0, 3)
+    // revisão: o melhor de CADA empresa, em ordem de nota; o motor pula a empresa de quem escreveu. Com três empresas sobram
+    // sempre dois revisores de fora (com um só, o Flash que travava deixava a parte sem revisão: V2-03, review_failed).
+    // Evitar só a empresa do titular de código comum não servia: quem escreve varia por papel, e com o GPT no código comum
+    // e o Claude escrevendo de fato (código difícil, prova e código) o Gemini (inteligência 40) revisava tudo (V5-2, V5-3).
+    if (cross) {
+      const fams = new Set(), best = one.filter((x) => !fams.has(x.e.family) && fams.add(x.e.family))
+      return [...best, ...one.filter((x) => !best.includes(x))].slice(0, 3)
     }
-    const first = one.find((x) => x.e.family !== avoidFamily) || one[0]
+    const first = one[0]
     if (!first) return []
     const other = one.find((x) => x.e.family !== first.e.family)
     const rest = one.filter((x) => x !== first && x !== other)
@@ -212,7 +213,7 @@ export function buildChains({ plans = {}, quota = {}, measured = {}, blocked = [
       // reserva de outra empresa no fim: a escada não sobe até ela (climbLast), mas cota esgotada da empresa da escada não para a parte
       const spare = base && rated.find((x) => x.e.family !== base.e.family)
       if (spare) picked.push({ ...spare, reserve: true })
-    } else picked = pick(rated, role === 'checker' ? chains.impl?.[0]?.family : null) // quem revisa não é da empresa de quem mais escreve
+    } else picked = pick(rated, !!ROLES[role].cross)
     chains[role] = picked.map(({ e, reserve }) => ({ family: e.family, model: e.model, effort: e.effort, ...(reserve ? { reserve } : {}) }))
     why[role] = picked.map(({ e, s, reserve }) => `${e.label} (${e.effort})${reserve ? ', reserva' : ''}: nota ${s.score.toFixed(1)} · ${s.parts.join(' · ')}`)
   }
