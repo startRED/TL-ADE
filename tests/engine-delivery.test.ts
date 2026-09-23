@@ -393,6 +393,11 @@ describe('engine delivery', () => {
     // Base branch (HEAD do repositório) foi atualizada para o commit entregue
     expect(fixture.repo.git(['rev-parse', 'HEAD']).trim()).toBe(result.commit)
 
+    // Commit da parte traz a medida como trailers Git.
+    const trailers = fixture.repo.git(['log', '-1', '--format=%(trailers:only,unfold)']).trim().split('\n')
+    expect(trailers.slice(0, 3)).toEqual(['ADE-Criterios: 1', 'ADE-Arquivos: 1', 'ADE-Rodadas: 1'])
+    expect(trailers[3]).toMatch(/^ADE-USD: \d+\.\d{2}$/)
+
     const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
     const deliveryStep = events.find(
       (e) => e.kind === 'step_result' && e.effect_class === 'local_merge',

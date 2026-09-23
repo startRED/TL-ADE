@@ -42,6 +42,7 @@ import {
 import { blockingReviewFindings, buildReviewHandoff, testEditViolations, wrongTestClaims, wrongTestVerdict } from './review/contract.ts'
 import { isReviewApproved } from './review/validate.ts'
 import { buildModelTelemetry, modelsFromUsage } from './telemetry/telemetry.ts'
+import { formatMeasureTrailers, storyMeasure } from './telemetry/cost.ts'
 
 /**
  * Famílias de modelos com canário aprovado no Slice 1 e v0.2.
@@ -483,6 +484,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         tree_before: treeBefore,
         base_ref: baseRef,
         base_before: baseBefore,
+        // Contrato sem cenários deixa os critérios desconhecidos na medida, nunca 0.
+        criteria: Array.isArray(contract.scenarios) ? contract.scenarios.length : null,
       },
     })
   }
@@ -1424,6 +1427,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     if (reviewApproval.approved) {
       maybeEngineFault('before_commit', env)
 
+      const measure = storyMeasure(readEvents(), storyId)
       const commitStepResult = await deps.step(
         {
           unit: storyId,
@@ -1431,7 +1435,9 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
           effect_class: 'local_commit',
           input: { tree: treeAfterContain },
         },
-        () => wtPort.commit({ message: `ade(${storyId}): ${contract.title}` }),
+        () => wtPort.commit({ message: `ade(${storyId}): ${contract.title}
+
+${formatMeasureTrailers(measure)}` }),
       )
 
       maybeEngineFault('after_commit', env)
@@ -1452,6 +1458,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
             spec_revision: story.spec_revision,
             unit: storyId,
             verified_tree: treeAfterContain,
+            measure,
           },
         })
         return { status: 'committed', exitCode: 0, reason: null, commit: commitSha }
@@ -1478,6 +1485,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
           spec_revision: story.spec_revision,
           unit: storyId,
           verified_tree: treeAfterContain,
+          measure,
         },
       })
 

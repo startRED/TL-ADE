@@ -17,8 +17,9 @@ function cacheByRole(calls: any[]) {
   for (const c of calls) {
     const role = String(c.data.role)
     const entry = byRole.get(role) ?? { role, tokens_in: 0, cache_read: 0, ratio: null }
-    entry.tokens_in += c.data.tokens_in
-    entry.cache_read += c.data.cache_read
+    // Tokens não reportados são null no evento; ficam fora da conta.
+    entry.tokens_in += c.data.tokens_in ?? 0
+    entry.cache_read += c.data.cache_read ?? 0
     byRole.set(role, entry)
   }
   return [...byRole.values()]

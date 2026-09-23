@@ -1,4 +1,5 @@
 import { AdeError } from '../journal/errors.ts'
+import { callCost } from './cost.ts'
 
 const OUTCOMES = ['ok', 'retry', 'rework', 'park', 'stop']
 const MISSION_OUTCOMES = ['completed', 'parked', 'interrupted']
@@ -16,7 +17,7 @@ export class TelemetryInvalidError extends AdeError {
 }
 
 /** @param v */
-function isCount(v: unknown) {
+function isCount(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v >= 0
 }
 
@@ -79,11 +80,17 @@ export function buildModelTelemetry(input: Record<string,any>): Record<string,an
 
   const tokens = input.tokens ?? { source: 'unavailable' }
   const reportedTokens = tokens.source === 'reported'
-  const count = (v: unknown) => (reportedTokens && isCount(v) ? (v as number) : 0)
   const usage = input.usage
   const usd = typeof tokens.usd === 'number' && Number.isFinite(tokens.usd)
     ? tokens.usd
     : (usage?.cost_source === 'reported' && typeof usage.cost_usd === 'number' ? usage.cost_usd : null)
+  const cost = callCost({
+    model: models.find((m) => m.role === 'executor')?.model_id ?? models[0].model_id,
+    // Custo reportado sem tokens (agy) conta só o US$; tokens não reportados ficam desconhecidos.
+    usage: reportedTokens ? { ...tokens, usd } : { source: usd === null ? 'unavailable' : 'reported', usd },
+    durationMs: input.duration_ms,
+  })
+  const counter = (v: unknown) => (reportedTokens && isCount(v) ? v : null)
   const basis = usd !== null && (usage?.cost_basis === 'list' || usage?.cost_basis === 'invoice') ? usage.cost_basis : null
 
   return {
@@ -96,11 +103,13 @@ export function buildModelTelemetry(input: Record<string,any>): Record<string,an
     models: models.map((m) => ({ role: m.role, model_id: m.model_id })),
     duration_ms: input.duration_ms,
     tokens_source: reportedTokens ? 'reported' : 'unknown',
-    tokens_in: count(tokens.input),
-    tokens_out: count(tokens.output),
-    cache_read: count(tokens.cache_read),
-    cache_write: count(tokens.cache_write),
-    cost_usd: usd,
+    tokens_in: cost.tokens_in,
+    tokens_out: cost.tokens_out,
+    cache_read: counter(tokens.cache_read),
+    cache_write: counter(tokens.cache_write),
+    tokens_cache: cost.tokens_cache,
+    minutes: cost.minutes,
+    cost_usd: cost.usd_equiv,
     cost_source: usd === null ? 'unknown' : 'reported',
     cost_basis: basis,
     pack_bytes: pack.bytes,
