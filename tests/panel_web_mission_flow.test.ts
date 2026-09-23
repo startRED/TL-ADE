@@ -68,6 +68,10 @@ const BRIEFING = {
   ],
 }
 
+// Opções na forma validada (autonomia do ADR 0015 e tetos em ceilings).
+const OPTIONS_40_3 = { autonomy: 'safe', ceilings: { max_turns: 40, max_rounds: 3, usd_informative: null }, fast_lane: true, visual_gate: false, images: true, research: false }
+const OPTIONS_12 = { ...OPTIONS_40_3, ceilings: { max_turns: 12, max_rounds: null, usd_informative: null } }
+
 const DISCOVERY = {
   repo: { head: 'HEAD', dirty: false },
   scripts: { test: 'node --test' },
@@ -100,12 +104,12 @@ function intentDouble({ questions = QUESTIONS, large = true }: { questions?: unk
 }
 
 function runDouble() {
-  const calls: Array<{ repoDir: string; missionId: string; planPath: string }> = []
+  const calls: Array<{ repoDir: string; missionId: string; planPath: string; options: unknown }> = []
   let finish: (err?: Error) => void = () => {}
   return {
     calls,
     finish: (err?: Error) => finish(err),
-    runMission: (args: { repoDir: string; missionId: string; planPath: string }) => {
+    runMission: (args: { repoDir: string; missionId: string; planPath: string; options: unknown }) => {
       calls.push(args)
       return new Promise<void>((resolve, reject) => { finish = (err) => (err ? reject(err) : resolve()) })
     },
@@ -167,7 +171,7 @@ describe('pedido, entrevista, briefing, plano e aprovação no painel', () => {
   test('criterio_1_pedido_sem_intake_vivo_responde_202_e_porta_recebe_pedido_e_opcoes', async () => {
     const repo = gitFixture()
     mkdirSync(path.join(repo, '.ade'), { recursive: true })
-    writeFileSync(path.join(repo, '.ade', 'options.json'), JSON.stringify({ max_turns: 40, max_rounds: 3 }))
+    writeFileSync(path.join(repo, '.ade', 'options.json'), JSON.stringify(OPTIONS_40_3))
     const double = intentDouble()
     const s = await serve(repo, { intent: double.intent, runMission: runDouble().runMission })
 
@@ -178,7 +182,7 @@ describe('pedido, entrevista, briefing, plano e aprovação no painel', () => {
     expect(double.calls[0]).toMatchObject({
       request: 'Crie uma agenda de compromissos',
       repoDir: path.resolve(repo),
-      options: { max_turns: 40, max_rounds: 3 },
+      options: OPTIONS_40_3,
     })
     expect(double.calls[0].answers).toBeUndefined()
   })
@@ -363,7 +367,7 @@ describe('pedido, entrevista, briefing, plano e aprovação no painel', () => {
   test('criterio_10_plano_aprovado_registra_source_panel_chama_execucao_uma_vez_com_atividade', async () => {
     const repo = gitFixture()
     mkdirSync(path.join(repo, '.ade'), { recursive: true })
-    writeFileSync(path.join(repo, '.ade', 'options.json'), JSON.stringify({ max_turns: 12 }))
+    writeFileSync(path.join(repo, '.ade', 'options.json'), JSON.stringify(OPTIONS_12))
     const run = runDouble()
     const s = await serve(repo, { intent: intentDouble().intent, runMission: run.runMission })
     const missionId = await reach(s, 'plan')
@@ -377,8 +381,8 @@ describe('pedido, entrevista, briefing, plano e aprovação no painel', () => {
     const missionDir = path.join(repo, '.ade', 'missions', missionId)
     const approval = decisionsOf(repo, missionId).find((e) => e.data.decision === 'plan_approved')
     expect(approval).toMatchObject({ source: 'panel', data: { digest } })
-    expect(run.calls).toEqual([{ repoDir: path.resolve(repo), missionId, planPath: path.join(missionDir, 'plan.json') }])
-    expect(JSON.parse(readFileSync(path.join(missionDir, 'mission-options.json'), 'utf8'))).toEqual({ max_turns: 12 })
+    expect(run.calls).toEqual([{ repoDir: path.resolve(repo), missionId, planPath: path.join(missionDir, 'plan.json'), options: OPTIONS_12 }])
+    expect(JSON.parse(readFileSync(path.join(missionDir, 'mission-options.json'), 'utf8'))).toEqual(OPTIONS_12)
     expect((await s.intake()).body.stage).toBe('running')
     expect(s.server.projects.hasActivity(s.projectId)).toBe(true)
     expect((await s.call('POST', '/api/projects/close', { id: s.projectId })).status).toBe(409)
@@ -419,7 +423,7 @@ describe('pedido, entrevista, briefing, plano e aprovação no painel', () => {
   test('criterio_12_nenhuma_opcao_aprova_briefing_ou_plano_sem_clique', async () => {
     const repo = gitFixture()
     mkdirSync(path.join(repo, '.ade'), { recursive: true })
-    writeFileSync(path.join(repo, '.ade', 'options.json'), JSON.stringify({ autonomy: 'total', fast_lane: true, auto_approve: true }))
+    writeFileSync(path.join(repo, '.ade', 'options.json'), JSON.stringify({ ...OPTIONS_12, autonomy: 'restricted', fast_lane: true }))
     const run = runDouble()
     const s = await serve(repo, { intent: intentDouble().intent, runMission: run.runMission })
     const missionId = await reach(s, 'briefing')

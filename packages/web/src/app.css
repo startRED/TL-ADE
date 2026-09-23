@@ -770,3 +770,48 @@ body:has(.overture) .strip {
   color: var(--ink);
 }
 body:has(.overture) .monogram { border-color: var(--ink-soft); }
+
+/* ---------- telas vindas da v5 (Modelos, Skills, Opções, Conversa) ----------
+   Primitivas do ui.tsx: cartão de borda fina sobre o fundo elevado, títulos estreitos, campos de linha, chave e
+   tabelas em mono. Sem cantos, sem sombra, as mesmas tintas do resto. */
+.ported { display: grid; gap: 1.5rem; }
+.ported > * { min-width: 0; }
+.ui-card { display: grid; gap: .75rem; padding: 1.25rem 1.5rem; border: 1px solid var(--sage-line); background: var(--ground-raised); }
+.ui-heading { font: 420 clamp(1.4rem, 2vw, 1.8rem)/1.05 var(--display); font-stretch: 75%; letter-spacing: -.015em; }
+h3.ui-heading, h4.ui-heading { font-size: 1.15rem; }
+.ui-field { position: relative; display: inline-flex; align-items: center; min-width: 0; }
+.ui-field.grow { flex: 1; }
+.ui-field .field { width: 100%; }
+.ui-slot { position: absolute; left: 0; color: var(--ink-faint); display: inline-flex; }
+.ui-slot + .field { padding-left: 1.6rem; }
+.ui-switch { display: inline-flex; align-items: center; border: 0; background: none; padding: .2rem 0; cursor: pointer; }
+.ui-switch .track { position: relative; width: 2.1rem; height: 1.1rem; border: 1px solid var(--sage); }
+.ui-switch .track::after { content: ''; position: absolute; top: 2px; left: 2px; width: calc(1.1rem - 6px); height: calc(1.1rem - 6px); background: var(--ink-soft); transition: transform .3s var(--ease-out), background-color .3s var(--ease-out); }
+.ui-switch[aria-checked='true'] .track::after { transform: translateX(1rem); background: var(--baton); }
+.ui-switch:disabled { opacity: .4; cursor: not-allowed; }
+.btn.small { min-height: 2rem; padding: 0 .8rem; font-size: 10.5px; }
+.btn.danger { --b-line: var(--danger, #ff8a7a); --b-fg: var(--danger, #ff8a7a); }
+.tag.ok { border-color: var(--ok, #8fe3b0); color: var(--ok, #8fe3b0); }
+.tag.bad { border-color: var(--danger, #ff8a7a); color: var(--danger, #ff8a7a); }
+.sel { font: 400 12.5px/1 var(--mono); padding: .45rem .5rem; border: 1px solid var(--sage-line); background: var(--ground); color: var(--ink); }
+.bar { width: 100%; height: .5rem; accent-color: var(--baton); }
+.table-wrap { overflow-x: auto; }
+.usage { border-collapse: collapse; font: 400 12.5px/1.4 var(--mono); }
+.usage th, .usage td { text-align: left; padding: .4rem .7rem; border-bottom: 1px dotted var(--sage-line); white-space: nowrap; }
+.usage th { color: var(--ink-faint); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; font-size: 10.5px; }
+.num-field { max-width: 10rem; }
+.skill-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
+.skill-item { border-bottom: 1px dotted var(--sage-line); padding-bottom: .6rem; }
+.skill-body { white-space: pre-wrap; overflow-x: auto; max-height: 24rem; font: 400 12px/1.5 var(--mono); background: var(--ground); border: 1px solid var(--sage-line); padding: .6rem .75rem; margin: .35rem 0 0; }
+.push { margin-left: auto; }
+.model-field { width: 10rem; }
+.conversation { margin-top: 4rem; }
+.rail { display: flex; flex-direction: column; gap: .75rem; max-width: 62rem; padding: 1.25rem 1.5rem; border: 1px solid var(--sage-line); background: var(--ground-raised); }
+.rail-turns { max-height: 28rem; overflow-y: auto; display: flex; flex-direction: column; gap: .75rem; }
+.rail-empty { color: var(--ink-faint); }
+.rail .composer { display: flex; flex-direction: column; gap: .5rem; padding: 0; border: 0; background: none; }
+.chat-turn { display: flex; flex-direction: column; gap: .25rem; }
+.chat-turn.user { align-self: flex-end; max-width: 85%; background: color-mix(in srgb, var(--field) 30%, var(--ground)); padding: .5rem .75rem; }
+.chat-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.permission-card { border: 1px solid var(--baton); padding: .9rem 1rem; display: grid; gap: .5rem; background: var(--ground); }
+.library.ported { grid-template-columns: minmax(0, 1fr); max-width: 72rem; }

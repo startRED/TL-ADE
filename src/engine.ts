@@ -12,6 +12,7 @@ import { findStoryCommitted, findStoryStarted } from './engine/resume.ts'
 import { preserveInterruptedTree } from './engine/preserve.ts'
 import { classifyCallFailure, pauseForQuota, refreshChains, waitQuotaPause } from './engine/quota.ts'
 import { buildLadder, classifyMakerOutcome, correctionRequest, ladderStart, nextAttempt, reserveRung, roundsPerRung, type MakerOutcome } from './engine/ladder.ts'
+import { readMissionOptionsBesidePlan } from './mission/options.ts'
 import { blockedInContract, cliModel } from './models/route.ts'
 import { readModelSettings } from './models/settings.ts'
 import { storyRisk } from './intent/risk.ts'
@@ -649,13 +650,16 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     const own = family === 'codex' ? deps.checkerResolved : family === 'agy' ? deps.agyResolved : deps.resolved
     return own === undefined ? deps.resolved : own
   }
+  // Tetos fixados na aprovação do painel, ao lado do plano; usd_informative não entra em decisão nenhuma.
+  const ceilings = loaded.planDir ? readMissionOptionsBesidePlan(path.join(loaded.planDir, 'plan.json'))?.ceilings : undefined
+  const caps = { maxTurns: ceilings?.max_turns ?? undefined, maxRounds: ceilings?.max_rounds ?? undefined }
   const startLadder = (route: typeof routed) => {
     const rungs = route
       ? route.chains.fix.map((slot) => ({ model: slot.model, family: slot.family, effort: slot.effort, reserve: slot.reserve }))
       : (deps.makerLadder ?? [{ model: makerModel ?? null, family: makerFamily }])
     const orphan = rungs.find((rung: { family: string }) => !dispatcherFor(rung.family))
     if (orphan) throw new AdeError('invalid_ladder', `degrau da família ${orphan.family} sem despachante`, 4)
-    return ladderStart(buildLadder(rungs), route ? roundsPerRung(storyRisk(contract)) : undefined)
+    return ladderStart(buildLadder(rungs), route ? roundsPerRung(storyRisk(contract)) : undefined, caps)
   }
   let ladderState = startLadder(routed)
   let attempt = 0
@@ -705,7 +709,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       if (routed) {
         routed = await refresh()
         if (!routed || routed.chains.fix.length === 0) return await noWriter()
-        if (routed.changed) ladderState = startLadder(routed)
+        // filas refeitas não zeram as rodadas já gastas pela parte
+        if (routed.changed) ladderState = { ...startLadder(routed), spent: ladderState.spent }
       }
       const family = ladderState.ladder[ladderState.rung].family
       quotaReceipt = routed ? routed.receipts[family as keyof typeof routed.receipts] ?? null : await deps.quotaPort.readReceipt({ family, now: deps.now?.() ?? Date.now() })

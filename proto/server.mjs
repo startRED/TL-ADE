@@ -503,14 +503,17 @@ async function withChain(key, { avoidVendor = null, start = 0, list = null } = {
     const until = state.quota.exhausted[titular.family]
     if (new Date(until) - Date.now() <= WAIT_RENEWAL_MS) await waitRenewal(key, titular, until)
   }
+  // Degraus pulados (escada) ficam de reserva no fim: se todos de cima falham (ex.: Gemini fora do ar, 503), um revisor mais
+  // fraco é melhor que parar a missão em review_failed com revisor disponível (m-mud7qppy, V5-4, 23/09).
+  const order = [...chain.keys()].slice(first).concat([...chain.keys()].slice(0, first))
   let tried = 0
-  for (let i = first; i < chain.length; i++) {
+  for (const i of order) {
     const who = chain[i]
     if (!quotaAvailable(who.family)) { log('engine', `${key}: ${who.model} sem cota até ${fmtWhen(state.quota.exhausted[who.family])}; pulo`, 'warn'); continue }
-    const rested = chain.slice(i + 1).find((w) => vendorOf(w.family, w.model) !== vendorOf(who.family, who.model) && quotaAvailable(w.family) && quotaUsed(w.family) < RESERVE_PCT) // chain já só tem quem tem revisor
+    const rested = order.slice(order.indexOf(i) + 1).map((k) => chain[k]).find((w) => vendorOf(w.family, w.model) !== vendorOf(who.family, who.model) && quotaAvailable(w.family) && quotaUsed(w.family) < RESERVE_PCT) // chain já só tem quem tem revisor
     if (quotaUsed(who.family) >= RESERVE_PCT && rested) { log('engine', `${key}: ${FAMILY_LABEL[who.family] || who.family} com ${quotaUsed(who.family)}% da cota usada; guardo o resto e uso ${rested.model}`, 'warn'); continue }
     tried++
-    journal({ type: 'model_chosen', role: key, family: who.family, model: who.model, effort: who.effort, story: state.mission?.current ?? null, step: i, reason: tried === 1 && i === first ? 'principal' : 'fallback', quota_used: quotaUsed(who.family) }).catch(() => {})
+    journal({ type: 'model_chosen', role: key, family: who.family, model: who.model, effort: who.effort, story: state.mission?.current ?? null, step: i, reason: tried === 1 && i === first ? 'principal' : i < first ? 'fallback_abaixo' : 'fallback', quota_used: quotaUsed(who.family) }).catch(() => {})
     try {
       const r = await fn({ ...who, step: i }); if (r != null) return r
       log('engine', `${key}: ${who.model} não devolveu resultado; próximo da cadeia`, 'warn')

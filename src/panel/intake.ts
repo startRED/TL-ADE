@@ -9,7 +9,9 @@ import { applyInterviewAnswer, buildInterview, unknownsFromRequest, type Decisio
 import { digest16 } from '../journal/canonical.ts'
 import { AdeError } from '../journal/errors.ts'
 import { approveMission, getProjectDiscovery, recordMissionDecision, validateMissionPlan, writeJsonAtomic } from '../mission/plan-lifecycle.ts'
+import { writeMissionOptions, type MissionOptions } from '../mission/options.ts'
 import type { ActivityKind } from './open-projects.ts'
+import { readProjectOptions, type SkillSummary } from './options.ts'
 
 export type IntakeStage = 'interview' | 'briefing' | 'plan' | 'running' | 'concluida' | 'recusada'
 type Answers = Record<string, string>
@@ -37,7 +39,9 @@ export interface IntentPort {
   compile(input: {
     request: string
     repoDir: string
-    options: Record<string, unknown>
+    options: MissionOptions
+    /** Skills do catálogo fora da quarentena e de plugin ligado no projeto. */
+    eligibleSkills: SkillSummary[]
     missionId: string
     answers?: Answers
     /** Briefing de produto já aprovado: o plano cobre a primeira versão dele. */
@@ -45,7 +49,7 @@ export interface IntentPort {
   }): Promise<{ questions?: any[]; briefing?: unknown; plan?: unknown; contracts?: unknown[] }>
 }
 
-export type RunMission = (args: { repoDir: string; missionId: string; planPath: string }) => Promise<void>
+export type RunMission = (args: { repoDir: string; missionId: string; planPath: string; options: MissionOptions }) => Promise<void>
 
 const ADE_BIN = fileURLToPath(new URL('../../bin/ade.js', import.meta.url))
 
@@ -79,15 +83,6 @@ function readIntakes(repoDir: string): Intake[] {
 const isLive = (i: Intake) => i.stage !== 'recusada' && i.stage !== 'concluida'
 /** Com no máximo um vivo por projeto, o vivo é o mais recente não encerrado. */
 const liveOf = (intakes: Intake[]): Intake | undefined => intakes.filter(isLive).at(-1)
-
-/** Opções do projeto em .ade/options.json; sem o arquivo, nenhuma. */
-function readProjectOptions(repoDir: string): Record<string, unknown> {
-  const file = path.join(repoDir, '.ade', 'options.json')
-  if (!fs.existsSync(file)) return {}
-  const options: unknown = JSON.parse(fs.readFileSync(file, 'utf8'))
-  if (!isPlainObject(options)) throw new AdeError('opcoes_invalidas', `${file} deve conter um objeto JSON.`, 2)
-  return options
-}
 
 /** No máximo 5 perguntas, cada uma com a opção recomendada em primeiro lugar. */
 function normalizeQuestions(questions: any[]): any[] {
@@ -152,9 +147,10 @@ function assertReason(reason: unknown): string {
  * .ade/missions/<id>/intake.json. Um projeto tem no máximo um intake vivo, e as operações
  * de um mesmo projeto passam em fila, então dois pedidos ao mesmo tempo não criam dois.
  */
-export function createIntake({ intent, runMission, beginActivity, onError }: {
+export function createIntake({ intent, runMission, eligibleSkills, beginActivity, onError }: {
   intent: IntentPort
   runMission: RunMission
+  eligibleSkills: (repoDir: string) => SkillSummary[]
   beginActivity: (projectId: string, kind: ActivityKind) => () => void
   onError: (message: string) => void
 }) {
@@ -182,7 +178,7 @@ export function createIntake({ intent, runMission, beginActivity, onError }: {
   }
 
   const compile = (repoDir: string, intake: Intake, extra: { answers?: Answers; briefing?: ProductBriefing } = {}) =>
-    intent.compile({ request: intake.request, repoDir, options: readProjectOptions(repoDir), missionId: intake.mission_id, ...extra })
+    intent.compile({ request: intake.request, repoDir, options: readProjectOptions(repoDir), eligibleSkills: eligibleSkills(repoDir), missionId: intake.mission_id, ...extra })
 
   return {
     /** Último intake do projeto, vivo ou encerrado; null quando nunca houve pedido. */
@@ -267,14 +263,16 @@ export function createIntake({ intent, runMission, beginActivity, onError }: {
         const approval = await approveMission({ repoDir, missionId: intake.mission_id, expectedDigest: digest, source: 'panel' })
         if (!approval.approved) throw new AdeError('aprovacao_recusada', approval.reason ?? 'O plano não pôde ser aprovado.', 5)
         const missionDir = path.join(missionsDir(repoDir), intake.mission_id)
-        writeJsonAtomic(path.join(missionDir, 'mission-options.json'), readProjectOptions(repoDir))
+        // As opções de agora ficam fixadas na missão: mudar as do projeto depois não mexe nesta.
+        const options = readProjectOptions(repoDir)
+        writeMissionOptions(missionDir, options)
         const running = write(repoDir, { ...intake, stage: 'running' })
 
         const release = beginActivity(project.id, 'mission')
         const finish = (error?: string) => serialized(repoDir, async () => {
           write(repoDir, { ...running, stage: 'concluida', ...(error ? { error } : {}) })
         })
-        runMission({ repoDir, missionId: intake.mission_id, planPath: path.join(missionDir, 'plan.json') })
+        runMission({ repoDir, missionId: intake.mission_id, planPath: path.join(missionDir, 'plan.json'), options })
           .then(() => finish(), (err) => finish(err instanceof Error ? err.message : String(err)))
           .catch((err) => onError(`ade serve: falha ao encerrar a missão ${intake.mission_id}: ${err instanceof Error ? err.message : String(err)}\n`))
           .finally(release)
@@ -324,8 +322,8 @@ export const defaultIntent: IntentPort = {
   },
 }
 
-/** Porta padrão de execução: `ade run --plan` sem shell, com a saída em run.log da missão. */
-export async function spawnMissionRun({ repoDir, missionId, planPath }: { repoDir: string; missionId: string; planPath: string }): Promise<void> {
+/** Porta padrão de execução: `ade run --plan` sem shell, com a saída em run.log; o motor acha as opções ao lado do plano. */
+export const spawnMissionRun: RunMission = async ({ repoDir, missionId, planPath }) => {
   const logPath = path.join(path.dirname(planPath), 'run.log')
   const fd = fs.openSync(logPath, 'a')
   try {

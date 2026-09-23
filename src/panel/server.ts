@@ -8,10 +8,15 @@ import { AdeError } from '../journal/errors.ts'
 import { approveMission } from '../mission/plan-lifecycle.ts'
 import { requestMissionControl } from '../engine/control.ts'
 import { createInterventionController } from './control.ts'
+import { defaultChatAgent } from './chat/agent.ts'
+import { createChat, type ChatAgent } from './chat/chat.ts'
 import { createSessionManager } from './session.ts'
+import { createLocalQuotaPort } from '../adapters/local/quota.ts'
+import { readModelsView, readUsage, setManualQuota, updateModelSettings, type QuotaPort } from './models-api.ts'
 import { createIntake, defaultIntent, spawnMissionRun, type IntentPort, type RunMission } from './intake.ts'
 import { pickFolder } from './folder-picker.ts'
 import { assertProjectPath, createOpenProjects } from './open-projects.ts'
+import { eligibleSkills, listPlugins, listSkills, readProjectOptions, readSkill, saveProjectOptions, setPlugin } from './options.ts'
 import { listProjects, registerProject } from './projects.ts'
 import { listUnits, readUnit } from './units.ts'
 import { resolveCurrentBuild } from './web-build.ts'
@@ -122,6 +127,14 @@ export async function startServer({
             intent?: IntentPort
             /** Execução da missão aprovada (padrão: bin/ade.js run --plan). */
             runMission?: RunMission
+            /** Agente do chat do painel, que roda na cópia do projeto (padrão: a CLI da empresa escolhida). */
+            chatAgent?: ChatAgent
+            /** Leitura oficial da cota (padrão: recibo local em ~/.ade/quota-receipt.json). */
+            quotaPort?: QuotaPort
+            /** Relógio da página Modelos e do relatório de uso. */
+            now?: () => number
+            /** Catálogo de skills sincronizado (padrão: ~/.ade/catalog). */
+            catalogDir?: string
         } & import('./control.ts').TerminalDeps
     } = {}) {
   const sessionManager = createSessionManager({ allowedOrigins: [`http://${host}:${port}`] })
@@ -145,6 +158,13 @@ export async function startServer({
   // 3 e 4. Projetos abertos, cada um com o próprio lease exclusivo (exit 5 se colisão) e projeção inicial
   const projects = createOpenProjects()
   const { indexPath } = await projects.open(resolvedRepo)
+  const quotaPort = deps.quotaPort ?? createLocalQuotaPort({ receiptPath: path.join(homeDir, '.ade', 'quota-receipt.json') })
+  const now = deps.now ?? Date.now
+  const catalogDir = deps.catalogDir ?? path.join(homeDir, '.ade', 'catalog')
+  const activeProject = () => {
+    if (!projects.activeId) throw new AdeError('project_not_found', 'Nenhum projeto aberto.', 2)
+    return projects.get(projects.activeId)
+  }
 
   // 5. Canal WebSocket unidirecional
   const stderrWrite =
@@ -154,7 +174,14 @@ export async function startServer({
   const intake = createIntake({
     intent: deps.intent ?? defaultIntent,
     runMission: deps.runMission ?? spawnMissionRun,
+    eligibleSkills: (repo) => eligibleSkills(catalogDir, repo),
     beginActivity: projects.beginActivity,
+    onError: stderrWrite,
+  })
+  const chat = createChat({
+    agent: deps.chatAgent ?? defaultChatAgent,
+    beginActivity: projects.beginActivity,
+    missionRunning: (projectId) => projects.hasActivity(projectId, 'mission'),
     onError: stderrWrite,
   })
   const intervention = createInterventionController({ repoDir: resolvedRepo, terminal: deps })
@@ -247,8 +274,46 @@ export async function startServer({
           return
         }
 
-        if (pathname.startsWith('/api/projects')) {
+        if (pathname.startsWith('/api/projects') || pathname.startsWith('/api/models') || pathname === '/api/usage' || pathname.startsWith('/api/skills')) {
           try {
+            if (pathname === '/api/skills' && method === 'GET') {
+              const filter = (k: string) => parsedUrl.searchParams.get(k) || undefined
+              sendJson(res, 200, listSkills(catalogDir, { domain: filter('domain'), trust: filter('trust'), source: filter('source') }))
+              return
+            }
+            const skillMatch = pathname.match(/^\/api\/skills\/([^/]+)$/)
+            if (skillMatch && method === 'GET') {
+              sendJson(res, 200, readSkill(catalogDir, decodeURIComponent(skillMatch[1])))
+              return
+            }
+            const settingsMatch = pathname.match(/^\/api\/projects\/([^/]+)\/(options|plugins)$/)
+            if (settingsMatch && (method === 'GET' || method === 'POST')) {
+              const repo = projects.get(decodeURIComponent(settingsMatch[1])).path
+              if (settingsMatch[2] === 'options') {
+                sendJson(res, 200, method === 'GET' ? readProjectOptions(repo) : saveProjectOptions(repo, await readJsonBody(req)))
+              } else {
+                if (method === 'POST') setPlugin(catalogDir, repo, await readJsonBody(req))
+                sendJson(res, 200, listPlugins(catalogDir, repo))
+              }
+              return
+            }
+            if (pathname === '/api/models' && method === 'GET') {
+              sendJson(res, 200, await readModelsView(activeProject().path, now(), quotaPort))
+              return
+            }
+            if (pathname === '/api/models/settings' && method === 'POST') {
+              sendJson(res, 200, updateModelSettings(activeProject().path, await readJsonBody(req)))
+              return
+            }
+            if (pathname === '/api/models/quota' && method === 'POST') {
+              setManualQuota(activeProject().path, await readJsonBody(req), now())
+              sendJson(res, 200, { ok: true })
+              return
+            }
+            if (pathname === '/api/usage' && method === 'GET') {
+              sendJson(res, 200, await readUsage(activeProject(), parsedUrl.searchParams.get('since'), now(), quotaPort))
+              return
+            }
             if (pathname === '/api/projects' && method === 'GET') {
               const open = projects.list()
               const registered = listProjects({ homeDir })
@@ -271,6 +336,25 @@ export async function startServer({
                 ? await readUnit(project.path, missionId, decodeURIComponent(unitsMatch[3]))
                 : listUnits(project.path, missionId))
               return
+            }
+            const chatMatch = pathname.match(/^\/api\/projects\/([^/]+)\/chat(?:\/(approve|reject|clear))?$/)
+            if (chatMatch) {
+              const project = projects.get(decodeURIComponent(chatMatch[1]))
+              const action = chatMatch[2]
+              if (!action && method === 'GET') {
+                sendJson(res, 200, await chat.read(project))
+                return
+              }
+              if (method === 'POST') {
+                const body = await readJsonBody(req)
+                if (!action) {
+                  await chat.ask(project, body)
+                  sendJson(res, 202, { ok: true })
+                } else {
+                  sendJson(res, 200, action === 'clear' ? await chat.clear(project) : await chat[action as 'approve' | 'reject'](project, body?.id))
+                }
+                return
+              }
             }
             const intakeMatch = pathname.match(/^\/api\/projects\/([^/]+)\/(requests|intake|intake\/interview|intake\/(?:briefing|plan)\/(?:approve|reject))$/)
             if (intakeMatch) {
@@ -327,7 +411,7 @@ export async function startServer({
             }
           } catch (err) {
             if (!(err instanceof AdeError)) throw err
-            const status = err.code === 'project_not_found' || err.code === 'intake_not_found' || err.code === 'unit_not_found' ? 404 : err.exitCode === 5 ? 409 : 400
+            const status = err.code === 'project_not_found' || err.code === 'intake_not_found' || err.code === 'unit_not_found' || err.code === 'chat_proposal_not_found' || err.code === 'skill_not_found' ? 404 : err.exitCode === 5 ? 409 : 400
             sendJson(res, status, { error: err.code, message: err.message })
             return
           }

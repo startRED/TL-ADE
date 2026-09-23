@@ -2,7 +2,11 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { X } from '@phosphor-icons/react'
 import { AnimatePresence, motion } from 'motion/react'
 import { apiFetch, postJson, subscribeEvents } from './api.ts'
+import ChatPanel from './Chat.tsx'
 import IntakeFlow from './Intake.tsx'
+import ModelsPage from './Models.tsx'
+import OptionsPage from './Options.tsx'
+import SkillsPage from './Skills.tsx'
 import Appearance, { LIGHT_PALETTES, PALETTES, type Palette } from './Appearance.tsx'
 import { EASE_OUT } from './motion.ts'
 import { brl } from './format.ts'
@@ -35,7 +39,7 @@ interface Snapshot {
   selectedMission: Mission | null
 }
 
-type Page = 'home' | 'projects' | 'appearance'
+type Page = 'home' | 'projects' | 'models' | 'skills' | 'options' | 'appearance'
 
 const PALETTE_KEY = 'ade.palette'
 
@@ -119,7 +123,7 @@ export default function App() {
                   aria-pressed={p.active}
                   aria-label={`Usar ${p.name}`}
                   title={p.path}
-                  onClick={() => { setPage('home'); if (!p.active) act(() => postJson('/api/projects/select', { id: p.id })) }}
+                  onClick={() => { if (page === 'projects' || page === 'appearance') setPage('home'); if (!p.active) act(() => postJson('/api/projects/select', { id: p.id })) }}
                 >
                   {p.active ? <span data-testid="active-project">{p.name}</span> : p.name}
                 </button>
@@ -135,7 +139,9 @@ export default function App() {
         <nav className="tabs" aria-label="Seções">
           <button className="tab" aria-current={page === 'home' ? 'page' : undefined} onClick={() => setPage('home')}>Missão</button>
           <button className="tab" aria-current={page === 'projects' ? 'page' : undefined} onClick={() => setPage('projects')}>Projetos</button>
-          <button className="tab" aria-current={page === 'appearance' ? 'page' : undefined} onClick={() => setPage('appearance')}>Aparência</button>
+          {([['models', 'Modelos'], ['skills', 'Skills'], ['options', 'Opções'], ['appearance', 'Aparência']] as const).map(([id, label]) => (
+            <button key={id} className="tab" aria-current={page === id ? 'page' : undefined} onClick={() => setPage(id)}>{label}</button>
+          ))}
         </nav>
 
         <div className="readouts">
@@ -157,6 +163,12 @@ export default function App() {
           >
             {page === 'appearance'
               ? <Appearance palette={palette} onPalette={choosePalette} />
+              : page === 'models' || page === 'skills' || page === 'options'
+              ? !active
+                ? <NoProject onOpen={() => setPage('projects')} />
+                : <section className="library ported">
+                    {page === 'models' ? <ModelsPage key={active.id} projectId={active.id} /> : page === 'skills' ? <SkillsPage key={active.id} projectId={active.id} /> : <OptionsPage key={active.id} projectId={active.id} />}
+                  </section>
               : page === 'projects'
               ? <ProjectsPage projects={projects ?? []} onOpen={(dir) => act(async () => { await postJson('/api/projects/open', { path: dir }); setPage('home') })} />
               : active
@@ -164,6 +176,8 @@ export default function App() {
                 : loaded ? <NoProject onOpen={() => setPage('projects')} /> : null}
           </motion.div>
         </AnimatePresence>
+        {/* Conversa sobre o projeto: abaixo da missão, na cópia do projeto; o cartão de permissão decide o que entra. */}
+        {page === 'home' && active && <section className="conversation" aria-label="Conversa"><ChatPanel key={`chat:${active.id}`} projectId={active.id} /></section>}
       </main>
     </>
   )
