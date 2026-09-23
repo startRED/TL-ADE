@@ -9,6 +9,7 @@ import { acquireLease } from '../lease/lease.ts'
 import { assertApprovedPlan, replanRemaining } from '../mission/plan-lifecycle.ts'
 import { createStepRunner } from '../step/step.ts'
 import { loadPlan } from './plan-load.ts'
+import { deriveMissionState, epicSuitesToOpen } from './mission-state.ts'
 import { drainMission, readMissionControl, clearControlRequest } from './control.ts'
 import { readLineageCallBudget } from './resume.ts'
 import { removeWorktreeKept } from './preserve.ts'
@@ -352,6 +353,11 @@ export async function runSequentialMission(deps: Record<string, any>, { loaded, 
   const validateApproval = (loadedPlan: import('./plan-load.ts').LoadedPlan, events: Array<Record<string, any>>, mDir: string = currentMissionDir) =>
     checkApproval(deps, loadedPlan, events, mDir)
 
+  const requireJournal = () => {
+    if (!deps.journal) throw new AdeError('journal_missing', 'suíte de fim de épico exige o journal da missão', 4)
+    return deps.journal
+  }
+
   let claiming = true
   /**
    * Portão de controle: missão STOPPED não despacha; pausa pedida, DRAINING herdado de um
@@ -469,6 +475,43 @@ export async function runSequentialMission(deps: Record<string, any>, { loaded, 
     }
 
     
+    // Revisão de plano e suíte de fim de épico pendentes vêm do journal: sobrevivem a reinício e vêm antes de qualquer despacho.
+    // Épico fechado sem marcador (inclusive morte logo após o story_done) ganha a suíte aqui, antes de despachar, se este
+    // processo tem executor ou se o journal já abriu suíte nesta missão; sem executor, a dívida falha fechado logo abaixo.
+    // Sem executor e sem marcador algum a missão não tem suíte de fim de épico (prova do critério 1).
+    const runsSuites = typeof deps.runEpicSuite === 'function' || events.some((ev) => ev?.kind === 'epic_suite_started')
+    const toOpen = runsSuites ? epicSuitesToOpen(events, currentLoaded.plan) : []
+    for (const epic of toOpen) await requireJournal().append({ kind: 'epic_suite_started', data: { epic } })
+    const missionState = deriveMissionState(toOpen.length ? readEvents(currentMissionDir) : events, currentLoaded.plan)
+    if (missionState.pendingPlanReview) {
+      return {
+        status: 'awaiting_operator',
+        exitCode: 3,
+        completedStories,
+        reason: 'plan_review_pending',
+        nextAction: 'ade approve',
+      }
+    }
+    if (missionState.pendingEpicSuite) {
+      if (typeof deps.runEpicSuite !== 'function') {
+        throw new AdeError('epic_suite_runner_missing', `suíte do fim do ${missionState.pendingEpicSuite} pendente sem executor`, 4)
+      }
+      const epic = missionState.pendingEpicSuite
+      const suite = await deps.runEpicSuite({ epicId: epic, repoDir, missionDir: currentMissionDir })
+      const ok = suite?.ok === true
+      await requireJournal().append({ kind: 'epic_suite_done', data: { epic, ok } })
+      if (!ok) {
+        return {
+          status: 'awaiting_operator',
+          exitCode: 3,
+          completedStories,
+          reason: 'epic_suite_red',
+          nextAction: 'operator intervention required',
+        }
+      }
+      continue
+    }
+
     const states: Record<string, any> = {}
     for (const completedId of completedStories) {
       states[completedId] = { status: 'completed' }
