@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { readJournal } from '../journal/journal.ts'
+import { missionDirsNewestFirst } from './sqlite-index.ts'
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 /** Entrada do operador por frame; acima disso o canal do terminal fecha. */
@@ -112,7 +113,7 @@ export function createWebSocketHandler({ sessionManager, repoDir, onJournalChang
   function latestJournalPath() {
     const missionsDir = path.join(repoDir, '.ade', 'missions')
     if (!fs.existsSync(missionsDir)) return null
-    for (const entry of fs.readdirSync(missionsDir).sort().reverse()) {
+    for (const entry of missionDirsNewestFirst(missionsDir)) {
       const journalPath = path.join(missionsDir, entry, 'journal.jsonl')
       if (fs.existsSync(journalPath)) return journalPath
     }

@@ -362,11 +362,11 @@ export async function ensureFreshProbe({ homeDir = os.homedir(), now = Date.now(
 }
 
 /** Roda um comando do `ade` sem shell, com a saída no arquivo aberto. */
-function runAde(args: string[], cwd: string, fd: number, what: string): Promise<void> {
+function runAde(args: string[], cwd: string, fd: number, what: string, okCodes: number[] = [0]): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const child = spawn(process.execPath, [ADE_BIN, ...args], { cwd, shell: false, stdio: ['ignore', fd, fd] })
     child.once('error', reject)
-    child.once('exit', (code) => (code === 0 ? resolve() : reject(new Error(`${what} saiu com código ${code}`))))
+    child.once('exit', (code) => (code !== null && okCodes.includes(code) ? resolve() : reject(new Error(`${what} saiu com código ${code}`))))
   })
 }
 
@@ -380,7 +380,8 @@ export const spawnMissionRun: RunMission = async ({ repoDir, missionId, planPath
     const receipts = await refreshQuotaReceipts()
     fs.writeSync(fd, `cota oficial: ${receipts.map((r) => `${r.family} ${r.used_percent}% da semana`).join(', ') || 'nenhuma leitura'}
 `)
-    await runAde(['run', '--plan', planPath, '--repo', repoDir], repoDir, fd, `ade run da missão ${missionId}`)
+    // saída 3 é parte parada esperando você (o motivo fica no journal e aparece na partitura), não erro do painel
+    await runAde(['run', '--plan', planPath, '--repo', repoDir], repoDir, fd, `ade run da missão ${missionId}`, [0, 3])
   } catch (err) {
     throw new Error(`${err instanceof Error ? err.message : String(err)}; saída em ${logPath}`)
   } finally {

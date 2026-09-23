@@ -65,11 +65,34 @@ const SEVERITY_PT: Record<string, string> = { high: 'grave', medium: 'média', l
 const STEP_STATE_PT: Record<string, string> = { ok: 'feito', running: 'tocando', failed: 'falhou', error: 'falhou' }
 const STATE_PT: Record<string, string> = {
   committed: 'pronta', delivered: 'pronta', done: 'pronta', approved: 'pronta', in_progress: 'tocando agora', running: 'tocando agora',
-  pending: 'na fila', queued: 'na fila', failed: 'parou', blocked: 'parou', rejected: 'recusada', skipped: 'pulada',
+  pending: 'na fila', queued: 'na fila', awaiting_operator: 'parou', failed: 'parou', blocked: 'parou', rejected: 'recusada', skipped: 'pulada',
 }
+/** Por que a parte parou, em linguagem de quem pediu; o código cru fica só quando não há tradução. */
+const PARKED_PT: Record<string, string> = {
+  eval_red_not_red: 'A prova desta parte não chegou a rodar antes do código: o comando de teste do projeto falha sozinho. Confira o script "test" do package.json e peça de novo.',
+  quota_unavailable: 'Sem leitura oficial da cota do plano, e a TL-ADE não gasta às cegas.',
+  quota_untrusted: 'A leitura da cota do plano não é confiável agora.',
+  quota_exhausted: 'A cota da semana do plano passou do limite desta missão.',
+  no_writer_available: 'Nenhum modelo sobrou para escrever o código.',
+  no_checker_family_available: 'Não há modelo de outra empresa para revisar esta parte.',
+  checker_dispatch_unavailable: 'O revisor de outra empresa não está instalado ou não respondeu.',
+  unresolved_blocking_findings: 'O revisor achou problemas graves que as rodadas de correção não resolveram.',
+  gate_failed: 'Tipos, lint ou provas continuaram falhando depois das rodadas de correção.',
+  exhausted: 'As rodadas de correção acabaram sem a prova ficar verde.',
+  budget_calls_exhausted: 'O limite de chamadas de modelo da missão acabou.',
+  model_call_budget_exhausted: 'O limite de chamadas de modelo da missão acabou.',
+  wall_clock_exhausted: 'O tempo máximo da missão acabou.',
+  dependency_failed: 'Uma parte da qual esta depende parou antes.',
+  dirty_worktree: 'Há mudanças não salvas no projeto. Salve (commit) e peça de novo.',
+  preflight: 'A checagem antes de começar achou um problema no projeto.',
+  context_limit_exceeded: 'Esta parte ficou grande demais para o modelo de uma vez.',
+  no_change: 'O modelo terminou sem mudar o código.',
+}
+const parkedWhy = (reason?: string | null) => (!reason ? 'Sem motivo registrado.' : PARKED_PT[reason] ?? (/\s/.test(reason) ? reason : `Motivo técnico: ${reason}.`))
+
 const isDone = (s: string) => /committed|delivered|done|approved|pronta/.test(s)
 const isLive = (s: string) => /in_progress|running/.test(s)
-const isStopped = (s: string) => /failed|blocked|rejected/.test(s)
+const isStopped = (s: string) => /failed|blocked|rejected|awaiting_operator/.test(s)
 const noteState = (s: string) => (s === 'running' ? 'running' : /fail|error|refused/.test(s) ? 'failed' : 'done')
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err))
 /** Uma contagem só em toda a tela: quantas revisões a parte já teve (o sinal de repetição mostra o mesmo número). */
@@ -140,7 +163,8 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
   const liveUnit = live >= 0 ? units[live] : null
   const batonFrac = useBatonClock(liveUnit?.steps[0]?.at ?? null)
   const done = units.filter((u) => isDone(u.state)).length
-  const waiting = !!mission?.takeover?.intervention_needed || /paused|stopped/i.test(mission?.runtime_state ?? '')
+  const parked = mission?.stories?.find((s) => s.status === 'awaiting_operator')
+  const waiting = !!parked || !!mission?.takeover?.intervention_needed || /paused|stopped/i.test(mission?.runtime_state ?? '')
   const title = mission?.title ?? mission?.intent ?? missionId
   const open = units.find((u) => u.id === openId)
   const maker = makerOf(mission, liveUnit?.id)
@@ -276,7 +300,12 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
                   <div className="fermata" data-waiting={waiting}>
                     <span className="glyph" aria-hidden="true">{G.fermata}</span>
                     <h2>Sua vez</h2>
-                    <p>{waiting ? 'A missão parou e espera você decidir.' : 'Nada para decidir agora.'}</p>
+                    {parked
+                      ? <>
+                        <p><strong>{parked.title ?? parked.id}</strong> parou.</p>
+                        <p>{parkedWhy(parked.reason)}</p>
+                      </>
+                      : <p>{waiting ? 'A missão parou e espera você decidir.' : 'Nada para decidir agora.'}</p>}
                   </div>
                   <Plate name="maestro" className="margin-plate" />
                 </motion.aside>

@@ -66,7 +66,11 @@ export function createOpenProjects() {
       const lease = acquireServeLease({ repoDir: resolved })
       const indexPath = path.join(resolved, '.ade', 'index.sqlite')
       try {
+        // Missões rodadas com o painel fechado (ou vistas pelo vigia errado) não estão no índice: refaz ao abrir.
+        // Com índice anterior, journal ruim não impede abrir: a reconstrução preserva o índice válido e o erro
+        // reaparece no próximo evento do vigia.
         if (!fs.existsSync(indexPath)) await rebuildProjection({ repoDir: resolved, indexPath })
+        else await rebuildProjection({ repoDir: resolved, indexPath }).catch(() => undefined)
       } catch (err) {
         lease.release()
         throw err

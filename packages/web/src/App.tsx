@@ -9,6 +9,7 @@ import OptionsPage from './Options.tsx'
 import SkillsPage from './Skills.tsx'
 import Appearance, { LIGHT_PALETTES, PALETTES, type Palette } from './Appearance.tsx'
 import { EASE_OUT } from './motion.ts'
+import { shortPath } from './format.ts'
 import { brl } from './format.ts'
 
 interface Project {
@@ -23,7 +24,7 @@ interface Project {
 /** O que acontece agora no projeto (só nos abertos): vem de GET /api/projects. */
 interface Activity {
   kind: 'waiting' | 'running' | 'done' | 'failed' | 'refused'
-  stage?: 'interview' | 'briefing' | 'plan'
+  stage?: 'interview' | 'briefing' | 'plan' | 'operator'
   mission_id: string
   request: string
   done?: number
@@ -31,7 +32,7 @@ interface Activity {
   error?: string
 }
 
-const STAGE_LABEL = { interview: 'entrevista', briefing: 'briefing', plan: 'plano' } as const
+const STAGE_LABEL = { interview: 'entrevista', briefing: 'briefing', plan: 'plano', operator: 'uma parte parou' } as const
 
 /** Linha de estado de um projeto: verbo curto, sem jargão; a cor e o ponto vêm da classe. */
 function activityLine(a: Activity): string {
@@ -43,7 +44,7 @@ function activityLine(a: Activity): string {
 }
 
 export interface ModelRef { family: string; model_id: string; effort?: string }
-export interface MissionStory { id: string; title?: string; status?: string | null; calls?: number; cost?: number | null; maker?: ModelRef | string | null }
+export interface MissionStory { id: string; title?: string; status?: string | null; reason?: string | null; calls?: number; cost?: number | null; maker?: ModelRef | string | null }
 export interface Mission {
   id: string
   status?: string
@@ -84,6 +85,8 @@ export default function App() {
   const [projects, setProjects] = useState<Project[] | null>(null)
   const [snapshot, setSnapshot] = useState<{ projectId: string; data: Snapshot } | null>(null)
   const [page, setPage] = useState<Page>('home')
+  // trocar de página começa do topo, não da altura em que a outra estava
+  useEffect(() => { window.scrollTo(0, 0) }, [page])
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -285,7 +288,7 @@ function ProjectRow({ project: p, onOpen }: { project: Project; onOpen: (dir: st
     <li className={a ? `project-row ${a.kind}` : 'project-row'}>
       <div style={{ display: 'grid', gap: '.3rem', minWidth: 0 }}>
         <p>{p.name}{p.open && <span className="tag">aberto</span>}</p>
-        <p className="mono" style={{ color: 'var(--ink-faint)' }}>{p.path}</p>
+        <p className="mono path-line" title={p.path}>{shortPath(p.path)}</p>
         {a && (
           <p className="activity" data-testid={`activity-${p.id}`}>
             {(a.kind === 'running' || a.kind === 'waiting') && <span className={`pulse ${a.kind}`} aria-hidden="true" />}

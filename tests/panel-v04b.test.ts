@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
 import net from 'node:net'
 import os from 'node:os'
@@ -10,6 +10,7 @@ import { main as serveMain } from '../src/cli/serve.ts'
 import { main as indexMain } from '../src/cli/index-command.ts'
 import { validate } from '../src/schema/index.ts'
 import {
+  missionDirsNewestFirst,
   readPanelSnapshot,
   rebuildProjection,
 } from '../src/panel/sqlite-index.ts'
@@ -797,5 +798,17 @@ describe('v0.4b Acceptance Tests', () => {
     // 7. Encerramento
     await server.close()
     expect(existsSync(path.join(repoDir, '.ade', 'serve.lease'))).toBe(false)
+  })
+
+  test('a_missao_atual_e_a_ultima_escrita_e_nao_a_de_maior_id', () => {
+    const dir = path.join(makeTmpDir(), 'missions')
+    for (const [id, at] of [['mission-ffff', 1000], ['mission-0000', 3000], ['mission-8888', 2000]] as const) {
+      mkdirSync(path.join(dir, id), { recursive: true })
+      const journal = path.join(dir, id, 'journal.jsonl')
+      writeFileSync(journal, '')
+      utimesSync(journal, at, at)
+    }
+    mkdirSync(path.join(dir, 'sem-nada'))
+    expect(missionDirsNewestFirst(dir)).toEqual(['mission-0000', 'mission-8888', 'mission-ffff'])
   })
 })

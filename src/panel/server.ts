@@ -104,6 +104,19 @@ export async function defaultOpenBrowser(url: string): Promise<void> {
 /**
  * Inicia o servidor local protegido do painel da TL-ADE.
  */
+/**
+ * Estado de um pedido já aprovado para a lista de Projetos, pelas partes projetadas: parte parada esperando o
+ * operador vale "esperando você" (rodando ou com o processo já encerrado, saída 3), erro do painel vale falha.
+ */
+export function activityOf(last: { mission_id: string; request: string; stage: string; error?: string; parts?: unknown[] }, stories: Array<{ status?: string | null }>) {
+  const base = { mission_id: last.mission_id, request: last.request }
+  if (last.stage === 'concluida' && last.error) return { kind: 'failed', ...base, error: last.error }
+  const progress = { done: stories.filter((st) => /done|conclu|pass|complete|merged/i.test(st.status ?? '')).length, total: stories.length || (last.parts?.length ?? 0) }
+  if (stories.some((st) => st.status === 'awaiting_operator')) return { kind: 'waiting', stage: 'operator', ...base, ...progress }
+  if (last.stage === 'concluida') return { kind: 'done', ...base }
+  return { kind: 'running', ...base, ...progress }
+}
+
 export async function startServer({
   repoDir = process.cwd(),
   port = 4173,
@@ -204,11 +217,10 @@ export async function startServer({
     const base = { mission_id: last.mission_id, request: last.request }
     if (last.stage === 'interview' || last.stage === 'briefing' || last.stage === 'plan') return { kind: 'waiting', stage: last.stage, ...base }
     if (last.stage === 'recusada') return { kind: 'refused', ...base }
-    if (last.stage === 'concluida') return { kind: last.error ? 'failed' : 'done', ...base, ...(last.error ? { error: last.error } : {}) }
-    const snapshot = await readPanelSnapshot({ repoDir: p.path, indexPath: p.indexPath }).catch(() => null)
+    const needsStories = !(last.stage === 'concluida' && last.error)
+    const snapshot = needsStories ? await readPanelSnapshot({ repoDir: p.path, indexPath: p.indexPath }).catch(() => null) : null
     const mission = snapshot?.missions.find((m: { id?: string }) => m.id === last.mission_id)
-    const stories: Array<{ status?: string | null }> = mission?.stories ?? []
-    return { kind: 'running', ...base, done: stories.filter((st) => /done|conclu|pass|complete|merged/i.test(st.status ?? '')).length, total: stories.length || (last.parts?.length ?? 0) }
+    return activityOf(last, mission?.stories ?? [])
   }
 
   // 6. Servidor HTTP

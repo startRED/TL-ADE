@@ -263,7 +263,30 @@ export async function rebuildProjection({ repoDir = process.cwd(), indexPath }: 
 }
 
 /**
- * Lê o snapshot projetado para o painel a partir do índice SQLite.
+ * Pastas de missão da mais recente para a mais antiga. O id da missão é aleatório, então a ordem vem da última escrita
+ * no journal (ou no plano, antes de rodar); ordenar pelo id mostrava uma missão velha como a atual.
+ */
+export function missionDirsNewestFirst(missionsDir: string): string[] {
+  if (!fs.existsSync(missionsDir)) return []
+  const touched = (name: string) => {
+    for (const file of ['journal.jsonl', 'plan.json']) {
+      try {
+        return fs.statSync(path.join(missionsDir, name, file)).mtimeMs
+      } catch {
+        // sem esse arquivo: tenta o próximo
+      }
+    }
+    return -1
+  }
+  return fs.readdirSync(missionsDir)
+    .map((name) => ({ name, at: touched(name) }))
+    .filter((m) => m.at >= 0)
+    .sort((a, b) => b.at - a.at || b.name.localeCompare(a.name))
+    .map((m) => m.name)
+}
+
+/**
+ * Lê o snapshot projetado para o painel a partir do índice SQLite; a primeira missão é a mais recente.
  */
 export async function readPanelSnapshot({ repoDir = process.cwd(), indexPath }: { repoDir?: string; indexPath?: string } = {}): Promise<{ projects: any[]; missions: any[]; selectedMission: any }> {
   const Database = checkNativeSqlite()
@@ -277,7 +300,9 @@ export async function readPanelSnapshot({ repoDir = process.cwd(), indexPath }: 
   const db = new Database(finalIndexPath, { readonly: true })
   try {
     const rawMissions = db.prepare('SELECT data_json FROM missions ORDER BY id DESC').all()
-    const missions = rawMissions.map((row: any) => JSON.parse(row.data_json))
+    const order = missionDirsNewestFirst(path.join(resolvedRepo, '.ade', 'missions'))
+    const rank = (id: string) => { const i = order.indexOf(id); return i < 0 ? order.length : i }
+    const missions = rawMissions.map((row: any) => JSON.parse(row.data_json)).sort((a: any, b: any) => rank(a.id) - rank(b.id))
 
     const projects = listProjects({ repoDir: resolvedRepo })
     const selectedMission = missions[0] || null

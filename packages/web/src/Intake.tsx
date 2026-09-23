@@ -4,12 +4,14 @@ import { motion } from 'motion/react'
 import { apiFetch, postJson } from './api.ts'
 import type { Mission } from './App.tsx'
 import MissionScore from './Units.tsx'
-import { EASE_OUT } from './motion.ts'
+import { shortPath } from './format.ts'
+import { EASE_OUT, reducedMotion } from './motion.ts'
 import Plate from './Plate.tsx'
 
 interface Question {
   id: string
   text: string
+  why?: string
   options: Array<{ id: string; label: string; why?: string; free_text?: boolean }>
 }
 
@@ -38,12 +40,22 @@ interface Intake {
   briefing?: Briefing
   parts?: Array<{ id: string; title?: string; task?: string; criteria: string[] }>
   digest?: string
+  /** Da IA: o que entendeu do pedido e, no plano, o que o usuário vai ter e o que ela assumiu. */
+  understanding?: { summary?: string; explanation?: string; decisions?: string[] }
 }
 
 interface ProjectRef { id: string; name: string; path: string }
 
 const ORIGIN_PT: Record<Decision['origin'], string> = { usuario: 'você escolheu', ia_supondo: 'IA supondo', padrao: 'padrão' }
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err))
+
+/** O que a IA faz em cada ação e quanto costuma levar: a espera de 15 s a 1 min precisa dizer que está andando. */
+const THINKING: Record<string, { label: string; hint: string }> = {
+  '/requests': { label: 'Lendo o pedido e o projeto', hint: 'A IA entende o pedido e prepara as perguntas. Costuma levar de 15 a 40 s.' },
+  '/intake/interview': { label: 'Montando o plano', hint: 'Divide o pedido em partes e escreve como provar cada uma. Costuma levar de 30 s a 1 min e meio.' },
+  '/intake/briefing/approve': { label: 'Montando o plano', hint: 'Divide o briefing em partes e escreve como provar cada uma. Costuma levar de 30 s a 1 min e meio.' },
+  '/intake/plan/approve': { label: 'Preparando a execução', hint: 'Confere o projeto e começa a primeira parte.' },
+}
 
 /** Entrada em cascata: cada bloco assenta um pouco depois do anterior, uma vez só. */
 const rise = (i: number) => ({
@@ -57,6 +69,7 @@ export default function IntakeFlow({ project, mission, missionCount, snapshotLoa
   const base = `/api/projects/${encodeURIComponent(project.id)}`
   const [intake, setIntake] = useState<Intake | null | undefined>(undefined)
   const [busy, setBusy] = useState(false)
+  const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -68,8 +81,15 @@ export default function IntakeFlow({ project, mission, missionCount, snapshotLoa
     load().catch((err) => setError(messageOf(err)))
   }, [load])
 
+  // etapa nova começa do topo: a entrevista respondida no fim da página não deixa o plano aparecer pela metade
+  const stage = intake?.stage
+  useEffect(() => {
+    if (stage) window.scrollTo({ top: 0, behavior: reducedMotion() ? 'auto' : 'smooth' })
+  }, [stage])
+
   async function act(path: string, body: unknown) {
     setBusy(true)
+    setPending(path)
     setError(null)
     try {
       await postJson(`${base}${path}`, body)
@@ -78,20 +98,25 @@ export default function IntakeFlow({ project, mission, missionCount, snapshotLoa
       setError(messageOf(err))
     } finally {
       setBusy(false)
+      setPending(null)
     }
   }
 
-  const alert = error && <div className="alert" role="alert" style={{ marginBottom: '2rem' }}>{error}</div>
+  const thinking = busy && pending ? THINKING[pending] : undefined
+  const alert = (error || thinking) && <>
+    {error && <div className="alert" role="alert" style={{ marginBottom: '2rem' }}>{error}</div>}
+    {thinking && <Thinking {...thinking} />}
+  </>
   const projectLine = (
     <p className="project-line" data-testid="project-state">
-      <span className="mono" title={project.path}>{project.path}</span>
+      <span className="mono" title={project.path}>{shortPath(project.path)}</span>
       <span>{!snapshotLoaded ? 'Lendo o estado do projeto…' : mission ? `Última missão: ${mission.id}` : 'Nenhum pedido ainda.'}</span>
     </p>
   )
   if (intake === undefined) return alert || null
 
   if (intake?.stage === 'interview') {
-    return <>{alert}<InterviewView questions={intake.questions ?? []} busy={busy} onAnswer={(answers) => act('/intake/interview', { answers })} /></>
+    return <>{alert}<InterviewView questions={intake.questions ?? []} summary={intake.understanding?.summary} busy={busy} onAnswer={(answers) => act('/intake/interview', { answers })} /></>
   }
   if (intake?.stage === 'briefing' && intake.briefing) {
     const b = intake.briefing
@@ -124,7 +149,11 @@ export default function IntakeFlow({ project, mission, missionCount, snapshotLoa
   if (intake?.stage === 'plan') {
     return (
       <>{alert}
-        <Movement title="Plano" note="Cada parte e os critérios que a prova dela vai cobrar." plate="estante">
+        <Movement title="Plano" note={intake.understanding?.explanation ?? 'Cada parte e os critérios que a prova dela vai cobrar.'} plate="estante">
+          {(intake.understanding?.decisions?.length ?? 0) > 0 && (
+            <motion.div {...rise(1)}><Ledger title="O que a IA assumiu" items={intake.understanding?.decisions ?? []} /></motion.div>
+          )}
+          <h3 className="caps">{(intake.parts ?? []).length === 1 ? 'A parte e como ela vai ser provada' : `As ${(intake.parts ?? []).length} partes e como cada uma vai ser provada`}</h3>
           <ol className="parts">
             {(intake.parts ?? []).map((p, i) => (
               <motion.li key={p.id} className="part-row" {...rise(i + 1)}>
@@ -222,9 +251,7 @@ function RequestBox({ last, busy, compact, onSend }: { last: Intake | null; busy
         </ol>
       )}
       {last?.stage === 'recusada' && <p className="note-line warn">{what} foi recusado: {last.reason}</p>}
-      {last?.stage === 'concluida' && (
-        <p className={`note-line${last.error ? ' warn' : ''}`}>A missão {last.mission_id} terminou{last.error ? ` com erro: ${last.error}` : '.'}</p>
-      )}
+      {last?.stage === 'concluida' && last.error && <p className="note-line warn">A missão {last.mission_id} parou com erro: {last.error}</p>}
       <span className="prompt" aria-hidden="true">›</span>
       <textarea
         className="field"
@@ -238,14 +265,14 @@ function RequestBox({ last, busy, compact, onSend }: { last: Intake | null; busy
       <div className="composer-row">
         {!compact && <span className="note-line">Ctrl + Enter também envia.</span>}
         <button className="btn baton" type="submit" disabled={busy || !text.trim()}>
-          <PaperPlaneRight size={15} aria-hidden="true" /> {busy ? 'Compilando o pedido…' : 'Enviar pedido'}
+          <PaperPlaneRight size={15} aria-hidden="true" /> {busy ? 'Enviando…' : 'Enviar pedido'}
         </button>
       </div>
     </form>
   )
 }
 
-function InterviewView({ questions, busy, onAnswer }: { questions: Question[]; busy: boolean; onAnswer: (answers: Record<string, string>) => void }) {
+function InterviewView({ questions, summary, busy, onAnswer }: { questions: Question[]; summary?: string; busy: boolean; onAnswer: (answers: Record<string, string>) => void }) {
   // Só vai o que o usuário mudou: o resto adota a recomendação com origem 'padrão'.
   const [picked, setPicked] = useState<Record<string, string>>({})
   const [written, setWritten] = useState<Record<string, string>>({})
@@ -255,10 +282,10 @@ function InterviewView({ questions, busy, onAnswer }: { questions: Question[]; b
     return [id, free && written[id]?.trim() ? written[id].trim() : opt]
   }))
   return (
-    <Movement title="Entrevista" note="A primeira opção é sempre a recomendada. Não sabe? Deixe como está." plate="afinacao">
+    <Movement title="Entrevista" note={`${summary ? `${summary} ` : ''}A primeira opção é sempre a recomendada. Não sabe? Deixe como está.`} plate="afinacao">
       {questions.map((q, qi) => (
         <motion.fieldset key={q.id} className="question" style={{ border: 0, margin: 0, padding: '0 0 2rem' }} {...rise(qi + 1)}>
-          <legend style={{ padding: 0 }}><p style={{ font: '500 19px/1.4 var(--text)', marginBottom: '1rem' }}><span className="q-index">{qi + 1}.</span>{q.text}</p></legend>
+          <legend style={{ padding: 0 }}><p style={{ font: '500 19px/1.4 var(--text)', marginBottom: '1rem' }}><span className="q-index">{qi + 1}.</span>{q.text}</p>{q.why && <p className="q-why">{q.why}</p>}</legend>
           <div className="choices">
             {q.options.map((o, i) => (
               <label key={o.id} className="choice">
@@ -334,5 +361,32 @@ function Verdict({ what, busy, onApprove, onReject }: { what: string; busy: bool
         </button>
       </div>
     </div>
+  )
+}
+
+/** Aviso fixo enquanto a IA trabalha: o que ela faz, quanto costuma levar e há quanto tempo está nisso. */
+function Thinking({ label, hint }: { label: string; hint: string }) {
+  const [seconds, setSeconds] = useState(0)
+  useEffect(() => {
+    const started = Date.now()
+    const id = window.setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000)
+    return () => window.clearInterval(id)
+  }, [])
+  return (
+    <motion.div
+      className="thinking"
+      role="status"
+      aria-live="polite"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, ease: EASE_OUT }}
+    >
+      <span className="pulse running" aria-hidden="true" />
+      <div>
+        <p className="thinking-label">{label}<span className="mono thinking-time">{seconds} s</span></p>
+        <p className="thinking-hint">{hint}</p>
+      </div>
+      <span className="thinking-bar" aria-hidden="true" />
+    </motion.div>
   )
 }

@@ -833,3 +833,17 @@ h3.ui-heading, h4.ui-heading { font-size: 1.15rem; }
 .measure-bar { display: block; height: 3px; margin-top: .35rem; background: var(--sage-line); overflow: hidden; }
 .measure-bar i { display: block; height: 100%; background: var(--baton); transform-origin: left; transition: transform .8s var(--ease-out); }
 @media (prefers-reduced-motion: reduce) { .pulse.running { animation: none; } }
+
+/* ---------- a IA pensando ----------
+   Cartão fixo no canto: pulso da batuta, o que ela faz, segundos em mono e uma régua que corre. Fica visível em qualquer
+   altura da página, porque o botão clicado pode estar no fim dela. */
+.thinking { position: fixed; right: var(--gutter); bottom: 1.5rem; z-index: 30; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: .25rem .75rem; width: min(26rem, calc(100vw - 2 * var(--gutter))); padding: 1rem 1.1rem 1.1rem; border: 1px solid var(--baton); background: var(--ground-raised); overflow: hidden; }
+.thinking .pulse { margin: .45rem 0 0; }
+.thinking-label { display: flex; justify-content: space-between; gap: 1rem; font: 560 15px/1.35 var(--text); color: var(--ink); }
+.thinking-time { font: 500 12px/1.6 var(--mono); color: var(--baton-text); font-variant-numeric: tabular-nums; }
+.thinking-hint { font: 400 13px/1.45 var(--text); color: var(--ink-soft); }
+.thinking-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--baton), transparent); background-size: 40% 100%; background-repeat: no-repeat; animation: thinking-run 1.8s var(--ease-out) infinite; }
+@keyframes thinking-run { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+@media (prefers-reduced-motion: reduce) { .thinking-bar { animation: none; background-position: 50% 0; } }
+.q-why { margin: -.5rem 0 1rem; font: 400 14px/1.5 var(--text); color: var(--ink-faint); max-width: 62ch; }
+.path-line { color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

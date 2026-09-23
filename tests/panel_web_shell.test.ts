@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 
 import { buildWebPanel, resolveCurrentBuild } from '../src/panel/web-build.ts'
-import { startServer } from '../src/panel/server.ts'
+import { activityOf, startServer } from '../src/panel/server.ts'
 import { readPanelSnapshot } from '../src/panel/sqlite-index.ts'
 import { makeRepo } from './helpers/git-repo.ts'
 import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
@@ -285,6 +285,15 @@ describe('painel novo servido do último build e vários projetos', () => {
     expect(await activity()).toMatchObject({ kind: 'running', mission_id: 'mission-a', request: 'Crie o cadastro' })
     write('concluida')
     expect(await activity()).toMatchObject({ kind: 'done', mission_id: 'mission-a' })
+  })
+
+  test('parte_parada_esperando_voce_aparece_como_esperando_e_nao_como_erro_nem_terminada', () => {
+    const last = { mission_id: 'm', request: 'Crie o cadastro', stage: 'concluida' }
+    const parked = [{ status: 'awaiting_operator' }, { status: null }]
+    expect(activityOf(last, parked)).toEqual({ kind: 'waiting', stage: 'operator', mission_id: 'm', request: 'Crie o cadastro', done: 0, total: 2 })
+    expect(activityOf({ ...last, stage: 'running' }, parked)).toMatchObject({ kind: 'waiting', stage: 'operator' })
+    expect(activityOf(last, [{ status: 'done' }])).toEqual({ kind: 'done', mission_id: 'm', request: 'Crie o cadastro' })
+    expect(activityOf({ ...last, error: 'ade run saiu com código 1' }, parked)).toMatchObject({ kind: 'failed' })
   })
 
   test('criterio_10_projeto_com_lease_de_outro_servidor_responde_409_e_nao_fica_aberto', async () => {
