@@ -18,6 +18,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   const body: unknown = await res.json()
   if (!res.ok) {
     const message = (body as { message?: unknown }).message
+    if (res.status === 401) throw new ApiError(401, 'Este link é de uma sessão antiga do painel. Abra o endereço novo que o comando ade serve mostrou no terminal.')
     throw new ApiError(res.status, typeof message === 'string' ? message : `Falha ${res.status} em ${path}.`)
   }
   return body as T
