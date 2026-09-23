@@ -159,6 +159,12 @@ describe('v0.3 Intent Compiler Acceptance Criteria', () => {
     expect(contract.unknowns[0].resolved_by).toBe('default_assumed')
   })
 
+  test('escopo_da_story_inclui_os_caminhos_do_comando_de_prova_para_o_motor_aceitar_o_verificador', async () => {
+    const { contracts } = await compileIntent({ request: 'Mostrar o total de tarefas', discovery: { repo: { head: 'HEAD' }, scripts: { test: 'node --test tests/' }, anchors: [] }, advisor: async () => ({ complexity: 'bounded', confidence: 0.9, domains: ['js'], rationale: 'x' }) })
+    expect(contracts[0].verifiers[0].cmd).toEqual(['node', '--test', 'tests/'])
+    expect(contracts[0].guardrails.scope_paths).toContain('tests/**')
+  })
+
   test('duvida_aberta_sem_opcoes_nao_ganha_opcoes_de_enfeite_e_aceita_resposta_escrita', () => {
     const [q] = buildInterview({ unknowns: [{ id: 'U1', question: 'Qual o nome do produto?', kind: 'product_choice' }] })
 

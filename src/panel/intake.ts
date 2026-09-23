@@ -16,6 +16,19 @@ import { readProjectOptions, type SkillSummary } from './options.ts'
 export type IntakeStage = 'interview' | 'briefing' | 'plan' | 'running' | 'concluida' | 'recusada'
 type Answers = Record<string, string>
 
+/** O que a IA entendeu do pedido: guardado no intake para as etapas seguintes não perguntarem de novo. */
+export interface Understanding {
+  title?: string
+  summary: string
+  complexity: string
+  difficulty: string
+  domains: string[]
+  needs_ui: boolean
+  /** Do plano: o que o usuário vai ter e o que foi assumido, em linguagem leiga. */
+  explanation?: string
+  decisions?: string[]
+}
+
 export interface Intake {
   mission_id: string
   /** Ordem dos pedidos do projeto: o intake vivo é o de maior seq ainda não encerrado. */
@@ -33,6 +46,7 @@ export interface Intake {
   rejected_at?: 'briefing' | 'plan'
   reason?: string
   error?: string
+  understanding?: Understanding
 }
 
 export interface IntentPort {
@@ -46,7 +60,10 @@ export interface IntentPort {
     answers?: Answers
     /** Briefing de produto já aprovado: o plano cobre a primeira versão dele. */
     briefing?: ProductBriefing
-  }): Promise<{ questions?: any[]; briefing?: unknown; plan?: unknown; contracts?: unknown[] }>
+    /** Perguntas já feitas e o entendimento já obtido: a IA não refaz a entrevista ao receber as respostas. */
+    questions?: any[]
+    understanding?: Understanding
+  }): Promise<{ questions?: any[]; briefing?: unknown; plan?: unknown; contracts?: unknown[]; understanding?: Understanding }>
 }
 
 export type RunMission = (args: { repoDir: string; missionId: string; planPath: string; options: MissionOptions }) => Promise<void>
@@ -100,6 +117,7 @@ type ResultKind = 'questions' | 'briefing' | 'plan'
 /** Leva o intake à etapa que o resultado da porta de intenção pede; plano vai para o disco da missão. */
 function applyResult(repoDir: string, intake: Intake, result: Awaited<ReturnType<IntentPort['compile']>>, allowed: ResultKind[]): void {
   const kind: ResultKind | null = result.questions?.length ? 'questions' : result.briefing ? 'briefing' : result.plan ? 'plan' : null
+  if (result.understanding) intake.understanding = result.understanding
   if (!kind || !allowed.includes(kind)) {
     throw new AdeError('intencao_inesperada', `A compilação do pedido devolveu ${kind ?? 'nada'}, mas esta etapa espera ${allowed.join(' ou ')}.`, 2)
   }
@@ -178,7 +196,7 @@ export function createIntake({ intent, runMission, eligibleSkills, beginActivity
   }
 
   const compile = (repoDir: string, intake: Intake, extra: { answers?: Answers; briefing?: ProductBriefing } = {}) =>
-    intent.compile({ request: intake.request, repoDir, options: readProjectOptions(repoDir), eligibleSkills: eligibleSkills(repoDir), missionId: intake.mission_id, ...extra })
+    intent.compile({ request: intake.request, repoDir, options: readProjectOptions(repoDir), eligibleSkills: eligibleSkills(repoDir), missionId: intake.mission_id, questions: intake.questions, understanding: intake.understanding, ...extra })
 
   return {
     /** Último intake do projeto, vivo ou encerrado; null quando nunca houve pedido. */

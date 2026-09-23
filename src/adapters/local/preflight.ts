@@ -64,6 +64,10 @@ export function createLocalPreflightPorts(options: LocalPreflightOptions): Recor
           if (!fs.existsSync(path.join(repoDir, 'package.json'))) {
             return { status: 'ready', reason: null }
           }
+          // Manifesto sem nenhuma dependência (só scripts, como um app com node --test) não precisa de node_modules.
+          const pkg = JSON.parse(fs.readFileSync(path.join(repoDir, 'package.json'), 'utf8'))
+          const declared = ['dependencies', 'devDependencies', 'optionalDependencies'].some((k) => Object.keys(pkg?.[k] ?? {}).length > 0)
+          if (!declared) return { status: 'ready', reason: null }
           const nmPath = path.join(repoDir, 'node_modules')
           if (!fs.existsSync(nmPath)) {
             return { status: 'blocked', reason: 'dependências ausentes' }

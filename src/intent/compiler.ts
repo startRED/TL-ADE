@@ -34,6 +34,24 @@ function splitDeliverables(request: string): string[] {
     .filter((part) => part.length > 8)
 }
 
+/**
+ * Caminhos que os verificadores tocam: a evidência e os argumentos de caminho do comando (`node --test tests/`).
+ * O motor recusa verificador que cita caminho fora de scope_paths, então o escopo da story precisa deles.
+ */
+export function verifierPaths(verifiers: any[]): string[] {
+  const out = new Set<string>()
+  for (const v of verifiers) {
+    for (const e of v.evidence ?? []) out.add(String(e).split('::')[0])
+    for (const arg of (v.cmd ?? []).slice(1)) {
+      const norm = String(arg).replace(/\\/g, '/').replace(/^\.\//, '')
+      if (!norm || norm.startsWith('-') || norm.startsWith('node_modules/')) continue
+      if (norm.endsWith('/')) out.add(`${norm}**`)
+      else if (norm.includes('/') || /\.[a-z0-9]+$/i.test(norm)) out.add(norm)
+    }
+  }
+  return [...out]
+}
+
 function buildVerifiers({ risk, discovery }: { risk: any; discovery: any }) {
   const testCmd = discovery.scripts?.test
     ? discovery.scripts.test.split(' ')
@@ -359,7 +377,7 @@ export async function compileIntent({
   }
 
   const verifiers = buildVerifiers({ risk, discovery })
-  const verifierEvidence = verifiers.flatMap((v) => v.evidence || [])
+  const verifierEvidence = verifierPaths(verifiers)
   const baseScopePaths = risk.sensitive_paths
     ? risk.sensitive_paths
     : (discovery.anchors || []).length > 0

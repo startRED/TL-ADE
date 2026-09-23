@@ -610,4 +610,18 @@ describe('preflight integration', () => {
       status: 'blocked', reason: expect.stringContaining('ade doctor'),
     })
   })
+
+  test('projeto_sem_dependencia_declarada_nao_precisa_de_node_modules', async () => {
+    const repo = makeRepo()
+    repoDirs.push(repo.dir)
+    const contract = buildContract()
+    const loaded = buildLoadedPlan(contract)
+    const ports = () => createLocalPreflightPorts({ repoDir: repo.dir, story: loaded.stories[0], loaded, capabilities: { probe_ok: true, probed_at: 0 }, gitPort: { dirtyPaths: async () => [] }, execFile: vi.fn(), now: () => 1, env: {} })
+
+    fs.writeFileSync(path.join(repo.dir, 'package.json'), JSON.stringify({ name: 'tarefas', scripts: { test: 'node --test tests/' } }))
+    await expect(ports().dependencies.check()).resolves.toEqual({ status: 'ready', reason: null })
+
+    fs.writeFileSync(path.join(repo.dir, 'package.json'), JSON.stringify({ name: 'tarefas', devDependencies: { vitest: '^3.0.0' } }))
+    await expect(ports().dependencies.check()).resolves.toEqual({ status: 'blocked', reason: 'dependências ausentes' })
+  })
 })

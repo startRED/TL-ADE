@@ -13,7 +13,8 @@ import { createChat, type ChatAgent } from './chat/chat.ts'
 import { createSessionManager } from './session.ts'
 import { createLocalQuotaPort } from '../adapters/local/quota.ts'
 import { readModelsView, readUsage, setManualQuota, updateModelSettings, type QuotaPort } from './models-api.ts'
-import { createIntake, defaultIntent, spawnMissionRun, type IntentPort, type RunMission } from './intake.ts'
+import { createIntake, spawnMissionRun, type IntentPort, type RunMission } from './intake.ts'
+import { llmIntent } from '../intent/llm-intent.ts'
 import { pickFolder } from './folder-picker.ts'
 import { assertProjectPath, createOpenProjects } from './open-projects.ts'
 import { eligibleSkills, listPlugins, listSkills, readProjectOptions, readSkill, saveProjectOptions, setPlugin } from './options.ts'
@@ -172,7 +173,7 @@ export async function startServer({
       ? deps.stderr
       : (deps.stderr?.write?.bind(deps.stderr) ?? process.stderr.write.bind(process.stderr))
   const intake = createIntake({
-    intent: deps.intent ?? defaultIntent,
+    intent: deps.intent ?? llmIntent,
     runMission: deps.runMission ?? spawnMissionRun,
     eligibleSkills: (repo) => eligibleSkills(catalogDir, repo),
     beginActivity: projects.beginActivity,

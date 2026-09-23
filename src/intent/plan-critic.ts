@@ -8,6 +8,7 @@ import path from 'node:path'
 import { buildAgyArgs } from '../adapters/agy/argv.ts'
 import { isAgyAvailable, setAgyAvailable } from '../adapters/agy/index.ts'
 import { parseAgyOutput } from '../adapters/agy/parse.ts'
+import { parseClaudeOutput } from '../adapters/claude/parse.ts'
 import { buildCodexArgs } from '../adapters/codex/argv.ts'
 import { parseCodexOutput } from '../adapters/codex/parse.ts'
 import { checkCanary, plantCanary } from '../contain/canary.ts'
@@ -43,10 +44,10 @@ const PLAN_CRITIC_SCHEMA = {
   },
 }
 
-type ModelRef = { family: string; model_id: string; effort?: string }
+export type ModelRef = { family: string; model_id: string; effort?: string }
 type CriticInput = { plan: any; contracts: any[]; epicAcceptance?: string[] }
 /** Chamada somente leitura de um papel: prompt e schema da resposta, na pasta da missão. */
-export type ModelCall = { missionId: string; stepId: string; prompt: string; schema: object }
+export type ModelCall = { missionId: string; stepId: string; prompt: string; schema: object; maxTurns?: number }
 type RunOpts = {
   repoDir: string
   env: Record<string, string | undefined>
@@ -139,6 +140,66 @@ async function agyCall(ref: ModelRef, call: ModelCall, missionDir: string, opts:
   if (envelope.structured_output) return envelope.structured_output
   const text = String(envelope.response ?? '')
   return JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1))
+}
+
+/**
+ * Claude só leitura com resposta estruturada: prompt pela entrada padrão, schema no argv, ferramentas de leitura
+ * e poucos turnos (o mesmo desenho do claudeCall da demo, que entende e planeja pedidos há semanas).
+ */
+async function claudeCall(ref: ModelRef, call: ModelCall, missionDir: string, opts: RunOpts): Promise<unknown> {
+  const stepId = `${call.stepId}-claude`
+  fs.mkdirSync(missionDir, { recursive: true })
+  const resolved = opts.resolveBinaryImpl('claude')
+  const args = [
+    '-p', '--output-format', 'json', '--json-schema', JSON.stringify(call.schema),
+    '--safe-mode', '--no-session-persistence', '--max-turns', String(call.maxTurns ?? 8),
+    '--permission-mode', 'acceptEdits', '--tools', 'Read', 'Glob', 'Grep',
+    '--model', ref.model_id, ...(ref.effort ? ['--effort', ref.effort] : []),
+  ]
+  const res = await opts.runWorkerImpl({
+    resolved,
+    args,
+    cwd: opts.repoDir,
+    missionDir,
+    missionId: call.missionId,
+    stepId,
+    request: workerRequest(stepId, opts.repoDir, [resolved.exe, ...resolved.prefixArgs, ...args], path.join(missionDir, `${stepId}.json`)),
+    timeoutS: CRITIC_TIMEOUT_S,
+    env: opts.env as Record<string, string>,
+    stdinData: call.prompt,
+  })
+  const { envelope, error } = parseClaudeOutput(res.stdout)
+  if (!envelope) throw new AdeError('claude_output_invalid', `claude saiu com código ${res.exitCode} sem resposta (${error})`, 2)
+  if (envelope.is_error) throw new AdeError('claude_output_invalid', `claude respondeu com erro: ${String(envelope.result ?? envelope.subtype ?? 'sem detalhe').slice(0, 300)}`, 2)
+  if (!envelope.structured_output) throw new AdeError('claude_output_invalid', 'claude respondeu sem o JSON exigido', 2)
+  return envelope.structured_output
+}
+
+/**
+ * Chamada por uma fila de modelos (claude, codex ou agy), na ordem: o primeiro que responde vale.
+ * É a porta do planejamento do pedido; os críticos seguem só com codex e agy.
+ */
+export function refsModelCall(
+  refs: ModelRef[],
+  label: string,
+  { repoDir, env = process.env, runWorkerImpl = runWorker, resolveBinaryImpl = resolveBinary }: { repoDir: string } & Partial<Omit<RunOpts, 'repoDir'>>,
+): (call: ModelCall) => Promise<unknown> {
+  const opts: RunOpts = { repoDir, env, runWorkerImpl, resolveBinaryImpl }
+  const usable = refs.filter((ref) => ref && ['claude', 'codex', 'agy'].includes(ref.family))
+  if (usable.length === 0) throw new AdeError('role_call_failed', `papel ${label} sem modelo configurado`, 2, { role: label })
+  return async (call) => {
+    const errors: string[] = []
+    for (const ref of usable) {
+      try {
+        const run = ref.family === 'claude' ? claudeCall : ref.family === 'codex' ? codexCall : agyCall
+        return await run(ref, call, path.join(repoDir, '.ade', 'missions', call.missionId), opts)
+      } catch (err) {
+        if (err instanceof AdeError && err.code === 'canary_escaped') throw err
+        errors.push(`${ref.family}/${ref.model_id}: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    throw new AdeError('role_call_failed', `papel ${label} sem resposta: ${errors.join('; ')}`, 2, { role: label })
+  }
 }
 
 /** Críticos do plano a partir dos papéis configurados; vazio quando nenhum é codex ou agy. */
