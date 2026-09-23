@@ -161,7 +161,7 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
         <div className="score-title" data-live={live >= 0}>
           <span className="rehearsal big" aria-label={`Missão ${rehearsal}`}>{rehearsal}</span>
           <div style={{ display: 'grid', gap: '.9rem', minWidth: 0 }}>
-            <h1 id="score-title" className="display" style={title.length > 32 ? { fontSize: 'clamp(2.4rem, 4.2vw, 4rem)', maxWidth: '24ch' } : undefined}>{title}</h1>
+            <h1 id="score-title" className="display" style={title.length > 32 ? { fontSize: 'clamp(1.9rem, 3vw, 2.8rem)', maxWidth: '34ch' } : undefined}>{title}</h1>
             <h2 className="direction status-line">{running ? `Missão em execução · ${status}` : status}</h2>
           </div>
         </div>

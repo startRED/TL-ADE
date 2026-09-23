@@ -592,27 +592,27 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 :root, :root[data-palette='cobalto'] {
   --ground: #0b1030; --ground-raised: #111845; --ink: #eef0ff; --ink-soft: #bcc2ea; --ink-faint: #8f97cc;
   --sage: #4150a6; --sage-line: #1f2a66; --baton: #ffc53d; --baton-ink: #1c1405; --baton-text: #ffc53d;
-  --field: #2b3de0; --field-ink: #f4f5ff; --stage-light: rgba(70, 95, 255, .38);
+  --field: #1d2aa8; --field-ink: #f4f5ff; --stage-light: rgba(70, 95, 255, .38);
 }
 :root[data-palette='violeta'] {
   --ground: #140c2c; --ground-raised: #1c1240; --ink: #f2eeff; --ink-soft: #c6bbe8; --ink-faint: #9a8dc6;
   --sage: #5a47a3; --sage-line: #2c2160; --baton: #ffd166; --baton-ink: #1c1405; --baton-text: #ffd166;
-  --field: #6d3df0; --field-ink: #f7f3ff; --stage-light: rgba(130, 80, 255, .36);
+  --field: #4f2bbd; --field-ink: #f7f3ff; --stage-light: rgba(130, 80, 255, .36);
 }
 :root[data-palette='brasa'] {
   --ground: #1a0d08; --ground-raised: #26130c; --ink: #fff0e6; --ink-soft: #e0bfaa; --ink-faint: #b08e79;
   --sage: #8a4a30; --sage-line: #45231a; --baton: #ffc15a; --baton-ink: #1c1003; --baton-text: #ffc15a;
-  --field: #d9480f; --field-ink: #fff4ec; --stage-light: rgba(235, 90, 30, .32);
+  --field: #a93a10; --field-ink: #fff4ec; --stage-light: rgba(235, 90, 30, .32);
 }
 :root[data-palette='oceano'] {
   --ground: #04191e; --ground-raised: #08252c; --ink: #e8fbff; --ink-soft: #aed3da; --ink-faint: #7fa8b0;
   --sage: #2c6f7a; --sage-line: #10363e; --baton: #ffd45c; --baton-ink: #1c1405; --baton-text: #ffd45c;
-  --field: #0b8f9e; --field-ink: #f0feff; --stage-light: rgba(20, 180, 200, .28);
+  --field: #0a6f7c; --field-ink: #f0feff; --stage-light: rgba(20, 180, 200, .28);
 }
 :root[data-palette='grafite'] {
   --ground: #121216; --ground-raised: #1a1a20; --ink: #ecebe8; --ink-soft: #b4b4ba; --ink-faint: #8a8a93;
   --sage: #5f5f6e; --sage-line: #2a2a33; --baton: #f0b43c; --baton-ink: #1c1405; --baton-text: #f0b43c;
-  --field: #3a46c4; --field-ink: #f2f3ff; --stage-light: rgba(58, 72, 190, .26);
+  --field: #2d378f; --field-ink: #f2f3ff; --stage-light: rgba(58, 72, 190, .26);
 }
 :root[data-palette='mono'] {
   --ground: #111111; --ground-raised: #191919; --ink: #ededed; --ink-soft: #b5b5b5; --ink-faint: #8a8a8a;
@@ -624,12 +624,12 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 :root[data-theme='light'], :root[data-theme='light'][data-palette='cobalto'] {
   --ground: #eef0fb; --ground-raised: #f8f9ff; --ink: #0d1333; --ink-soft: #3a4270; --ink-faint: #5a628f;
   --sage: #9ea6d6; --sage-line: #d5d9f0; --baton: #e8a912; --baton-ink: #1c1405; --baton-text: #8a5a00;
-  --field: #2b3de0; --stage-light: rgba(70, 95, 255, .14);
+  --field: #1d2aa8; --stage-light: rgba(70, 95, 255, .14);
 }
-:root[data-theme='light'][data-palette='violeta'] { --ground: #f2effb; --ground-raised: #faf8ff; --ink: #1a1233; --ink-soft: #463a6e; --ink-faint: #665a8e; --sage: #b2a6d8; --sage-line: #ddd6f0; --baton: #e8a912; --baton-text: #8a5a00; --field: #6d3df0; --stage-light: rgba(130, 80, 255, .12); }
-:root[data-theme='light'][data-palette='brasa'] { --ground: #f8efe9; --ground-raised: #fdf8f5; --ink: #24120a; --ink-soft: #5a3a2c; --ink-faint: #7a5a4a; --sage: #d0a891; --sage-line: #ecdcd2; --baton: #d9480f; --baton-ink: #ffffff; --baton-text: #a8360a; --field: #d9480f; --stage-light: rgba(235, 90, 30, .12); }
-:root[data-theme='light'][data-palette='oceano'] { --ground: #eaf6f7; --ground-raised: #f6fcfc; --ink: #06222a; --ink-soft: #2f5058; --ink-faint: #4f7078; --sage: #92c3ca; --sage-line: #cfe6e9; --baton: #e8a912; --baton-text: #7a5200; --field: #0b8f9e; --stage-light: rgba(20, 180, 200, .12); }
-:root[data-theme='light'][data-palette='grafite'] { --ground: #eeeef1; --ground-raised: #f7f7f9; --ink: #17171c; --ink-soft: #44444d; --ink-faint: #62626c; --sage: #9d9daa; --sage-line: #d5d5dd; --baton: #e3a51c; --baton-text: #8a5a00; --field: #3a46c4; --stage-light: rgba(58, 72, 190, .10); }
+:root[data-theme='light'][data-palette='violeta'] { --ground: #f2effb; --ground-raised: #faf8ff; --ink: #1a1233; --ink-soft: #463a6e; --ink-faint: #665a8e; --sage: #b2a6d8; --sage-line: #ddd6f0; --baton: #e8a912; --baton-text: #8a5a00; --field: #4f2bbd; --stage-light: rgba(130, 80, 255, .12); }
+:root[data-theme='light'][data-palette='brasa'] { --ground: #f8efe9; --ground-raised: #fdf8f5; --ink: #24120a; --ink-soft: #5a3a2c; --ink-faint: #7a5a4a; --sage: #d0a891; --sage-line: #ecdcd2; --baton: #d9480f; --baton-ink: #ffffff; --baton-text: #a8360a; --field: #a93a10; --stage-light: rgba(235, 90, 30, .12); }
+:root[data-theme='light'][data-palette='oceano'] { --ground: #eaf6f7; --ground-raised: #f6fcfc; --ink: #06222a; --ink-soft: #2f5058; --ink-faint: #4f7078; --sage: #92c3ca; --sage-line: #cfe6e9; --baton: #e8a912; --baton-text: #7a5200; --field: #0a6f7c; --stage-light: rgba(20, 180, 200, .12); }
+:root[data-theme='light'][data-palette='grafite'] { --ground: #eeeef1; --ground-raised: #f7f7f9; --ink: #17171c; --ink-soft: #44444d; --ink-faint: #62626c; --sage: #9d9daa; --sage-line: #d5d5dd; --baton: #e3a51c; --baton-text: #8a5a00; --field: #2d378f; --stage-light: rgba(58, 72, 190, .10); }
 :root[data-theme='light'][data-palette='mono'] { --ground: #f2f2f2; --ground-raised: #fafafa; --ink: #141414; --ink-soft: #444444; --ink-faint: #666666; --sage: #a6a6a6; --sage-line: #dadada; --baton: #141414; --baton-ink: #ffffff; --baton-text: #141414; --field: #1e1e1e; --stage-light: rgba(0, 0, 0, .03); }
 
 /* Gravura sempre impressa em branco sobre o campo de cor, com retícula leve: a assinatura visual do painel. */
@@ -756,3 +756,45 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 .composer.compact { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; }
 .composer.compact .field { font: 400 15px/1.5 var(--mono); border-bottom: 0; }
 .composer.compact .note-line { grid-column: 1 / -1; }
+
+/* ---------- tudo em monospace ----------
+   Uma família só, a Geist Mono, do título ao rótulo; hierarquia por tamanho, peso e cor. A notação musical e as
+   gravuras seguem como estão. */
+:root { --display: var(--mono); --text: var(--mono); }
+body { font: 400 14px/1.6 var(--mono); font-feature-settings: 'ss01', 'zero'; }
+.display { font-family: var(--mono); font-weight: 520; letter-spacing: -.055em; line-height: 1.02; }
+.direction { font-family: var(--mono); font-style: normal; font-weight: 400; color: var(--ink-soft); letter-spacing: -.01em; }
+.lede { font: 400 15px/1.65 var(--mono); }
+.overture h1 { font-size: clamp(2.6rem, 4.6vw, 4.6rem); }
+.overture h1 em { font-style: normal; font-weight: 300; }
+.cursor { display: inline-block; width: .55em; height: .9em; margin-left: .12em; vertical-align: -.06em; background: var(--baton-text); animation: blink 1.1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.score-title h1 { font-size: clamp(2.4rem, 4.4vw, 4.2rem); }
+.status-line { font-size: 15px; }
+.rehearsal, .rehearsal.big, .measure-head .bar-no, .part-row .bar, .monogram { font-family: var(--mono); font-style: normal; }
+.measure-head .part-name { font: 400 12.5px/1.35 var(--mono); letter-spacing: -.01em; }
+.staff-label span { font: 400 11.5px/1.3 var(--mono); font-style: normal; }
+.fermata p, .empty, .goal, .finding-meta, .verdict-line .display { font-family: var(--mono); font-style: normal; }
+.fermata p { font-size: 14px; }
+.goal { font-size: clamp(1.1rem, 1.6vw, 1.4rem); line-height: 1.5; font-weight: 400; }
+.verdict-line .display { font-size: 1.25rem; letter-spacing: -.03em; }
+.option strong { font: 500 16px/1.2 var(--mono); font-style: normal; }
+.setting h2 { font: 500 clamp(1.3rem, 1.8vw, 1.6rem)/1 var(--mono); letter-spacing: -.03em; }
+.leaf-head h2 { font-size: clamp(1.4rem, 2vw, 1.8rem); }
+.movement > header h2, .library h1, .settings h1 { font-size: clamp(2.4rem, 3.8vw, 3.6rem); }
+.q-index { font-family: var(--mono); font-style: normal; }
+@media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
+.display { font-weight: 470; }
+.score-title .direction { max-width: none; }
+/* Na abertura a barra de cima é da mesma cor da seção: sem faixa escura, botões em tons do campo. */
+body:has(.overture) .strip {
+  --ink: var(--field-ink);
+  --ink-soft: color-mix(in srgb, var(--field-ink) 78%, var(--field));
+  --ink-faint: color-mix(in srgb, var(--field-ink) 62%, var(--field));
+  --sage: color-mix(in srgb, var(--field-ink) 40%, var(--field));
+  --sage-line: color-mix(in srgb, var(--field-ink) 18%, var(--field));
+  --baton: color-mix(in srgb, var(--field-ink) 85%, var(--field));
+  background: var(--field);
+  color: var(--ink);
+}
+body:has(.overture) .monogram { border-color: var(--ink-soft); }

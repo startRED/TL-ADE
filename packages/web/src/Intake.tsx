@@ -167,7 +167,7 @@ export default function IntakeFlow({ project, mission, missionCount, snapshotLoa
     <>{alert}
       <section className="overture">
         <div className="copy">
-          <motion.h1 className="display" {...rise(0)}>O que você quer construir em <em>{project.name}</em>?</motion.h1>
+          <motion.h1 className="display" {...rise(0)}>O que você quer construir em <em>{project.name}</em>?<span className="cursor" aria-hidden="true" /></motion.h1>
           <motion.div {...rise(1)}>{projectLine}</motion.div>
           <motion.div {...rise(2)}><RequestBox last={intake} busy={busy} onSend={(text) => act('/requests', { text })} /></motion.div>
         </div>
@@ -217,7 +217,7 @@ function RequestBox({ last, busy, compact, onSend }: { last: Intake | null; busy
   return (
     <form className={`composer${compact ? ' compact' : ' terminal'}`} onSubmit={submit}>
       {!compact && (
-        <ol className="term-tabs" aria-label="Caminho do pedido">
+        <ol className="term-tabs" aria-label="Etapas até a execução">
           {['pedido', 'entrevista', 'briefing', 'plano', 'partes'].map((s, i) => <li key={s} aria-current={i === 0 ? 'step' : undefined}>{s}</li>)}
         </ol>
       )}
