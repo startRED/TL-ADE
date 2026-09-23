@@ -56,9 +56,9 @@ const messageOf = (err: unknown) => (err instanceof Error ? err.message : String
 
 export default function App() {
   const [mode, setMode] = useState<Mode>(() => readPref<Mode>(APPEARANCE_KEY, ['light', 'dark', 'system'], 'system'))
-  const [palette, setPalette] = useState<Palette>(() => readPref<Palette>(PALETTE_KEY, PALETTES.map((p) => p.id), 'grafite'))
+  const [palette, setPalette] = useState<Palette>(() => readPref<Palette>(PALETTE_KEY, PALETTES.map((p) => p.id), 'cobalto'))
   const [sysDark, setSysDark] = useState(systemDark)
-  const [projects, setProjects] = useState<Project[]>([])
+  const [projects, setProjects] = useState<Project[] | null>(null)
   const [snapshot, setSnapshot] = useState<{ projectId: string; data: Snapshot } | null>(null)
   const [page, setPage] = useState<Page>('home')
   const [error, setError] = useState<string | null>(null)
@@ -111,7 +111,9 @@ export default function App() {
     }
   }
 
-  const openProjects = projects.filter((p) => p.open)
+  // Antes da primeira resposta nada aparece: mostrar "abra uma pasta" e trocar em seguida era a piscada ao abrir o link.
+  const loaded = projects !== null
+  const openProjects = (projects ?? []).filter((p) => p.open)
   const active = openProjects.find((p) => p.active) ?? null
   const mission = active && snapshot?.projectId === active.id ? snapshot.data.selectedMission : null
 
@@ -162,20 +164,21 @@ export default function App() {
       <main className="stage">
         {error && <div className="alert" role="alert" style={{ marginBottom: '2rem' }}>{error}</div>}
         <AnimatePresence mode="wait" initial={false}>
+          {/* troca de página: sai rápido e entra suave; a primeira tela entra pelas animações dela mesma */}
           <motion.div
-            key={page === 'home' ? active?.id ?? 'none' : page}
+            key={page === 'home' ? active?.id ?? (loaded ? 'none' : 'loading') : page}
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.45, ease: EASE_OUT }}
+            exit={{ opacity: 0, transition: { duration: 0.18 } }}
+            transition={{ duration: 0.5, ease: EASE_OUT }}
           >
             {page === 'appearance'
               ? <Appearance mode={mode} palette={palette} onMode={chooseMode} onPalette={choosePalette} />
               : page === 'projects'
-              ? <ProjectsPage projects={projects} onOpen={(dir) => act(async () => { await postJson('/api/projects/open', { path: dir }); setPage('home') })} />
+              ? <ProjectsPage projects={projects ?? []} onOpen={(dir) => act(async () => { await postJson('/api/projects/open', { path: dir }); setPage('home') })} />
               : active
                 ? <IntakeFlow key={active.id} project={active} mission={mission} missionCount={snapshot?.projectId === active.id ? snapshot.data.missions.length : 0} snapshotLoaded={snapshot?.projectId === active.id} />
-                : <NoProject onOpen={() => setPage('projects')} />}
+                : loaded ? <NoProject onOpen={() => setPage('projects')} /> : null}
           </motion.div>
         </AnimatePresence>
       </main>

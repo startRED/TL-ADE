@@ -5,10 +5,7 @@ import { apiFetch, postJson } from './api.ts'
 import type { Mission } from './App.tsx'
 import MissionScore from './Units.tsx'
 import { EASE_OUT } from './motion.ts'
-import estante from './assets/plates/estante.webp'
-import afinacao from './assets/plates/afinacao.webp'
-import coda from './assets/plates/coda.webp'
-import maestro from './assets/plates/maestro.webp'
+import Plate from './Plate.tsx'
 
 interface Question {
   id: string
@@ -91,7 +88,7 @@ export default function IntakeFlow({ project, mission, missionCount, snapshotLoa
       <span>{!snapshotLoaded ? 'Lendo o estado do projeto…' : mission ? `Última missão: ${mission.id}` : 'Nenhum pedido ainda.'}</span>
     </p>
   )
-  if (intake === undefined) return <>{alert}{projectLine}<p className="empty" style={{ marginTop: '2rem' }}>Lendo o pedido…</p></>
+  if (intake === undefined) return alert || null
 
   if (intake?.stage === 'interview') {
     return <>{alert}<InterviewView questions={intake.questions ?? []} busy={busy} onAnswer={(answers) => act('/intake/interview', { answers })} /></>
@@ -100,7 +97,7 @@ export default function IntakeFlow({ project, mission, missionCount, snapshotLoa
     const b = intake.briefing
     return (
       <>{alert}
-        <Movement title="Briefing" note="Confira o que entra e o que fica fora antes de a IA montar o plano." plate={estante}>
+        <Movement title="Briefing" note="Confira o que entra e o que fica fora antes de a IA montar o plano." plate="estante">
           <motion.p className="goal" {...rise(1)}>{b.goal}</motion.p>
           <motion.div className="columns" {...rise(2)}>
             <Ledger title="O que entra" items={b.in_scope} />
@@ -127,7 +124,7 @@ export default function IntakeFlow({ project, mission, missionCount, snapshotLoa
   if (intake?.stage === 'plan') {
     return (
       <>{alert}
-        <Movement title="Plano" note="Cada parte e os critérios que a prova dela vai cobrar." plate={estante}>
+        <Movement title="Plano" note="Cada parte e os critérios que a prova dela vai cobrar." plate="estante">
           <ol className="parts">
             {(intake.parts ?? []).map((p, i) => (
               <motion.li key={p.id} className="part-row" {...rise(i + 1)}>
@@ -174,27 +171,26 @@ export default function IntakeFlow({ project, mission, missionCount, snapshotLoa
           <motion.div {...rise(1)}>{projectLine}</motion.div>
           <motion.div {...rise(2)}><RequestBox last={intake} busy={busy} onSend={(text) => act('/requests', { text })} /></motion.div>
         </div>
-        <motion.figure
+        <motion.div
           className="plate-frame"
-          style={{ margin: 0 }}
           initial={{ opacity: 0, filter: 'blur(8px)' }}
           animate={{ opacity: 1, filter: 'blur(0px)' }}
           transition={{ duration: 1.4, ease: EASE_OUT, delay: 0.2 }}
         >
-          <img className="plate" src={finished ? coda : maestro} alt={finished ? 'Gravura de um regente agradecendo ao fim do concerto' : 'Gravura de um regente de costas, com seis braços, cada mão conduzindo um fio'} />
-        </motion.figure>
+          <Plate name={finished ? 'coda' : 'maestro'} depth={1.4} />
+        </motion.div>
       </section>
     </>
   )
 }
 
-function Movement({ title, note, plate, children }: { title: string; note: string; plate: string; children: ReactNode }) {
+function Movement({ title, note, plate, children }: { title: string; note: string; plate: 'estante' | 'afinacao'; children: ReactNode }) {
   return (
     <section className="movement">
       <motion.header {...rise(0)}>
         <h2 className="display">{title}</h2>
         <p className="lede">{note}</p>
-        <img className="plate" src={plate} alt="" aria-hidden="true" />
+        <Plate name={plate} decorative />
       </motion.header>
       <div className="body">{children}</div>
     </section>
@@ -247,7 +243,7 @@ function InterviewView({ questions, busy, onAnswer }: { questions: Question[]; b
   // Só vai o que o usuário mudou: o resto adota a recomendação com origem 'padrão'.
   const [picked, setPicked] = useState<Record<string, string>>({})
   return (
-    <Movement title="Entrevista" note="A primeira opção é sempre a recomendada. Não sabe? Deixe como está." plate={afinacao}>
+    <Movement title="Entrevista" note="A primeira opção é sempre a recomendada. Não sabe? Deixe como está." plate="afinacao">
       {questions.map((q, qi) => (
         <motion.fieldset key={q.id} className="question" style={{ border: 0, margin: 0, padding: '0 0 2rem' }} {...rise(qi + 1)}>
           <legend style={{ padding: 0 }}><p style={{ font: '500 19px/1.4 var(--text)', marginBottom: '1rem' }}><span className="q-index">{qi + 1}.</span>{q.text}</p></legend>

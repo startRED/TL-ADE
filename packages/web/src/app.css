@@ -42,7 +42,7 @@
   --baton: #e3a51c;
   --baton-ink: #1c1405;
   --stage-light: rgba(58, 72, 190, .10);
-  --plate-filter: brightness(.16);
+  --plate-filter: none;
   --baton-text: #8a5a00;
   --plate-ground: transparent;
   color-scheme: light;
@@ -366,7 +366,12 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 .hall { display: grid; grid-template-columns: minmax(0, 1fr) 19rem; gap: clamp(1.5rem, 2.5vw, 2.5rem); align-items: start; transition: grid-template-columns .7s var(--ease-out); }
 .hall[data-open='true'] { grid-template-columns: minmax(0, 1fr) minmax(0, 34rem); }
 .margin-slot { perspective: 1400px; min-width: 0; }
-.margin-plate { max-height: 17rem; width: auto; margin-inline: auto; }
+.margin-plate { height: min(22rem, calc(100dvh - 30rem)); min-height: 11rem; }
+.overture .plate-field { height: calc(100dvh - var(--strip) - 7rem); min-height: 28rem; }
+.movement > header .plate-field { aspect-ratio: 3 / 2; max-width: 20rem; margin-top: .5rem; }
+
+.hall[data-open='true'] .score { mask-image: linear-gradient(to right, #000 calc(100% - 4rem), transparent); }
+.cost-chart { margin-top: 2rem; max-width: 40rem; }
 .composer-dock { position: sticky; bottom: 0; z-index: 15; margin: 2.5rem calc(-1 * var(--gutter)) -6rem; padding: 1rem var(--gutter) 1.25rem; border-top: 1px solid var(--sage-line); background: color-mix(in srgb, var(--ground) 90%, transparent); backdrop-filter: blur(10px); }
 .composer.compact { grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 1.5rem; }
 .composer.compact .field { resize: none; }
@@ -579,19 +584,68 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
 
-.overture .plate { max-height: calc(100dvh - var(--strip) - 6rem); width: auto; max-width: 100%; margin-inline: auto; }
 
-/* ---------- paletas (a Grafite é o padrão, definida em :root) ---------- */
+/* ---------- paletas ----------
+   Cada paleta tem as quatro funções (fundo, tinta, linha de pauta, batuta) e um campo de cor viva (--field): o chão
+   das gravuras, a coluna da parte que toca agora e a luz de palco. A cor mora em campos inteiros, não em enfeite. */
 
-:root[data-palette='meia-noite'] { --ground: #0c0e1f; --ground-raised: #13162c; --ink: #e9eaf5; --ink-soft: #b3b6d0; --ink-faint: #868aa8; --sage: #4f5584; --sage-line: #222748; --baton: #a9b6ff; --baton-ink: #0c0e1f; --baton-text: #a9b6ff; --stage-light: rgba(110, 90, 230, .30); }
-:root[data-palette='brasa'] { --ground: #15100d; --ground-raised: #1e1612; --ink: #f1e8e2; --ink-soft: #c3b3a8; --ink-faint: #97867b; --sage: #6b5446; --sage-line: #33261f; --baton: #ec7a43; --baton-ink: #1a0d06; --baton-text: #ec7a43; --stage-light: rgba(200, 70, 40, .22); }
-:root[data-palette='mono'] { --ground: #111111; --ground-raised: #191919; --ink: #ededed; --ink-soft: #b5b5b5; --ink-faint: #8a8a8a; --sage: #5c5c5c; --sage-line: #2a2a2a; --baton: #f5f5f5; --baton-ink: #111111; --baton-text: #ffffff; --stage-light: rgba(255, 255, 255, .06); }
-:root[data-palette='ardosia'] { --ground: #0f141b; --ground-raised: #161d26; --ink: #e6edf3; --ink-soft: #aab8c6; --ink-faint: #7f8e9d; --sage: #4d6072; --sage-line: #233040; --baton: #79b8ff; --baton-ink: #06121f; --baton-text: #79b8ff; --stage-light: rgba(60, 130, 220, .20); }
+:root, :root[data-palette='cobalto'] {
+  --ground: #0b1030; --ground-raised: #111845; --ink: #eef0ff; --ink-soft: #bcc2ea; --ink-faint: #8f97cc;
+  --sage: #4150a6; --sage-line: #1f2a66; --baton: #ffc53d; --baton-ink: #1c1405; --baton-text: #ffc53d;
+  --field: #2b3de0; --field-ink: #f4f5ff; --stage-light: rgba(70, 95, 255, .38);
+}
+:root[data-palette='violeta'] {
+  --ground: #140c2c; --ground-raised: #1c1240; --ink: #f2eeff; --ink-soft: #c6bbe8; --ink-faint: #9a8dc6;
+  --sage: #5a47a3; --sage-line: #2c2160; --baton: #ffd166; --baton-ink: #1c1405; --baton-text: #ffd166;
+  --field: #6d3df0; --field-ink: #f7f3ff; --stage-light: rgba(130, 80, 255, .36);
+}
+:root[data-palette='brasa'] {
+  --ground: #1a0d08; --ground-raised: #26130c; --ink: #fff0e6; --ink-soft: #e0bfaa; --ink-faint: #b08e79;
+  --sage: #8a4a30; --sage-line: #45231a; --baton: #ffc15a; --baton-ink: #1c1003; --baton-text: #ffc15a;
+  --field: #d9480f; --field-ink: #fff4ec; --stage-light: rgba(235, 90, 30, .32);
+}
+:root[data-palette='oceano'] {
+  --ground: #04191e; --ground-raised: #08252c; --ink: #e8fbff; --ink-soft: #aed3da; --ink-faint: #7fa8b0;
+  --sage: #2c6f7a; --sage-line: #10363e; --baton: #ffd45c; --baton-ink: #1c1405; --baton-text: #ffd45c;
+  --field: #0b8f9e; --field-ink: #f0feff; --stage-light: rgba(20, 180, 200, .28);
+}
+:root[data-palette='grafite'] {
+  --ground: #121216; --ground-raised: #1a1a20; --ink: #ecebe8; --ink-soft: #b4b4ba; --ink-faint: #8a8a93;
+  --sage: #5f5f6e; --sage-line: #2a2a33; --baton: #f0b43c; --baton-ink: #1c1405; --baton-text: #f0b43c;
+  --field: #3a46c4; --field-ink: #f2f3ff; --stage-light: rgba(58, 72, 190, .26);
+}
+:root[data-palette='mono'] {
+  --ground: #111111; --ground-raised: #191919; --ink: #ededed; --ink-soft: #b5b5b5; --ink-faint: #8a8a8a;
+  --sage: #5c5c5c; --sage-line: #2a2a2a; --baton: #f5f5f5; --baton-ink: #111111; --baton-text: #ffffff;
+  --field: #2b2b2b; --field-ink: #f5f5f5; --stage-light: rgba(255, 255, 255, .06);
+}
 
-:root[data-theme='light'][data-palette='meia-noite'] { --ground: #eeeff8; --ground-raised: #f7f7fc; --ink: #151733; --ink-soft: #414468; --ink-faint: #5f6288; --sage: #a3a6c8; --sage-line: #d6d8ec; --baton: #4a55d8; --baton-ink: #ffffff; --baton-text: #3a44c0; --stage-light: rgba(90, 80, 220, .12); }
-:root[data-theme='light'][data-palette='brasa'] { --ground: #f3eeeb; --ground-raised: #faf7f5; --ink: #22150f; --ink-soft: #55433a; --ink-faint: #75625a; --sage: #bba79b; --sage-line: #e3d8d1; --baton: #d4602b; --baton-ink: #ffffff; --baton-text: #a8481c; --stage-light: rgba(210, 90, 40, .10); }
-:root[data-theme='light'][data-palette='mono'] { --ground: #f2f2f2; --ground-raised: #fafafa; --ink: #141414; --ink-soft: #444444; --ink-faint: #666666; --sage: #a6a6a6; --sage-line: #dadada; --baton: #141414; --baton-ink: #ffffff; --baton-text: #141414; --stage-light: rgba(0, 0, 0, .03); }
-:root[data-theme='light'][data-palette='ardosia'] { --ground: #edf1f5; --ground-raised: #f6f8fb; --ink: #121a23; --ink-soft: #3d4b59; --ink-faint: #5a6978; --sage: #9fb0c1; --sage-line: #d3dce5; --baton: #2f7fd6; --baton-ink: #ffffff; --baton-text: #1f63ad; --stage-light: rgba(40, 120, 220, .10); }
+/* Claro: papel tingido pela cor da paleta, nunca creme; o campo continua vivo e a gravura segue branca sobre ele. */
+:root[data-theme='light'], :root[data-theme='light'][data-palette='cobalto'] {
+  --ground: #eef0fb; --ground-raised: #f8f9ff; --ink: #0d1333; --ink-soft: #3a4270; --ink-faint: #5a628f;
+  --sage: #9ea6d6; --sage-line: #d5d9f0; --baton: #e8a912; --baton-ink: #1c1405; --baton-text: #8a5a00;
+  --field: #2b3de0; --stage-light: rgba(70, 95, 255, .14);
+}
+:root[data-theme='light'][data-palette='violeta'] { --ground: #f2effb; --ground-raised: #faf8ff; --ink: #1a1233; --ink-soft: #463a6e; --ink-faint: #665a8e; --sage: #b2a6d8; --sage-line: #ddd6f0; --baton: #e8a912; --baton-text: #8a5a00; --field: #6d3df0; --stage-light: rgba(130, 80, 255, .12); }
+:root[data-theme='light'][data-palette='brasa'] { --ground: #f8efe9; --ground-raised: #fdf8f5; --ink: #24120a; --ink-soft: #5a3a2c; --ink-faint: #7a5a4a; --sage: #d0a891; --sage-line: #ecdcd2; --baton: #d9480f; --baton-ink: #ffffff; --baton-text: #a8360a; --field: #d9480f; --stage-light: rgba(235, 90, 30, .12); }
+:root[data-theme='light'][data-palette='oceano'] { --ground: #eaf6f7; --ground-raised: #f6fcfc; --ink: #06222a; --ink-soft: #2f5058; --ink-faint: #4f7078; --sage: #92c3ca; --sage-line: #cfe6e9; --baton: #e8a912; --baton-text: #7a5200; --field: #0b8f9e; --stage-light: rgba(20, 180, 200, .12); }
+:root[data-theme='light'][data-palette='grafite'] { --ground: #eeeef1; --ground-raised: #f7f7f9; --ink: #17171c; --ink-soft: #44444d; --ink-faint: #62626c; --sage: #9d9daa; --sage-line: #d5d5dd; --baton: #e3a51c; --baton-text: #8a5a00; --field: #3a46c4; --stage-light: rgba(58, 72, 190, .10); }
+:root[data-theme='light'][data-palette='mono'] { --ground: #f2f2f2; --ground-raised: #fafafa; --ink: #141414; --ink-soft: #444444; --ink-faint: #666666; --sage: #a6a6a6; --sage-line: #dadada; --baton: #141414; --baton-ink: #ffffff; --baton-text: #141414; --field: #1e1e1e; --stage-light: rgba(0, 0, 0, .03); }
+
+/* Gravura sempre impressa em branco sobre o campo de cor, com retícula leve: a assinatura visual do painel. */
+.plate-field {
+  position: relative;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  isolation: isolate;
+  background: radial-gradient(ellipse 70% 60% at 50% 40%, color-mix(in srgb, var(--field-ink) 16%, var(--field)), var(--field) 72%);
+  overflow: hidden;
+}
+.plate-dots { position: absolute; inset: -24px; z-index: -1; background: radial-gradient(color-mix(in srgb, var(--field-ink) 16%, transparent) .6px, transparent .9px) 0 0 / 5px 5px; }
+.plate-field .plate { position: absolute; inset: 0; margin: auto; width: 92%; height: 92%; object-fit: contain; will-change: transform; }
+.plate-field .plate { filter: none; background: none; mix-blend-mode: normal; }
+.bar-cell[data-live='true'], .measure-head[data-live='true'] { background: color-mix(in srgb, var(--field) 16%, transparent); }
 
 /* ---------- aparência ---------- */
 
@@ -601,7 +655,7 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 .setting > header { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
 .setting h2 { font: 520 clamp(1.6rem, 2.2vw, 2.1rem)/1 var(--display); }
 .options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--sage-line); }
-.options.palettes { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1rem; border-top: 0; }
+.options.palettes { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1rem; border-top: 0; }
 .option {
   position: relative;
   display: grid;

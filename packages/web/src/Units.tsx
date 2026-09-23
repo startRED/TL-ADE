@@ -5,7 +5,7 @@ import { apiFetch, subscribeEvents } from './api.ts'
 import type { Mission } from './App.tsx'
 import { brl, hour } from './format.ts'
 import { EASE_OUT, reducedMotion } from './motion.ts'
-import maestro from './assets/plates/maestro.webp'
+import Plate from './Plate.tsx'
 
 interface Step { name: string; state: string; at: string }
 interface Unit { id: string; title: string | null; state: string; rounds: number; steps: Step[] }
@@ -72,6 +72,9 @@ const isLive = (s: string) => /in_progress|running/.test(s)
 const isStopped = (s: string) => /failed|blocked|rejected/.test(s)
 const noteState = (s: string) => (s === 'running' ? 'running' : /fail|error|refused/.test(s) ? 'failed' : 'done')
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err))
+/** Uma contagem só em toda a tela: quantas revisões a parte já teve (o sinal de repetição mostra o mesmo número). */
+const reviews = (n: number) => (n === 1 ? '1 revisão' : `${n} revisões`)
+const decimal = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 // Esforço vira dinâmica de partitura: baixo p, médio mf, alto f, muito alto ff, máximo fff.
 const DYNAMIC: Record<string, string> = { low: 'p', medium: 'mf', high: 'f', xhigh: 'ff', max: 'fff' }
@@ -149,7 +152,7 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
   }), [units])
 
   const status = liveUnit
-    ? `parte ${live + 1} de ${units.length} tocando agora${liveUnit.rounds > 1 ? `, rodada ${liveUnit.rounds + 1}` : ''}`
+    ? `parte ${live + 1} de ${units.length} tocando agora${liveUnit.rounds > 0 ? `, ${reviews(liveUnit.rounds)} até agora` : ''}`
     : units.length ? `${done} de ${units.length} partes prontas` : 'esperando a primeira parte'
 
   return (
@@ -181,6 +184,7 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
                       <button
                         key={u.id}
                         className="measure-head"
+                        data-live={i === live}
                         aria-expanded={u.id === openId}
                         onClick={() => setOpenId(u.id === openId ? null : u.id)}
                       >
@@ -189,10 +193,10 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
                         <span className="part-state">
                           {isDone(u.state) ? <span className="stamp" title="Pronta e provada"><Check size={14} weight="bold" aria-hidden="true" /></span>
                             : isStopped(u.state) ? <span className="stamp" title="Parou"><X size={14} weight="bold" aria-hidden="true" /></span>
-                              : u.rounds > 1 ? <span className="repeat">{u.rounds}x<span className="glyph" aria-hidden="true">{G.repeat}</span></span>
+                              : u.rounds > 1 ? <span className="repeat" title={reviews(u.rounds)}>{u.rounds}x<span className="glyph" aria-hidden="true">{G.repeat}</span></span>
                                 : <span className="caps" style={{ fontSize: 10 }}>{STATE_PT[u.state] ?? u.state}</span>}
                         </span>
-                        <span className="sr-only">{STATE_PT[u.state] ?? u.state}, {u.rounds} rodada(s)</span>
+                        <span className="sr-only">{STATE_PT[u.state] ?? u.state}, {reviews(u.rounds)}</span>
                       </button>
                     ))}
 
@@ -213,6 +217,7 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
                               key={u.id}
                               className={`bar-cell${staff.key === 'motor' ? ' percussion' : ''}`}
                               data-state={queued ? 'queued' : 'played'}
+                              data-live={mi === live}
                               style={{ ['--drawn' as string]: drawn ? 1 : 0, transitionDelay: `${mi * 90 + si * 40}ms` }}
                             >
                               {mi === 0 && <span className="clef" aria-hidden="true">{staff.key === 'motor' ? G.percClef : G.gClef}</span>}
@@ -251,6 +256,7 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
                   </div>
                 </div>
               )}
+          {mission && units.length > 0 && <CostChart mission={mission} units={units} live={live} />}
         </div>
 
         <div className="margin-slot">
@@ -272,8 +278,7 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
                     <h2>Sua vez</h2>
                     <p>{waiting ? 'A missão parou e espera você decidir.' : 'Nada para decidir agora.'}</p>
                   </div>
-                  {mission && units.length > 0 && <CostChart mission={mission} units={units} live={live} />}
-                  <img className="plate margin-plate" src={maestro} alt="Gravura de um regente de costas, com seis braços, cada mão conduzindo um fio" />
+                  <Plate name="maestro" className="margin-plate" />
                 </motion.aside>
               )}
           </AnimatePresence>
@@ -305,11 +310,11 @@ function CostChart({ mission, units, live }: { mission: Mission; units: Unit[]; 
   const max = Math.max(0.01, ...costs)
   return (
     <figure className="cost-chart">
-      <figcaption className="direction">Gasto por parte</figcaption>
+      <figcaption className="direction">Gasto por parte, em US$</figcaption>
       <ol className="stems" style={{ ['--n' as string]: units.length }}>
         {units.map((u, i) => (
           <li key={u.id} title={`${u.title ?? u.id}: ${brl(costs[i])}`}>
-            <span className="val num">{costs[i] > 0 ? costs[i].toFixed(1) : '·'}</span>
+            <span className="val num">{costs[i] > 0 ? decimal.format(costs[i]) : '·'}</span>
             <motion.i
               data-live={i === live}
               style={{ height: `${Math.max(2, (costs[i] / max) * 100)}%` }}
@@ -341,7 +346,7 @@ function Leaf({ unit, detail, index, onClose }: { unit: Unit; detail: Detail; in
       <header className="leaf-head">
         <div style={{ display: 'grid', gap: '.5rem' }}>
           <h2 className="display">{unit.title ?? unit.id}</h2>
-          <p className="direction">Compasso {index + 1}, {STATE_PT[unit.state] ?? unit.state}, {unit.rounds} rodada(s)</p>
+          <p className="direction">Compasso {index + 1}, {STATE_PT[unit.state] ?? unit.state}, {reviews(unit.rounds)}</p>
         </div>
         <button className="btn quiet" onClick={onClose}><X size={14} aria-hidden="true" /> Fechar</button>
       </header>

@@ -3,15 +3,16 @@ import { motion } from 'motion/react'
 import { EASE_OUT } from './motion.ts'
 
 export type Mode = 'light' | 'dark' | 'system'
-export type Palette = 'grafite' | 'meia-noite' | 'brasa' | 'mono' | 'ardosia'
+export type Palette = 'cobalto' | 'violeta' | 'brasa' | 'oceano' | 'grafite' | 'mono'
 
-/** Cores só da miniatura: fundo, barra lateral, texto forte, texto fraco, destaque. As de verdade moram no app.css. */
+/** Cores só da miniatura: fundo, campo de cor, texto forte, texto fraco, batuta. As de verdade moram no app.css. */
 export const PALETTES: Array<{ id: Palette; name: string; note: string; swatch: [string, string, string, string, string] }> = [
-  { id: 'grafite', name: 'Grafite', note: 'Grafite neutro com batuta dourada e luz azul de palco', swatch: ['#121216', '#1a1a20', '#ecebe8', '#5f5f6e', '#f0b43c'] },
-  { id: 'meia-noite', name: 'Meia-noite', note: 'Azul-violeta profundo com destaques frios', swatch: ['#0c0e1f', '#13162c', '#e9eaf5', '#4f5584', '#a9b6ff'] },
-  { id: 'brasa', name: 'Brasa', note: 'Carvão quente com cobre, clima de forja', swatch: ['#15100d', '#1e1612', '#f1e8e2', '#6b5446', '#ec7a43'] },
-  { id: 'mono', name: 'Mono', note: 'Tons de cinza, mínimo e concentrado', swatch: ['#111111', '#191919', '#ededed', '#5c5c5c', '#f5f5f5'] },
-  { id: 'ardosia', name: 'Ardósia', note: 'Azul-ardósia frio, tema de quem programa', swatch: ['#0f141b', '#161d26', '#e6edf3', '#4d6072', '#79b8ff'] },
+  { id: 'cobalto', name: 'Cobalto', note: 'Azul-marinho com campo cobalto e batuta dourada', swatch: ['#0b1030', '#2b3de0', '#eef0ff', '#4150a6', '#ffc53d'] },
+  { id: 'violeta', name: 'Violeta', note: 'Noite violeta com campo ultravioleta', swatch: ['#140c2c', '#6d3df0', '#f2eeff', '#5a47a3', '#ffd166'] },
+  { id: 'brasa', name: 'Brasa', note: 'Carvão quente com campo laranja de forja', swatch: ['#1a0d08', '#d9480f', '#fff0e6', '#8a4a30', '#ffc15a'] },
+  { id: 'oceano', name: 'Oceano', note: 'Verde-azulado profundo com campo turquesa', swatch: ['#04191e', '#0b8f9e', '#e8fbff', '#2c6f7a', '#ffd45c'] },
+  { id: 'grafite', name: 'Grafite', note: 'Grafite neutro, cor só no campo das gravuras', swatch: ['#121216', '#3a46c4', '#ecebe8', '#5f5f6e', '#f0b43c'] },
+  { id: 'mono', name: 'Mono', note: 'Tons de cinza, mínimo e concentrado', swatch: ['#111111', '#2b2b2b', '#ededed', '#5c5c5c', '#f5f5f5'] },
 ]
 
 const MODES: Array<{ id: Mode; name: string; note: string; Icon: typeof Sun }> = [
