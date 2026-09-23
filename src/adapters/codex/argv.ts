@@ -60,6 +60,9 @@ export function buildCodexArgs(opts: {
     // 0 desliga as skills, mas o codex 0.156 recusa 0 ("expected a nonzero usize") e não roda: vale o menor aceito,
     // que já tira todas (architecture.md §11 E16 previa essa troca)
     'skills.max_context_tokens=1',
+    // Windows: com --ignore-user-config o [windows] do config some e todo comando volta "blocked by policy" (o revisor
+    // não lia a worktree e reprovava sem achado); `elevated` quebrou na 0.154/0.156, `unelevated` lê, grava e roda
+    ...(process.platform === 'win32' ? ['-c', 'windows.sandbox=unelevated'] : []),
     '--skip-git-repo-check',
     '-C',
     cwd,
