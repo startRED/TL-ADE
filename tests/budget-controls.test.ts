@@ -14,16 +14,16 @@ describe('budget controls', () => {
   test('ca1_absolute_usd_cap_and_open_reservations', () => {
     expect(ABSOLUTE_USD_CAP).toBe(300)
 
-    // EXEMPLO CA1: {observed_usd:299,open_reservations:[],requested_usd:1} → {allowed:false,reason:'absolute_usd_cap'}
+    // ADR 0032: o dólar é informativo; 299+1 é autorizado e o total fica registrado
     const atCap = authorizePaidCall({
       observed_usd: 299,
       open_reservations: [],
       requested_usd: 1,
     })
-    expect(atCap).toEqual({
-      allowed: false,
-      reason: 'absolute_usd_cap',
-      reservation: null,
+    expect(atCap).toMatchObject({
+      allowed: true,
+      reason: null,
+      usd_total: 300,
     })
 
     // [CA1] 299+0.99 → allowed
@@ -50,10 +50,10 @@ describe('budget controls', () => {
       observed_usd: 289,
       requested_usd: 1,
     })
-    expect(resBlockedByOpenRes).toEqual({
-      allowed: false,
-      reason: 'absolute_usd_cap',
-      reservation: null,
+    expect(resBlockedByOpenRes).toMatchObject({
+      allowed: true,
+      reason: null,
+      usd_total: 300,
     })
 
     // Se story-1 já tiver step_result de maker, a reserva não é mais aberta

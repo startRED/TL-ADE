@@ -4,12 +4,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { AdeError } from './journal/errors.ts'
 import { readJournal } from './journal/journal.ts'
-import { assertCallBudget, authorizePaidCall, checkUsdCap, DEFAULT_CONTEXT_LIMIT_BYTES, observedUsd, reserveCalls } from './engine/budget.ts'
+import { assertCallBudget, authorizePaidCall, DEFAULT_CONTEXT_LIMIT_BYTES, observedUsd, reserveCalls, validateQuotaReceipt } from './engine/budget.ts'
 import { deliverStory, withDeliveryFlag } from './engine/deliver.ts'
 import { authorizedStep } from './engine/paid-call.ts'
 import { maybeEngineFault } from './engine/faults.ts'
 import { findStoryCommitted, findStoryStarted } from './engine/resume.ts'
 import { preserveInterruptedTree } from './engine/preserve.ts'
+import { classifyCallFailure, pauseForQuota, waitQuotaPause } from './engine/quota.ts'
 import { buildLadder, classifyMakerOutcome, correctionRequest, ladderStart, nextAttempt, reserveRung, type MakerOutcome } from './engine/ladder.ts'
 import { dedupStorySection } from './pack/dedup.ts'
 import { measurePackBytes, telemetrySections } from './pack/pack.ts'
@@ -88,7 +89,7 @@ function packTelemetry(manifest: any) {
  * @param input.repoDir Diretório raiz do repositório alvo.
  * @param input.missionDir Diretório de trabalho da missão em .ade/missions/<mission_id>.
  */
-export async function runStory(deps: { journal: { append: (event: Record<string, unknown>) => Promise<Record<string, unknown>> }; step: (spec: { unit: string; id: string; effect_class: string; input: unknown }, effectFn: () => Promise<unknown>) => Promise<{ step_id: string; status: string; result: unknown; reused: boolean }>; gitPortFor: (dir: string) => import('./git/gitport.ts').GitPort; prepareStory: (opts: { repoDir: string; missionId: string; storyId: string }) => Promise<any>; createEvalRunner: (opts: { step: any; missionDir: string; gitPort: any }) => { runEval: (opts: any) => Promise<any> }; createGateRunner: (opts: { step: any; missionDir: string; gitPort: any; packageJson?: any }) => { runGates: (opts: any) => Promise<any> }; compilePack: (opts: any) => { pack_path: string; manifest_path: string; manifest: any }; contain: (opts: any) => Promise<any>; plantCanary: (opts: { worktreeDir: string; outsideDir: string; unitId: string }) => Promise<any> | any; checkCanary: (canary: any) => Promise<any> | any; dispatchClaude: (opts: any) => Promise<any>; dispatchCodex?: (opts: any) => Promise<any>; checkerResolved?: { exe: string; prefixArgs: string[] } | null; reconcileAll?: any; resolved: { exe: string; prefixArgs: string[] }; workerEnv: Record<string, string>; capabilities: { probe_ok: boolean | null }; env?: NodeJS.ProcessEnv; now?: () => number; quotaPort: { readReceipt: ({ family, now }: { family: string; now: number }) => Promise<any> }; preflight?: (opts: { story: any; loaded: any; repoDir: string; events: any[] }) => Promise<{ ready: boolean; checks: any[]; failures: any[]; calls_avoided: number }> }, input: { loaded: import('./engine/plan-load.ts').LoadedPlan; story: import('./engine/plan-load.ts').LoadedStory; repoDir: string; missionDir: string }): Promise<{ status: 'committed' | 'delivered' | 'awaiting_operator'; exitCode: 0 | 3; reason: string | null; commit: string | null; delivered: boolean }> {
+export async function runStory(deps: { journal: { append: (event: Record<string, unknown>) => Promise<Record<string, unknown>> }; step: (spec: { unit: string; id: string; effect_class: string; input: unknown }, effectFn: () => Promise<unknown>) => Promise<{ step_id: string; status: string; result: unknown; reused: boolean }>; gitPortFor: (dir: string) => import('./git/gitport.ts').GitPort; prepareStory: (opts: { repoDir: string; missionId: string; storyId: string }) => Promise<any>; createEvalRunner: (opts: { step: any; missionDir: string; gitPort: any }) => { runEval: (opts: any) => Promise<any> }; createGateRunner: (opts: { step: any; missionDir: string; gitPort: any; packageJson?: any }) => { runGates: (opts: any) => Promise<any> }; compilePack: (opts: any) => { pack_path: string; manifest_path: string; manifest: any }; contain: (opts: any) => Promise<any>; plantCanary: (opts: { worktreeDir: string; outsideDir: string; unitId: string }) => Promise<any> | any; checkCanary: (canary: any) => Promise<any> | any; dispatchClaude: (opts: any) => Promise<any>; dispatchCodex?: (opts: any) => Promise<any>; checkerResolved?: { exe: string; prefixArgs: string[] } | null; reconcileAll?: any; resolved: { exe: string; prefixArgs: string[] }; workerEnv: Record<string, string>; capabilities: { probe_ok: boolean | null }; env?: NodeJS.ProcessEnv; now?: () => number; sleep?: (ms: number) => Promise<unknown>; quotaPort: { readReceipt: ({ family, now }: { family: string; now: number }) => Promise<any> }; preflight?: (opts: { story: any; loaded: any; repoDir: string; events: any[] }) => Promise<{ ready: boolean; checks: any[]; failures: any[]; calls_avoided: number }> }, input: { loaded: import('./engine/plan-load.ts').LoadedPlan; story: import('./engine/plan-load.ts').LoadedStory; repoDir: string; missionDir: string }): Promise<{ status: 'committed' | 'delivered' | 'awaiting_operator'; exitCode: 0 | 3; reason: string | null; commit: string | null; delivered: boolean }> {
   const result = await runStoryImpl({ ...deps, journal: withDeliveryFlag(deps.journal) }, input)
   return { ...result, delivered: result.status === 'delivered' }
 }
@@ -262,7 +263,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     !Array.isArray(previousReservationData)
     ? (previousReservationData).quota_receipt
     : undefined
-  const quotaReceipt = previousQuotaReceipt ?? await deps.quotaPort.readReceipt({
+  let quotaReceipt = previousQuotaReceipt ?? await deps.quotaPort.readReceipt({
     family: makerFamily,
     now: deps.now?.() ?? Date.now(),
   })
@@ -375,6 +376,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         family: paidCall.reservation.family,
         phase: 'implementation',
         quota_receipt: quotaReceipt,
+        // o dólar é informativo (ADR 0032): fica registrado e não bloqueia
+        usd_total: paidCall.usd_total,
         unit: storyId,
       },
     })
@@ -664,6 +667,17 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   }
 
   while (true) {
+    // Pausa por cota aberta (desta chamada ou de antes do reinício): dorme até a renovação e retoma sem aprovação nova.
+    if (await waitQuotaPause({ journal: deps.journal, events: readEvents(), now: () => deps.now?.() ?? Date.now(), sleep: deps.sleep })) {
+      // o recibo de antes da pausa pode ter vencido na espera
+      quotaReceipt = await deps.quotaPort.readReceipt({ family: makerFamily, now: deps.now?.() ?? Date.now() })
+      const quota = validateQuotaReceipt(quotaReceipt, {
+        family: makerFamily,
+        max_percent: loaded.missionBudget.max_subscription_weekly_percent ?? 50,
+        now: deps.now?.() ?? Date.now(),
+      })
+      if (!quota.ok) return await parkStory(quota.reason ?? 'quota_unavailable')
+    }
     // Tentativa repetida pela escada ganha passo próprio dentro da mesma rodada.
     const tag = attempt === 0 ? `r${round}` : `r${round}t${attempt}`
     let currentPackPath = packResult.pack_path
@@ -816,6 +830,15 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     makerDurationMs = Math.max(0, (deps.now?.() ?? Date.now()) - makerStartedAt)
 
     maybeEngineFault('after_maker_effect', env)
+
+    // Cota esgotada não gasta rodada nem anda a escada: registra a pausa e tenta a mesma chamada depois da renovação.
+    const failure = classifyCallFailure(dispatch)
+    if (failure.kind === 'quota') {
+      await appendMakerTelemetry(dispatch, 'stop')
+      await pauseForQuota({ journal: deps.journal, events: readEvents(), unit: storyId, stepId: `${storyId}:${tag}:maker`, resetAt: failure.resetAt, now: deps.now?.() ?? Date.now() })
+      attempt++
+      continue
+    }
 
     maybeEngineFault('before_contain', env)
 
@@ -973,29 +996,6 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     }
 
     await appendMakerTelemetry(dispatch, round > 1 ? 'rework' : 'ok')
-
-    const usdCap = checkUsdCap({
-      observed_usd: observedUsd(readEvents()).observed_usd,
-      max_usd: loaded.missionBudget.max_usd,
-    })
-    if (!usdCap.ok) {
-      await deps.journal.append({
-        kind: 'story_done',
-        unit: storyId,
-        data: {
-          status: 'awaiting_operator',
-          reason: 'budget_usd_exceeded',
-          unit: storyId,
-          commit: null,
-        },
-      })
-      return {
-        status: 'awaiting_operator',
-        exitCode: 3,
-        reason: 'budget_usd_exceeded',
-        commit: null,
-      }
-    }
 
     maybeEngineFault('after_contain', env)
 

@@ -149,10 +149,10 @@ test('CA3_missing_or_exhausted_receipts_park_without_dispatch', async () => {
 
 test('CA4_absolute_cap_parks_and_resume_reuses_official_reservation', async () => {
   const capped = fixture({ maxUsd: 5 })
-  await capped.journal.append({ kind: 'step_result', unit: 'old', step_id: 'old:r1:maker', data: { cost_usd: 275 } })
-  await capped.journal.append({ kind: 'budget_reserved', unit: 'other', data: { unit: 'other', usd: 20, calls: 1 } })
-  await expect(run(capped)).resolves.toMatchObject({ status: 'awaiting_operator', reason: 'absolute_usd_cap' })
-  expect(capped.dispatched).not.toHaveBeenCalled()
+  await capped.journal.append({ kind: 'step_result', unit: 'old', step_id: 'old:r1:maker', data: { cost_usd: 320 } })
+  // ADR 0032: gasto acima de US$ 300 não bloqueia a chamada; a parte segue até a contenção dublê
+  await expect(run(capped)).resolves.toMatchObject({ status: 'awaiting_operator', reason: 'stop_after_dispatch' })
+  expect(capped.dispatched).toHaveBeenCalledTimes(1)
 
   const resumed = fixture()
   await resumed.journal.append({

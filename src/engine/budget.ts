@@ -463,8 +463,8 @@ export function validateQuotaReceipt(receipt: any, { family, max_percent = 50, n
 }
 
 /**
- * Autoriza uma chamada paga após checar tetos absolutos, reservas abertas, limites de missão,
- * turnos, contexto e cota por família.
+ * Autoriza uma chamada paga após checar reservas abertas, limites de missão, turnos, contexto e
+ * cota por família; o total em USD volta só como registro.
  */
 export function authorizePaidCall(params: { events?: Array<Record<string, any>>; mission_budget?: Record<string, any>; story_budget?: Record<string, any>; family?: string; phase?: string; requested_usd?: number; requested_calls?: number; requested_turns?: number; used_turns?: number; context_bytes?: number; context_limit?: number; quota_receipt?: any; now?: number | string | Date; states?: Record<string, any> | Array<any>; observed_usd?: number; open_reservations?: Array<any> } = {}): {
   allowed: false
@@ -474,6 +474,7 @@ export function authorizePaidCall(params: { events?: Array<Record<string, any>>;
   allowed: true
   reason: null
   reservation: { calls: number; usd: number; turns: number; family: string }
+  usd_total: number
 } {
   const {
     events = [],
@@ -538,7 +539,7 @@ export function authorizePaidCall(params: { events?: Array<Record<string, any>>;
     }
   }
 
-  // 3. Teto de USD: observed_usd + reservas abertas + requested_usd
+  // 3. Total em USD informativo: observed_usd + reservas abertas + requested_usd
   let obsUsd = 0
   if (typeof params.observed_usd === 'number') {
     obsUsd = params.observed_usd
@@ -573,25 +574,7 @@ export function authorizePaidCall(params: { events?: Array<Record<string, any>>;
 
   const totalUsd = obsUsd + openResUsd + requested_usd
 
-  // Teto absoluto de US$ 300
-  if (totalUsd >= ABSOLUTE_USD_CAP) {
-    return {
-      allowed: false,
-      reason: 'absolute_usd_cap',
-      reservation: null,
-    }
-  }
-
-  // Teto do mission_budget.max_usd se configurado
-  if (mission_budget?.max_usd !== undefined && mission_budget?.max_usd !== null) {
-    if (totalUsd >= mission_budget.max_usd) {
-      return {
-        allowed: false,
-        reason: 'budget_usd_exceeded',
-        reservation: null,
-      }
-    }
-  }
+  // O dólar é informativo (ADR 0032, emenda o 0026): a cota dos planos manda e o total só fica registrado.
 
   // 4. Limites determinísticos da missão (model calls, wall clock, parked units)
   if (mission_budget || story_budget || Array.isArray(events) || states) {
@@ -672,5 +655,6 @@ export function authorizePaidCall(params: { events?: Array<Record<string, any>>;
       turns: requested_turns,
       family: family ?? '',
     },
+    usd_total: totalUsd,
   }
 }

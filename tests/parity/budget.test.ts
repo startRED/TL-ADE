@@ -380,17 +380,17 @@ describe('budget parity', () => {
 
   // Contratos de extensão do orçamento: CA1, CA2, CA3, CA4
   test('budget_controls_extensions_parity', () => {
-    // [CA1] 299+1 → absolute_usd_cap, 299+0.99 → allowed
+    // [CA1] ADR 0032: 299+1 → autorizado com o total registrado, 299+0.99 → allowed
     expect(
       authorizePaidCall({
         observed_usd: 299,
         open_reservations: [],
         requested_usd: 1,
       }),
-    ).toEqual({
-      allowed: false,
-      reason: 'absolute_usd_cap',
-      reservation: null,
+    ).toMatchObject({
+      allowed: true,
+      reason: null,
+      usd_total: 300,
     })
 
     const allowedBelow = authorizePaidCall({

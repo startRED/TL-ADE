@@ -42,6 +42,7 @@ export async function dispatchClaude(opts: {
   subtype: string | null
   num_turns: number | null
   result_text: string
+  is_error: boolean
 }> {
   const {
     step,
@@ -110,6 +111,8 @@ export async function dispatchClaude(opts: {
       subtype: typeof envelope?.subtype === 'string' ? envelope.subtype : null,
       num_turns: typeof envelope?.num_turns === 'number' ? envelope.num_turns : null,
       result_text: typeof envelope?.result === 'string' ? envelope.result : '',
+      // a cota é lida só da mensagem de erro, nunca do texto de uma resposta bem-sucedida
+      is_error: envelope?.is_error === true,
     }
   })
 
@@ -129,5 +132,6 @@ export async function dispatchClaude(opts: {
     subtype: effectResult.subtype ?? null,
     num_turns: effectResult.num_turns ?? null,
     result_text: effectResult.result_text ?? '',
+    is_error: effectResult.is_error === true,
   }
 }

@@ -17,7 +17,7 @@ export type Attempt = { kind: 'repeat' | 'next_model' | 'climb' | 'reserve' | 'p
 
 const ROUNDS_PER_RUNG = 2
 const OUTCOMES = new Set(['ok', 'max_turns', 'no_change', 'env_blocked', 'rejected'])
-const ENV_BLOCK = /sandbox|somente leitura|read-?only|permiss[aã]o negada|access (is )?denied|EPERM|EACCES/i
+export const ENV_BLOCK = /sandbox|somente leitura|read-?only|permiss[aã]o negada|access (is )?denied|EPERM|EACCES/i
 
 /** Monta a escada: turnos nunca caem de um degrau para o seguinte e reserva só no fim. */
 export function buildLadder(rungs: Array<{ model: string | null; family: string; maxTurns?: number; reserve?: boolean }>): Rung[] {
