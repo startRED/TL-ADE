@@ -156,33 +156,6 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 .field:focus { outline: none; border-bottom-color: var(--baton); }
 .field:focus-visible { outline: none; }
 
-.switch {
-  display: inline-flex;
-  align-items: center;
-  gap: .6rem;
-  border: 0;
-  background: none;
-  padding: .25rem 0;
-  cursor: pointer;
-}
-.switch .track {
-  position: relative;
-  width: 2.1rem;
-  height: 1.1rem;
-  border: 1px solid var(--sage);
-}
-.switch .track::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: calc(1.1rem - 6px);
-  height: calc(1.1rem - 6px);
-  background: var(--ink-soft);
-  transition: transform .35s var(--ease-out), background-color .35s var(--ease-out);
-}
-.switch[aria-checked='true'] .track::after { transform: translateX(1rem); background: var(--baton); }
-
 .alert {
   display: flex;
   gap: .75rem;
@@ -620,17 +593,12 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
   --field: #2b2b2b; --field-ink: #f5f5f5; --stage-light: rgba(255, 255, 255, .06);
 }
 
-/* Claro: papel tingido pela cor da paleta, nunca creme; o campo continua vivo e a gravura segue branca sobre ele. */
-:root[data-theme='light'], :root[data-theme='light'][data-palette='cobalto'] {
+/* Papel: o único tema claro, papel tingido de cobalto, nunca creme; o campo continua vivo e a gravura branca. */
+:root[data-palette='papel'] {
   --ground: #eef0fb; --ground-raised: #f8f9ff; --ink: #0d1333; --ink-soft: #3a4270; --ink-faint: #5a628f;
   --sage: #9ea6d6; --sage-line: #d5d9f0; --baton: #e8a912; --baton-ink: #1c1405; --baton-text: #8a5a00;
-  --field: #1424c4; --stage-light: rgba(70, 95, 255, .14);
+  --field: #1424c4; --field-ink: #f4f5ff; --stage-light: rgba(70, 95, 255, .14);
 }
-:root[data-theme='light'][data-palette='violeta'] { --ground: #f2effb; --ground-raised: #faf8ff; --ink: #1a1233; --ink-soft: #463a6e; --ink-faint: #665a8e; --sage: #b2a6d8; --sage-line: #ddd6f0; --baton: #e8a912; --baton-text: #8a5a00; --field: #5520d8; --stage-light: rgba(130, 80, 255, .12); }
-:root[data-theme='light'][data-palette='brasa'] { --ground: #f8efe9; --ground-raised: #fdf8f5; --ink: #24120a; --ink-soft: #5a3a2c; --ink-faint: #7a5a4a; --sage: #d0a891; --sage-line: #ecdcd2; --baton: #d9480f; --baton-ink: #ffffff; --baton-text: #a8360a; --field: #bf3a08; --stage-light: rgba(235, 90, 30, .12); }
-:root[data-theme='light'][data-palette='oceano'] { --ground: #eaf6f7; --ground-raised: #f6fcfc; --ink: #06222a; --ink-soft: #2f5058; --ink-faint: #4f7078; --sage: #92c3ca; --sage-line: #cfe6e9; --baton: #e8a912; --baton-text: #7a5200; --field: #00798a; --stage-light: rgba(20, 180, 200, .12); }
-:root[data-theme='light'][data-palette='grafite'] { --ground: #eeeef1; --ground-raised: #f7f7f9; --ink: #17171c; --ink-soft: #44444d; --ink-faint: #62626c; --sage: #9d9daa; --sage-line: #d5d5dd; --baton: #e3a51c; --baton-text: #8a5a00; --field: #2d378f; --stage-light: rgba(58, 72, 190, .10); }
-:root[data-theme='light'][data-palette='mono'] { --ground: #f2f2f2; --ground-raised: #fafafa; --ink: #141414; --ink-soft: #444444; --ink-faint: #666666; --sage: #a6a6a6; --sage-line: #dadada; --baton: #141414; --baton-ink: #ffffff; --baton-text: #141414; --field: #1e1e1e; --stage-light: rgba(0, 0, 0, .03); }
 
 /* Gravura sempre impressa em branco sobre o campo de cor, com retícula leve: a assinatura visual do painel. */
 .plate-field {

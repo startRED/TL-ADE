@@ -10,6 +10,7 @@ import { requestMissionControl } from '../engine/control.ts'
 import { createInterventionController } from './control.ts'
 import { createSessionManager } from './session.ts'
 import { createIntake, defaultIntent, spawnMissionRun, type IntentPort, type RunMission } from './intake.ts'
+import { pickFolder } from './folder-picker.ts'
 import { assertProjectPath, createOpenProjects } from './open-projects.ts'
 import { listProjects, registerProject } from './projects.ts'
 import { listUnits, readUnit } from './units.ts'
@@ -296,6 +297,10 @@ export async function startServer({
                 }
                 return
               }
+            }
+            if (method === 'POST' && pathname === '/api/projects/pick') {
+              sendJson(res, 200, { path: await pickFolder() })
+              return
             }
             if (method === 'POST' && pathname === '/api/projects/open') {
               const repoPath = assertProjectPath((await readJsonBody(req))?.path)

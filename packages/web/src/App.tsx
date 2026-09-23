@@ -3,7 +3,7 @@ import { X } from '@phosphor-icons/react'
 import { AnimatePresence, motion } from 'motion/react'
 import { apiFetch, postJson, subscribeEvents } from './api.ts'
 import IntakeFlow from './Intake.tsx'
-import Appearance, { PALETTES, type Mode, type Palette } from './Appearance.tsx'
+import Appearance, { LIGHT_PALETTES, PALETTES, type Palette } from './Appearance.tsx'
 import { EASE_OUT } from './motion.ts'
 import { brl } from './format.ts'
 
@@ -37,9 +37,7 @@ interface Snapshot {
 
 type Page = 'home' | 'projects' | 'appearance'
 
-const APPEARANCE_KEY = 'ade.appearance'
 const PALETTE_KEY = 'ade.palette'
-const systemDark = () => window.matchMedia('(prefers-color-scheme: dark)').matches
 
 /** Lê uma preferência guardada; armazenamento bloqueado ou valor estranho devolve o padrão, sem lembrar a escolha. */
 function readPref<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
@@ -55,26 +53,17 @@ function readPref<T extends string>(key: string, allowed: readonly T[], fallback
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
 export default function App() {
-  const [mode, setMode] = useState<Mode>(() => readPref<Mode>(APPEARANCE_KEY, ['light', 'dark', 'system'], 'system'))
   const [palette, setPalette] = useState<Palette>(() => readPref<Palette>(PALETTE_KEY, PALETTES.map((p) => p.id), 'cobalto'))
-  const [sysDark, setSysDark] = useState(systemDark)
   const [projects, setProjects] = useState<Project[] | null>(null)
   const [snapshot, setSnapshot] = useState<{ projectId: string; data: Snapshot } | null>(null)
   const [page, setPage] = useState<Page>('home')
   const [error, setError] = useState<string | null>(null)
 
-  const dark = mode === 'system' ? sysDark : mode === 'dark'
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const on = () => setSysDark(mq.matches)
-    mq.addEventListener('change', on)
-    return () => mq.removeEventListener('change', on)
-  }, [])
   useEffect(() => {
     const root = document.documentElement
-    root.dataset.theme = dark ? 'dark' : 'light'
+    root.dataset.theme = LIGHT_PALETTES.includes(palette) ? 'light' : 'dark'
     root.dataset.palette = palette
-  }, [dark, palette])
+  }, [palette])
 
   const refresh = useCallback(async () => {
     const list = await apiFetch<Project[]>('/api/projects')
@@ -98,7 +87,6 @@ export default function App() {
       setError('O navegador não deixou guardar a aparência; ela vale só até recarregar.')
     }
   }
-  function chooseMode(next: Mode) { setMode(next); save(APPEARANCE_KEY, next) }
   function choosePalette(next: Palette) { setPalette(next); save(PALETTE_KEY, next) }
 
   async function act(fn: () => Promise<unknown>) {
@@ -153,11 +141,6 @@ export default function App() {
         <div className="readouts">
           {mission?.consumed_usd != null && <span className="num" title="Custo equivalente de API">{brl(mission.consumed_usd)}</span>}
           {mission?.total_calls ? <><span className="rule" aria-hidden="true" /><span className="num">{mission.total_calls} chamadas</span></> : null}
-          <span className="rule" aria-hidden="true" />
-          <button className="switch" role="switch" aria-checked={dark} aria-label="Modo noturno" onClick={() => chooseMode(dark ? 'light' : 'dark')}>
-            <span className="track" aria-hidden="true" />
-            <span className="caps" aria-hidden="true">Noite</span>
-          </button>
         </div>
       </header>
 
@@ -173,7 +156,7 @@ export default function App() {
             transition={{ duration: 0.5, ease: EASE_OUT }}
           >
             {page === 'appearance'
-              ? <Appearance mode={mode} palette={palette} onMode={chooseMode} onPalette={choosePalette} />
+              ? <Appearance palette={palette} onPalette={choosePalette} />
               : page === 'projects'
               ? <ProjectsPage projects={projects ?? []} onOpen={(dir) => act(async () => { await postJson('/api/projects/open', { path: dir }); setPage('home') })} />
               : active
@@ -200,7 +183,22 @@ function NoProject({ onOpen }: { onOpen: () => void }) {
 
 function ProjectsPage({ projects, onOpen }: { projects: Project[]; onOpen: (dir: string) => void }) {
   const [dir, setDir] = useState('')
-  const closed = projects.filter((p) => !p.open)
+  const [picking, setPicking] = useState(false)
+  const [pickError, setPickError] = useState<string | null>(null)
+
+  // O servidor abre o seletor de pasta do sistema (Explorer, Finder ou zenity) e devolve o caminho; cancelar não faz nada.
+  async function browse() {
+    setPicking(true)
+    setPickError(null)
+    try {
+      const { path } = await postJson<{ path: string | null }>('/api/projects/pick', {})
+      if (path) onOpen(path)
+    } catch (err) {
+      setPickError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPicking(false)
+    }
+  }
 
   function submit(e: FormEvent) {
     e.preventDefault()
@@ -212,24 +210,26 @@ function ProjectsPage({ projects, onOpen }: { projects: Project[]; onOpen: (dir:
       <div style={{ display: 'grid', gap: '1.75rem' }}>
         <h1 className="display">Projetos</h1>
         <p className="lede">A ADE trabalha dentro de um repositório git do seu PC. Abrir outra pasta não interrompe a missão das que já estão abertas.</p>
+        <div><button className="btn baton" type="button" onClick={browse} disabled={picking}>{picking ? 'Esperando a escolha…' : 'Escolher pasta'}</button></div>
+        {pickError && <div className="alert" role="alert">{pickError}</div>}
         <form className="open-form" onSubmit={submit}>
           <input className="field mono" value={dir} onChange={(e) => setDir(e.target.value)} placeholder="E:\meus-projetos\minha-app" aria-label="Caminho da pasta" />
-          <button className="btn baton" type="submit" disabled={!dir.trim()}>Abrir</button>
+          <button className="btn" type="submit" disabled={!dir.trim()}>Abrir</button>
         </form>
       </div>
       <div style={{ display: 'grid', gap: '1rem' }}>
         <h2 className="caps">Recentes</h2>
-        {closed.length === 0
-          ? <p className="empty">Nenhuma pasta fechada por aqui.</p>
+        {projects.length === 0
+          ? <p className="empty">As pastas que você abrir aparecem aqui.</p>
           : (
             <ul className="shelf">
-              {closed.map((p) => (
+              {projects.map((p) => (
                 <li key={p.path}>
                   <div>
-                    <p>{p.name}</p>
+                    <p>{p.name}{p.open && <span className="tag">aberto</span>}</p>
                     <p className="mono" style={{ color: 'var(--ink-faint)' }}>{p.path}</p>
                   </div>
-                  <button className="btn" aria-label={`Reabrir ${p.name}`} onClick={() => onOpen(p.path)}>Reabrir</button>
+                  <button className="btn" aria-label={`${p.open ? 'Mostrar' : 'Reabrir'} ${p.name}`} onClick={() => onOpen(p.path)}>{p.open ? 'Mostrar' : 'Reabrir'}</button>
                 </li>
               ))}
             </ul>

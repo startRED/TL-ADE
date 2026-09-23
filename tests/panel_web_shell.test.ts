@@ -332,19 +332,21 @@ describe('painel novo servido do último build e vários projetos', () => {
     expect(ui.consoleErrors).toEqual([])
   }, 180_000)
 
-  test('criterio_13_modo_noturno_aplica_aparencia_escura_e_persiste_ao_recarregar', async () => {
+  test('criterio_13_tema_escolhido_fica_fixo_e_persiste_ao_recarregar', async () => {
     const panel = await startPanelForTest({ repoDirs: [gitFixture()] })
     cleanups.push(() => panel.close())
     const ui = await openPanel(panel.url)
     cleanups.push(() => ui.browser.close())
     const { page } = ui
-    const isDark = () => page.evaluate(() => document.documentElement.dataset.theme === 'dark')
+    const theme = () => page.evaluate(() => `${document.documentElement.dataset.palette}/${document.documentElement.dataset.theme}`)
 
-    await expect.poll(isDark).toBe(false)
-    await page.getByRole('switch', { name: 'Modo noturno' }).click()
-    await expect.poll(isDark).toBe(true)
+    await expect.poll(theme).toBe('cobalto/dark')
+    expect(await page.getByRole('switch').count()).toBe(0)
+    await page.getByRole('button', { name: 'Aparência' }).click()
+    await page.getByRole('radio', { name: /Papel/ }).click()
+    await expect.poll(theme).toBe('papel/light')
     await page.reload()
-    await expect.poll(isDark).toBe(true)
+    await expect.poll(theme).toBe('papel/light')
     expect(ui.consoleErrors).toEqual([])
   }, 180_000)
 
