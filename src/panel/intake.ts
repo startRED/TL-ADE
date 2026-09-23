@@ -224,7 +224,7 @@ export function createIntake({ intent, runMission, beginActivity, onError }: {
         const questions = intake.questions ?? []
         const unknown = Object.keys(answers).find((id) => !questions.some((q) => q.id === id))
         if (unknown) throw new AdeError('respostas_invalidas', `A resposta cita a pergunta inexistente ${unknown}.`, 2)
-        const decisions = questions.map((q) => applyInterviewAnswer({}, q, answers[q.id] as string | undefined).decision)
+        const decisions = questions.map((q) => applyInterviewAnswer({}, q, answers[q.id] as string | undefined, { allowWritten: true }).decision)
         const result = await compile(repoDir, intake, { answers: answers as Answers })
         const next: Intake = { ...intake, answers: answers as Answers, decisions }
         applyResult(repoDir, next, result, ['briefing', 'plan'])
@@ -306,7 +306,7 @@ export const defaultIntent: IntentPort = {
     }
 
     const version = briefing ? versionPlanOf(briefing, 0) : null
-    const decisions = questions.map((q) => applyInterviewAnswer({}, q, answers?.[q.id]).decision)
+    const decisions = questions.map((q) => applyInterviewAnswer({}, q, answers?.[q.id], { allowWritten: true }).decision)
     const compiled = await compileIntent({
       request: version?.request ?? request,
       discovery,
@@ -318,7 +318,7 @@ export const defaultIntent: IntentPort = {
       adeConfig,
     })
     let contracts = compiled.contracts
-    for (const q of questions) contracts = contracts.map((c) => applyInterviewAnswer(c, q, answers?.[q.id]).contract)
+    for (const q of questions) contracts = contracts.map((c) => applyInterviewAnswer(c, q, answers?.[q.id], { allowWritten: true }).contract)
     if (version) Object.assign(compiled.plan.briefing, version.briefing)
     return { plan: compiled.plan, contracts }
   },

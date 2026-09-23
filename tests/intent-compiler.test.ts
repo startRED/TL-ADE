@@ -159,6 +159,23 @@ describe('v0.3 Intent Compiler Acceptance Criteria', () => {
     expect(contract.unknowns[0].resolved_by).toBe('default_assumed')
   })
 
+  test('duvida_aberta_sem_opcoes_nao_ganha_opcoes_de_enfeite_e_aceita_resposta_escrita', () => {
+    const [q] = buildInterview({ unknowns: [{ id: 'U1', question: 'Qual o nome do produto?', kind: 'product_choice' }] })
+
+    // Nada de "Padrão recomendado pelo projeto" nem "Opção alternativa configurável": as opções dizem o que acontece.
+    expect(q.options.map((o: any) => o.label)).toEqual(['Deixar a TL-ADE decidir', 'Responder com minhas palavras', 'Não sei (a TL-ADE decide)'])
+    expect(q.options[1].free_text).toBe(true)
+
+    const { decision } = applyInterviewAnswer({ unknowns: [] }, q, '  Tutti  ', { allowWritten: true })
+    expect(decision).toMatchObject({ value: 'Tutti', origin: 'usuario' })
+
+    // Pergunta com opções reais continua recusando resposta fora delas.
+    const [closed] = buildInterview({ unknowns: [{ id: 'U2', question: 'Formato?', options: [{ id: 'a', label: 'A' }] }] })
+    expect(() => applyInterviewAnswer({ unknowns: [] }, closed, 'texto livre', { allowWritten: true })).toThrow(/opção inexistente/)
+    // Sem a permissão (arquivo de respostas da CLI), texto fora das opções segue recusado mesmo em dúvida aberta.
+    expect(() => applyInterviewAnswer({ unknowns: [] }, q, 'Tutti')).toThrow(/opção inexistente/)
+  })
+
   test('criterio_6_incognita_externa_com_pesquisa_permitida_produz_fonte_data_e_artefato_ou_default_reversivel', async () => {
     const fixture = loadJson('fixtures/intent/research-external.json')
     const mockResearcher = vi.fn().mockResolvedValue(fixture.mock_researcher_result)

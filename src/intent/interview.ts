@@ -203,20 +203,22 @@ export function buildInterview({ unknowns = [], discovery = {}, repoIr = {}, max
     // Montar opções garantindo recomendação primeiro e opção não sei
     let options = Array.isArray(u.options) ? [...u.options] : []
     if (options.length === 0) {
+      // Dúvida aberta: sem opções prontas, as escolhas dizem o que acontece e uma delas aceita resposta escrita.
       options = [
         {
           id: `opt-${i}-recommended`,
-          label: 'Padrão recomendado pelo projeto',
+          label: 'Deixar a TL-ADE decidir',
           recommended: true,
-          why: 'Configuração padrão de v0.3',
+          why: 'Segue pelo caminho mais simples e anota a suposição no plano.',
         },
         {
           id: `opt-${i}-alt`,
-          label: 'Opção alternativa configurável',
+          label: 'Responder com minhas palavras',
+          free_text: true,
         },
         {
           id: 'dont_know',
-          label: 'Não sei (adotar recomendação)',
+          label: 'Não sei (a TL-ADE decide)',
         },
       ]
     } else {
@@ -289,7 +291,10 @@ export type Decision = {
  * "Não sei" e a falta de resposta adotam a recomendação com origem 'padrao'; opção
  * escolhida vira origem 'usuario'. Opção inexistente na pergunta é erro.
  */
-export function applyInterviewAnswer(contract: any, question: any, answer?: string): { contract: any; decision: Decision } {
+/**
+ * Com `allowWritten` (painel), uma dúvida aberta aceita texto livre como resposta; o arquivo de respostas da CLI só cita opções.
+ */
+export function applyInterviewAnswer(contract: any, question: any, answer?: string, { allowWritten = false }: { allowWritten?: boolean } = {}): { contract: any; decision: Decision } {
   if (!contract || typeof contract !== 'object') {
     throw new TypeError('applyInterviewAnswer: contrato inválido')
   }
@@ -299,7 +304,8 @@ export function applyInterviewAnswer(contract: any, question: any, answer?: stri
 
   const options: any[] = question.options || []
   const chosen = answer === undefined ? undefined : options.find((o) => o.id === answer)
-  if (answer !== undefined && !chosen) {
+  const written = allowWritten && !chosen && typeof answer === 'string' && answer.trim() && options.some((o) => o.free_text) ? answer.trim() : null
+  if (answer !== undefined && !chosen && !written) {
     throw new AdeError('invalid_answer', `resposta da pergunta ${question.id} cita opção inexistente: ${answer}`, 2, {
       question_id: question.id,
       option_id: answer,
@@ -307,7 +313,9 @@ export function applyInterviewAnswer(contract: any, question: any, answer?: stri
   }
 
   let decision: Decision
-  if (!chosen || isDontKnowOption(chosen)) {
+  if (written) {
+    decision = { question_id: question.id, value: written, origin: 'usuario', rationale: 'resposta escrita na entrevista' }
+  } else if (!chosen || isDontKnowOption(chosen)) {
     const recommended =
       options.find((o) => o.recommended) || options.find((o) => o.id === question.default_if_unknown) || options[0]
     decision = {

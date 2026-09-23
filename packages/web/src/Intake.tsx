@@ -10,7 +10,7 @@ import Plate from './Plate.tsx'
 interface Question {
   id: string
   text: string
-  options: Array<{ id: string; label: string; why?: string }>
+  options: Array<{ id: string; label: string; why?: string; free_text?: boolean }>
 }
 
 interface Decision {
@@ -248,6 +248,12 @@ function RequestBox({ last, busy, compact, onSend }: { last: Intake | null; busy
 function InterviewView({ questions, busy, onAnswer }: { questions: Question[]; busy: boolean; onAnswer: (answers: Record<string, string>) => void }) {
   // Só vai o que o usuário mudou: o resto adota a recomendação com origem 'padrão'.
   const [picked, setPicked] = useState<Record<string, string>>({})
+  const [written, setWritten] = useState<Record<string, string>>({})
+  // Escolher "responder com minhas palavras" manda o texto; em branco, vale a própria opção.
+  const answers = () => Object.fromEntries(Object.entries(picked).map(([id, opt]) => {
+    const free = questions.find((q) => q.id === id)?.options.find((o) => o.id === opt)?.free_text
+    return [id, free && written[id]?.trim() ? written[id].trim() : opt]
+  }))
   return (
     <Movement title="Entrevista" note="A primeira opção é sempre a recomendada. Não sabe? Deixe como está." plate="afinacao">
       {questions.map((q, qi) => (
@@ -270,10 +276,21 @@ function InterviewView({ questions, busy, onAnswer }: { questions: Question[]; b
               </label>
             ))}
           </div>
+          {q.options.find((o) => o.id === picked[q.id])?.free_text && (
+            <textarea
+              className="field"
+              rows={2}
+              aria-label={`Sua resposta: ${q.text}`}
+              placeholder="Escreva a resposta"
+              value={written[q.id] ?? ''}
+              onChange={(e) => setWritten({ ...written, [q.id]: e.target.value })}
+              style={{ marginTop: '.75rem' }}
+            />
+          )}
         </motion.fieldset>
       ))}
       <div className="verdict-row">
-        <button className="btn baton" disabled={busy} onClick={() => onAnswer(picked)}><Check size={15} aria-hidden="true" /> Responder</button>
+        <button className="btn baton" disabled={busy} onClick={() => onAnswer(answers())}><Check size={15} aria-hidden="true" /> Responder</button>
         <button className="btn" disabled={busy} onClick={() => onAnswer({})}>Seguir com as recomendações <ArrowRight size={15} aria-hidden="true" /></button>
       </div>
     </Movement>
