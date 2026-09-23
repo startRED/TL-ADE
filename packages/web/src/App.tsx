@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Badge, Box, Button, Card, Flex, Heading, IconButton, Switch, Text, TextField, Theme } from '@radix-ui/themes'
 import { FolderOpen, FolderSimple, Moon, Sparkle, X } from '@phosphor-icons/react'
 import { apiFetch, postJson, subscribeEvents } from './api.ts'
+import IntakeFlow from './Intake.tsx'
 
 interface Project {
   id: string
@@ -161,6 +162,7 @@ function Home({ project, snapshot }: { project: Project | null; snapshot: Snapsh
           {!snapshot ? 'Lendo o estado do projeto…' : count === 0 ? 'Nenhum pedido ainda.' : `${count} pedido(s); o último é ${snapshot.selectedMission?.id}.`}
         </Text>
       </Card>
+      <IntakeFlow key={project.id} projectId={project.id} />
     </Flex>
   )
 }

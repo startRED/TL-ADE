@@ -1,4 +1,5 @@
 import { readdirSync, statSync } from 'node:fs'
+import http from 'node:http'
 import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -20,6 +21,24 @@ export function freePort(): Promise<number> {
       const { port } = probe.address() as net.AddressInfo
       probe.close(() => resolve(port))
     })
+  })
+}
+
+/** Pedido HTTP ao servidor do painel, com token de sessão e corpo JSON opcionais. */
+export function apiRequest(port: number, rawPath: string, options: { method?: string; token?: string; body?: unknown } = {}): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const headers: Record<string, string> = {}
+    if (options.token) headers['x-ade-session'] = options.token
+    const payload = options.body === undefined ? undefined : JSON.stringify(options.body)
+    if (payload) headers['content-type'] = 'application/json'
+    const req = http.request({ host: '127.0.0.1', port, path: rawPath, method: options.method ?? 'GET', headers }, (res) => {
+      let body = ''
+      res.setEncoding('utf8')
+      res.on('data', (c) => { body += c })
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, body }))
+    })
+    req.on('error', reject)
+    req.end(payload)
   })
 }
 

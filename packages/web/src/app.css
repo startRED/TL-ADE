@@ -30,6 +30,9 @@
 .accent { color: var(--accent-11); }
 .mono { font-family: var(--code-font-family); overflow-wrap: anywhere; }
 .dir-form { display: flex; gap: .5rem; flex-wrap: wrap; }
+.request-form { display: flex; flex-direction: column; gap: .75rem; }
+.list { margin: .35rem 0 0; padding-left: 1.25rem; }
+.list li { margin: .2rem 0; }
 
 @media (max-width: 40rem) {
   .shell { grid-template-columns: 1fr; }

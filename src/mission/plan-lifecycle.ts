@@ -17,7 +17,7 @@ import { loadApprovedSkills } from '../skills/catalog.ts'
 /**
  * Escreve um arquivo de forma atômica utilizando arquivo temporário e renomeação.
  */
-function writeJsonAtomic(targetPath: string, data: any) {
+export function writeJsonAtomic(targetPath: string, data: any) {
   const dir = path.dirname(targetPath)
   fs.mkdirSync(dir, { recursive: true })
   const tmpPath = `${targetPath}.tmp.${Date.now()}.${Math.random().toString(16).slice(2, 8)}`
@@ -191,9 +191,24 @@ function planningRuntimeStamp() {
 }
 
 /**
+ * Registra no journal da missão uma decisão de planejamento tomada fora do `ade approve`
+ * (aprovação do briefing ou recusa de briefing ou plano pelo painel).
+ */
+export async function recordMissionDecision(
+  { repoDir, missionId, source, data }: { repoDir: string; missionId: string; source: string; data: { decision: string } & Record<string, unknown> },
+): Promise<void> {
+  const journal = openJournal({ missionDir: path.join(path.resolve(repoDir), '.ade', 'missions', missionId), runtimeStamp: planningRuntimeStamp() })
+  try {
+    await journal.append({ kind: 'decision', source, data })
+  } finally {
+    await journal.close()
+  }
+}
+
+/**
  * Constrói a estrutura básica de descoberta do repositório a partir de package.json.
  */
-function getProjectDiscovery(repoDir: string): any {
+export function getProjectDiscovery(repoDir: string): any {
   const pkgPath = path.join(repoDir, 'package.json')
   let scripts = {}
   if (fs.existsSync(pkgPath)) {

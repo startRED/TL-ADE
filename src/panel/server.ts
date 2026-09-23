@@ -9,6 +9,7 @@ import { approveMission } from '../mission/plan-lifecycle.ts'
 import { requestMissionControl } from '../engine/control.ts'
 import { createInterventionController } from './control.ts'
 import { createSessionManager } from './session.ts'
+import { createIntake, defaultIntent, spawnMissionRun, type IntentPort, type RunMission } from './intake.ts'
 import { assertProjectPath, createOpenProjects } from './open-projects.ts'
 import { listProjects, registerProject } from './projects.ts'
 import { resolveCurrentBuild } from './web-build.ts'
@@ -115,6 +116,10 @@ export async function startServer({
             stderr?: { write: (s: string) => void } | ((s: string) => void)
             openBrowser?: (url: string) => Promise<void>
             checkNativeSqlite?: () => any
+            /** Compilador de intenção do pedido do painel (padrão: o da real). */
+            intent?: IntentPort
+            /** Execução da missão aprovada (padrão: bin/ade.js run --plan). */
+            runMission?: RunMission
         } & import('./control.ts').TerminalDeps
     } = {}) {
   const sessionManager = createSessionManager({ allowedOrigins: [`http://${host}:${port}`] })
@@ -144,6 +149,12 @@ export async function startServer({
     typeof deps.stderr === 'function'
       ? deps.stderr
       : (deps.stderr?.write?.bind(deps.stderr) ?? process.stderr.write.bind(process.stderr))
+  const intake = createIntake({
+    intent: deps.intent ?? defaultIntent,
+    runMission: deps.runMission ?? spawnMissionRun,
+    beginActivity: projects.beginActivity,
+    onError: stderrWrite,
+  })
   const intervention = createInterventionController({ repoDir: resolvedRepo, terminal: deps })
   const wsHandler = createWebSocketHandler({
     sessionManager,
@@ -250,6 +261,32 @@ export async function startServer({
               sendJson(res, 200, await readPanelSnapshot({ repoDir: project.path, indexPath: project.indexPath }))
               return
             }
+            const intakeMatch = pathname.match(/^\/api\/projects\/([^/]+)\/(requests|intake|intake\/interview|intake\/(?:briefing|plan)\/(?:approve|reject))$/)
+            if (intakeMatch) {
+              const project = projects.get(decodeURIComponent(intakeMatch[1]))
+              const action = intakeMatch[2]
+              if (action === 'intake' && method === 'GET') {
+                // ?if_missing=null: o painel pergunta sem gerar 404 (erro no console) em projeto sem pedido.
+                const missingAsNull = parsedUrl.searchParams.get('if_missing') === 'null'
+                sendJson(res, 200, missingAsNull ? intake.find(project.path) : intake.read(project.path))
+                return
+              }
+              if (action !== 'intake' && method === 'POST') {
+                const body = await readJsonBody(req)
+                if (action === 'requests') {
+                  sendJson(res, 202, { mission_id: (await intake.submit(project.path, body?.text)).mission_id })
+                } else if (action === 'intake/interview') {
+                  sendJson(res, 200, await intake.answer(project.path, body?.answers))
+                } else if (action === 'intake/briefing/approve') {
+                  sendJson(res, 200, await intake.approveBriefing(project.path, body?.digest))
+                } else if (action === 'intake/plan/approve') {
+                  sendJson(res, 200, await intake.approvePlan(project, body?.digest))
+                } else {
+                  sendJson(res, 200, await intake.reject(project.path, action === 'intake/briefing/reject' ? 'briefing' : 'plan', body?.reason))
+                }
+                return
+              }
+            }
             if (method === 'POST' && pathname === '/api/projects/open') {
               const repoPath = assertProjectPath((await readJsonBody(req))?.path)
               const wasOpen = projects.list().some((p) => p.path === repoPath)
@@ -275,7 +312,7 @@ export async function startServer({
             }
           } catch (err) {
             if (!(err instanceof AdeError)) throw err
-            const status = err.code === 'project_not_found' ? 404 : err.exitCode === 5 ? 409 : 400
+            const status = err.code === 'project_not_found' || err.code === 'intake_not_found' ? 404 : err.exitCode === 5 ? 409 : 400
             sendJson(res, status, { error: err.code, message: err.message })
             return
           }
