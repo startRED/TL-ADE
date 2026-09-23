@@ -9,8 +9,8 @@ import { createLocalPreflightPorts } from '../adapters/local/preflight.js'
 import { createLocalQuotaPort } from '../adapters/local/quota.js'
 import { dispatchClaude } from '../adapters/claude/index.js'
 import { dispatchCodex } from '../adapters/codex/index.js'
-import { checkCanary, plantCanary } from '../contain/canary.js'
-import { contain } from '../contain/contain.js'
+import { checkCanary, plantCanary } from '../contain/canary.ts'
+import { contain } from '../contain/contain.ts'
 import { runStory } from '../engine.js'
 import { loadPlan } from '../engine/plan-load.js'
 import { runHardPreconditions, runPreflight } from '../engine/preflight.js'
@@ -22,19 +22,19 @@ import { checkApproval } from '../engine/schedule.js'
 import { replanRemaining } from '../mission/plan-lifecycle.js'
 import { createEvalRunner } from '../evals/eval-runner.js'
 import { createGateRunner } from '../gates/gates.js'
-import { createGitPort } from '../git/gitport.js'
-import { digest16 } from '../journal/canonical.js'
-import { AdeError } from '../journal/errors.js'
-import { openJournal, readJournal } from '../journal/journal.js'
-import { acceptStaleVersion as acceptStaleVersionFn, assertStampCurrent, buildRuntimeStamp } from '../journal/stamp.js'
-import { acquireLease } from '../lease/lease.js'
-import { compilePack } from '../pack/pack.js'
-import { resolveBinary } from '../runner/resolve-binary.js'
-import { activeWorkerPids, terminateProcessTree } from '../runner/spawn.js'
-import { reconcileAll } from '../step/reconcile.js'
-import { createStepRunner } from '../step/step.js'
+import { createGitPort } from '../git/gitport.ts'
+import { digest16 } from '../journal/canonical.ts'
+import { AdeError } from '../journal/errors.ts'
+import { openJournal, readJournal } from '../journal/journal.ts'
+import { acceptStaleVersion as acceptStaleVersionFn, assertStampCurrent, buildRuntimeStamp } from '../journal/stamp.ts'
+import { acquireLease } from '../lease/lease.ts'
+import { compilePack } from '../pack/pack.ts'
+import { resolveBinary } from '../runner/resolve-binary.ts'
+import { activeWorkerPids, terminateProcessTree } from '../runner/spawn.ts'
+import { reconcileAll } from '../step/reconcile.ts'
+import { createStepRunner } from '../step/step.ts'
 import { loadApprovedSkills } from '../skills/catalog.js'
-import { closeMissionSummary } from '../telemetry/telemetry.js'
+import { closeMissionSummary } from '../telemetry/telemetry.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -213,9 +213,9 @@ export async function runCommand(options, deps = {}) {
   const capabilitiesDigest = digest16(capabilities)
   const runtimeStamp = buildRuntimeStamp({ configDigest, capabilitiesDigest })
 
-  /** @type {import('../journal/journal.js').Journal | null} */
+  /** @type {import('../journal/journal.ts').Journal | null} */
   let journal = null
-  /** @type {import('../lease/lease.js').Lease | null} */
+  /** @type {import('../lease/lease.ts').Lease | null} */
   let lease = null
   const journalPath = path.join(missionDir, 'journal.jsonl')
   // O resumo só fecha missões que chegaram a despachar; recusa de versão ou lease não escreve.

@@ -1,6 +1,6 @@
 // @ts-check
 import fs from 'node:fs'
-import { validate } from '../../schema/index.js'
+import { validate } from '../../schema/index.ts'
 
 const ESC = String.fromCharCode(27)
 const ANSI_RE = new RegExp(ESC + '\\[[0-9;?]*[ -/]*[@-~]', 'g')

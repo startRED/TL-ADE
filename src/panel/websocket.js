@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { readJournal } from '../journal/journal.js'
+import { readJournal } from '../journal/journal.ts'
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 /** Entrada do operador por frame; acima disso o canal do terminal fecha. */

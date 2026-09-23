@@ -1,6 +1,6 @@
 // @ts-check
 import { parseArgs } from 'node:util'
-import { syncDocProjections } from '../docs/projection.js'
+import { syncDocProjections } from '../docs/projection.ts'
 import { exitCodeOf } from './exit-codes.js'
 
 /**

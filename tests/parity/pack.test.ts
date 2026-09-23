@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.js'
-import { compilePack, SECTION_CAPS } from '../../src/pack/pack.js'
+import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.ts'
+import { compilePack, SECTION_CAPS } from '../../src/pack/pack.ts'
 
 let tmpDirs: string[] = []
 
@@ -70,7 +70,7 @@ describe('pack truncation and redaction parity', () => {
     expect(storyManifestEntry?.bytes).toBeLessThanOrEqual(SECTION_CAPS.story)
   })
 
-  // O pack reusa exatamente os mesmos SECRET_PATTERNS do containment (src/contain/secrets.js):
+  // O pack reusa exatamente os mesmos SECRET_PATTERNS do containment (src/contain/secrets.ts):
   // uma saída de gate realista (linha de status + trecho de erro) com um github_token embutido
   // tem de sair redigida tanto do pack quanto do artefato bruto salvo em disco.
   test('gate_output_secret_is_redacted_from_packs', () => {

@@ -2,10 +2,10 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { AdeError } from '../src/journal/errors.js'
+import { AdeError } from '../src/journal/errors.ts'
 import { recordTranscript } from '../scripts/record-transcript.js'
 import { deriveTranscripts, main as deriveMain } from '../scripts/derive-transcripts.js'
-import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
+import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
 let tmpDirs: string[] = []
 

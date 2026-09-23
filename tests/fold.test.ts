@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { fold, openIntents } from '../src/journal/fold.js'
+import { fold, openIntents } from '../src/journal/fold.ts'
 
 function ev(
   seq: number,

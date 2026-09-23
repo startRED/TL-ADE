@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'vitest'
-import { digest16 } from '../src/journal/canonical.js'
+import { digest16 } from '../src/journal/canonical.ts'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
 

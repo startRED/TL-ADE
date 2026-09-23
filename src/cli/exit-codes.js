@@ -4,7 +4,7 @@ import {
   CoordinatorConflictError,
   JournalCorruptError,
   StateIntegrityError,
-} from '../journal/errors.js'
+} from '../journal/errors.ts'
 
 /** @typedef {1 | 2 | 3 | 4 | 5} ExitCode */
 

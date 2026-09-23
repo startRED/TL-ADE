@@ -4,10 +4,10 @@ import path from 'node:path'
 import { compileIntent } from '../src/intent/compiler.js'
 import { runResearchStep } from '../src/intent/research.js'
 import { dispatchAgy, setAgyAvailable, isAgyAvailable } from '../src/adapters/agy/index.js'
-import { compilePack } from '../src/pack/pack.js'
-import { screenResearchFinding } from '../src/pack/firewall.js'
-import { validate } from '../src/schema/index.js'
-import { makeTmpDir } from './helpers/tmp-dir.js'
+import { compilePack } from '../src/pack/pack.ts'
+import { screenResearchFinding } from '../src/pack/firewall.ts'
+import { validate } from '../src/schema/index.ts'
+import { makeTmpDir } from './helpers/tmp-dir.ts'
 
 describe('v0.5 Research and AGY Adapter Acceptance Criteria', () => {
   let tmpDirs: string[] = []

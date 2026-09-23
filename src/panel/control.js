@@ -4,12 +4,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { activeTakeover, readMissionControl, requestMissionControl } from '../engine/control.js'
 import { findStoryStarted } from '../engine/resume.js'
-import { digest16 } from '../journal/canonical.js'
-import { AdeError } from '../journal/errors.js'
-import { openJournal, readJournal } from '../journal/journal.js'
-import { acquireLease } from '../lease/lease.js'
-import { getProcessStartTime } from '../lease/process-info.js'
-import { resolveBinary } from '../runner/resolve-binary.js'
+import { digest16 } from '../journal/canonical.ts'
+import { AdeError } from '../journal/errors.ts'
+import { openJournal, readJournal } from '../journal/journal.ts'
+import { acquireLease } from '../lease/lease.ts'
+import { getProcessStartTime } from '../lease/process-info.ts'
+import { resolveBinary } from '../runner/resolve-binary.ts'
 import { createTakeoverSession, loadPtyAdapter } from './pty.js'
 
 /**
@@ -72,7 +72,7 @@ function startTimeOf(pid) {
  * @param {{ repoDir: string, terminal?: TerminalDeps }} input
  */
 export function createInterventionController({ repoDir, terminal = {} }) {
-  /** @type {Map<string, { session: ReturnType<typeof createTakeoverSession>, journal: import('../journal/journal.js').Journal, lease: { release: () => Promise<void> }, socket: import('node:net').Socket | null }>} */
+  /** @type {Map<string, { session: ReturnType<typeof createTakeoverSession>, journal: import('../journal/journal.ts').Journal, lease: { release: () => Promise<void> }, socket: import('node:net').Socket | null }>} */
   const sessions = new Map()
   let queue = Promise.resolve()
   // Leitura antecipada: o takeover não espera o PowerShell. A falha fica para o takeover, que relê.

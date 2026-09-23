@@ -1,10 +1,10 @@
 // @ts-check
 import fs from 'node:fs'
 import path from 'node:path'
-import { matchesGlob } from '../contain/contain.js'
-import { digest16 } from '../journal/canonical.js'
-import { AdeError } from '../journal/errors.js'
-import { validate, validateSupported } from '../schema/index.js'
+import { matchesGlob } from '../contain/contain.ts'
+import { digest16 } from '../journal/canonical.ts'
+import { AdeError } from '../journal/errors.ts'
+import { validate, validateSupported } from '../schema/index.ts'
 import { assertCallBudget } from './budget.js'
 
 export const EXTERNAL_EFFECTS = ['push', 'open_pr', 'merge']

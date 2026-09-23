@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import { AdeError } from '../journal/errors.js'
+import { AdeError } from '../journal/errors.ts'
 import { projectMissionFromSources } from './projection.js'
 import { listProjects } from './projects.js'
 

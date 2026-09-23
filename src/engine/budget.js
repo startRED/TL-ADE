@@ -1,5 +1,5 @@
 // @ts-check
-import { AdeError } from '../journal/errors.js'
+import { AdeError } from '../journal/errors.ts'
 
 export const ABSOLUTE_USD_CAP = 300
 

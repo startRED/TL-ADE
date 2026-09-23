@@ -5,10 +5,10 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { resolveGateArgv, runContained } from '../../src/gates/command.js'
 import * as gatesModule from '../../src/gates/gates.js'
 import { createGateRunner } from '../../src/gates/gates.js'
-import { createGitPort } from '../../src/git/gitport.js'
-import { openJournal, readJournal } from '../../src/journal/journal.js'
-import { createStepRunner } from '../../src/step/step.js'
-import { makeRepo, removeRepo } from '../helpers/git-repo.js'
+import { createGitPort } from '../../src/git/gitport.ts'
+import { openJournal, readJournal } from '../../src/journal/journal.ts'
+import { createStepRunner } from '../../src/step/step.ts'
+import { makeRepo, removeRepo } from '../helpers/git-repo.ts'
 
 const restorePendingGate = (gatesModule as Record<string, any>).restorePendingGate as (opts: {
   missionDir: string

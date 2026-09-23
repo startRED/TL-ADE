@@ -1,7 +1,7 @@
 import path from 'node:path'
-import { digest16 } from '../journal/canonical.js'
-import { AdeError } from '../journal/errors.js'
-import { getOrProduceArtifact } from '../artifacts/cache.js'
+import { digest16 } from '../journal/canonical.ts'
+import { AdeError } from '../journal/errors.ts'
+import { getOrProduceArtifact } from '../artifacts/cache.ts'
 
 /**
  * Sinaliza manifesto do projeto ilegível durante a descoberta.
@@ -22,7 +22,7 @@ export class DiscoveryManifestError extends AdeError {
 /**
  * Lê o conteúdo completo de um arquivo pela leitura contida da porta de workspace.
  *
- * @param {import('../workspace/port.js').WorkspacePort} workspace
+ * @param {import('../workspace/port.ts').WorkspacePort} workspace
  * @param {string} relPath
  * @returns {Promise<string>}
  */
@@ -34,7 +34,7 @@ async function readText(workspace, relPath) {
 /**
  * Executa a descoberta determinística do projeto sobre o workspace.
  *
- * @param {import('../workspace/port.js').WorkspacePort} workspace
+ * @param {import('../workspace/port.ts').WorkspacePort} workspace
  * @param {{
  *   producer?: (ambiguities: any[]) => Promise<any>,
  *   producerVersion?: string,

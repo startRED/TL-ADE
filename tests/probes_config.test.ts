@@ -4,8 +4,8 @@ import { buildClaudeArgs } from '../src/adapters/claude/argv.js'
 import { observedUsd } from '../src/engine/budget.js'
 import { loadPlan } from '../src/engine/plan-load.js'
 import { selectTests } from '../vitest.config.mjs'
-import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
-import { checkProbeJournal, probeEnv, writeProbePlan } from './probes/probe-plan.js'
+import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
+import { checkProbeJournal, probeEnv, writeProbePlan } from './probes/probe-plan.ts'
 
 describe('probes config', () => {
   test('default_suite_excludes_probes', () => {

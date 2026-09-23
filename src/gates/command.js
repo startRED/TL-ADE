@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import path from 'node:path'
-import { buildWorkerEnv } from '../runner/spawn.js'
+import { buildWorkerEnv } from '../runner/spawn.ts'
 
 /**
  * @typedef {Object} GateSpec

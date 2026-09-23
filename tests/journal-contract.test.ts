@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, test } from 'vitest'
-import { validate } from '../src/schema/index.js'
+import { validate } from '../src/schema/index.ts'
 import {
   AdeError,
   JournalCorruptError,
@@ -8,7 +8,7 @@ import {
   StaleWorkflowVersionError,
   CoordinatorConflictError,
   LeaseAwaitingOperatorError,
-} from '../src/journal/errors.js'
+} from '../src/journal/errors.ts'
 import {
   CORE_VERSION,
   buildRuntimeStamp,
@@ -16,15 +16,15 @@ import {
   findStaleIntents,
   assertStampCurrent,
   acceptStaleVersion,
-} from '../src/journal/stamp.js'
+} from '../src/journal/stamp.ts'
 import {
   GENESIS_PREV,
   openJournal,
   readJournal,
   fold,
-} from '../src/journal/journal.js'
-import { acquireLease } from '../src/lease/lease.js'
-import { getProcessStartTime, isProcessAlive } from '../src/lease/process-info.js'
+} from '../src/journal/journal.ts'
+import { acquireLease } from '../src/lease/lease.ts'
+import { getProcessStartTime, isProcessAlive } from '../src/lease/process-info.ts'
 
 // AC1 & AC2: o schema aceita fixtures antigas, campos novos válidos e recusa valores inválidos
 describe('journal contract', () => {

@@ -1,7 +1,7 @@
 // @ts-check
 import path from 'node:path'
-import { AdeError } from '../journal/errors.js'
-import { readJournal } from '../journal/journal.js'
+import { AdeError } from '../journal/errors.ts'
+import { readJournal } from '../journal/journal.ts'
 import { checkMissionBudget } from './budget.js'
 import { findStoryStarted } from './resume.js'
 import { nextReady } from './schedule.js'

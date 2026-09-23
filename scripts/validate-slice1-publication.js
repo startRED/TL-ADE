@@ -1,5 +1,5 @@
 import fs from 'node:fs'
-import { AdeError } from '../src/journal/errors.js'
+import { AdeError } from '../src/journal/errors.ts'
 
 const EXPECTED_RECIPE = [
   'npm ci',

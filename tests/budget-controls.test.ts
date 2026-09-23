@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { AdeError } from '../src/journal/errors.js'
+import { AdeError } from '../src/journal/errors.ts'
 import { loadPlan } from '../src/engine/plan-load.js'
 import {
   ABSOLUTE_USD_CAP,

@@ -4,8 +4,8 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { AdeError } from '../src/journal/errors.js'
-import { buildArgv, resolveBinary } from '../src/runner/resolve-binary.js'
+import { AdeError } from '../src/journal/errors.ts'
+import { buildArgv, resolveBinary } from '../src/runner/resolve-binary.ts'
 import { buildClaudeArgs } from '../src/adapters/claude/argv.js'
 
 const NAME_RE = /^[a-z0-9_]+$/

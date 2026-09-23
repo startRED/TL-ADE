@@ -2,13 +2,13 @@
 import crypto from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
-import { AdeError } from '../../journal/errors.js'
-import { runWorker } from '../../runner/spawn.js'
+import { AdeError } from '../../journal/errors.ts'
+import { runWorker } from '../../runner/spawn.ts'
 import { safeId } from '../../gates/output.js'
-import { plantCanary, checkCanary } from '../../contain/canary.js'
+import { plantCanary, checkCanary } from '../../contain/canary.ts'
 import { buildAgyArgs } from './argv.js'
 import { parseAgyFinding, parseAgyOutput, parseAgyUsage } from './parse.js'
-import { buildModelTelemetry, modelsFromUsage } from '../../telemetry/telemetry.js'
+import { buildModelTelemetry, modelsFromUsage } from '../../telemetry/telemetry.ts'
 
 let agyAvailable = true
 

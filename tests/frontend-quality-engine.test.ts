@@ -16,8 +16,8 @@ import { compileIntent } from '../src/intent/compiler.js'
 import { prepareStory } from '../src/engine/prepare.js'
 import { renderVisualComparison } from '../src/cli/report.js'
 import { runDoctor } from '../src/cli/doctor.js'
-import { makeRepo, removeRepo } from './helpers/git-repo.js'
-import { validate } from '../src/schema/index.js'
+import { makeRepo, removeRepo } from './helpers/git-repo.ts'
+import { validate } from '../src/schema/index.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 

@@ -2,8 +2,8 @@ import fs, { rmSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readCounter } from '../../../src/adapters/fake/cli.js'
-import { makeRepo } from '../../helpers/git-repo.js'
-import { makeTmpDir } from '../../helpers/tmp-dir.js'
+import { makeRepo } from '../../helpers/git-repo.ts'
+import { makeTmpDir } from '../../helpers/tmp-dir.ts'
 
 export { readCounter }
 

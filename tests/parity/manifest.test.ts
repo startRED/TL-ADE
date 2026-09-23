@@ -5,7 +5,7 @@ import path from 'node:path'
 import { PassThrough } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test, vi } from 'vitest'
-import { AdeError } from '../../src/journal/errors.js'
+import { AdeError } from '../../src/journal/errors.ts'
 import { selectTests } from '../../vitest.config.mjs'
 import {
   ParityCaseMissingError,
@@ -14,7 +14,7 @@ import {
   validateParityResult,
   type VitestJsonReport,
 } from '../../scripts/run-parity.js'
-import { contractStub } from './contract-stubs.test.js'
+import { contractStub } from './contract-stubs.test.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '../..')

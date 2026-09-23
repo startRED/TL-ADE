@@ -1,7 +1,7 @@
 // @ts-check
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
-import { canonicalize } from '../journal/canonical.js'
+import { canonicalize } from '../journal/canonical.ts'
 import { validateMissionPlan } from '../mission/plan-lifecycle.js'
 
 /**

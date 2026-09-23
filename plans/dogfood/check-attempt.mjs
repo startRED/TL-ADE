@@ -1,4 +1,4 @@
-import { validate } from '../../src/schema/index.js'
+import { validate } from '../../src/schema/index.ts'
 
 const base = {
   format_version: 1,

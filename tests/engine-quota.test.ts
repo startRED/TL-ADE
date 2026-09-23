@@ -2,9 +2,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
 import { runStory } from '../src/engine.js'
-import { AdeError } from '../src/journal/errors.js'
-import { openJournal, readJournal } from '../src/journal/journal.js'
-import { makeRepo, removeRepo } from './helpers/git-repo.js'
+import { AdeError } from '../src/journal/errors.ts'
+import { openJournal, readJournal } from '../src/journal/journal.ts'
+import { makeRepo, removeRepo } from './helpers/git-repo.ts'
 
 const NOW = Date.parse('2026-09-20T00:00:00.000Z')
 const RECEIPT = {

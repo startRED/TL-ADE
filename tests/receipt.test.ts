@@ -2,7 +2,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { AdeError } from '../src/journal/errors.js'
+import { AdeError } from '../src/journal/errors.ts'
 import {
   RECEIPT_STATES,
   chargeOf,
@@ -15,8 +15,8 @@ import {
   withRunning,
   withTerminal,
   writeReceipt,
-} from '../src/runner/receipt.js'
-import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
+} from '../src/runner/receipt.ts'
+import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
 describe('receipt', () => {
   let tmpDir: string

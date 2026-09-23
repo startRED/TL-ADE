@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { canonicalize, digest16 } from '../../../src/journal/canonical.js'
-import { openJournal, readJournal } from '../../../src/journal/journal.js'
+import { canonicalize, digest16 } from '../../../src/journal/canonical.ts'
+import { openJournal, readJournal } from '../../../src/journal/journal.ts'
 import { runCase } from './_caso.mjs'
 
 async function withJournal(fn) {

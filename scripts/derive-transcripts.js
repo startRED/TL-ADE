@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { AdeError } from '../src/journal/errors.js'
+import { AdeError } from '../src/journal/errors.ts'
 
 export const VARIANTS = ['ok_without_cost', 'unknown_fields', 'truncated_json', 'ansi_noise']
 

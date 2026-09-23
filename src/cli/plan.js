@@ -4,9 +4,9 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 import { dispatchAgy } from '../adapters/agy/index.js'
-import { canonicalize } from '../journal/canonical.js'
+import { canonicalize } from '../journal/canonical.ts'
 import { planMission } from '../mission/plan-lifecycle.js'
-import { resolveBinary } from '../runner/resolve-binary.js'
+import { resolveBinary } from '../runner/resolve-binary.ts'
 
 /**
  * Ponto de entrada do comando `ade plan`.

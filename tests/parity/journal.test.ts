@@ -9,14 +9,14 @@ import {
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { AdeError, JournalCorruptError, StaleWorkflowVersionError } from '../../src/journal/errors.js'
-import { digest16 } from '../../src/journal/canonical.js'
-import { fold, openJournal, readJournal } from '../../src/journal/journal.js'
+import { AdeError, JournalCorruptError, StaleWorkflowVersionError } from '../../src/journal/errors.ts'
+import { digest16 } from '../../src/journal/canonical.ts'
+import { fold, openJournal, readJournal } from '../../src/journal/journal.ts'
 import {
   acceptStaleVersion,
   assertStampCurrent,
   findStaleIntents,
-} from '../../src/journal/stamp.js'
+} from '../../src/journal/stamp.ts'
 
 interface ReadJournalResult {
   events: Array<Record<string, unknown>>

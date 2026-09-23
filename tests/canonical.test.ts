@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { describe, expect, test } from 'vitest'
-import { canonicalize, digest16 } from '../src/journal/canonical.js'
+import { canonicalize, digest16 } from '../src/journal/canonical.ts'
 
 // AC3: canonicalizar os objetos do conjunto de referência produz bytes
 // idênticos aos do runtime Python de referência (json.dumps com sort_keys=True,

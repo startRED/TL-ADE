@@ -12,7 +12,7 @@ import {
   runDogfoodSuite,
   runDogfoodTask,
 } from '../src/evals/eval-runner.js'
-import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
+import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
 const CATALOG = path.join(ROOT, 'fixtures/dogfood/catalog.json')

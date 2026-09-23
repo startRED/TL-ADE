@@ -5,9 +5,9 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { classifyGreen, classifyRed, parseReporterJson } from '../src/evals/classify.js'
 import { createEvalRunner } from '../src/evals/eval-runner.js'
 import { validateScenarioStrictness } from '../src/evals/strictness.js'
-import { openJournal, readJournal } from '../src/journal/journal.js'
-import { validate } from '../src/schema/index.js'
-import { createStepRunner } from '../src/step/step.js'
+import { openJournal, readJournal } from '../src/journal/journal.ts'
+import { validate } from '../src/schema/index.ts'
+import { createStepRunner } from '../src/step/step.ts'
 
 describe('evals classification and strictness', () => {
   // CA1: Dado um stdout de reporter com {"numTotalTests":0,"numPassedTests":0,"numFailedTests":0}
@@ -271,7 +271,7 @@ describe('evals classification and strictness', () => {
   })
 
   // CA4: Dado um eval com strictness.mode:'strict', quando validado por validate('eval', doc)
-  // de src/schema/index.js, então é recusado com valid:false, e com mode:'must_fail_before' é aceito.
+  // de src/schema/index.ts, então é recusado com valid:false, e com mode:'must_fail_before' é aceito.
   test('strictness_mode_enum_is_closed', () => {
     const validEval = JSON.parse(
       readFileSync(new URL('../fixtures/schemas/eval/valid.json', import.meta.url), 'utf8')

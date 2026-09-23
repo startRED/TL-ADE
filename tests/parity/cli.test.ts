@@ -6,10 +6,10 @@ import { main as journalMain } from '../../src/cli/journal.js'
 import { projectUnits } from '../../src/cli/project.js'
 import { main as reportMain, renderReport } from '../../src/cli/report.js'
 import { main } from '../../src/cli/status.js'
-import { digest16 } from '../../src/journal/canonical.js'
-import { openJournal } from '../../src/journal/journal.js'
-import { buildRuntimeStamp } from '../../src/journal/stamp.js'
-import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.js'
+import { digest16 } from '../../src/journal/canonical.ts'
+import { openJournal } from '../../src/journal/journal.ts'
+import { buildRuntimeStamp } from '../../src/journal/stamp.ts'
+import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.ts'
 
 let tmpDirs: string[] = []
 

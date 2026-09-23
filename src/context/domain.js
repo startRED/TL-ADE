@@ -1,4 +1,4 @@
-import { digest16 } from '../journal/canonical.js'
+import { digest16 } from '../journal/canonical.ts'
 import { resolveScopeOwners } from './scope-owners.js'
 
 /**

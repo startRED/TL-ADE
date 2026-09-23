@@ -4,7 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'vitest'
 import { PREFLIGHT_CHECK_ORDER, runPreflight, type PreflightCheckPort } from '../src/engine/preflight.js'
-import { AdeError } from '../src/journal/errors.js'
+import { AdeError } from '../src/journal/errors.ts'
 
 const ROOT_DIR = fileURLToPath(new URL('..', import.meta.url))
 const ADR_DIR = path.join(ROOT_DIR, 'docs', 'adr')

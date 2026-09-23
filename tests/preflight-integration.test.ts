@@ -4,9 +4,9 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import { createLocalPreflightPorts } from '../src/adapters/local/preflight.js'
 import { runStory } from '../src/engine.js'
 import { runPreflight } from '../src/engine/preflight.js'
-import { openJournal, readJournal } from '../src/journal/journal.js'
-import { makeRepo, removeRepo } from './helpers/git-repo.js'
-import { removeTmpDir } from './helpers/tmp-dir.js'
+import { openJournal, readJournal } from '../src/journal/journal.ts'
+import { makeRepo, removeRepo } from './helpers/git-repo.ts'
+import { removeTmpDir } from './helpers/tmp-dir.ts'
 
 let repoDirs: string[] = []
 let tmpDirs: string[] = []

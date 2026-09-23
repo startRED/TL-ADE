@@ -3,9 +3,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
-import { canonicalize } from '../journal/canonical.js'
-import { openIntents } from '../journal/fold.js'
-import { readJournal } from '../journal/journal.js'
+import { canonicalize } from '../journal/canonical.ts'
+import { openIntents } from '../journal/fold.ts'
+import { readJournal } from '../journal/journal.ts'
 import { projectUnits } from './project.js'
 
 /**

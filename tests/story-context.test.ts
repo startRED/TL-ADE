@@ -1,9 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { makeRepo, removeRepo } from './helpers/git-repo.js'
-import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
-import { openJournal, readJournal } from '../src/journal/journal.js'
+import { makeRepo, removeRepo } from './helpers/git-repo.ts'
+import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
+import { openJournal, readJournal } from '../src/journal/journal.ts'
 
 let tmpDirs: string[] = []
 

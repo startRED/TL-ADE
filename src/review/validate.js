@@ -1,4 +1,4 @@
-import { validateSupported } from '../schema/index.js'
+import { validateSupported } from '../schema/index.ts'
 
 export const RESULT_FORMAT_VERSION = 2
 

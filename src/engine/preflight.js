@@ -1,5 +1,5 @@
 // @ts-check
-import { AdeError } from '../journal/errors.js'
+import { AdeError } from '../journal/errors.ts'
 
 /**
  * Ordem mandatória e fixa de execução das verificações do preflight.

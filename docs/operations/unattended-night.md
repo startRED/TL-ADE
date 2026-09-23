@@ -71,7 +71,7 @@ evidência apontada, depois os merges.
 ade report --calibrate --mission .ade/missions/<id>
 ```
 
-Calcula, só sobre a telemetria já gravada no journal (`src/telemetry/harness.js`, `calibrate`):
+Calcula, só sobre a telemetria já gravada no journal (`src/telemetry/harness.ts`, `calibrate`):
 
 - `max_pack_bytes` e `review_max_diff_bytes`: p90 observado de `pack_bytes` e da seção `diff` do
   pack, com no mínimo 20 chamadas;

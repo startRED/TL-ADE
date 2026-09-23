@@ -1,8 +1,8 @@
 // @ts-check
 import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { AdeError } from '../journal/errors.js'
-import { terminateProcessTree } from '../runner/spawn.js'
+import { AdeError } from '../journal/errors.ts'
+import { terminateProcessTree } from '../runner/spawn.ts'
 
 /** Maior pedaço de saída entregue de uma vez ao navegador. */
 export const MAX_TERMINAL_CHUNK = 64 * 1024

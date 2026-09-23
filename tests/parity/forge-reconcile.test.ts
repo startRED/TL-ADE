@@ -8,8 +8,8 @@ import {
   reconcileCiRerun,
   reconcilePullRequest,
   reconcileRemoteMerge,
-} from '../../src/step/reconcile-delivery.js'
-import { EFFECT_CLASSES } from '../../src/step/step.js'
+} from '../../src/step/reconcile-delivery.ts'
+import { EFFECT_CLASSES } from '../../src/step/step.ts'
 
 let tempDirs: string[] = []
 

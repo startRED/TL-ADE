@@ -7,12 +7,12 @@ import {
   assertCanaryIntact as rawAssertCanaryIntact,
   checkCanary as rawCheckCanary,
   plantCanary as rawPlantCanary,
-} from '../src/contain/canary.js'
-import { contain } from '../src/contain/contain.js'
-import { pathWithin } from '../src/contain/secrets.js'
-import { createGitPort } from '../src/git/gitport.js'
-import { makeRepo, removeRepo } from './helpers/git-repo.js'
-import { makeTmpDir } from './helpers/tmp-dir.js'
+} from '../src/contain/canary.ts'
+import { contain } from '../src/contain/contain.ts'
+import { pathWithin } from '../src/contain/secrets.ts'
+import { createGitPort } from '../src/git/gitport.ts'
+import { makeRepo, removeRepo } from './helpers/git-repo.ts'
+import { makeTmpDir } from './helpers/tmp-dir.ts'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
 const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.js')

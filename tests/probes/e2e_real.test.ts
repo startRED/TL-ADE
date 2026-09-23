@@ -3,10 +3,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, expect, test } from 'vitest'
 import { observedUsd } from '../../src/engine/budget.js'
-import { readJournal } from '../../src/journal/journal.js'
-import { makeRepo, removeRepo } from '../helpers/git-repo.js'
-import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.js'
-import { checkProbeJournal, probeEnv, writeProbePlan, writeProbeSandbox } from './probe-plan.js'
+import { readJournal } from '../../src/journal/journal.ts'
+import { makeRepo, removeRepo } from '../helpers/git-repo.ts'
+import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.ts'
+import { checkProbeJournal, probeEnv, writeProbePlan, writeProbeSandbox } from './probe-plan.ts'
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url))
 const BIN_ADE = path.resolve(ROOT, 'bin/ade.js')

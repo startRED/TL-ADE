@@ -8,16 +8,16 @@ import {
   scanBytes,
   scanFile,
   scanText,
-} from '../../src/contain/secrets.js'
+} from '../../src/contain/secrets.ts'
 import {
   DEFAULT_SENSITIVE_PATHS,
   PRECEDENCE,
   contain,
   matchesGlob,
-} from '../../src/contain/contain.js'
-import { createGitPort } from '../../src/git/gitport.js'
-import { makeRepo, removeRepo } from '../helpers/git-repo.js'
-import { makeTmpDir } from '../helpers/tmp-dir.js'
+} from '../../src/contain/contain.ts'
+import { createGitPort } from '../../src/git/gitport.ts'
+import { makeRepo, removeRepo } from '../helpers/git-repo.ts'
+import { makeTmpDir } from '../helpers/tmp-dir.ts'
 
 let tmpDirs: string[] = []
 

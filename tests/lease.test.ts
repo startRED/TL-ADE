@@ -2,8 +2,8 @@ import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSy
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { AdeError, CoordinatorConflictError, LeaseAwaitingOperatorError } from '../src/journal/errors.js'
-import { acquireLease } from '../src/lease/lease.js'
+import { AdeError, CoordinatorConflictError, LeaseAwaitingOperatorError } from '../src/journal/errors.ts'
+import { acquireLease } from '../src/lease/lease.ts'
 
 interface LeaseOwner {
   pid: number

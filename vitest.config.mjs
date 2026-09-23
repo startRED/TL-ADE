@@ -1,4 +1,4 @@
-import { configDefaults, defineConfig } from 'vitest/config'
+import { configDefaults } from 'vitest/config'
 
 /**
  * Seleciona os testes a serem incluídos e excluídos com base nas variáveis de ambiente.
@@ -31,20 +31,24 @@ export function selectTests(env) {
   }
 }
 
-export default defineConfig({
+// satisfies em vez de defineConfig: preserva o tipo literal (coverage.include) para quem importa.
+export default /** @satisfies {import('vitest/config').ViteUserConfig} */ ({
   test: {
     ...selectTests(process.env),
     minWorkers: process.env.ADE_PARITY === '1' ? 4 : undefined,
     maxWorkers: process.env.ADE_PARITY === '1' ? 4 : undefined,
     coverage: {
       provider: 'v8',
+      // Mesma contagem de linhas da linha de base em .js (sem source map, comentários contavam);
+      // no .ts transformado o padrão true tiraria esses comentários da conta.
+      ignoreEmptyLines: false,
       include: [
-        'src/journal/**/*.{js,ts}',
-        'src/step/**/*.{js,ts}',
-        'src/lease/**/*.{js,ts}',
-        'src/git/**/*.{js,ts}',
-        'src/runner/**/*.{js,ts}',
-        'src/contain/**/*.{js,ts}',
+        'src/journal/**/*.ts',
+        'src/step/**/*.ts',
+        'src/lease/**/*.ts',
+        'src/git/**/*.ts',
+        'src/runner/**/*.ts',
+        'src/contain/**/*.ts',
       ],
     },
   },

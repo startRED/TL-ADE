@@ -1,5 +1,5 @@
 // @ts-check
-import { AdeError } from '../../journal/errors.js'
+import { AdeError } from '../../journal/errors.ts'
 
 /**
  * Monta o argv para invocar a CLI `codex` real seguindo as invariantes normativas da spec v2 / ADR 0006.

@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createGitPort } from '../git/gitport.js'
-import { UnexpectedTreeStateError } from '../journal/errors.js'
+import { createGitPort } from '../git/gitport.ts'
+import { UnexpectedTreeStateError } from '../journal/errors.ts'
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 

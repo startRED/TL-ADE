@@ -5,9 +5,9 @@ import path from 'node:path'
 import { compileIntent } from '../intent/compiler.js'
 import { applyInterviewAnswer } from '../intent/interview.js'
 import { validateCompiledPlan } from '../intent/validate.js'
-import { digest16 } from '../journal/canonical.js'
-import { openJournal, readJournal } from '../journal/journal.js'
-import { buildRuntimeStamp } from '../journal/stamp.js'
+import { digest16 } from '../journal/canonical.ts'
+import { openJournal, readJournal } from '../journal/journal.ts'
+import { buildRuntimeStamp } from '../journal/stamp.ts'
 import { loadApprovedSkills } from '../skills/catalog.js'
 
 /**
@@ -57,7 +57,7 @@ function storyIdsOf(plan) {
 
 /**
  * Estados de story que a projeção canônica do projeto considera concluídos
- * (mesma política de src/docs/projection.js e src/engine/resume.js).
+ * (mesma política de src/docs/projection.ts e src/engine/resume.js).
  */
 const DONE_STATUSES = new Set(['delivered', 'committed'])
 

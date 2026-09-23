@@ -7,7 +7,7 @@ import {
   cleanupTmpDirs,
   readCounter,
   setupE2E,
-} from './fixtures/e2e-fixture.js'
+} from './fixtures/e2e-fixture.ts'
 
 export const POINTS = [
   'before_spawn',

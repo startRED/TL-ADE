@@ -1,11 +1,11 @@
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { digest16 } from '../src/journal/canonical.js'
-import { AdeError } from '../src/journal/errors.js'
-import { openJournal, readJournal } from '../src/journal/journal.js'
-import { createStepRunner } from '../src/step/step.js'
-import { maybeFault } from '../src/step/fault.js'
-import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
+import { digest16 } from '../src/journal/canonical.ts'
+import { AdeError } from '../src/journal/errors.ts'
+import { openJournal, readJournal } from '../src/journal/journal.ts'
+import { createStepRunner } from '../src/step/step.ts'
+import { maybeFault } from '../src/step/fault.ts'
+import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
 const RUNTIME_STAMP = '1:aaaaaaaa:bbbbbbbb'
 

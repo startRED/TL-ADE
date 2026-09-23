@@ -2,9 +2,9 @@ import fs, { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { canonicalize, digest16 } from '../src/journal/canonical.js'
-import { AdeError, InvalidEventError } from '../src/journal/errors.js'
-import { GENESIS_PREV, openJournal } from '../src/journal/journal.js'
+import { canonicalize, digest16 } from '../src/journal/canonical.ts'
+import { AdeError, InvalidEventError } from '../src/journal/errors.ts'
+import { GENESIS_PREV, openJournal } from '../src/journal/journal.ts'
 
 let tmpDirs: string[] = []
 

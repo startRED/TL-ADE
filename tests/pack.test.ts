@@ -1,11 +1,11 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
-import { compilePack, SECTION_CAPS, SECTION_ORDER } from '../src/pack/pack.js'
-import { AdeError } from '../src/journal/errors.js'
-import { redactText } from '../src/pack/redact.js'
-import { dedupStorySection } from '../src/pack/dedup.js'
+import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
+import { compilePack, SECTION_CAPS, SECTION_ORDER } from '../src/pack/pack.ts'
+import { AdeError } from '../src/journal/errors.ts'
+import { redactText } from '../src/pack/redact.ts'
+import { dedupStorySection } from '../src/pack/dedup.ts'
 
 let tmpDirs: string[] = []
 

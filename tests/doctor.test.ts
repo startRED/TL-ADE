@@ -1,14 +1,14 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
+import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 import {
   ARGV_MAX_CHARS,
   assertArgvLimit,
   buildArgv,
   resolveBinary,
-} from '../src/runner/resolve-binary.js'
-import { AdeError } from '../src/journal/errors.js'
+} from '../src/runner/resolve-binary.ts'
+import { AdeError } from '../src/journal/errors.ts'
 
 let tmpDirs: string[] = []
 

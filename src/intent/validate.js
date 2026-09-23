@@ -1,4 +1,4 @@
-import { validate } from '../schema/index.js'
+import { validate } from '../schema/index.ts'
 
 /**
  * Valida o plano compilado e os contratos antes de qualquer aprovação.

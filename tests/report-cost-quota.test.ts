@@ -2,10 +2,10 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { main, renderReport, sumQuotaUsage, sumTokensByRole } from '../src/cli/report.js'
-import { digest16 } from '../src/journal/canonical.js'
-import { openJournal } from '../src/journal/journal.js'
-import { buildRuntimeStamp } from '../src/journal/stamp.js'
-import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
+import { digest16 } from '../src/journal/canonical.ts'
+import { openJournal } from '../src/journal/journal.ts'
+import { buildRuntimeStamp } from '../src/journal/stamp.ts'
+import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
 let tmpDirs: string[] = []
 

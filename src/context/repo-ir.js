@@ -1,5 +1,5 @@
-import { digest16 } from '../journal/canonical.js'
-import { AdeError } from '../journal/errors.js'
+import { digest16 } from '../journal/canonical.ts'
+import { AdeError } from '../journal/errors.ts'
 
 /**
  * Sinaliza inferência sem proveniência completa (confiança ou evidências).
@@ -41,7 +41,7 @@ function assertInference(item, index) {
  * Constrói o IR (Intermediate Representation) do repositório segregando proveniência.
  *
  * @param {{
- *   workspace?: import('../workspace/port.js').WorkspacePort,
+ *   workspace?: import('../workspace/port.ts').WorkspacePort,
  *   discovery: any,
  *   producer?: (ambiguities: any[]) => Promise<any[]>,
  *   operatorDecisions?: Array<{ id: string, decision: string, source: string }>,

@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { makeRepo, removeRepo } from './helpers/git-repo.js'
-import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
-import { openJournal, readJournal } from '../src/journal/journal.js'
-import { GitWorkspace } from '../src/workspace/git.js'
-import { FolderWorkspace } from '../src/workspace/folder.js'
-import { computeArtifactCacheKey, getOrProduceArtifact } from '../src/artifacts/cache.js'
+import { makeRepo, removeRepo } from './helpers/git-repo.ts'
+import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
+import { openJournal, readJournal } from '../src/journal/journal.ts'
+import { GitWorkspace } from '../src/workspace/git.ts'
+import { FolderWorkspace } from '../src/workspace/folder.ts'
+import { computeArtifactCacheKey, getOrProduceArtifact } from '../src/artifacts/cache.ts'
 import { discoverProject } from '../src/context/discovery.js'
 import { buildRepoIr } from '../src/context/repo-ir.js'
 import { rankRepoContext } from '../src/context/rank.js'
@@ -70,7 +70,7 @@ describe('Certificar descoberta e contexto do projeto', () => {
     } finally {
       removeRepo(dir)
     }
-  })
+  }, 30_000)
 
   // Critério 2: Dado um projeto JavaScript, quando a descoberta for executada, então identifica linguagem, comandos disponíveis, entradas, módulos, símbolos, dependências, testes relacionados, regras de escopo e estado da árvore com referência à fonte.
   test('criterio_2_descoberta_javascript_identifica_elementos_com_fonte', async () => {

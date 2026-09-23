@@ -3,9 +3,9 @@ import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { main as doctorMain } from '../src/cli/doctor.js'
 import { main as docsMain } from '../src/cli/docs.js'
-import { generateDocProjections, syncDocProjections } from '../src/docs/projection.js'
-import { openJournal, readJournal } from '../src/journal/journal.js'
-import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
+import { generateDocProjections, syncDocProjections } from '../src/docs/projection.ts'
+import { openJournal, readJournal } from '../src/journal/journal.ts'
+import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
 let tmpDirs: string[] = []
 

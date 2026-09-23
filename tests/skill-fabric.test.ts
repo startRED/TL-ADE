@@ -1,8 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { makeRepo, removeRepo } from './helpers/git-repo.js'
-import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
+import { makeRepo, removeRepo } from './helpers/git-repo.ts'
+import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
 let tmpDirs: string[] = []
 
@@ -437,7 +437,7 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
   // pedidas que couberem no orçamento, sem scripts, hooks, instaladores, ferramentas autorizadas
   // pelo fornecedor ou caminhos executáveis.
   test('criterio_7_pack_contem_corpo_sanitizado_sem_frontmatter_nem_scripts_nem_instaladores', async () => {
-    const { compilePack, SECTION_ORDER } = await import('../src/pack/pack.js')
+    const { compilePack, SECTION_ORDER } = await import('../src/pack/pack.ts')
     const missionDir = makeTmpDir('ade-pack-')
     tmpDirs.push(missionDir)
 
@@ -523,8 +523,8 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
   // trabalha com ela, então a contenção e o canário continuam bloqueando a fuga e nenhuma permissão,
   // memória ou configuração do agente é ampliada.
   test('criterio_9_maker_sob_skill_hostil_nao_escapa_de_contain_nem_amplia_permissoes', async () => {
-    const { contain } = await import('../src/contain/contain.js')
-    const { createGitPort } = await import('../src/git/gitport.js')
+    const { contain } = await import('../src/contain/contain.ts')
+    const { createGitPort } = await import('../src/git/gitport.ts')
     const repo = makeRepo()
     tmpDirs.push(repo.dir)
 

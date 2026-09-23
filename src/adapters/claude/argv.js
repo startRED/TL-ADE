@@ -1,5 +1,5 @@
 import fs from 'node:fs'
-import { AdeError } from '../../journal/errors.js'
+import { AdeError } from '../../journal/errors.ts'
 
 const SCHEMA_URL = new URL('../../../schemas/unit-result.schema.json', import.meta.url)
 

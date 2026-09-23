@@ -1,7 +1,7 @@
-import { digest16 } from '../journal/canonical.js'
-import { AdeError } from '../journal/errors.js'
-import { reconcileLocalMerge } from '../step/reconcile-delivery.js'
-import { priorStepResult } from '../step/step.js'
+import { digest16 } from '../journal/canonical.ts'
+import { AdeError } from '../journal/errors.ts'
+import { reconcileLocalMerge } from '../step/reconcile-delivery.ts'
+import { priorStepResult } from '../step/step.ts'
 
 /**
  * Entrega local do commit revisado: fast-forward da base quando ela não mudou.
@@ -12,7 +12,7 @@ import { priorStepResult } from '../step/step.js'
  * @param {{
  *   journal: { append: (event: Record<string, unknown>) => Promise<Record<string, unknown>> },
  *   events: Array<Record<string, any>>,
- *   gitPort: import('../git/gitport.js').GitPort,
+ *   gitPort: import('../git/gitport.ts').GitPort,
  *   storyId: string,
  *   baseRef: string | null,
  *   baseBefore: string | null,

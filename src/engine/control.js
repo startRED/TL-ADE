@@ -2,9 +2,9 @@
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { digest16 } from '../journal/canonical.js'
-import { AdeError } from '../journal/errors.js'
-import { readJournal } from '../journal/journal.js'
+import { digest16 } from '../journal/canonical.ts'
+import { AdeError } from '../journal/errors.ts'
+import { readJournal } from '../journal/journal.ts'
 
 /**
  * Controle cooperativo da missão: RUNNING → DRAINING → STOPPED → RUNNING.

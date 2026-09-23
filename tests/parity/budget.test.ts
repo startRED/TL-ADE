@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { AdeError } from '../../src/journal/errors.js'
+import { AdeError } from '../../src/journal/errors.ts'
 import { loadPlan } from '../../src/engine/plan-load.js'
 import {
   assertCallBudget,
@@ -11,7 +11,7 @@ import {
   reserveCalls,
   validateQuotaReceipt,
 } from '../../src/engine/budget.js'
-import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.js'
+import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.ts'
 
 let tmpDirs: string[] = []
 

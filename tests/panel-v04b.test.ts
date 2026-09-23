@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { main as initMain } from '../src/cli/init.js'
 import { main as serveMain } from '../src/cli/serve.js'
 import { main as indexMain } from '../src/cli/index-command.js'
-import { validate } from '../src/schema/index.js'
+import { validate } from '../src/schema/index.ts'
 import {
   readPanelSnapshot,
   rebuildProjection,
@@ -16,9 +16,9 @@ import {
 import { generateLauncher } from '../src/panel/launcher.js'
 import { listProjects } from '../src/panel/projects.js'
 import { startServer } from '../src/panel/server.js'
-import { openJournal } from '../src/journal/journal.js'
-import { digest16 } from '../src/journal/canonical.js'
-import { AdeError } from '../src/journal/errors.js'
+import { openJournal } from '../src/journal/journal.ts'
+import { digest16 } from '../src/journal/canonical.ts'
+import { AdeError } from '../src/journal/errors.ts'
 
 let tmpDirs: string[] = []
 let activeServers: Array<{ close: () => Promise<void> }> = []

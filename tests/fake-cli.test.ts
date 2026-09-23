@@ -3,9 +3,9 @@ import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { AdeError } from '../src/journal/errors.js'
+import { AdeError } from '../src/journal/errors.ts'
 import { bumpCounter, readCounter, runFakeCli } from '../src/adapters/fake/cli.js'
-import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
+import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
 const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.js')

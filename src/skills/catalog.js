@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import canonicalize from 'canonicalize'
-import { AdeError } from '../journal/errors.js'
+import { AdeError } from '../journal/errors.ts'
 import { scanSkill } from './skillguard.js'
 
 const ALLOWED_LICENSES = new Set([

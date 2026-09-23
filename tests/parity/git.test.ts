@@ -2,10 +2,10 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { makeRepo, removeRepo } from '../helpers/git-repo.js'
+import { makeRepo, removeRepo } from '../helpers/git-repo.ts'
 // Importações dos módulos da story (a implementar na fase 2)
-import { createGitPort } from '../../src/git/gitport.js'
-import { AdeError, GitError } from '../../src/journal/errors.js'
+import { createGitPort } from '../../src/git/gitport.ts'
+import { AdeError, GitError } from '../../src/journal/errors.ts'
 
 interface GitPortWithTreeAndDirty {
   worktreeDir: string

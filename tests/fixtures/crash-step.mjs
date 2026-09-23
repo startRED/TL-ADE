@@ -1,9 +1,9 @@
 import fs, { writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { createGitPort } from '../../src/git/gitport.js'
-import { Journal, openJournal } from '../../src/journal/journal.js'
-import { startingReceipt, withRunning, withTerminal, writeReceipt } from '../../src/runner/receipt.js'
-import { createStepRunner } from '../../src/step/step.js'
+import { createGitPort } from '../../src/git/gitport.ts'
+import { Journal, openJournal } from '../../src/journal/journal.ts'
+import { startingReceipt, withRunning, withTerminal, writeReceipt } from '../../src/runner/receipt.ts'
+import { createStepRunner } from '../../src/step/step.ts'
 
 const [cenario, missionDir, worktreeDir] = process.argv.slice(2)
 

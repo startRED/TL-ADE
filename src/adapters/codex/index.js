@@ -2,10 +2,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { AdeError } from '../../journal/errors.js'
+import { AdeError } from '../../journal/errors.ts'
 import { buildCodexArgs } from './argv.js'
 import { parseCodexOutput, parseCodexTokens, parseReviewResult } from './parse.js'
-import { runWorker } from '../../runner/spawn.js'
+import { runWorker } from '../../runner/spawn.ts'
 import { safeId } from '../../gates/output.js'
 import { assertPaidAuthorization } from '../../engine/paid-call.js'
 

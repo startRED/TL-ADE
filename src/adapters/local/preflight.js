@@ -3,7 +3,7 @@ import { execFile as defaultExecFile } from 'node:child_process'
 import nodeFs from 'node:fs'
 import { statfs as defaultStatfs } from 'node:fs/promises'
 import path from 'node:path'
-import { validate } from '../../schema/index.js'
+import { validate } from '../../schema/index.ts'
 
 /**
  * @typedef {Object} LocalPreflightOptions

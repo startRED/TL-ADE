@@ -11,11 +11,11 @@ import {
 } from '../src/engine/control.js'
 import { resumeMission } from '../src/engine/resume.js'
 import { runSequentialMission } from '../src/engine/schedule.js'
-import { digest16 } from '../src/journal/canonical.js'
-import { openJournal, readJournal } from '../src/journal/journal.js'
-import { buildRuntimeStamp } from '../src/journal/stamp.js'
+import { digest16 } from '../src/journal/canonical.ts'
+import { openJournal, readJournal } from '../src/journal/journal.ts'
+import { buildRuntimeStamp } from '../src/journal/stamp.ts'
 import { startServer } from '../src/panel/server.js'
-import { terminateProcessTree } from '../src/runner/spawn.js'
+import { terminateProcessTree } from '../src/runner/spawn.ts'
 
 const MISSION_ID = 'mission-ctl'
 const runtimeStamp = buildRuntimeStamp({ configDigest: 'a'.repeat(16), capabilitiesDigest: 'b'.repeat(16) })

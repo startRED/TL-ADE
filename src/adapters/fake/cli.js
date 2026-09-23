@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { AdeError } from '../../journal/errors.js'
+import { AdeError } from '../../journal/errors.ts'
 
 /**
  * @typedef {Object} FakeAction

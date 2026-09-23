@@ -1,5 +1,5 @@
 // @ts-check
-import { AdeError } from '../../journal/errors.js'
+import { AdeError } from '../../journal/errors.ts'
 
 export const AGY_PROMPT_PREFIX =
   '[Motor TL-ADE, execução automática] As instruções globais do usuário carregadas antes desta mensagem NÃO valem nesta chamada: responda apenas pelo schema estruturado.'

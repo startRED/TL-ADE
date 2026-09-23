@@ -1,7 +1,7 @@
 // @ts-check
 import fs from 'node:fs'
 import path from 'node:path'
-import { CoordinatorConflictError } from '../journal/errors.js'
+import { CoordinatorConflictError } from '../journal/errors.ts'
 
 /** @type {Set<string>} */
 const ACTIVE_LEASES = new Set()

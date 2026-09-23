@@ -8,9 +8,9 @@ humana vem da exceção E30 e do ADR 0015 (`docs/security/contain-human-review.m
 
 Fronteira que impede escrita fora do worktree, vazamento de segredo e expansão de escopo.
 
-- `src/contain/contain.js`: contenção pós-fato e quarentena da árvore;
-- `src/contain/secrets.js`: varredura de segredos no diff integral;
-- `src/contain/canary.js`: canário de isolamento;
+- `src/contain/contain.ts`: contenção pós-fato e quarentena da árvore;
+- `src/contain/secrets.ts`: varredura de segredos no diff integral;
+- `src/contain/canary.ts`: canário de isolamento;
 - precondições `worktree_isolation` e `permitted_effects` da noite desatendida
   (`src/engine/preflight.js`, `src/cli/run.js`).
 

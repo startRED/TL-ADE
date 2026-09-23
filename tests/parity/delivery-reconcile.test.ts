@@ -3,18 +3,18 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { createGitPort, GitInvalidInputError } from '../../src/git/gitport.js'
-import { digest16 } from '../../src/journal/canonical.js'
-import { AdeError } from '../../src/journal/errors.js'
-import { openJournal, readJournal } from '../../src/journal/journal.js'
-import { reconcileAll } from '../../src/step/reconcile.js'
+import { createGitPort, GitInvalidInputError } from '../../src/git/gitport.ts'
+import { digest16 } from '../../src/journal/canonical.ts'
+import { AdeError } from '../../src/journal/errors.ts'
+import { openJournal, readJournal } from '../../src/journal/journal.ts'
+import { reconcileAll } from '../../src/step/reconcile.ts'
 import {
   DeliveryInvalidInputError,
   reconcileLocalMerge,
   reconcilePush,
-} from '../../src/step/reconcile-delivery.js'
-import { EFFECT_CLASSES } from '../../src/step/step.js'
-import { makeRepo } from '../helpers/git-repo.js'
+} from '../../src/step/reconcile-delivery.ts'
+import { EFFECT_CLASSES } from '../../src/step/step.ts'
+import { makeRepo } from '../helpers/git-repo.ts'
 
 const RUNTIME_STAMP = '1:aaaaaaaa:bbbbbbbb'
 

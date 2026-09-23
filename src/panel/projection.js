@@ -2,10 +2,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { activeTakeover } from '../engine/control.js'
-import { digest16 } from '../journal/canonical.js'
-import { readJournal } from '../journal/journal.js'
-import { validate } from '../schema/index.js'
-import { AdeError } from '../journal/errors.js'
+import { digest16 } from '../journal/canonical.ts'
+import { readJournal } from '../journal/journal.ts'
+import { validate } from '../schema/index.ts'
+import { AdeError } from '../journal/errors.ts'
 
 /**
  * Projeta os dados determinísticos de uma missão a partir de suas fontes duráveis

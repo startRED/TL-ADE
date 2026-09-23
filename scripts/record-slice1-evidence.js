@@ -3,8 +3,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { CRASH_MATRIX_CELLS, validateEvidence } from '../src/evidence/slice1.js'
-import { AdeError } from '../src/journal/errors.js'
+import { CRASH_MATRIX_CELLS, validateEvidence } from '../src/evidence/slice1.ts'
+import { AdeError } from '../src/journal/errors.ts'
 import { runParity as defaultRunParity } from './run-parity.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -48,7 +48,7 @@ function defaultRunGit(args, opts = {}) {
  * @param {Function} [options.runCoverage]
  * @param {Function} [options.runGit]
  * @param {Function} [options.now]
- * @returns {Promise<import('../src/evidence/slice1.js').EvidenceV1>}
+ * @returns {Promise<import('../src/evidence/slice1.ts').EvidenceV1>}
  */
 export async function recordSlice1Evidence(options = {}) {
   const repoDir = options.repoDir ? path.resolve(options.repoDir) : ROOT

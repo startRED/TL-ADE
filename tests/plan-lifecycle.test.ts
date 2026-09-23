@@ -13,9 +13,9 @@ import {
 import { main as cliMain } from '../src/cli/index.js'
 import { splitContract } from '../src/intent/split.js'
 import { validateCompiledPlan } from '../src/intent/validate.js'
-import { readJournal, openJournal } from '../src/journal/journal.js'
-import { validate } from '../src/schema/index.js'
-import { digest16 } from '../src/journal/canonical.js'
+import { readJournal, openJournal } from '../src/journal/journal.ts'
+import { validate } from '../src/schema/index.ts'
+import { digest16 } from '../src/journal/canonical.ts'
 
 describe('Plan Lifecycle and Approval', () => {
   let tmpRepoDir: string

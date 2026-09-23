@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { main as indexMain } from '../src/cli/index.js'
-import { diagnoseDocs, generateDocProjections } from '../src/docs/projection.js'
-import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
+import { diagnoseDocs, generateDocProjections } from '../src/docs/projection.ts'
+import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
 let tmpDirs: string[] = []
 

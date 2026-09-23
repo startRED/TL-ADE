@@ -9,7 +9,7 @@ const BLOCK_LINES = 200
  *   query: string,
  *   cursor?: number,
  *   budget?: number,
- *   workspace?: import('../workspace/port.js').WorkspacePort,
+ *   workspace?: import('../workspace/port.ts').WorkspacePort,
  *   ir?: any,
  * }} options
  * @returns {Promise<{

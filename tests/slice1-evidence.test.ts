@@ -3,8 +3,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, test } from 'vitest'
 import { recordSlice1Evidence } from '../scripts/record-slice1-evidence.js'
-import { CRASH_MATRIX_CELLS, validateEvidence } from '../src/evidence/slice1.js'
-import { AdeError } from '../src/journal/errors.js'
+import { CRASH_MATRIX_CELLS, validateEvidence } from '../src/evidence/slice1.ts'
+import { AdeError } from '../src/journal/errors.ts'
 
 describe('slice1 evidence', () => {
   const validEvidenceLiteral = {

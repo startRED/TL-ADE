@@ -1,0 +1,357 @@
+import path from 'node:path'
+import { digest16 } from '../journal/canonical.ts'
+import { readJournal } from '../journal/journal.ts'
+import { AdeError, StateIntegrityError } from '../journal/errors.ts'
+import { maybeFault } from './fault.ts'
+
+/** Classes de efeito fechadas desta fatia do motor. */
+export const EFFECT_CLASSES = [
+  'none',
+  'local_write',
+  'prepare',
+  'gate',
+  'model_call',
+  'local_commit',
+  'eval_run',
+  'push',
+  'local_merge',
+  'pull_request',
+  'pull_request_merge',
+  'ci_rerun',
+]
+
+/** Chaves fechadas de `intent_context`; cada valor é `string | null`. */
+export const INTENT_CONTEXT_KEYS = [
+  'head_before',
+  'branch_before',
+  'head_after',
+  'branch_after',
+  'tree_before',
+  'parent_commit',
+  'remote_before',
+  'base_before',
+]
+
+const UNIT_OR_ID_REGEX = /^[A-Za-z0-9][A-Za-z0-9:._/-]*$/
+
+/**
+ * Acha o último evento `step_result` gravado para o `step_id` informado.
+ */
+export function priorStepResult(events: Array<Record<string,unknown>>, stepId: string): Record<string,unknown>|null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i]
+    if (ev.kind === 'step_result' && ev.step_id === stepId) {
+      return ev
+    }
+  }
+  return null
+}
+
+/**
+ * Cria o executor de steps write-ahead: grava a intenção antes do efeito e o
+ * resultado depois, reusando o que já foi gravado no journal em disco.
+ */
+export function createStepRunner({ journal, missionDir, gitPort = null, remotePort = null, env = process.env }: {
+journal: { append: (partial: Record<string,unknown>) => Promise<Record<string,unknown>> }
+missionDir: string
+gitPort?: import('../git/gitport.ts').GitPort|null
+remotePort?: { readRef: (remote: string,ref: string) => Promise<string|null> }|null
+env?: NodeJS.ProcessEnv
+}): {
+step: (spec: {
+unit: string
+id: string
+effect_class: string
+input: unknown
+intent_context?: Record<string,string|null>
+worktree?: string
+receiptPath?: string
+session_ref?: string|null
+criticality?: 'required'|'enhancement'
+},effectFn: () => Promise<unknown>) => Promise<{
+step_id: string
+status: 'ok'|'ambiguous'|'degraded'
+result: unknown
+reused: boolean
+reason?: string
+evidence?: Record<string,unknown>
+}>
+} {
+  const queues: Map<string,Promise<void>> = new Map()
+
+  async function runStep(spec: {
+unit: string
+id: string
+effect_class: string
+input: unknown
+intent_context?: Record<string,string|null>
+worktree?: string
+receiptPath?: string
+session_ref?: string|null
+criticality?: 'required'|'enhancement'
+}, effectFn: () => Promise<unknown>) {
+    const {
+      unit,
+      id,
+      effect_class,
+      input,
+      intent_context = {},
+      worktree = '',
+      receiptPath = '',
+      session_ref = null,
+      criticality: rawCriticality,
+    } = spec ?? {}
+
+    if (typeof unit !== 'string' || !UNIT_OR_ID_REGEX.test(unit)) {
+      throw new TypeError('unit inválida')
+    }
+    if (typeof id !== 'string' || !UNIT_OR_ID_REGEX.test(id)) {
+      throw new TypeError('step id inválido')
+    }
+    if (!EFFECT_CLASSES.includes(effect_class)) {
+      throw new TypeError('effect_class inválido')
+    }
+    if (typeof effectFn !== 'function') {
+      throw new TypeError('effectFn inválido')
+    }
+    const criticality = rawCriticality === undefined ? 'required' : rawCriticality
+    if (criticality !== 'required' && criticality !== 'enhancement') {
+      throw new TypeError('criticality inválida')
+    }
+    if (intent_context === null || typeof intent_context !== 'object' || Array.isArray(intent_context)) {
+      throw new TypeError('intent_context inválido')
+    }
+    for (const key of Object.keys(intent_context)) {
+      if (!INTENT_CONTEXT_KEYS.includes(key)) {
+        throw new TypeError('intent_context inválido')
+      }
+      const value = (intent_context as Record<string, unknown>)[key]
+      if (value !== null && typeof value !== 'string') {
+        throw new TypeError('intent_context inválido')
+      }
+    }
+    if (typeof worktree !== 'string') {
+      throw new TypeError('worktree inválido')
+    }
+    if (typeof receiptPath !== 'string') {
+      throw new TypeError('receiptPath inválido')
+    }
+    if (session_ref !== null && (typeof session_ref !== 'string' || !session_ref)) {
+      throw new AdeError('invalid_session_ref', 'session_ref inválido', 2)
+    }
+
+    const digest = digest16(input)
+    const { events } = readJournal(path.join(missionDir, 'journal.jsonl'))
+    const prior = priorStepResult(events, id)
+
+    if (prior && prior.status === 'ambiguous' && effect_class === 'model_call') {
+      const priorData = ((prior.data ?? {}) as Record<string, unknown>)
+      return {
+        step_id: id,
+        status: ('ambiguous' as const),
+        result: priorData.result ?? null,
+        reused: true,
+        reason: String(priorData.reason ?? ''),
+        evidence: ((priorData.evidence ?? {}) as Record<string, unknown>),
+      }
+    }
+
+    if (prior && prior.status === 'degraded' && (prior.input_digest === digest || effect_class === 'model_call')) {
+      const priorData = ((prior.data ?? {}) as Record<string, unknown>)
+      return {
+        step_id: id,
+        status: ('degraded' as const),
+        result: priorData.result ?? null,
+        reused: true,
+      }
+    }
+
+    if (prior && prior.status === 'ok' && (prior.input_digest === digest || effect_class === 'model_call')) {
+      const priorData = ((prior.data ?? {}) as Record<string, unknown>)
+      const reused: { step_id: string; status: 'ok'; result: unknown; reused: boolean; reason?: string; evidence?: Record<string,unknown> } = {
+        step_id: id,
+        status: ('ok' as const),
+        result: priorData.result ?? null,
+        reused: true,
+      }
+      if (priorData.reason !== undefined) {
+        reused.reason = String(priorData.reason)
+      }
+      if (priorData.evidence !== undefined) {
+        reused.evidence = (priorData.evidence as Record<string, unknown>)
+      }
+      return reused
+    }
+
+    let before = null
+    let recordedContext = intent_context
+    if (effect_class === 'model_call' && gitPort) {
+      before = await gitPort.headInfo()
+      recordedContext = { ...intent_context, head_before: before.commit, branch_before: before.branch }
+    }
+
+    const inputRecord = input && typeof input === 'object' && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : {}
+    if (effect_class === 'push') {
+      if (!remotePort || typeof remotePort.readRef !== 'function') {
+        throw new TypeError('remotePort obrigatório para push')
+      }
+      const remote = inputRecord.remote ?? 'origin'
+      const branch = inputRecord.branch ?? intent_context.branch_before ?? 'main'
+      let ref = inputRecord.ref
+      if (ref === undefined) {
+        if (typeof branch !== 'string' || !branch.trim()) {
+          throw new TypeError('branch inválida para push')
+        }
+        ref = branch.startsWith('refs/') ? branch : `refs/heads/${branch}`
+      }
+      if (typeof remote !== 'string' || !remote.trim() || typeof ref !== 'string' || !ref.trim()) {
+        throw new TypeError('remote e ref inválidos para push')
+      }
+      const remoteBefore = await remotePort.readRef(remote, ref)
+      if (remoteBefore !== null && (typeof remoteBefore !== 'string' || !remoteBefore.trim())) {
+        throw new TypeError('remotePort retornou ref inválida')
+      }
+      recordedContext = { ...intent_context, remote_before: remoteBefore }
+    }
+
+    if (effect_class === 'local_merge') {
+      if (!gitPort || typeof gitPort.readLocalRef !== 'function') {
+        throw new TypeError('gitPort com readLocalRef obrigatório para local_merge')
+      }
+      const baseRef = inputRecord.base_ref ?? intent_context.branch_after ?? 'main'
+      if (typeof baseRef !== 'string' || !baseRef.trim()) {
+        throw new TypeError('base_ref inválida para local_merge')
+      }
+      const baseBefore = await gitPort.readLocalRef(baseRef)
+      if (baseBefore !== null && (typeof baseBefore !== 'string' || !baseBefore.trim())) {
+        throw new TypeError('gitPort retornou ref local inválida')
+      }
+      recordedContext = { ...intent_context, base_before: baseBefore }
+    }
+
+    await journal.append({
+      kind: 'step_intent',
+      step_id: id,
+      effect_class,
+      input_digest: digest,
+      intent_context: recordedContext,
+      worktree,
+      receipt_path: receiptPath,
+      unit,
+      session_ref,
+      criticality,
+    })
+    maybeFault('after_intent', env)
+
+    let value
+    try {
+      value = await effectFn()
+    } catch (err) {
+      const errMessage = String((err as { message?: unknown })?.message ?? err)
+      const errPayload = { message: errMessage }
+
+      if (criticality === 'enhancement') {
+        await journal.append({
+          kind: 'step_result',
+          step_id: id,
+          effect_class,
+          input_digest: digest,
+          status: 'degraded',
+          error: errPayload,
+          criticality,
+        })
+        maybeFault('after_result', env)
+        return {
+          step_id: id,
+          status: ('degraded' as const),
+          result: null,
+          reused: false,
+        }
+      }
+
+      await journal.append({
+        kind: 'step_result',
+        step_id: id,
+        effect_class,
+        input_digest: digest,
+        status: 'failed',
+        error: errPayload,
+        criticality,
+      })
+      throw err
+    }
+
+    maybeFault('after_effect', env)
+
+    if (effect_class === 'model_call' && gitPort && before) {
+      const after = await gitPort.headInfo()
+      if (after.commit !== before.commit || after.branch !== before.branch) {
+        await journal.append({
+          kind: 'step_result',
+          step_id: id,
+          effect_class,
+          input_digest: digest,
+          status: 'state_integrity',
+          reason: 'head_moved',
+          head_before: before.commit,
+          head_after: after.commit,
+          branch_before: before.branch,
+          branch_after: after.branch,
+          criticality,
+        })
+        throw new StateIntegrityError('head_moved', {
+          step_id: id,
+          head_before: before.commit,
+          head_after: after.commit,
+        })
+      }
+    }
+
+    await journal.append({
+      kind: 'step_result',
+      step_id: id,
+      effect_class,
+      input_digest: digest,
+      status: 'ok',
+      result: value,
+      criticality,
+    })
+    maybeFault('after_result', env)
+
+    return { step_id: id, status: ('ok' as const), result: value, reused: false }
+  }
+
+  async function step(spec: {
+unit: string
+id: string
+effect_class: string
+input: unknown
+intent_context?: Record<string,string|null>
+worktree?: string
+receiptPath?: string
+session_ref?: string|null
+criticality?: 'required'|'enhancement'
+}, effectFn: () => Promise<unknown>) {
+    const unit = spec?.unit
+    if (typeof unit !== 'string' || !UNIT_OR_ID_REGEX.test(unit)) {
+      throw new TypeError('unit inválida')
+    }
+    const prev = queues.get(unit) ?? Promise.resolve()
+    const next = prev.then(
+      () => runStep(spec, effectFn),
+      () => runStep(spec, effectFn),
+    )
+    queues.set(
+      unit,
+      next.then(
+        () => undefined,
+        () => undefined,
+      ),
+    )
+    return next
+  }
+
+  return { step }
+}

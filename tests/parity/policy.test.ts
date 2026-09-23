@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { AdeError } from '../../src/journal/errors.js'
+import { AdeError } from '../../src/journal/errors.ts'
 import { nextReady, validateGraph } from '../../src/engine/schedule.js'
 import { checkMissionBudget } from '../../src/engine/budget.js'
 import { detectLoop, normalize } from '../../src/engine/loop.js'

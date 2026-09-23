@@ -10,16 +10,16 @@ import {
   classifyFailure,
   movementOf,
   runWithPolicy,
-} from '../../src/runner/failure-policy.js'
-import { readReceipt } from '../../src/runner/receipt.js'
+} from '../../src/runner/failure-policy.ts'
+import { readReceipt } from '../../src/runner/receipt.ts'
 // Importações do runner a implementar na fase 2
 import {
   WORKER_ENV_ALLOWLIST,
   buildWorkerEnv,
   killTree,
   runWorker,
-} from '../../src/runner/spawn.js'
-import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.js'
+} from '../../src/runner/spawn.ts'
+import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.ts'
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url))
 const CLI_PATH = path.join(ROOT, 'src/adapters/fake/cli.js')

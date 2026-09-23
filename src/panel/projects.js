@@ -2,7 +2,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { AdeError } from '../journal/errors.js'
+import { AdeError } from '../journal/errors.ts'
 
 /** @param {string} filePath @returns {{format_version: number, projects: Array<{id: string, name: string, path: string, registered_at: string}>}} */
 function readProjectsFile(filePath) {

@@ -6,11 +6,11 @@ import { parseCodexTokens } from '../src/adapters/codex/parse.js'
 import { dispatchAgy, setAgyAvailable } from '../src/adapters/agy/index.js'
 import { sumQuotaUsage, sumTokensByRole } from '../src/cli/report.js'
 import { main as doctorMain } from '../src/cli/doctor.js'
-import { openJournal } from '../src/journal/journal.js'
-import { compilePack, telemetrySections } from '../src/pack/pack.js'
-import { buildModelTelemetry, closeMissionSummary, modelsFromUsage } from '../src/telemetry/telemetry.js'
-import { auditHarness, evaluateDefaultPruning, evaluateModelPromotion } from '../src/telemetry/harness.js'
-import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
+import { openJournal } from '../src/journal/journal.ts'
+import { compilePack, telemetrySections } from '../src/pack/pack.ts'
+import { buildModelTelemetry, closeMissionSummary, modelsFromUsage } from '../src/telemetry/telemetry.ts'
+import { auditHarness, evaluateDefaultPruning, evaluateModelPromotion } from '../src/telemetry/harness.ts'
+import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
 const SHA_A = 'a'.repeat(64)
 const SHA_B = 'b'.repeat(64)

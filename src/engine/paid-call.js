@@ -1,6 +1,6 @@
 // @ts-check
-import { AdeError } from '../journal/errors.js'
-import { digest16 } from '../journal/canonical.js'
+import { AdeError } from '../journal/errors.ts'
+import { digest16 } from '../journal/canonical.ts'
 import { DEFAULT_CONTEXT_LIMIT_BYTES, validateQuotaReceipt } from './budget.js'
 
 /**

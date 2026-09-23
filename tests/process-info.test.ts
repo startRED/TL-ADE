@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { AdeError } from '../src/journal/errors.js'
-import { getProcessStartTime, isProcessAlive } from '../src/lease/process-info.js'
+import { AdeError } from '../src/journal/errors.ts'
+import { getProcessStartTime, isProcessAlive } from '../src/lease/process-info.ts'
 
 type GetProcessStartTimeFn = (
   pid: number,

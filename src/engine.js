@@ -2,15 +2,15 @@
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { AdeError } from './journal/errors.js'
-import { readJournal } from './journal/journal.js'
+import { AdeError } from './journal/errors.ts'
+import { readJournal } from './journal/journal.ts'
 import { assertCallBudget, authorizePaidCall, checkUsdCap, DEFAULT_CONTEXT_LIMIT_BYTES, observedUsd, reserveCalls } from './engine/budget.js'
 import { deliverStory, withDeliveryFlag } from './engine/deliver.js'
 import { authorizedStep } from './engine/paid-call.js'
 import { maybeEngineFault } from './engine/faults.js'
 import { findStoryCommitted, findStoryStarted } from './engine/resume.js'
-import { dedupStorySection } from './pack/dedup.js'
-import { measurePackBytes, telemetrySections } from './pack/pack.js'
+import { dedupStorySection } from './pack/dedup.ts'
+import { measurePackBytes, telemetrySections } from './pack/pack.ts'
 import { buildStoryContext, guardStoryContext } from './context/story.js'
 import { dispatchClaude } from './adapters/claude/index.js'
 import { dispatchCodex } from './adapters/codex/index.js'
@@ -41,7 +41,7 @@ import {
   isBlockingFinding,
 } from './review/handoff.js'
 import { isReviewApproved } from './review/validate.js'
-import { buildModelTelemetry, modelsFromUsage } from './telemetry/telemetry.js'
+import { buildModelTelemetry, modelsFromUsage } from './telemetry/telemetry.ts'
 
 /**
  * Famílias de modelos com canário aprovado no Slice 1 e v0.2.
@@ -67,7 +67,7 @@ function packTelemetry(manifest) {
  * @param {Object} deps Dependências injetáveis do motor.
  * @param {{ append: (event: Record<string, unknown>) => Promise<Record<string, unknown>> }} deps.journal Instância do journal aberto.
  * @param {(spec: { unit: string, id: string, effect_class: string, input: unknown }, effectFn: () => Promise<unknown>) => Promise<{ step_id: string, status: string, result: unknown, reused: boolean }>} deps.step Executor de steps com journaling.
- * @param {(dir: string) => import('./git/gitport.js').GitPort} deps.gitPortFor Fábrica de porta git para o diretório de worktree.
+ * @param {(dir: string) => import('./git/gitport.ts').GitPort} deps.gitPortFor Fábrica de porta git para o diretório de worktree.
  * @param {(opts: { repoDir: string, missionId: string, storyId: string }) => Promise<any>} deps.prepareStory Prepara a worktree e branch.
  * @param {(opts: { step: any, missionDir: string, gitPort: any }) => { runEval: (opts: any) => Promise<any> }} deps.createEvalRunner Fábrica de executor de evals.
  * @param {(opts: { step: any, missionDir: string, gitPort: any, packageJson?: any }) => { runGates: (opts: any) => Promise<any> }} deps.createGateRunner Fábrica de executor de gates.
@@ -403,7 +403,7 @@ async function runStoryImpl(deps, input) {
 
   /** @type {string} */
   let worktreeDir
-  /** @type {import('./git/gitport.js').GitPort} */
+  /** @type {import('./git/gitport.ts').GitPort} */
   let wtPort
   /** @type {string} */
   let treeBefore

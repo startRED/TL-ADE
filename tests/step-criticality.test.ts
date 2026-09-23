@@ -1,8 +1,8 @@
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { openJournal, readJournal } from '../src/journal/journal.js'
-import { createStepRunner } from '../src/step/step.js'
-import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.js'
+import { openJournal, readJournal } from '../src/journal/journal.ts'
+import { createStepRunner } from '../src/step/step.ts'
+import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
 const RUNTIME_STAMP = '1:aaaaaaaa:bbbbbbbb'
 

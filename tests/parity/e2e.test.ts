@@ -2,9 +2,9 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { acquireLease } from '../../src/lease/lease.js'
+import { acquireLease } from '../../src/lease/lease.ts'
 import * as reportModule from '../../src/cli/report.js'
-import { BIN_ADE, cleanupTmpDirs, readCounter, setupE2E } from './fixtures/e2e-fixture.js'
+import { BIN_ADE, cleanupTmpDirs, readCounter, setupE2E } from './fixtures/e2e-fixture.ts'
 
 afterEach(() => {
   cleanupTmpDirs()

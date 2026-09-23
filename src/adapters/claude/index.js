@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { buildClaudeArgs } from './argv.js'
 import { parseClaudeOutput, parseTokens, parseUnitResult, parseUsage } from './parse.js'
-import { runWorker } from '../../runner/spawn.js'
+import { runWorker } from '../../runner/spawn.ts'
 import { safeId } from '../../gates/output.js'
 import { assertPaidAuthorization } from '../../engine/paid-call.js'
 

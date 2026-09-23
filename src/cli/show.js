@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { AdeError } from '../journal/errors.js'
+import { AdeError } from '../journal/errors.ts'
 
 /**
  * Resolve uma ref `art:<rel>` para o caminho absoluto de `<missionDir>/artifacts/<rel>.log`,

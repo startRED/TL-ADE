@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { makeRepo, removeRepo } from '../helpers/git-repo.js'
-import { UnexpectedTreeStateError } from '../../src/journal/errors.js'
+import { makeRepo, removeRepo } from '../helpers/git-repo.ts'
+import { UnexpectedTreeStateError } from '../../src/journal/errors.ts'
 // Importações dos módulos da story (a implementar na fase 2)
 import { prepareStory } from '../../src/engine/prepare.js'
 

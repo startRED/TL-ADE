@@ -1,14 +1,14 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { contain } from '../../src/contain/contain.js'
-import { createGitPort } from '../../src/git/gitport.js'
-import { isProcessAlive } from '../../src/lease/process-info.js'
-import { readReceipt } from '../../src/runner/receipt.js'
-import { resolveBinary } from '../../src/runner/resolve-binary.js'
-import { killTree, runWorker } from '../../src/runner/spawn.js'
-import { makeRepo, removeRepo } from '../helpers/git-repo.js'
-import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.js'
+import { contain } from '../../src/contain/contain.ts'
+import { createGitPort } from '../../src/git/gitport.ts'
+import { isProcessAlive } from '../../src/lease/process-info.ts'
+import { readReceipt } from '../../src/runner/receipt.ts'
+import { resolveBinary } from '../../src/runner/resolve-binary.ts'
+import { killTree, runWorker } from '../../src/runner/spawn.ts'
+import { makeRepo, removeRepo } from '../helpers/git-repo.ts'
+import { makeTmpDir, removeTmpDir } from '../helpers/tmp-dir.ts'
 
 describe('windows durability parity', () => {
   let tmpDir: string

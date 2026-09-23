@@ -1,9 +1,9 @@
 // @ts-check
 import fs from 'node:fs'
 import path from 'node:path'
-import { AdeError } from '../journal/errors.js'
-import { readJournal } from '../journal/journal.js'
-import { assertStampCurrent } from '../journal/stamp.js'
+import { AdeError } from '../journal/errors.ts'
+import { readJournal } from '../journal/journal.ts'
+import { assertStampCurrent } from '../journal/stamp.ts'
 import { clearControlRequest, readMissionControl } from './control.js'
 import { checkApproval, runSequentialMission } from './schedule.js'
 

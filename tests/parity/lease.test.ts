@@ -2,9 +2,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
-import { AdeError, CoordinatorConflictError } from '../../src/journal/errors.js'
-import { acquireLease } from '../../src/lease/lease.js'
-import { makeRepo, removeRepo } from '../helpers/git-repo.js'
+import { AdeError, CoordinatorConflictError } from '../../src/journal/errors.ts'
+import { acquireLease } from '../../src/lease/lease.ts'
+import { makeRepo, removeRepo } from '../helpers/git-repo.ts'
 
 interface LeaseOwner {
   pid: number
