@@ -268,6 +268,25 @@ describe('painel novo servido do último build e vários projetos', () => {
     expect(existsSync(path.join(semGit, '.ade'))).toBe(false)
   })
 
+  test('lista_de_projetos_diz_o_que_esta_rodando_ou_esperando_em_cada_projeto_aberto', async () => {
+    const repo = gitFixture()
+    const server = await serve(repo)
+    const [{ id }] = JSON.parse((await api(server, '/api/projects')).body)
+    const activity = async () => JSON.parse((await api(server, '/api/projects')).body).find((p: { id: string }) => p.id === id).activity
+    expect(await activity()).toBeUndefined()
+
+    const write = (stage: string) => {
+      mkdirSync(path.join(repo, '.ade', 'missions', 'mission-a'), { recursive: true })
+      writeFileSync(path.join(repo, '.ade', 'missions', 'mission-a', 'intake.json'), JSON.stringify({ mission_id: 'mission-a', seq: 1, created_at: new Date().toISOString(), request: 'Crie o cadastro', stage }))
+    }
+    write('plan')
+    expect(await activity()).toEqual({ kind: 'waiting', stage: 'plan', mission_id: 'mission-a', request: 'Crie o cadastro' })
+    write('running')
+    expect(await activity()).toMatchObject({ kind: 'running', mission_id: 'mission-a', request: 'Crie o cadastro' })
+    write('concluida')
+    expect(await activity()).toMatchObject({ kind: 'done', mission_id: 'mission-a' })
+  })
+
   test('criterio_10_projeto_com_lease_de_outro_servidor_responde_409_e_nao_fica_aberto', async () => {
     const repo = gitFixture()
     await serve(repo)

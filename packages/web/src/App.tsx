@@ -17,6 +17,29 @@ interface Project {
   path: string
   open: boolean
   active: boolean
+  activity?: Activity
+}
+
+/** O que acontece agora no projeto (só nos abertos): vem de GET /api/projects. */
+interface Activity {
+  kind: 'waiting' | 'running' | 'done' | 'failed' | 'refused'
+  stage?: 'interview' | 'briefing' | 'plan'
+  mission_id: string
+  request: string
+  done?: number
+  total?: number
+  error?: string
+}
+
+const STAGE_LABEL = { interview: 'entrevista', briefing: 'briefing', plan: 'plano' } as const
+
+/** Linha de estado de um projeto: verbo curto, sem jargão; a cor e o ponto vêm da classe. */
+function activityLine(a: Activity): string {
+  if (a.kind === 'running') return a.total ? `Missão rodando · ${a.done ?? 0} de ${a.total} partes prontas` : 'Missão rodando'
+  if (a.kind === 'waiting') return `Esperando você · ${STAGE_LABEL[a.stage ?? 'plan']}`
+  if (a.kind === 'failed') return 'A última missão parou com erro'
+  if (a.kind === 'refused') return 'O último pedido foi recusado'
+  return 'A última missão terminou'
 }
 
 export interface ModelRef { family: string; model_id: string; effort?: string }
@@ -125,6 +148,7 @@ export default function App() {
                   title={p.path}
                   onClick={() => { if (page === 'projects' || page === 'appearance') setPage('home'); if (!p.active) act(() => postJson('/api/projects/select', { id: p.id })) }}
                 >
+                  {p.activity && (p.activity.kind === 'running' || p.activity.kind === 'waiting') && <span className={`pulse ${p.activity.kind}`} aria-hidden="true" />}
                   {p.active ? <span data-testid="active-project">{p.name}</span> : p.name}
                 </button>
                 <button className="chip-x" aria-label={`Fechar ${p.name}`} onClick={() => act(() => postJson('/api/projects/close', { id: p.id }))}>
@@ -218,6 +242,9 @@ function ProjectsPage({ projects, onOpen }: { projects: Project[]; onOpen: (dir:
     e.preventDefault()
     onOpen(dir.trim())
   }
+  const isLive = (p: Project) => p.activity?.kind === 'running' || p.activity?.kind === 'waiting'
+  const live = projects.filter(isLive)
+  const rest = projects.filter((p) => !isLive(p))
 
   return (
     <section className="library">
@@ -231,24 +258,44 @@ function ProjectsPage({ projects, onOpen }: { projects: Project[]; onOpen: (dir:
           <button className="btn" type="submit" disabled={!dir.trim()}>Abrir</button>
         </form>
       </div>
-      <div style={{ display: 'grid', gap: '1rem' }}>
-        <h2 className="caps">Recentes</h2>
-        {projects.length === 0
-          ? <p className="empty">As pastas que você abrir aparecem aqui.</p>
-          : (
-            <ul className="shelf">
-              {projects.map((p) => (
-                <li key={p.path}>
-                  <div>
-                    <p>{p.name}{p.open && <span className="tag">aberto</span>}</p>
-                    <p className="mono" style={{ color: 'var(--ink-faint)' }}>{p.path}</p>
-                  </div>
-                  <button className="btn" aria-label={`${p.open ? 'Mostrar' : 'Reabrir'} ${p.name}`} onClick={() => onOpen(p.path)}>{p.open ? 'Mostrar' : 'Reabrir'}</button>
-                </li>
-              ))}
-            </ul>
-          )}
+      <div style={{ display: 'grid', gap: '2.5rem', alignContent: 'start' }}>
+        {live.length > 0 && (
+          <section className="project-group" aria-labelledby="live-label">
+            <h2 className="caps" id="live-label">Em andamento</h2>
+            <ul className="shelf">{live.map((p) => <ProjectRow key={p.path} project={p} onOpen={onOpen} />)}</ul>
+          </section>
+        )}
+        <section className="project-group" aria-labelledby="recent-label">
+          <h2 className="caps" id="recent-label">Recentes</h2>
+          {rest.length === 0
+            ? <p className="empty">{live.length ? 'Nenhuma outra pasta por aqui.' : 'As pastas que você abrir aparecem aqui.'}</p>
+            : <ul className="shelf">{rest.map((p) => <ProjectRow key={p.path} project={p} onOpen={onOpen} />)}</ul>}
+        </section>
       </div>
     </section>
+  )
+}
+
+/** Um projeto na estante: nome, caminho, o que acontece nele agora e a ação que leva até lá. */
+function ProjectRow({ project: p, onOpen }: { project: Project; onOpen: (dir: string) => void }) {
+  const a = p.activity
+  const verb = !p.open ? 'Reabrir' : a?.kind === 'running' ? 'Acompanhar' : a?.kind === 'waiting' ? 'Responder' : 'Mostrar'
+  const progress = a?.kind === 'running' && a.total ? (a.done ?? 0) / a.total : null
+  return (
+    <li className={a ? `project-row ${a.kind}` : 'project-row'}>
+      <div style={{ display: 'grid', gap: '.3rem', minWidth: 0 }}>
+        <p>{p.name}{p.open && <span className="tag">aberto</span>}</p>
+        <p className="mono" style={{ color: 'var(--ink-faint)' }}>{p.path}</p>
+        {a && (
+          <p className="activity" data-testid={`activity-${p.id}`}>
+            {(a.kind === 'running' || a.kind === 'waiting') && <span className={`pulse ${a.kind}`} aria-hidden="true" />}
+            <span>{activityLine(a)}</span>
+          </p>
+        )}
+        {a && a.kind !== 'done' && <p className="activity-request" title={a.request}>{'\u201c'}{a.request}{'\u201d'}</p>}
+        {progress !== null && <span className="measure-bar" aria-hidden="true"><i style={{ transform: `scaleX(${progress})` }} /></span>}
+      </div>
+      <button className={a?.kind === 'waiting' ? 'btn baton' : 'btn'} aria-label={`${verb} ${p.name}`} onClick={() => onOpen(p.path)}>{verb}</button>
+    </li>
   )
 }

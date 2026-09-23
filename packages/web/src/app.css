@@ -815,3 +815,21 @@ h3.ui-heading, h4.ui-heading { font-size: 1.15rem; }
 .chat-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .permission-card { border: 1px solid var(--baton); padding: .9rem 1rem; display: grid; gap: .5rem; background: var(--ground); }
 .library.ported { grid-template-columns: minmax(0, 1fr); max-width: 72rem; }
+
+/* ---------- projetos: o que acontece em cada um ----------
+   Ponto que pulsa na cor da batuta quando algo roda; contorno quando espera você; a barra fina é o compasso das
+   partes prontas. */
+.pulse { display: inline-block; flex: none; width: .5rem; height: .5rem; margin-right: .5rem; background: var(--baton); }
+.pulse.running { animation: pulse 1.6s var(--ease-out) infinite; }
+.pulse.waiting { background: transparent; border: 1.5px solid var(--baton); }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--baton) 60%, transparent); } 70% { box-shadow: 0 0 0 .45rem transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.chip .pulse { width: .4rem; height: .4rem; margin-right: .4rem; }
+.project-group { display: grid; gap: 1rem; }
+.project-row { align-items: center; }
+.project-row .activity { display: flex; align-items: center; margin-top: .2rem; font: 500 12px/1.3 var(--mono); letter-spacing: .02em; color: var(--ink-soft); }
+.project-row.running .activity, .project-row.waiting .activity { color: var(--baton-text); }
+.project-row.failed .activity { color: var(--danger, #ff8a7a); }
+.activity-request { font: 400 13px/1.4 var(--text); color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 44ch; }
+.measure-bar { display: block; height: 3px; margin-top: .35rem; background: var(--sage-line); overflow: hidden; }
+.measure-bar i { display: block; height: 100%; background: var(--baton); transform-origin: left; transition: transform .8s var(--ease-out); }
+@media (prefers-reduced-motion: reduce) { .pulse.running { animation: none; } }

@@ -193,6 +193,23 @@ export async function startServer({
     onError: (err) => stderrWrite(`ade serve: falha ao atualizar painel: ${err instanceof Error ? err.message : String(err)}\n`),
   })
 
+  /**
+   * O que acontece agora num projeto aberto, para a lista de Projetos: pedido esperando o operador, missão
+   * rodando (partes feitas de total, pela projeção) ou a última encerrada. Sem pedido, nada.
+   */
+  async function projectActivity(p: { path: string; indexPath: string }) {
+    const last = intake.find(p.path)
+    if (!last) return null
+    const base = { mission_id: last.mission_id, request: last.request }
+    if (last.stage === 'interview' || last.stage === 'briefing' || last.stage === 'plan') return { kind: 'waiting', stage: last.stage, ...base }
+    if (last.stage === 'recusada') return { kind: 'refused', ...base }
+    if (last.stage === 'concluida') return { kind: last.error ? 'failed' : 'done', ...base, ...(last.error ? { error: last.error } : {}) }
+    const snapshot = await readPanelSnapshot({ repoDir: p.path, indexPath: p.indexPath }).catch(() => null)
+    const mission = snapshot?.missions.find((m: { id?: string }) => m.id === last.mission_id)
+    const stories: Array<{ status?: string | null }> = mission?.stories ?? []
+    return { kind: 'running', ...base, done: stories.filter((st) => /done|conclu|pass|complete|merged/i.test(st.status ?? '')).length, total: stories.length || (last.parts?.length ?? 0) }
+  }
+
   // 6. Servidor HTTP
   const packageDir = fileURLToPath(new URL('../..', import.meta.url))
   const rootIndexHtml = path.join(packageDir, 'index.html')
@@ -319,7 +336,11 @@ export async function startServer({
               const registered = listProjects({ homeDir })
                 .filter((r) => !open.some((p) => p.path === path.resolve(r.path)))
                 .map((r) => ({ id: r.id, name: r.name, path: path.resolve(r.path), open: false, active: false }))
-              sendJson(res, 200, [...open.map((p) => ({ ...p, open: true })), ...registered])
+              const withActivity = await Promise.all(open.map(async (p) => {
+                const activity = await projectActivity(projects.get(p.id))
+                return { ...p, open: true, ...(activity ? { activity } : {}) }
+              }))
+              sendJson(res, 200, [...withActivity, ...registered])
               return
             }
             const snapshotMatch = pathname.match(/^\/api\/projects\/([^/]+)\/snapshot$/)
