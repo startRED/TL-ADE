@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { compileIntent } from '../src/intent/compiler.ts'
-import { approvalReasons, planIssues } from '../src/intent/proportional.ts'
+import { approvalReasons, planIssues, planStoriesDigest } from '../src/intent/proportional.ts'
 import { approveMission, planMission, validateMissionPlan } from '../src/mission/plan-lifecycle.ts'
 
 const advisorOf = (complexity: string) =>
@@ -127,6 +127,7 @@ describe('Planejador proporcional com decisões humanas', () => {
       family: 'agy',
       model: 'gemini-3-pro',
       attempts: [{ family: 'codex', model: 'gpt-5.5', error: 'timeout de 8 min' }],
+      plan_digest: planStoriesDigest(plan),
     })
     expect(result.state).toBe('planned')
   })

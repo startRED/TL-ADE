@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 import { dispatchAgy } from '../adapters/agy/index.ts'
 import { canonicalize } from '../journal/canonical.ts'
-import { planMission, resumeMissionAnswers } from '../mission/plan-lifecycle.ts'
+import { planMission, recritiqueMission, resumeMissionAnswers } from '../mission/plan-lifecycle.ts'
 import { resolveBinary } from '../runner/resolve-binary.ts'
 
 /**
@@ -38,6 +38,7 @@ export async function main(argv: string[], deps: {
       'non-interactive': { type: 'boolean', short: 'n' },
       mission: { type: 'string' },
       answers: { type: 'string' },
+      recritique: { type: 'boolean' },
       json: { type: 'boolean' },
     },
   })
@@ -46,10 +47,12 @@ export async function main(argv: string[], deps: {
   const resumeMissionId = values.mission
   const answersPath = values.answers
   const resuming = typeof resumeMissionId === 'string' && typeof answersPath === 'string'
-  if (resuming ? request : !request) {
+  const recritique = values.recritique === true
+  if (recritique ? typeof resumeMissionId !== 'string' || request || answersPath : resuming ? request : !request) {
     stderr.write(
       'uso: ade plan [--request <pedido>] [--repo <pasta>] [--from <missao>] [--non-interactive] [--json]\n' +
-        '     ade plan --mission <id> --answers <arquivo.json> [--repo <pasta>] [--json]\n',
+        '     ade plan --mission <id> --answers <arquivo.json> [--repo <pasta>] [--json]\n' +
+        '     ade plan --mission <id> --recritique [--repo <pasta>] [--json]\n',
     )
     return 4
   }
@@ -100,7 +103,9 @@ export async function main(argv: string[], deps: {
           consumed_usd: 0,
         },
       }
-    const result = resuming
+    const result = recritique
+      ? await recritiqueMission({ missionId: String(resumeMissionId), repoDir: String(repoDir) }, planDeps)
+      : resuming
       ? await resumeMissionAnswers(
           { missionId: resumeMissionId, repoDir: String(repoDir), answers: JSON.parse(fs.readFileSync(answersPath, 'utf8')) },
           planDeps,
@@ -124,6 +129,9 @@ export async function main(argv: string[], deps: {
         for (const o of q.options) stdout.write(`    ${o.id}: ${o.label}${o.recommended ? ' (recomendada)' : ''}\n`)
       }
       stdout.write(`responda com: ade plan --mission ${result.missionId} --answers <arquivo.json>\n`)
+    } else if (recritique) {
+      stdout.write(`crítica refeita na missão ${result.missionId}; plano em ${result.state} (digest ${result.digest})\n`)
+      stdout.write(`aprove com: ade approve --mission ${result.missionId} --digest ${result.digest}\n`)
     } else if (result.state === 'awaiting_briefing_approval') {
       stdout.write(`missão ${result.missionId} aguarda aprovação do briefing de produto (digest ${result.digest})\n`)
       stdout.write(`briefing gravado em: ${path.join(String(repoDir), '.ade', 'missions', result.missionId, 'briefing.json')}\n`)

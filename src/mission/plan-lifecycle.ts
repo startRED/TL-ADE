@@ -8,7 +8,7 @@ import { applyInterviewAnswer, buildInterview, unknownsFromRequest, type Decisio
 import { AdeError } from '../journal/errors.ts'
 import { validateCompiledPlan } from '../intent/validate.ts'
 import { planCriticsFromConfig } from '../intent/plan-critic.ts'
-import { approvalReasons, critiquePlan, needsPlanCritic, planIssues, planStoriesOf } from '../intent/proportional.ts'
+import { approvalReasons, critiquePlan, needsPlanCritic, planCriticStale, planIssues, planStoriesOf, storyIdsOf, type PlanCritic } from '../intent/proportional.ts'
 import { digest16 } from '../journal/canonical.ts'
 import { openJournal, readJournal } from '../journal/journal.ts'
 import { buildRuntimeStamp } from '../journal/stamp.ts'
@@ -32,22 +32,6 @@ function writeJsonAtomic(targetPath: string, data: any) {
 function readJsonIfExists(filePath: string): any {
   if (!fs.existsSync(filePath)) return null
   return JSON.parse(fs.readFileSync(filePath, 'utf8'))
-}
-
-/**
- * IDs das stories despacháveis declaradas pelo plano, na ordem do plano.
- * Tolera estrutura inválida (fase nula, épico nulo, story não-string): a travessia
- * nunca lança, e é o validador de schema que reporta as violações.
- */
-function storyIdsOf(plan: any): string[] {
-  const phases = Array.isArray(plan?.phases) ? plan.phases : []
-  return phases.flatMap((phase: any) => {
-    const epics = Array.isArray(phase?.epics) ? phase.epics : []
-    return epics.flatMap((epic: any) => {
-      const stories = Array.isArray(epic?.stories) ? epic.stories : []
-      return stories.filter((id: any) => typeof id === 'string' && id !== '')
-    })
-  })
 }
 
 /**
@@ -164,6 +148,31 @@ async function withMissionLock<T>(missionDir: string, missionId: string, fn: () 
     fs.closeSync(lockFd)
     fs.rmSync(lockPath, { force: true })
   }
+}
+
+/**
+ * Críticos do plano: os injetados sempre leem; os dos papéis de .ade/config.json, quando o
+ * plano é de alto risco ou quando `always` (revalidação de um plano já criticado).
+ */
+function planCriticsOf(plan: any, deps: any, repoDir: string, always: boolean): PlanCritic[] {
+  if (Array.isArray(deps.planCritics)) return deps.planCritics
+  if (!always && !needsPlanCritic(plan)) return []
+  return planCriticsFromConfig(deps.adeConfig, {
+    repoDir,
+    env: deps.env,
+    runWorkerImpl: deps.runWorkerImpl,
+    resolveBinaryImpl: deps.resolveBinary,
+  })
+}
+
+/**
+ * Grava no briefing a crítica das stories do plano, com os critérios do épico (a versão atual
+ * do briefing de produto). Crítica de plano corrigido fica marcada: não aprova sozinha.
+ */
+async function critiqueInto(plan: any, contracts: any[], critics: PlanCritic[], revalidated: boolean): Promise<void> {
+  const epicAcceptance: string[] = plan.briefing.product?.versions?.[plan.briefing.version_index ?? 0]?.includes ?? []
+  const critic = await critiquePlan({ plan, contracts }, critics, { epicAcceptance })
+  plan.briefing.plan_critic = revalidated ? { ...critic, revalidated: true } : critic
 }
 
 /** Decisão 'briefing_approved' gravada no journal da missão, ou null. */
@@ -437,21 +446,9 @@ async function compileAndWritePlan(
     throw new Error(`Plano compilado inválido: ${issues.map((i) => `${i.story}: ${i.problem}`).join(', ')}`)
   }
 
-  // A crítica fica no briefing: entra no digest que o operador aprova. Críticos injetados
-  // sempre leem o plano; os dos papéis de .ade/config.json, só quando o plano é de alto risco.
-  const critics = Array.isArray(deps.planCritics)
-    ? deps.planCritics
-    : needsPlanCritic(plan)
-      ? planCriticsFromConfig(deps.adeConfig, {
-          repoDir: resolvedRepoDir,
-          env: deps.env,
-          runWorkerImpl: deps.runWorkerImpl,
-          resolveBinaryImpl: deps.resolveBinary,
-        })
-      : []
-  if (critics.length > 0) {
-    plan.briefing.plan_critic = await critiquePlan({ plan, contracts }, critics)
-  }
+  // A crítica fica no briefing: entra no digest que o operador aprova.
+  const critics = planCriticsOf(plan, deps, resolvedRepoDir, false)
+  if (critics.length > 0) await critiqueInto(plan, contracts, critics, false)
 
   const planPath = path.join(missionDir, 'plan.json')
   writeJsonAtomic(planPath, plan)
@@ -626,6 +623,16 @@ export async function approveMission(
     }
   }
 
+  // Crítica que leu outras stories não vale para este plano: aprovar exige a crítica refeita.
+  if (planCriticStale(planObj)) {
+    throw new AdeError(
+      'plan_critic_stale',
+      `crítica desatualizada: as stories do plano mudaram depois dela; rode ade plan --mission ${missionId} --recritique antes de aprovar`,
+      2,
+      { mission_id: missionId },
+    )
+  }
+
   const valResult = validateMissionPlan(planPath)
   if (!valResult.valid) {
     return {
@@ -782,6 +789,41 @@ async function approveBriefing(
       deps,
     )
     return { approved: true, digest, state: planned.state, planDigest: planned.digest }
+  })
+}
+
+/**
+ * Refaz a crítica sobre as stories atuais de um plano ainda não aprovado (`ade plan
+ * --mission <id> --recritique`). A crítica nova não aprova: o plano espera `ade approve`.
+ */
+export async function recritiqueMission({ missionId, repoDir }: { missionId: string; repoDir?: string }, deps: any = {}): Promise<PlanResult> {
+  const resolvedRepoDir = path.resolve(repoDir || process.cwd())
+  const missionDir = path.join(resolvedRepoDir, '.ade', 'missions', String(missionId))
+  if (missionStateOf(missionDir) === null) {
+    throw new AdeError('mission_not_found', `missão ${missionId} não existe`, 2, { mission_id: missionId })
+  }
+  return withMissionLock(missionDir, missionId, async () => {
+    const state = missionStateOf(missionDir)
+    if (state !== 'awaiting_approval' && state !== 'planned') {
+      throw new AdeError('mission_not_recritiquable', `missão ${missionId} está em ${state}; só plano ainda não aprovado tem a crítica refeita`, 2, {
+        mission_id: missionId,
+        state,
+      })
+    }
+    const planPath = path.join(missionDir, 'plan.json')
+    const plan = readJsonIfExists(planPath)
+    const contracts = storyIdsOf(plan).map((id) => readJsonIfExists(path.join(missionDir, 'stories', `${id}.json`)))
+    const absent = storyIdsOf(plan).filter((_, i) => contracts[i] === null)
+    if (absent.length > 0) {
+      throw new AdeError('story_contract_missing', `contratos ausentes na missão ${missionId}: ${absent.join(', ')}`, 2, { mission_id: missionId })
+    }
+    const critics = planCriticsOf(plan, deps, resolvedRepoDir, true)
+    if (critics.length === 0) {
+      throw new AdeError('plan_critic_unavailable', 'nenhum crítico do plano: configure um papel codex ou agy em .ade/config.json', 2, { mission_id: missionId })
+    }
+    await critiqueInto(plan, contracts, critics, true)
+    writeJsonAtomic(planPath, plan)
+    return { missionId, planPath, digest: digest16(plan), state: approvalReasons(plan).length > 0 ? 'awaiting_approval' : 'planned', questions: [] }
   })
 }
 
@@ -1085,6 +1127,12 @@ export async function replanRemaining(
       ...version?.briefing,
     },
   }
+  // Plano corrigido: a crítica roda de novo antes de ele poder ser aprovado.
+  // Sem crítico disponível para revalidar um plano já criticado, a crítica grava 'failed' sem
+  // tentativas e o portão de aprovação fica fechado.
+  const mustRecritique = Boolean(oldPlan.briefing?.plan_critic)
+  const critics = planCriticsOf(newPlan, deps, resolvedRepoDir, mustRecritique)
+  if (critics.length > 0 || mustRecritique) await critiqueInto(newPlan, newContracts, critics, true)
   newPlan.immutable_digest = digest16(newPlan)
 
   const newPlanPath = path.join(newMissionDir, 'plan.json')

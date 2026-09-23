@@ -44,7 +44,7 @@ const PLAN_CRITIC_SCHEMA = {
 }
 
 type ModelRef = { family: string; model_id: string; effort?: string }
-type CriticInput = { plan: any; contracts: any[] }
+type CriticInput = { plan: any; contracts: any[]; epicAcceptance?: string[] }
 /** Chamada somente leitura de um papel: prompt e schema da resposta, na pasta da missão. */
 export type ModelCall = { missionId: string; stepId: string; prompt: string; schema: object }
 type RunOpts = {
@@ -54,14 +54,18 @@ type RunOpts = {
   resolveBinaryImpl: (command: string) => { exe: string; prefixArgs: string[] }
 }
 
-function criticPrompt({ plan, contracts }: CriticInput): string {
+function criticPrompt({ plan, contracts, epicAcceptance = [] }: CriticInput): string {
   const stories = planStoriesOf(contracts, plan.briefing?.human_decisions)
+  const epic = epicAcceptance.length > 0
+    ? ['Critérios do épico (cada um precisa de uma story que o entregue; o que faltar vira issue com story "novo" e fix descrevendo a story faltante):', ...epicAcceptance.map((c) => `- ${c}`)]
+    : []
   return [
     'Você vai criticar um PLANO, não código. Leia cada story como quem vai implementá-la agora; quem implementa investiga o repositório e decide detalhes locais.',
     'Aponte só bloqueios concretos: requisito contraditório, referência obrigatória inexistente (confira), contrato público incompatível, risco sem proteção, dependência entre stories não declarada, duas stories no mesmo trecho, story que precisa mudar arquivo fora do seu scope_paths.',
     'Falta de receita, exemplo, nome de variável ou mensagem exata não é defeito. Não peça escopo novo nem opine sobre estilo.',
     'Plano executável: verdict = "ready" e issues = []. Senão verdict = "revise" e até 10 issues com story (id), problem (uma frase) e fix (o texto concreto que falta). Responda em português no JSON exigido.',
     `Pedido do usuário: ${plan.intent}`,
+    ...epic,
     '--- PLANO ---',
     JSON.stringify({ stories }, null, 1).slice(0, PLAN_MAX_CHARS),
   ].join('\n')

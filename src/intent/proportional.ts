@@ -1,6 +1,7 @@
 // Planejamento proporcional (lição de proto/planning.mjs): a quantidade de stories segue o
 // trabalho, sem mínimo nem máximo; o que só o operador sabe vira decisão humana; a crítica
 // do plano tenta outra empresa antes de desistir.
+import { digest16 } from '../journal/canonical.ts'
 
 export type Issue = { story: string; problem: string }
 
@@ -75,20 +76,87 @@ export function needsPlanCritic(plan: any): boolean {
 }
 
 /**
- * Crítica do plano com até duas empresas: a primária e, se ela falha, a primeira de outra
- * família. Cada falha fica em `attempts`; se as duas falham, o veredito é `failed`.
+ * IDs das stories despacháveis declaradas pelo plano, na ordem do plano.
+ * Tolera estrutura inválida (fase nula, épico nulo, story não-string): a travessia
+ * nunca lança, e é o validador de schema que reporta as violações.
  */
-export async function critiquePlan(plan: any, critics: PlanCritic[]): Promise<Record<string, any>> {
+export function storyIdsOf(plan: any): string[] {
+  const phases = Array.isArray(plan?.phases) ? plan.phases : []
+  return phases.flatMap((phase: any) => {
+    const epics = Array.isArray(phase?.epics) ? phase.epics : []
+    return epics.flatMap((epic: any) => {
+      const stories = Array.isArray(epic?.stories) ? epic.stories : []
+      return stories.filter((id: any) => typeof id === 'string' && id !== '')
+    })
+  })
+}
+
+/** Digest das stories do plano: a crítica que leu outras stories está desatualizada. */
+export function planStoriesDigest(plan: any): string {
+  return digest16(storyIdsOf(plan))
+}
+
+/** Crítica gravada que não leu as stories atuais do plano. */
+export function planCriticStale(plan: any): boolean {
+  const critic = plan?.briefing?.plan_critic
+  return Boolean(critic) && critic.plan_digest !== planStoriesDigest(plan)
+}
+
+/** Palavras com peso de um texto, sem acento nem caixa. */
+function wordsOf(text: string): string[] {
+  return String(text ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length > 3)
+}
+
+/**
+ * Critérios do épico que nenhum texto entrega: coberto é o critério cujas palavras aparecem
+ * todas num mesmo texto (story ou issue 'novo' do crítico).
+ * ponytail: casamento por palavra inteira; flexão diferente ("mostra"/"mostrar") conta como falta.
+ */
+function uncoveredCriteria(criteria: string[], texts: string[]): string[] {
+  const bags = texts.map((t) => new Set(wordsOf(t)))
+  return criteria.filter((c) => !bags.some((bag) => wordsOf(c).every((w) => bag.has(w))))
+}
+
+/**
+ * Crítica do plano com até duas empresas: a primária e, se ela falha, a primeira de outra
+ * família. Cada falha fica em `attempts`; se as duas falham, o veredito é `failed`. O digest
+ * das stories lidas vai junto, e critério do épico sem story vira issue 'novo' com 'revise'
+ * mesmo quando o crítico disse 'ready' (lição de proto/server.mjs planCritic).
+ */
+export async function critiquePlan(
+  input: { plan: any; contracts: any[] },
+  critics: PlanCritic[],
+  { epicAcceptance = [] }: { epicAcceptance?: string[] } = {},
+): Promise<Record<string, any>> {
   const [primary] = critics
-  if (!primary) throw new TypeError('critiquePlan: nenhum crítico configurado')
+  const plan_digest = planStoriesDigest(input.plan)
+  // Sem crítico não há tentativa: a crítica sai 'failed' e o plano não segue sem aprovação.
+  if (!primary) return { verdict: 'failed', attempts: [], plan_digest }
   const fallback = critics.find((c) => c.family !== primary.family)
   const attempts: Array<{ family: string; model: string; error: string }> = []
   for (const critic of fallback ? [primary, fallback] : [primary]) {
     let error: string
     try {
-      const crit = await critic.critique(plan)
+      const crit = await critic.critique({ ...input, epicAcceptance })
       if (crit && typeof crit.verdict === 'string') {
-        return { ...crit, family: critic.family, model: critic.model, attempts }
+        const issues: any[] = Array.isArray(crit.issues) ? crit.issues : []
+        const texts = [
+          ...input.contracts.map((c) => [c.task, ...(c.scenarios ?? []).map((s: any) => `${s.given} ${s.when} ${s.then}`)].join(' ')),
+          ...issues.filter((i) => i.story === 'novo').map((i) => `${i.problem} ${i.fix}`),
+        ]
+        const missing = uncoveredCriteria(epicAcceptance, texts).map((c) => ({
+          story: 'novo',
+          problem: `nenhuma story entrega o critério do épico "${c}"`,
+          fix: `Criar story que entregue o critério do épico: ${c}`,
+        }))
+        const all = [...issues, ...missing]
+        const verdict = all.some((i) => i.story === 'novo') ? 'revise' : crit.verdict
+        return { ...crit, verdict, issues: all, family: critic.family, model: critic.model, attempts, plan_digest }
       }
       error = 'resposta sem verdict'
     } catch (err) {
@@ -96,7 +164,7 @@ export async function critiquePlan(plan: any, critics: PlanCritic[]): Promise<Re
     }
     attempts.push({ family: critic.family, model: critic.model, error })
   }
-  return { verdict: 'failed', attempts }
+  return { verdict: 'failed', attempts, plan_digest }
 }
 
 /** Motivos que impedem o plano de seguir sem `ade approve`; vazio quando nada pende. */
@@ -110,10 +178,17 @@ export function approvalReasons(plan: any): string[] {
     reasons.push(`plano da versão ${product.versions?.[plan.briefing.version_index]?.name ?? '?'} do briefing "${product.title}" exige aprovação`)
   }
   const critic = plan?.briefing?.plan_critic
+  if (planCriticStale(plan)) {
+    reasons.push(`crítica desatualizada: as stories mudaram depois dela; rode ade plan --mission ${plan.mission_id} --recritique`)
+  }
+  // Crítica nova de plano corrigido não aprova sozinha: a correção mudou o plano.
+  if (critic?.revalidated) reasons.push('plano corrigido exige aprovação')
   if (critic && critic.verdict !== 'ready') {
     reasons.push(
       critic.verdict === 'failed'
-        ? `crítica do plano falhou em ${critic.attempts.map((a: any) => a.family).join(' e ')}`
+        ? critic.attempts.length > 0
+          ? `crítica do plano falhou em ${critic.attempts.map((a: any) => a.family).join(' e ')}`
+          : `crítica do plano falhou: nenhum crítico disponível; rode ade plan --mission ${plan.mission_id} --recritique`
         : `crítica do plano pediu revisão: ${critic.summary ?? ''}`.trim(),
     )
   }
