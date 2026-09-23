@@ -249,6 +249,8 @@ export async function runCommand(options: {
     
     let checkerResolved: { exe: string; prefixArgs: string[] } | null
     
+    let agyResolved: { exe: string; prefixArgs: string[] } | null
+
     let workerEnv: Record<string, string> = {}
     if (env.ADE_FAKE_CLI === '1') {
       resolved = {
@@ -256,6 +258,7 @@ export async function runCommand(options: {
         prefixArgs: [fileURLToPath(new URL('../adapters/fake/cli.ts', import.meta.url))],
       }
       checkerResolved = resolved
+      agyResolved = resolved
       workerEnv = {
         ADE_FAKE_SCENARIO: env.ADE_FAKE_SCENARIO ?? '',
         ADE_FAKE_ROLE: 'maker',
@@ -271,6 +274,16 @@ export async function runCommand(options: {
         await journal.append({
           kind: 'checker_binary_unavailable',
           data: { family: 'codex', error: err instanceof Error ? err.message : String(err) },
+        })
+      }
+      // o Google só é despachado quando a fila o escolhe; sem binário, o degrau estaciona em vez de rodar o errado
+      try {
+        agyResolved = resolveBinary('agy')
+      } catch (err) {
+        agyResolved = null
+        await journal.append({
+          kind: 'family_binary_unavailable',
+          data: { family: 'agy', error: err instanceof Error ? err.message : String(err) },
         })
       }
       workerEnv = {}
@@ -375,6 +388,7 @@ export async function runCommand(options: {
       dispatchCodex: deps.dispatchCodex ?? dispatchCodex,
       resolved,
       checkerResolved,
+      agyResolved,
       workerEnv,
       quotaPort: deps.quotaPort ?? createLocalQuotaPort({
         receiptPath: path.join(homeDir, '.ade', 'quota-receipt.json'),

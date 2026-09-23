@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import { buildClaudeArgs } from './argv.ts'
 import { parseClaudeOutput, parseTokens, parseUnitResult, parseUsage } from './parse.ts'
+import { parseReviewResult } from '../codex/parse.ts'
 import { runWorker } from '../../runner/spawn.ts'
 import { safeId } from '../../gates/output.ts'
 import { assertPaidAuthorization } from '../../engine/paid-call.ts'
@@ -8,6 +9,7 @@ import { assertPaidAuthorization } from '../../engine/paid-call.ts'
 /**
  * Cunha o session id antes do spawn, monta os args do `claude` e despacha o efeito `model_call`
  * através do `step()` write-ahead, para que o journal já tenha o `session_ref` no instante do spawn.
+ * Com `role: 'checker_*'` o Claude revisa: só leitura e resposta pelo review-result.
  */
 export async function dispatchClaude(opts: {
     step: Function
@@ -20,7 +22,9 @@ export async function dispatchClaude(opts: {
     resultFile: string
     maxBudgetUsd: number
     model?: string
+    effort?: string
     maxTurns?: number
+    role?: string
     resolved: { exe: string; prefixArgs: string[] }
     timeoutS?: number
     env?: Record<string, string>
@@ -34,6 +38,7 @@ export async function dispatchClaude(opts: {
   session_ref: string
   exit_code: number | null
   unit_result: object | null
+  review_result: any | null
   valid: boolean
   cited: boolean
   usage: ReturnType<typeof parseUsage>
@@ -55,7 +60,9 @@ export async function dispatchClaude(opts: {
     resultFile,
     maxBudgetUsd,
     model,
+    effort,
     maxTurns,
+    role = 'maker',
     resolved,
     timeoutS = 1800,
     env = {},
@@ -70,8 +77,8 @@ export async function dispatchClaude(opts: {
   }
 
   const sessionId = randomUUID()
-  const args = buildClaudeArgs({ sessionId, packPath, maxBudgetUsd, model, mcpConfigPath, maxTurns })
-  const input = { pack_path: packPath, max_budget_usd: maxBudgetUsd, model: model ?? null, ...(maxTurns === undefined ? {} : { max_turns: maxTurns }) }
+  const args = buildClaudeArgs({ sessionId, packPath, maxBudgetUsd, model, effort, mcpConfigPath, maxTurns, role })
+  const input = { pack_path: packPath, max_budget_usd: maxBudgetUsd, model: model ?? null, ...(effort === undefined ? {} : { effort }), ...(maxTurns === undefined ? {} : { max_turns: maxTurns }) }
 
   const r = await step({ unit, id: stepId, effect_class: 'model_call', input, session_ref: sessionId }, async () => {
     const result = await runWorkerImpl({
@@ -94,14 +101,18 @@ export async function dispatchClaude(opts: {
     })
 
     const { envelope, error } = parseClaudeOutput(result.stdout)
-    const pu = parseUnitResult(envelope)
-    const usage = parseUsage(envelope, 'maker')
+    // a revisão só vale vinda de structured_output: o envelope do Claude não é uma revisão
+    const pu = role === 'maker'
+      ? { ...parseUnitResult(envelope), review_result: null }
+      : { ...parseReviewResult(envelope?.structured_output ? envelope : null), unit_result: null }
+    const usage = parseUsage(envelope, role)
     const tokens = parseTokens(envelope)
 
     return {
       session_ref: sessionId,
       exit_code: result.exitCode,
       unit_result: pu.unit_result,
+      review_result: pu.review_result,
       valid: pu.valid,
       cited: pu.cited,
       usage,
@@ -124,6 +135,7 @@ export async function dispatchClaude(opts: {
     session_ref: effectResult.session_ref,
     exit_code: effectResult.exit_code,
     unit_result: effectResult.unit_result,
+    review_result: effectResult.review_result ?? null,
     valid: effectResult.valid,
     cited: effectResult.cited,
     usage: effectResult.usage,

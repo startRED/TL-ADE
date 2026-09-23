@@ -10,13 +10,17 @@ import { authorizedStep } from './engine/paid-call.ts'
 import { maybeEngineFault } from './engine/faults.ts'
 import { findStoryCommitted, findStoryStarted } from './engine/resume.ts'
 import { preserveInterruptedTree } from './engine/preserve.ts'
-import { classifyCallFailure, pauseForQuota, waitQuotaPause } from './engine/quota.ts'
-import { buildLadder, classifyMakerOutcome, correctionRequest, ladderStart, nextAttempt, reserveRung, type MakerOutcome } from './engine/ladder.ts'
+import { classifyCallFailure, pauseForQuota, refreshChains, waitQuotaPause } from './engine/quota.ts'
+import { buildLadder, classifyMakerOutcome, correctionRequest, ladderStart, nextAttempt, reserveRung, roundsPerRung, type MakerOutcome } from './engine/ladder.ts'
+import { blockedInContract, cliModel } from './models/route.ts'
+import { readModelSettings } from './models/settings.ts'
+import { storyRisk } from './intent/risk.ts'
 import { dedupStorySection } from './pack/dedup.ts'
 import { measurePackBytes, telemetrySections } from './pack/pack.ts'
 import { buildStoryContext, guardStoryContext } from './context/story.ts'
 import { dispatchClaude } from './adapters/claude/index.ts'
 import { dispatchCodex } from './adapters/codex/index.ts'
+import { dispatchAgyUnit } from './adapters/agy/index.ts'
 import { runFrontendQuality } from './visual/evaluate.ts'
 import { createDesignToolServer } from './visual/design-server.ts'
 export { nextReady, runSequentialMission } from './engine/schedule.ts'
@@ -90,7 +94,7 @@ function packTelemetry(manifest: any) {
  * @param input.repoDir Diretório raiz do repositório alvo.
  * @param input.missionDir Diretório de trabalho da missão em .ade/missions/<mission_id>.
  */
-export async function runStory(deps: { journal: { append: (event: Record<string, unknown>) => Promise<Record<string, unknown>> }; step: (spec: { unit: string; id: string; effect_class: string; input: unknown }, effectFn: () => Promise<unknown>) => Promise<{ step_id: string; status: string; result: unknown; reused: boolean }>; gitPortFor: (dir: string) => import('./git/gitport.ts').GitPort; prepareStory: (opts: { repoDir: string; missionId: string; storyId: string }) => Promise<any>; createEvalRunner: (opts: { step: any; missionDir: string; gitPort: any }) => { runEval: (opts: any) => Promise<any> }; createGateRunner: (opts: { step: any; missionDir: string; gitPort: any; packageJson?: any }) => { runGates: (opts: any) => Promise<any> }; compilePack: (opts: any) => { pack_path: string; manifest_path: string; manifest: any }; contain: (opts: any) => Promise<any>; plantCanary: (opts: { worktreeDir: string; outsideDir: string; unitId: string }) => Promise<any> | any; checkCanary: (canary: any) => Promise<any> | any; dispatchClaude: (opts: any) => Promise<any>; dispatchCodex?: (opts: any) => Promise<any>; checkerResolved?: { exe: string; prefixArgs: string[] } | null; reconcileAll?: any; resolved: { exe: string; prefixArgs: string[] }; workerEnv: Record<string, string>; capabilities: { probe_ok: boolean | null }; env?: NodeJS.ProcessEnv; now?: () => number; sleep?: (ms: number) => Promise<unknown>; quotaPort: { readReceipt: ({ family, now }: { family: string; now: number }) => Promise<any> }; preflight?: (opts: { story: any; loaded: any; repoDir: string; events: any[] }) => Promise<{ ready: boolean; checks: any[]; failures: any[]; calls_avoided: number }> }, input: { loaded: import('./engine/plan-load.ts').LoadedPlan; story: import('./engine/plan-load.ts').LoadedStory; repoDir: string; missionDir: string }): Promise<{ status: 'committed' | 'delivered' | 'awaiting_operator'; exitCode: 0 | 3; reason: string | null; commit: string | null; delivered: boolean }> {
+export async function runStory(deps: { journal: { append: (event: Record<string, unknown>) => Promise<Record<string, unknown>> }; step: (spec: { unit: string; id: string; effect_class: string; input: unknown }, effectFn: () => Promise<unknown>) => Promise<{ step_id: string; status: string; result: unknown; reused: boolean }>; gitPortFor: (dir: string) => import('./git/gitport.ts').GitPort; prepareStory: (opts: { repoDir: string; missionId: string; storyId: string }) => Promise<any>; createEvalRunner: (opts: { step: any; missionDir: string; gitPort: any }) => { runEval: (opts: any) => Promise<any> }; createGateRunner: (opts: { step: any; missionDir: string; gitPort: any; packageJson?: any }) => { runGates: (opts: any) => Promise<any> }; compilePack: (opts: any) => { pack_path: string; manifest_path: string; manifest: any }; contain: (opts: any) => Promise<any>; plantCanary: (opts: { worktreeDir: string; outsideDir: string; unitId: string }) => Promise<any> | any; checkCanary: (canary: any) => Promise<any> | any; dispatchClaude: (opts: any) => Promise<any>; dispatchCodex?: (opts: any) => Promise<any>; checkerResolved?: { exe: string; prefixArgs: string[] } | null; agyResolved?: { exe: string; prefixArgs: string[] } | null; dispatchAgy?: (opts: any) => Promise<any>; reconcileAll?: any; resolved: { exe: string; prefixArgs: string[] }; workerEnv: Record<string, string>; capabilities: { probe_ok: boolean | null }; env?: NodeJS.ProcessEnv; now?: () => number; sleep?: (ms: number) => Promise<unknown>; quotaPort: { readReceipt: ({ family, now }: { family: string; now: number }) => Promise<any> }; preflight?: (opts: { story: any; loaded: any; repoDir: string; events: any[] }) => Promise<{ ready: boolean; checks: any[]; failures: any[]; calls_avoided: number }> }, input: { loaded: import('./engine/plan-load.ts').LoadedPlan; story: import('./engine/plan-load.ts').LoadedStory; repoDir: string; missionDir: string }): Promise<{ status: 'committed' | 'delivered' | 'awaiting_operator'; exitCode: 0 | 3; reason: string | null; commit: string | null; delivered: boolean }> {
   const result = await runStoryImpl({ ...deps, journal: withDeliveryFlag(deps.journal) }, input)
   return { ...result, delivered: result.status === 'delivered' }
 }
@@ -143,6 +147,10 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   const readEvents = () => {
     const res = readJournal(journalPath)
     return res.events || []
+  }
+  const parkStory = async (reason: string) => {
+    await deps.journal.append({ kind: 'story_done', unit: storyId, data: { status: 'awaiting_operator', reason, unit: storyId, commit: null } })
+    return { status: 'awaiting_operator' as const, exitCode: 3 as const, reason, commit: null }
   }
 
   // Anexa batch_open se ausente
@@ -216,6 +224,21 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     }
   }
 
+  // Filas pelos planos do usuário (ADR 0033), refeitas a cada parte e ao retomar de pausa por cota; sem planos valem os
+  // papéis do contrato, com o bloqueio do usuário conferido antes de qualquer despacho. O plano aprovado não muda.
+  const settings = readModelSettings(repoDir)
+  const refresh = () => refreshChains({ journal: deps.journal, quotaPort: deps.quotaPort, settings, repoDir, events: readEvents(), contract, now: deps.now?.() ?? Date.now() })
+  const noWriter = () => parkStory(settings.blocked.length > 0
+    ? `modelo bloqueado pelo usuário: nenhum modelo sobrou para escrever (${settings.blocked.join(', ')})`
+    : 'no_writer_available')
+  let routed = await refresh()
+  if (routed && routed.chains.fix.length === 0) return await noWriter()
+  if (!routed) {
+    const blocked = blockedInContract(settings, contract, deps.makerLadder ?? [])
+    if (blocked) return await parkStory(`modelo bloqueado pelo usuário: ${blocked.model} (${blocked.role})`)
+  }
+  const writerFamily = routed ? routed.chains.fix[0].family : makerFamily
+
   // Autoriza e reserva a chamada paga antes de preparar a worktree.
   assertCallBudget(loaded.plan.budget, 'plan')
   assertCallBudget(contract.budget, 'contract')
@@ -264,10 +287,10 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     !Array.isArray(previousReservationData)
     ? (previousReservationData).quota_receipt
     : undefined
-  let quotaReceipt = previousQuotaReceipt ?? await deps.quotaPort.readReceipt({
+  let quotaReceipt = previousQuotaReceipt ?? (routed ? routed.receipts[writerFamily as keyof typeof routed.receipts] ?? null : await deps.quotaPort.readReceipt({
     family: makerFamily,
     now: deps.now?.() ?? Date.now(),
-  })
+  }))
   const hasPreviousReservation = Boolean(previousReservation)
   // Teto efetivo da chamada: o menor entre o teto da missão e o do contrato. A reserva é o que o
   // despacho leva ao modelo, então reservar só o teto do contrato deixaria gastar acima da missão.
@@ -300,7 +323,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       ...contract.budget,
       max_model_calls: Number.isFinite(effectiveMaxCalls) ? effectiveMaxCalls + 1 : undefined,
     },
-    family: makerFamily,
+    family: writerFamily,
     phase: 'implementation',
     requested_calls: hasPreviousReservation ? 0 : (contract.needs_ui ? 2 : 1),
     requested_usd: requestedUsd,
@@ -618,19 +641,25 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   let claimedWrongTests: string[] = []
   let allowedWrongTests: string[] = []
   let treeBeforeRound = treeBefore
-  // Escada de quem escreve: os degraus vêm de quem chama; sem eles, só o maker do contrato.
-  const rungs = deps.makerLadder ?? [{ model: makerModel ?? null, family: makerFamily }]
-  if (rungs.some((rung: { family?: unknown }) => rung.family !== makerFamily)) {
-    throw new AdeError('invalid_ladder', `degrau fora da família do maker (${makerFamily}), sem despachante`, 4)
+  // Escada de quem escreve: a fila `fix` com planos; sem eles, os degraus de quem chama ou só o maker do contrato. Cada
+  // degrau vai pelo despachante da sua empresa; com planos, as rodadas por degrau seguem o risco da parte.
+  const dispatcherFor = (family: string) => ({ claude: deps.dispatchClaude ?? dispatchClaude, codex: deps.dispatchCodex ?? dispatchCodex, agy: deps.dispatchAgy ?? dispatchAgyUnit } as Record<string, ((opts: any) => Promise<any>) | undefined>)[family]
+  // cada empresa usa o binário que a fiação resolveu para ela; `null` explícito = não achou; sem fiação (dublês), o do Claude
+  const binaryFor = (family: string) => {
+    const own = family === 'codex' ? deps.checkerResolved : family === 'agy' ? deps.agyResolved : deps.resolved
+    return own === undefined ? deps.resolved : own
   }
-  let ladderState = ladderStart(buildLadder(rungs))
+  const startLadder = (route: typeof routed) => {
+    const rungs = route
+      ? route.chains.fix.map((slot) => ({ model: slot.model, family: slot.family, effort: slot.effort, reserve: slot.reserve }))
+      : (deps.makerLadder ?? [{ model: makerModel ?? null, family: makerFamily }])
+    const orphan = rungs.find((rung: { family: string }) => !dispatcherFor(rung.family))
+    if (orphan) throw new AdeError('invalid_ladder', `degrau da família ${orphan.family} sem despachante`, 4)
+    return ladderStart(buildLadder(rungs), route ? roundsPerRung(storyRisk(contract)) : undefined)
+  }
+  let ladderState = startLadder(routed)
   let attempt = 0
   let treeBeforeAttempt = treeBefore
-
-  const parkStory = async (reason: string) => {
-    await deps.journal.append({ kind: 'story_done', unit: storyId, data: { status: 'awaiting_operator', reason, unit: storyId, commit: null } })
-    return { status: 'awaiting_operator' as const, exitCode: 3 as const, reason, commit: null }
-  }
 
   // Aplica a decisão da escada; troca de degrau passa pela reserva de chamadas e, negada, estaciona.
   const climbLadder = async (outcome: MakerOutcome, rejectReason = 'rework_exhausted') => {
@@ -672,10 +701,16 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   while (true) {
     // Pausa por cota aberta (desta chamada ou de antes do reinício): dorme até a renovação e retoma sem aprovação nova.
     if (await waitQuotaPause({ journal: deps.journal, events: readEvents(), now: () => deps.now?.() ?? Date.now(), sleep: deps.sleep })) {
-      // o recibo de antes da pausa pode ter vencido na espera
-      quotaReceipt = await deps.quotaPort.readReceipt({ family: makerFamily, now: deps.now?.() ?? Date.now() })
+      // o recibo de antes da pausa pode ter vencido na espera; com planos, as filas são refeitas com a leitura nova
+      if (routed) {
+        routed = await refresh()
+        if (!routed || routed.chains.fix.length === 0) return await noWriter()
+        if (routed.changed) ladderState = startLadder(routed)
+      }
+      const family = ladderState.ladder[ladderState.rung].family
+      quotaReceipt = routed ? routed.receipts[family as keyof typeof routed.receipts] ?? null : await deps.quotaPort.readReceipt({ family, now: deps.now?.() ?? Date.now() })
       const quota = validateQuotaReceipt(quotaReceipt, {
-        family: makerFamily,
+        family,
         max_percent: loaded.missionBudget.max_subscription_weekly_percent ?? 50,
         now: deps.now?.() ?? Date.now(),
       })
@@ -733,13 +768,19 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     }
 
     const makerStartedAt = deps.now?.() ?? Date.now()
-    
+    // quem escreve esta rodada: o degrau atual da escada, pela empresa dele
+    const rung = ladderState.ladder[ladderState.rung]
+    const makerCliModel = rung.model === null ? undefined : cliModel({ ...rung, model: rung.model })
+    const makerResolved = binaryFor(rung.family)
+    if (!makerResolved) return await parkStory('writer_dispatch_unavailable')
+    let filesTouched = 0
+
     const paidAuthorization: import('./engine/paid-call.ts').PaidCallAuthorization = {
       authorized: true,
-      family: makerFamily,
+      family: rung.family,
       phase: round === 1 ? 'implementation' : 'rework',
-      reservation: authorizedReservation,
-      quota_receipt: quotaReceipt,
+      reservation: { ...authorizedReservation, family: rung.family },
+      quota_receipt: routed ? routed.receipts[rung.family as keyof typeof routed.receipts] ?? null : quotaReceipt,
       context_bytes: contextBytes,
       weekly_percent_cap: loaded.missionBudget.max_subscription_weekly_percent ?? 50,
     }
@@ -775,10 +816,10 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         mission_id: missionId,
         story_id: storyId,
         step_id: `${storyId}:${tag}:maker`,
-        family: 'claude',
+        family: rung.family,
         role: 'maker',
-        effort: 'default',
-        models: modelsFromUsage(dispatch?.usage?.models ?? [], makerModel ?? null),
+        effort: rung.effort ?? 'default',
+        models: modelsFromUsage(dispatch?.usage?.models ?? [], makerCliModel ?? makerModel ?? null),
         duration_ms: dispatch === undefined ? Math.max(0, (deps.now?.() ?? Date.now()) - makerStartedAt) : makerDurationMs,
         tokens: dispatch?.tokens ?? { source: 'unavailable' },
         usage: dispatch?.usage,
@@ -789,16 +830,17 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         ttft_ms: null,
         approval_decisions: 0,
         network_attempts: 0,
-        files_touched: 0,
+        files_touched: filesTouched,
         tool_output_raw_bytes: 0,
         tool_output_model_bytes: 0,
       }),
     })
 
-    
+    const dispatchMaker = dispatcherFor(rung.family)
+    if (!dispatchMaker) throw new AdeError('invalid_ladder', `degrau da família ${rung.family} sem despachante`, 4)
     let dispatch: any
     try {
-      dispatch = await deps.dispatchClaude({
+      dispatch = await dispatchMaker({
         // O bloqueio da chamada paga fica no `step()` write-ahead: o efeito `model_call` só chega ao
         // spawn se o teto despachado for exatamente a reserva autorizada.
         step: authorizedStep(
@@ -815,11 +857,13 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         cwd: worktreeDir,
         resultFile,
         maxBudgetUsd: authorizedReservation.usd,
-        resolved: deps.resolved,
+        resolved: makerResolved,
         env: workerEnv,
         mcpConfigPath,
-        // sem isto o maker rodava no padrão da CLI do Claude e o model_id do contrato não valia nada
-        model: ladderState.ladder[ladderState.rung].model ?? undefined,
+        // sem isto o maker rodava no padrão da CLI e o modelo escolhido não valia nada; o Google leva o esforço no nome
+        model: makerCliModel,
+        ...(rung.effort && rung.family !== 'agy' ? { effort: rung.effort } : {}),
+        ...(rung.family === 'claude' ? {} : { role: 'maker' }),
         maxTurns: ladderState.maxTurns,
       })
     } catch (err) {
@@ -918,6 +962,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     }
 
     const changedPaths = containResult.changedPaths ?? []
+    filesTouched = changedPaths.length
 
     // Na primeira tentativa o diff da contenção é o da própria chamada; depois, compara a árvore da tentativa.
     const makerOutcome = classifyMakerOutcome({
@@ -1159,7 +1204,10 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       }
     }
 
-    if (!checkerRole) {
+    // com planos, o revisor é o primeiro da fila de empresa diferente de quem escreveu esta rodada (ADR 0005, emendado)
+    const checkerSlot = routed ? routed.chains.checker.find((slot) => slot.family !== rung.family) : undefined
+    // sem planos, o revisor fixo do contrato só vale se não for da empresa de quem escreveu a rodada (a reserva pode ser)
+    if (routed ? !checkerSlot : !checkerRole || checkerRole.family === rung.family) {
       await deps.journal.append({
         kind: 'story_done',
         unit: storyId,
@@ -1178,17 +1226,15 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       }
     }
 
-    // Checker dispatch
-    const checkerDispatchFn =
-      checkerRole.family === 'claude'
-        ? (deps.dispatchClaude ?? dispatchClaude)
-        : (deps.dispatchCodex ?? dispatchCodex)
+    const checker = checkerSlot
+      ? { family: checkerSlot.family as string, model: cliModel(checkerSlot), effort: checkerSlot.effort as string | null }
+      : { family: checkerRole.family as string, model: checkerRole.model_id as string | undefined, effort: null }
+    const checkerDispatchFn = dispatcherFor(checker.family)
 
     // O Checker roda em outra família: usa o binário dela. Quem não fia `checkerResolved`
     // (provas com dublê) fica com o resolvido do Maker; `null` explícito significa que a
     // fiação tentou resolver e não achou, e aí não há revisão independente possível.
-    const checkerResolved =
-      deps.checkerResolved === undefined ? deps.resolved : deps.checkerResolved
+    const checkerResolved = binaryFor(checker.family)
 
     if (!checkerDispatchFn || !checkerResolved) {
       await deps.journal.append({
@@ -1260,10 +1306,10 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         mission_id: missionId,
         story_id: storyId,
         step_id: checkerStepId,
-        family: 'codex',
+        family: checker.family,
         role: 'checker_round',
-        effort: 'default',
-        models: modelsFromUsage([], checkerRole.model_id ?? null),
+        effort: checker.effort ?? 'default',
+        models: modelsFromUsage([], checker.model ?? null),
         duration_ms: Math.max(0, (deps.now?.() ?? Date.now()) - checkerStartedAt),
         tokens: dispatch?.tokens ?? { source: 'unavailable' },
         usage: dispatch?.usage,
@@ -1297,7 +1343,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         cwd: worktreeDir,
         resultFile: checkerResultFile,
         maxBudgetUsd: authorizedReservation.usd,
-        model: checkerRole.model_id,
+        model: checker.model,
+        ...(checker.effort && checker.family !== 'agy' ? { effort: checker.effort } : {}),
         resolved: checkerResolved,
         env: checkerWorkerEnv,
         role: 'checker_round',

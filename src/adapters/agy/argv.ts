@@ -14,6 +14,7 @@ export function buildAgyArgs(opts: {
     cwd?: string
     timeout?: string
     readOnly?: boolean
+    addDirs?: string[]
   }): string[] {
   const {
     prompt,
@@ -21,6 +22,8 @@ export function buildAgyArgs(opts: {
     schema,
     cwd,
     timeout = '6m',
+    readOnly = true,
+    addDirs = [],
   } = opts ?? {}
 
   if (typeof prompt !== 'string' || prompt.trim() === '') {
@@ -34,13 +37,13 @@ export function buildAgyArgs(opts: {
     'json',
     '--model',
     model,
-    '--mode',
-    'plan',
+    // sem `--mode plan` o agy escreve no diretório de trabalho (quem escreve a parte)
+    ...(readOnly ? ['--mode', 'plan'] : []),
     '--dangerously-skip-permissions',
   ]
 
-  if (cwd) {
-    args.push('--add-dir', cwd)
+  for (const dir of cwd ? [cwd, ...addDirs] : addDirs) {
+    args.push('--add-dir', dir)
   }
 
   if (schema) {

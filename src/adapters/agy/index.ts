@@ -9,6 +9,10 @@ import { plantCanary, checkCanary } from '../../contain/canary.ts'
 import { buildAgyArgs } from './argv.ts'
 import { parseAgyFinding, parseAgyOutput, parseAgyUsage } from './parse.ts'
 import { buildModelTelemetry, modelsFromUsage } from '../../telemetry/telemetry.ts'
+import { parseReviewResult } from '../codex/parse.ts'
+import { parseUnitResult } from '../claude/parse.ts'
+import { assertPaidAuthorization } from '../../engine/paid-call.ts'
+import fs from 'node:fs'
 
 let agyAvailable = true
 
@@ -256,5 +260,98 @@ export async function dispatchAgy(opts: {
     usage,
     session_ref: effectRes.session_ref || sessionId,
     telemetry: telemetryFor(usage, 'ok'),
+  }
+}
+
+/**
+ * Despacha uma rodada de parte para o agy: quem escreve (`maker`, com escrita no worktree e o schema de resultado de
+ * unidade) ou quem revisa (`checker_round`, somente leitura com o schema de revisão). O esforço vai no nome do modelo
+ * (gemini-3.8-flash-high).
+ * O pack vai por arquivo, não no argv, para não estourar o limite da linha de comando.
+ */
+export async function dispatchAgyUnit(opts: {
+    step: Function
+    unit: string
+    stepId: string
+    packPath: string
+    missionDir: string
+    missionId: string
+    cwd: string
+    resultFile: string
+    resolved: { exe: string; prefixArgs: string[] }
+    model?: string
+    role?: string
+    maxBudgetUsd?: number
+    authorization?: any
+    timeoutS?: number
+    env?: Record<string, string>
+    runWorkerImpl?: typeof runWorker
+  }) {
+  const { step, unit, stepId, packPath, missionDir, missionId, cwd, resultFile, resolved, model = 'gemini-3.8-flash-medium', role = 'maker', maxBudgetUsd = 0.25, authorization, timeoutS = 1800, env = {}, runWorkerImpl = runWorker } = opts
+  const isChecker = role.startsWith('checker')
+  if (!isChecker && role !== 'maker') throw new AdeError('agy_role_unsupported', `papel sem suporte no adapter agy: ${role}`, 4)
+  if (!agyAvailable) throw new AdeError('family_unavailable', 'família agy indisponível devido a violação de contenção anterior', 4)
+  if (!resolved || typeof resolved.exe !== 'string') throw new AdeError('binary_not_found', 'executável do agy não encontrado', 2)
+  if (!fs.existsSync(packPath)) throw new AdeError('agy_pack_missing', `pack ausente em ${packPath}`, 4)
+  if (authorization) assertPaidAuthorization(authorization, maxBudgetUsd)
+
+  const prompt = `Leia o pacote de contexto em ${packPath} e cumpra a tarefa descrita nele${isChecker ? ' sem alterar nenhum arquivo' : ''}.`
+  const args = buildAgyArgs({
+    prompt,
+    model,
+    cwd,
+    addDirs: [path.dirname(packPath)],
+    readOnly: isChecker,
+    timeout: `${Math.ceil(timeoutS / 60)}m`,
+    schema: fs.readFileSync(new URL(`../../../schemas/${isChecker ? 'review-result' : 'unit-result'}.schema.json`, import.meta.url), 'utf8'),
+  })
+
+  const r = await step({ unit, id: stepId, effect_class: 'model_call', input: { pack_path: packPath, max_budget_usd: maxBudgetUsd, model, role }, session_ref: null }, async () => {
+    const result = await runWorkerImpl({
+      resolved,
+      args,
+      cwd,
+      missionDir,
+      missionId,
+      stepId: safeId(stepId),
+      request: { unit, authorization: 'unattended', cwd, argv: [resolved.exe, ...resolved.prefixArgs, ...args], timeout: timeoutS, result_file: resultFile },
+      timeoutS,
+      env: { ...env, ...(isChecker ? { AGY_READ_ONLY: '1' } : {}) },
+    })
+    const { envelope, error } = parseAgyOutput(result.stdout)
+    const parsed = isChecker ? { ...parseReviewResult(envelope), unit_result: null } : { ...parseUnitResult(envelope), review_result: null }
+    const usage = parseAgyUsage(envelope, isChecker ? 'checker_round' : 'maker')
+    const failed = result.exitCode !== 0 || envelope?.is_error === true
+    return {
+      exit_code: result.exitCode,
+      review_result: parsed.review_result ?? null,
+      unit_result: parsed.unit_result,
+      valid: parsed.valid,
+      cited: parsed.cited,
+      usage,
+      tokens: usage.tokens && usage.tokens.source !== 'unavailable' ? { ...usage.tokens, source: 'reported' } : { source: 'unavailable' },
+      envelope_error: error,
+      // a escada lê o texto final; num erro, a mensagem vai para a classificação de cota
+      is_error: failed,
+      result_text: failed ? String(result.stderr || result.stdout) : typeof envelope?.response === 'string' ? envelope.response : '',
+    }
+  })
+  const e = r.result ?? {}
+  return {
+    step_id: r.step_id,
+    status: r.status,
+    session_ref: null,
+    exit_code: e.exit_code ?? null,
+    review_result: e.review_result ?? null,
+    unit_result: e.unit_result ?? null,
+    valid: e.valid ?? false,
+    cited: e.cited ?? false,
+    usage: e.usage,
+    tokens: e.tokens ?? { source: 'unavailable' },
+    envelope_error: e.envelope_error ?? null,
+    subtype: null,
+    num_turns: null,
+    is_error: e.is_error === true,
+    result_text: e.result_text ?? '',
   }
 }

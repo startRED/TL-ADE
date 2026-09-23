@@ -2,13 +2,20 @@ import fs from 'node:fs'
 import { AdeError } from '../../journal/errors.ts'
 
 const SCHEMA_URL = new URL('../../../schemas/unit-result.schema.json', import.meta.url)
+const REVIEW_SCHEMA_URL = new URL('../../../schemas/review-result.schema.json', import.meta.url)
+
+// O revisor é só leitura: sem ferramenta que escreve nem shell (o Claude não tem sandbox de leitura para o Bash).
+// ponytail: sem Bash o revisor não roda comandos; liberar os de leitura quando houver sandbox de leitura no Claude.
+const CHECKER_DISALLOWED = 'Bash,Edit,MultiEdit,Write,NotebookEdit'
+
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 
 const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export const CLAUDE_PROMPT = 'Siga a seção task do contexto anexado e responda somente pelo schema.'
 
-function loadSchemaJson() {
-  const raw = JSON.parse(fs.readFileSync(SCHEMA_URL, 'utf8'))
+function loadSchemaJson(url: URL) {
+  const raw = JSON.parse(fs.readFileSync(url, 'utf8'))
   delete raw.$id
   delete raw.$schema
   return JSON.stringify(raw)
@@ -16,9 +23,10 @@ function loadSchemaJson() {
 
 /**
  * Monta o argv para invocar o `claude` real seguindo a ordem fixa de flags decidida para o Slice 1.
+ * Quem escreve (`maker`, o padrão) responde pelo unit-result; quem revisa (`checker_*`) pelo review-result, só leitura.
  */
-export function buildClaudeArgs(opts: { sessionId: string; packPath: string; maxBudgetUsd: number; model?: string; mcpConfigPath?: string; maxTurns?: number }): string[] {
-  const { sessionId, packPath, maxBudgetUsd, model } = opts ?? {}
+export function buildClaudeArgs(opts: { sessionId: string; packPath: string; maxBudgetUsd: number; model?: string; effort?: string; mcpConfigPath?: string; maxTurns?: number; role?: string }): string[] {
+  const { sessionId, packPath, maxBudgetUsd, model, role = 'maker' } = opts ?? {}
 
   if (typeof sessionId !== 'string' || (!SESSION_ID_RE.test(sessionId) && sessionId !== 's')) {
     throw new AdeError('invalid_claude_args', 'sessionId inválido', 2)
@@ -32,6 +40,10 @@ export function buildClaudeArgs(opts: { sessionId: string; packPath: string; max
   if (model !== undefined && (typeof model !== 'string' || model === '')) {
     throw new AdeError('invalid_claude_args', 'model inválido', 2)
   }
+  if (typeof role !== 'string' || !(role === 'maker' || role.startsWith('checker'))) {
+    throw new AdeError('invalid_claude_args', `papel sem suporte no adapter claude: ${String(role)}`, 2)
+  }
+  const checker = role !== 'maker'
 
   const args = [
     '-p',
@@ -39,7 +51,7 @@ export function buildClaudeArgs(opts: { sessionId: string; packPath: string; max
     '--output-format',
     'json',
     '--json-schema',
-    loadSchemaJson(),
+    loadSchemaJson(checker ? REVIEW_SCHEMA_URL : SCHEMA_URL),
     '--session-id',
     sessionId,
     '--max-budget-usd',
@@ -50,13 +62,18 @@ export function buildClaudeArgs(opts: { sessionId: string; packPath: string; max
     '--permission-prompts',
     'none',
     '--disallowedTools',
-    'Bash(git push*),Bash(gh pr*)',
+    checker ? CHECKER_DISALLOWED : 'Bash(git push*),Bash(gh pr*)',
     '--append-system-prompt-file',
     packPath,
   ]
 
   if (model !== undefined) {
     args.push('--model', model)
+  }
+
+  if (opts?.effort !== undefined) {
+    if (!EFFORTS.includes(opts.effort)) throw new AdeError('invalid_claude_args', `effort inválido: ${opts.effort}`, 2)
+    args.push('--effort', opts.effort)
   }
 
   if (opts?.maxTurns !== undefined) {

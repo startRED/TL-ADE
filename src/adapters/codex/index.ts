@@ -11,6 +11,7 @@ import { assertPaidAuthorization } from '../../engine/paid-call.ts'
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url))
 const DEFAULT_REVIEW_SCHEMA = path.join(ROOT, 'schemas/review-result.schema.json')
+const UNIT_RESULT_SCHEMA = path.join(ROOT, 'schemas/unit-result.schema.json')
 
 /**
  * Despacha execução do modelo para o Codex via `step()` write-ahead.
@@ -46,6 +47,10 @@ export async function dispatchCodex(opts: {
   cited: boolean
   tokens: any
   envelope_error: null | 'empty' | 'not_json' | 'truncated_json'
+  subtype: null
+  num_turns: null
+  is_error: boolean
+  result_text: string
 }> {
   const {
     step,
@@ -66,12 +71,12 @@ export async function dispatchCodex(opts: {
     role = 'checker_round',
     effort,
     sandbox,
-    schemaPath = DEFAULT_REVIEW_SCHEMA,
+    schemaPath = role === 'maker' ? UNIT_RESULT_SCHEMA : DEFAULT_REVIEW_SCHEMA,
   } = opts ?? {}
 
-  // Este adapter só conhece o contrato de revisão (review-result). Papel de Maker não é
-  // suportado aqui: aceitá-lo calado devolveria uma revisão no lugar do resultado de unidade.
-  if (typeof role !== 'string' || !role.startsWith('checker')) {
+  // Revisão (review-result) ou quem escreve a parte (`maker`, sandbox de escrita e unit-result); outro papel é erro.
+  const isMaker = role === 'maker'
+  if (typeof role !== 'string' || !(isMaker || role.startsWith('checker'))) {
     throw new AdeError('codex_role_unsupported', `papel sem suporte no adapter codex: ${role}`, 4)
   }
 
@@ -117,7 +122,7 @@ export async function dispatchCodex(opts: {
     
     const workerEnv: Record<string, string> = {
       ...env,
-      ADE_FAKE_ROLE: 'checker',
+      ADE_FAKE_ROLE: isMaker ? 'maker' : 'checker',
       ADE_FAKE_RESULT_FILE: resultFile,
     }
 
@@ -144,12 +149,16 @@ export async function dispatchCodex(opts: {
     const { envelope, error } = parseCodexOutput(result.stdout, resultFile)
     const pr = parseReviewResult(envelope)
     const tokens = parseCodexTokens(envelope)
+    const failed = result.exitCode !== 0
 
     return {
       session_ref: null,
       exit_code: result.exitCode,
-      review_result: pr.review_result,
-      unit_result: null,
+      review_result: isMaker ? null : pr.review_result,
+      unit_result: isMaker ? envelope?.structured_output ?? envelope : null,
+      // a escada lê o erro para classificar cota e bloqueio de ambiente
+      is_error: failed,
+      result_text: failed ? String(result.stderr || result.stdout) : '',
       valid: pr.valid,
       cited: pr.cited,
       tokens,
@@ -170,5 +179,9 @@ export async function dispatchCodex(opts: {
     cited: effectResult?.cited ?? false,
     tokens: effectResult?.tokens ?? { source: 'unavailable' },
     envelope_error: effectResult?.envelope_error ?? null,
+    subtype: null,
+    num_turns: null,
+    is_error: effectResult?.is_error === true,
+    result_text: effectResult?.result_text ?? '',
   }
 }

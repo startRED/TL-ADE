@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import { describe, expect, test, vi } from 'vitest'
 import { dispatchClaude } from '../../src/adapters/claude/index.ts'
 import * as parseModule from '../../src/adapters/claude/parse.ts'
@@ -205,5 +206,32 @@ describe('claude token parsing and telemetry adapter', () => {
       runWorkerImpl: worker as any,
     })).rejects.toMatchObject({ code: 'paid_call_unauthorized', exitCode: 4 })
     expect(worker).not.toHaveBeenCalled()
+  })
+
+  test('checker_role_is_read_only_and_answers_by_the_review_schema', async () => {
+    // o motor despacha todo revisor com role 'checker_round'; com planos, o Claude pode revisar a rodada de outra empresa
+    const review = JSON.parse(fs.readFileSync(new URL('../../fixtures/schemas/review-result/valid.json', import.meta.url), 'utf8'))
+    const argvs: string[][] = []
+    const worker = vi.fn(async ({ args }: { args: string[] }) => {
+      argvs.push(args)
+      return { stdout: JSON.stringify({ type: 'result', is_error: false, structured_output: review }), stderr: '', exitCode: 0 }
+    })
+    const rawStep = async (spec: any, fn: any) => ({ step_id: spec.id, status: 'ok', result: await fn() })
+    const common = {
+      step: rawStep, unit: 'S23', packPath: '/fake/pack.md', missionDir: '/fake/m1', missionId: 'm1', cwd: '/fake/m1',
+      resultFile: '/fake/m1/result.json', maxBudgetUsd: 0.25, resolved: { exe: 'node', prefixArgs: [] }, runWorkerImpl: worker as any,
+    }
+    const flag = (args: string[], name: string) => args[args.indexOf(name) + 1]
+
+    expect(await dispatchClaude({ ...common, stepId: 'S23:r1:checker', role: 'checker_round' })).toMatchObject({ review_result: review, unit_result: null, valid: true })
+    expect(flag(argvs[0], '--disallowedTools').split(',')).toEqual(expect.arrayContaining(['Bash', 'Edit', 'Write', 'NotebookEdit']))
+    expect(JSON.parse(flag(argvs[0], '--json-schema')).required).toContain('verdict')
+
+    // quem escreve segue com escrita e o schema de resultado de unidade; papel desconhecido nem chega ao spawn
+    expect(await dispatchClaude({ ...common, stepId: 'S23:r1:maker' })).toMatchObject({ review_result: null })
+    expect(flag(argvs[1], '--disallowedTools')).toBe('Bash(git push*),Bash(gh pr*)')
+    expect(JSON.parse(flag(argvs[1], '--json-schema')).required).toContain('tree_after')
+    await expect(dispatchClaude({ ...common, stepId: 'S23:r1:planner', role: 'planner' })).rejects.toMatchObject({ code: 'invalid_claude_args' })
+    expect(worker).toHaveBeenCalledTimes(2)
   })
 })

@@ -991,8 +991,8 @@ describe('Integrar revisão e correção que convergem', () => {
     // Sem pack o despacho falha fechado, em vez de mandar EOF ao Codex
     await expect(dispatchCodex({ ...base, packPath: undefined } as any)).rejects.toThrow(/pack/i)
 
-    // Papel de Maker não é suportado por este adapter
-    await expect(dispatchCodex({ ...base, role: 'maker' } as any)).rejects.toThrow(
+    // Papel fora de revisão e de quem escreve não é suportado por este adapter
+    await expect(dispatchCodex({ ...base, role: 'planner' } as any)).rejects.toThrow(
       /papel sem suporte/i,
     )
 

@@ -7,20 +7,23 @@
 import { AdeError } from '../journal/errors.ts'
 import { isBlockingFinding, normalizeFinding } from '../review/handoff.ts'
 import { PHASE_TURN_LIMITS, reserveCalls } from './budget.ts'
+import type { Effort } from '../models/catalog.ts'
 
-// model null = padrão da CLI da família
-export type Rung = { model: string | null; family: string; maxTurns: number; reserve: boolean }
-// extended = a tentativa atual já é a repetição com mais turnos depois de um corte
-export type LadderState = { ladder: Rung[]; rung: number; rounds: number; maxTurns: number; reserveUsed: boolean; extended: boolean }
+// model null = padrão da CLI da família; effort null = padrão da CLI
+export type Rung = { model: string | null; family: string; effort: Effort | null; maxTurns: number; reserve: boolean }
+// extended = a tentativa atual já é a repetição com mais turnos depois de um corte; perRung = rodadas por degrau
+export type LadderState = { ladder: Rung[]; rung: number; rounds: number; perRung: number; maxTurns: number; reserveUsed: boolean; extended: boolean }
 export type MakerOutcome = { kind: 'ok' | 'max_turns' | 'no_change' | 'env_blocked' | 'rejected' }
 export type Attempt = { kind: 'repeat' | 'next_model' | 'climb' | 'reserve' | 'park'; maxTurns: number; countsAsRound: boolean; state: LadderState }
 
-const ROUNDS_PER_RUNG = 2
+// comum 2 (lição da v2), leve 1, sensível 3 (segurança, login, pagamento, migração de banco)
+const ROUNDS_BY_RISK = { light: 1, normal: 2, sensitive: 3 } as const
+export const roundsPerRung = (risk: keyof typeof ROUNDS_BY_RISK) => ROUNDS_BY_RISK[risk]
 const OUTCOMES = new Set(['ok', 'max_turns', 'no_change', 'env_blocked', 'rejected'])
 export const ENV_BLOCK = /sandbox|somente leitura|read-?only|permiss[aã]o negada|access (is )?denied|EPERM|EACCES/i
 
 /** Monta a escada: turnos nunca caem de um degrau para o seguinte e reserva só no fim. */
-export function buildLadder(rungs: Array<{ model: string | null; family: string; maxTurns?: number; reserve?: boolean }>): Rung[] {
+export function buildLadder(rungs: Array<{ model: string | null; family: string; effort?: Effort | null; maxTurns?: number; reserve?: boolean }>): Rung[] {
   if (!Array.isArray(rungs) || rungs.length === 0) throw new AdeError('invalid_ladder', 'escada sem degraus', 4)
   let floor: number = PHASE_TURN_LIMITS.implementation
   let seenReserve = false
@@ -33,12 +36,12 @@ export function buildLadder(rungs: Array<{ model: string | null; family: string;
     if (seenReserve && !rung.reserve) throw new AdeError('invalid_ladder', 'degrau de reserva antes de degrau da escada', 4)
     seenReserve ||= Boolean(rung.reserve)
     floor = Math.max(floor, declared)
-    return { model: rung.model, family: rung.family, maxTurns: floor, reserve: Boolean(rung.reserve) }
+    return { model: rung.model, family: rung.family, effort: rung.effort ?? null, maxTurns: floor, reserve: Boolean(rung.reserve) }
   })
 }
 
-export function ladderStart(ladder: Rung[]): LadderState {
-  return { ladder, rung: 0, rounds: 0, maxTurns: ladder[0].maxTurns, reserveUsed: Boolean(ladder[0].reserve), extended: false }
+export function ladderStart(ladder: Rung[], perRung = roundsPerRung('normal')): LadderState {
+  return { ladder, rung: 0, rounds: 0, perRung, maxTurns: ladder[0].maxTurns, reserveUsed: Boolean(ladder[0].reserve), extended: false }
 }
 
 /** Classifica a saída do maker; corte no teto (dito pela CLI) vem antes de "nada mudou", porque cortado não terminou. */
@@ -79,10 +82,10 @@ export function nextAttempt(state: LadderState, outcome: MakerOutcome): Attempt 
     return moveTo(state, next, 'next_model', false)
   }
 
-  // Rodada reprovada (ou cortada duas vezes): duas por degrau, depois sobe; a reserva entra uma vez só.
+  // Rodada reprovada (ou cortada duas vezes): as do risco por degrau, depois sobe; a reserva entra uma vez só.
   if (current.reserve) return park(true)
   const rounds = state.rounds + 1
-  if (rounds < ROUNDS_PER_RUNG) {
+  if (rounds < state.perRung) {
     return { kind: 'repeat', maxTurns: state.maxTurns, countsAsRound: true, state: { ...state, rounds, extended: false } }
   }
   const top = climbLast(state.ladder)

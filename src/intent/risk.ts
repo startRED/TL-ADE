@@ -33,3 +33,13 @@ export function assessRisk({ request = '', discovery = {} }: { request?: string;
     evidence: [],
   }
 }
+
+// segurança, login e autenticação, pagamento e migração de banco (ADR 0033)
+const SENSITIVE = /seguran[çc]a|security|login|senha|password|autentica|auth|pagamento|payment|billing|migra[çc][ãa]o de banco|db_migration|database_migration/i
+
+/** Risco da parte para a escada: sensível pelo título ou pelas superfícies do contrato; leve só quando o contrato diz. */
+export function storyRisk(contract: { title?: unknown; risk?: Record<string, unknown> }): 'light' | 'normal' | 'sensitive' {
+  const surfaces = Array.isArray(contract.risk?.surfaces) ? contract.risk.surfaces : []
+  if (contract.risk?.level === 'critical' || SENSITIVE.test([contract.title ?? '', ...surfaces].join(' '))) return 'sensitive'
+  return contract.risk?.level === 'light' ? 'light' : 'normal'
+}
