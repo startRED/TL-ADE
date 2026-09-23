@@ -16,7 +16,7 @@ const advisorOf = (complexity: string) =>
     cost: { usd: 0.01, model_calls: 1, model_id: 'claude-haiku-4-5' },
   })
 
-const readPlan = (planPath: string) => JSON.parse(fs.readFileSync(planPath, 'utf8'))
+const readPlan = (planPath: string | null) => JSON.parse(fs.readFileSync(planPath as string, 'utf8'))
 
 describe('Planejador proporcional com decisões humanas', () => {
   let repoDir: string
@@ -38,7 +38,7 @@ describe('Planejador proporcional com decisões humanas', () => {
     const simplePlan = readPlan(simple.planPath)
     expect(simplePlan.phases[0].epics[0].stories).toEqual(['S1'])
     expect(simple.state).toBe('planned')
-    expect(validateMissionPlan(simple.planPath).valid).toBe(true)
+    expect(validateMissionPlan(simple.planPath as string).valid).toBe(true)
 
     const deliverables = [
       'criar cadastro de clientes',
@@ -92,7 +92,7 @@ describe('Planejador proporcional com decisões humanas', () => {
     expect(result.questions).toContainEqual(expect.objectContaining({ id: 'Q-human-S1', kind: 'human_decision' }))
 
     // O fluxo existente de approve continua sendo o caminho para liberar o plano.
-    const approved = await approveMission({ repoDir, missionId: result.missionId, expectedDigest: result.digest })
+    const approved = await approveMission({ repoDir, missionId: result.missionId, expectedDigest: result.digest as string })
     expect(approved.approved).toBe(true)
 
     const plain = await compileIntent({ request: 'Exibir o preço do plano Pro calculado pela tabela do repositório' })

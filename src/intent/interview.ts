@@ -1,3 +1,5 @@
+import { AdeError } from '../journal/errors.ts'
+
 const STOPWORDS = new Set([
   'qual',
   'quais',
@@ -218,16 +220,16 @@ export function buildInterview({ unknowns = [], discovery = {}, repoIr = {}, max
         },
       ]
     } else {
-      if (!options.some((o) => o.recommended)) {
-        options[0] = { ...options[0], recommended: true }
-      }
-      if (!options.some((o) => normalizeText(o.label).includes('nao sei'))) {
+      const recommendedAt = options.findIndex((o) => o.recommended)
+      const [recommended] = options.splice(Math.max(recommendedAt, 0), 1)
+      options.unshift({ ...recommended, recommended: true })
+      if (!options.some(isDontKnowOption)) {
         options.push({ id: 'dont_know', label: 'Não sei' })
       }
     }
 
     candidates.push({
-      id: u.id || `Q${candidates.length + 1}`,
+      id: `Q${candidates.length + 1}`,
       unknown_ref: u.unknown_ref || u.id || `U${candidates.length + 1}`,
       kind: u.kind || 'product_choice',
       text,
@@ -241,11 +243,53 @@ export function buildInterview({ unknowns = [], discovery = {}, repoIr = {}, max
 }
 
 /**
- * Aplica a resposta do operador a um contrato, registrando defaults adotados e justificativas.
- * O contrato mantém apenas os campos admitidos pelo schema; valor padrão e justificativa
- * ficam na decisão retornada.
+ * Dúvidas de produto que o próprio pedido deixa em aberto: cada frase terminada em "?" vira
+ * uma incógnita, e alternativas "A, B ou C" viram opções, com a primeira citada como recomendada.
+ *
+ * ponytail: heurística de texto sem modelo; dúvida implícita no pedido passa sem pergunta.
+ * Trocar pelas dúvidas do papel intent_compiler quando o planejamento chamar modelo.
  */
-export function applyInterviewAnswer(contract: any, question: any, answer: any): { contract: any; decision: any } {
+export function unknownsFromRequest(request: string): Array<{ id: string; question: string; kind: string; options?: any[] }> {
+  const questions = String(request)
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((s) => s.trim())
+    .filter((s) => s.endsWith('?') && normalizeText(s) !== '')
+
+  return questions.map((question, i) => {
+    const choices = /\sou\s/i.test(question)
+      ? (question.split(':').pop() || '').replace(/\?$/, '').split(/\s*,\s*|\s+ou\s+/i).map((c) => c.trim()).filter(Boolean)
+      : []
+    const options = choices.map((label, j) => ({
+      id: `opt-${j + 1}`,
+      label,
+      ...(j === 0 ? { recommended: true, why: 'primeira alternativa citada no pedido' } : {}),
+    }))
+    return { id: `U${i + 1}`, question, kind: 'product_choice', ...(options.length > 1 ? { options } : {}) }
+  })
+}
+
+/** Opção "Não sei" de uma pergunta: pelo id reservado ou pelo rótulo. */
+function isDontKnowOption(option: any): boolean {
+  return option?.id === 'dont_know' || normalizeText(option?.label).includes('nao sei')
+}
+
+/** Origem de uma decisão: resposta explícita, recomendação adotada ou dúvida resolvida pela IA sem perguntar. */
+export type DecisionOrigin = 'usuario' | 'padrao' | 'ia_supondo'
+
+export type Decision = {
+  question_id?: string
+  unknown_id?: string
+  value: string
+  origin: DecisionOrigin
+  rationale: string
+}
+
+/**
+ * Aplica a resposta do operador (id de opção; ausente = sem resposta) a um contrato.
+ * "Não sei" e a falta de resposta adotam a recomendação com origem 'padrao'; opção
+ * escolhida vira origem 'usuario'. Opção inexistente na pergunta é erro.
+ */
+export function applyInterviewAnswer(contract: any, question: any, answer?: string): { contract: any; decision: Decision } {
   if (!contract || typeof contract !== 'object') {
     throw new TypeError('applyInterviewAnswer: contrato inválido')
   }
@@ -253,49 +297,38 @@ export function applyInterviewAnswer(contract: any, question: any, answer: any):
     throw new TypeError('applyInterviewAnswer: pergunta inválida')
   }
 
-  const normalizedAnswer = normalizeText(answer)
-  const isDontKnow = !answer || normalizedAnswer === 'nao sei' || normalizedAnswer === 'dont know' || answer === 'dont_know'
+  const options: any[] = question.options || []
+  const chosen = answer === undefined ? undefined : options.find((o) => o.id === answer)
+  if (answer !== undefined && !chosen) {
+    throw new AdeError('invalid_answer', `resposta da pergunta ${question.id} cita opção inexistente: ${answer}`, 2, {
+      question_id: question.id,
+      option_id: answer,
+    })
+  }
+
+  let decision: Decision
+  if (!chosen || isDontKnowOption(chosen)) {
+    const recommended =
+      options.find((o) => o.recommended) || options.find((o) => o.id === question.default_if_unknown) || options[0]
+    decision = {
+      question_id: question.id,
+      value: String(recommended?.id ?? question.default_if_unknown),
+      origin: 'padrao',
+      rationale: recommended?.why || recommended?.label || 'recomendação da entrevista',
+    }
+  } else {
+    decision = { question_id: question.id, value: String(chosen.id), origin: 'usuario', rationale: String(chosen.label) }
+  }
 
   const unknownId = question.unknown_ref || question.id
-  
-  const unknownEntry: { id: any; question: any; kind: any; resolved_by?: string } = {
-    id: unknownId,
-    question: question.text || question.question,
-    kind: question.kind || 'product_choice',
-  }
+  const resolvedBy = decision.origin === 'usuario' ? 'operator_choice' : 'default_assumed'
+  const known = (contract.unknowns || []).some((u: any) => u.id === unknownId)
+  const unknowns = known
+    ? contract.unknowns.map((u: any) => (u.id === unknownId ? { ...u, resolved_by: resolvedBy } : u))
+    : [
+        ...(contract.unknowns || []),
+        { id: unknownId, question: question.text || question.question, kind: question.kind || 'product_choice', resolved_by: resolvedBy },
+      ]
 
-  let decision
-
-  if (isDontKnow) {
-    const recommendedOpt =
-      (question.options || []).find((o: any) => o.recommended) ||
-      (question.options || []).find((o: any) => o.id === question.default_if_unknown) ||
-      (question.options || [])[0]
-
-    const defaultValue = question.default_if_unknown || recommendedOpt?.id || 'default'
-    const rationale = recommendedOpt?.why || 'Padrão de telemetria v0.3'
-
-    decision = {
-      kind: 'default_assumed',
-      unknown_id: unknownId,
-      default_value: defaultValue,
-      rationale,
-    }
-    unknownEntry.resolved_by = 'default_assumed'
-  } else {
-    decision = {
-      kind: 'operator_choice',
-      unknown_id: unknownId,
-      value: answer,
-    }
-    unknownEntry.resolved_by = 'operator_choice'
-  }
-
-  return {
-    contract: {
-      ...contract,
-      unknowns: [...(contract.unknowns || []), unknownEntry],
-    },
-    decision,
-  }
+  return { contract: { ...contract, unknowns }, decision }
 }

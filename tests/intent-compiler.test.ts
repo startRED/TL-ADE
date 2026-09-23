@@ -146,11 +146,11 @@ describe('v0.3 Intent Compiler Acceptance Criteria', () => {
     const { contract, decision } = applyInterviewAnswer(
       initialContract,
       fixture.question,
-      fixture.answer,
+      'dont_know',
     )
 
-    expect(decision.kind).toBe('default_assumed')
-    expect(decision.default_value).toBe('opt-json')
+    expect(decision.origin).toBe('padrao')
+    expect(decision.value).toBe('opt-json')
     expect(decision.rationale).toBe('Padrão de telemetria v0.3')
 
     // A incógnita permanece rastreável no contrato

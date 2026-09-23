@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 import { dispatchAgy } from '../adapters/agy/index.ts'
 import { canonicalize } from '../journal/canonical.ts'
-import { planMission } from '../mission/plan-lifecycle.ts'
+import { planMission, resumeMissionAnswers } from '../mission/plan-lifecycle.ts'
 import { resolveBinary } from '../runner/resolve-binary.ts'
 
 /**
@@ -36,13 +36,21 @@ export async function main(argv: string[], deps: {
       'from-mission': { type: 'string' },
       from: { type: 'string' },
       'non-interactive': { type: 'boolean', short: 'n' },
+      mission: { type: 'string' },
+      answers: { type: 'string' },
       json: { type: 'boolean' },
     },
   })
 
   const request = values.request || positionals.join(' ').trim()
-  if (!request) {
-    stderr.write('uso: ade plan [--request <pedido>] [--repo <pasta>] [--from <missao>] [--non-interactive] [--json]\n')
+  const resumeMissionId = values.mission
+  const answersPath = values.answers
+  const resuming = typeof resumeMissionId === 'string' && typeof answersPath === 'string'
+  if (resuming ? request : !request) {
+    stderr.write(
+      'uso: ade plan [--request <pedido>] [--repo <pasta>] [--from <missao>] [--non-interactive] [--json]\n' +
+        '     ade plan --mission <id> --answers <arquivo.json> [--repo <pasta>] [--json]\n',
+    )
     return 4
   }
 
@@ -78,14 +86,7 @@ export async function main(argv: string[], deps: {
         }
       : undefined)
 
-    const result = await planMission(
-      {
-        request: String(request),
-        repoDir: String(repoDir),
-        fromMissionId: fromMissionId ? String(fromMissionId) : undefined,
-        nonInteractive,
-      },
-      {
+    const planDeps = {
         ...deps,
         adeConfig,
         researcher,
@@ -98,11 +99,31 @@ export async function main(argv: string[], deps: {
           max_usd: researchConfig?.max_usd,
           consumed_usd: 0,
         },
-      },
-    )
+      }
+    const result = resuming
+      ? await resumeMissionAnswers(
+          { missionId: resumeMissionId, repoDir: String(repoDir), answers: JSON.parse(fs.readFileSync(answersPath, 'utf8')) },
+          planDeps,
+        )
+      : await planMission(
+          {
+            request: String(request),
+            repoDir: String(repoDir),
+            fromMissionId: fromMissionId ? String(fromMissionId) : undefined,
+            nonInteractive,
+          },
+          planDeps,
+        )
 
     if (values.json) {
       stdout.write(canonicalize(result) + '\n')
+    } else if (result.state === 'awaiting_answers') {
+      stdout.write(`missão ${result.missionId} aguarda respostas (${result.questions.length} perguntas):\n`)
+      for (const q of result.questions) {
+        stdout.write(`- ${q.id}: ${q.text}\n`)
+        for (const o of q.options) stdout.write(`    ${o.id}: ${o.label}${o.recommended ? ' (recomendada)' : ''}\n`)
+      }
+      stdout.write(`responda com: ade plan --mission ${result.missionId} --answers <arquivo.json>\n`)
     } else {
       stdout.write(`missão criada: ${result.missionId} (digest ${result.digest})\n`)
       stdout.write(`plano gravado em: ${result.planPath}\n`)

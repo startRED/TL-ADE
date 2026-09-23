@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { classifyIntent } from './classify.ts'
 import { assessRisk } from './risk.ts'
 import { generateBriefing } from './briefing.ts'
-import { buildInterview, applyInterviewAnswer, getRefusedQuestions } from './interview.ts'
+import { buildInterview, applyInterviewAnswer, getRefusedQuestions, type Decision } from './interview.ts'
 import { runResearchStep, fallbackArtifact } from './research.ts'
 import { selectEligibleSkills } from './skills.ts'
 import { splitContract } from './split.ts'
@@ -147,6 +147,22 @@ function buildContract({
   }
 }
 
+/** Id da missão derivado do pedido: o mesmo pedido cai na mesma pasta de missão. */
+export function missionIdOf(request: string): string {
+  return `mission-${createHash('sha256').update(request).digest('hex').slice(0, 12)}`
+}
+
+/** Decisão 'ia_supondo' de uma incógnita externa resolvida por pesquisa ou fallback. */
+function researchDecisionOf(unknown: any, artifact: any): Decision {
+  const data = artifact.data || {}
+  return {
+    unknown_id: String(unknown.id),
+    value: String(data.default_value ?? data.result ?? artifact.ref),
+    origin: 'ia_supondo',
+    rationale: String(data.rationale ?? `pesquisa: ${artifact.ref}`),
+  }
+}
+
 /**
  * Compila pedidos em briefing, classificação, entrevista e plano progressivo executável,
  * integrando pesquisa externa controlada com tetos por classe de complexidade e fallback seguro.
@@ -162,11 +178,12 @@ export async function compileIntent({
   researcher,
   adeConfig,
   budget = {},
+  interview,
+  decisions = [],
 }: {
         request: string
         discovery?: any
         repoIr?: any
-        answers?: any
         eligibleSkills?: any[]
         policy?: any
         advisor?: Function
@@ -174,6 +191,10 @@ export async function compileIntent({
         researcher?: Function
         adeConfig?: any
         budget?: any
+        /** Perguntas já gravadas na missão suspensa; quando presentes, a entrevista não é refeita. */
+        interview?: any[]
+        /** Decisões da entrevista já respondida: orientam as tarefas dos contratos e abrem o briefing. */
+        decisions?: Decision[]
     }): Promise<{ briefing: any; plan: any; contracts: any[]; stories: PlanStory[]; questions: any[]; refusedQuestions: any[] }> {
   if (typeof request !== 'string' || request.trim() === '') {
     throw new TypeError('compileIntent: request é obrigatório')
@@ -183,8 +204,16 @@ export async function compileIntent({
   const risk = assessRisk({ request, discovery, classification })
   const briefing = generateBriefing({ request, discovery, classification, risk })
 
-  const questions = buildInterview({ unknowns, discovery, repoIr, maxQuestions: 5 })
+  const questions = interview ? [...interview] : buildInterview({ unknowns, discovery, repoIr, maxQuestions: 5 })
   const refusedQuestions = getRefusedQuestions({ unknowns, discovery, repoIr })
+  // Dúvidas resolvidas sem perguntar ao operador: fato do repositório, pesquisa ou fallback.
+  const aiDecisions: Decision[] = []
+  for (const refused of refusedQuestions) {
+    const u = unknowns.find((x) => x?.id && (x.question || x.text) === refused.question)
+    if (u) {
+      aiDecisions.push({ unknown_id: String(u.id), value: refused.evidence, origin: 'ia_supondo', rationale: `fato já respondido pelo projeto: ${refused.evidence}` })
+    }
+  }
 
   const complexity = classification.complexity
   const externalUnknowns = unknowns.filter((u) => u && u.kind === 'external_fact')
@@ -294,6 +323,7 @@ export async function compileIntent({
             unknownInContract.resolved_by = 'research'
           }
         }
+        if (!stepRes.data?.parked) aiDecisions.push(researchDecisionOf(extU, stepRes))
       }
     } else {
       // Excedeu o teto ou pesquisa desabilitada/não autorizada
@@ -317,6 +347,7 @@ export async function compileIntent({
             unknownInContract.resolved_by = 'fallback_assumed'
           }
         }
+        if (!fallback.data?.parked) aiDecisions.push(researchDecisionOf(extU, fallback))
       }
     }
   }
@@ -372,6 +403,15 @@ export async function compileIntent({
 
   const researchRefs = researchFindings.map((f) => f.ref)
 
+  // As escolhas da entrevista chegam a quem executa pela tarefa do contrato (o schema é fechado).
+  const choices = decisions.map((d) => {
+    const q = questions.find((x) => x.id === d.question_id)
+    const option = q?.options?.find((o: any) => o.id === d.value)
+    return `${q?.text ?? d.question_id} → ${option?.label ?? d.value}`
+  })
+  const taskOf = (deliverable: string) =>
+    choices.length > 0 ? `${deliverable}\nDecisões da entrevista: ${choices.join('; ')}` : deliverable
+
   const contracts = immediate.map((deliverable, index) => {
     const idMatch = deliverable.match(/^(S\d+)\b/i)
     const id = idMatch ? idMatch[1].toUpperCase() : `S${index + 1}`
@@ -379,7 +419,7 @@ export async function compileIntent({
     const c = buildContract({
       id,
       title: deliverable,
-      task: deliverable,
+      task: taskOf(deliverable),
       complexity: classification.complexity,
       needsUi: index === 0 ? needsUi : false,
       risk,
@@ -425,6 +465,7 @@ export async function compileIntent({
     ...(Object.keys(humanDecisions).length > 0 ? { human_decisions: humanDecisions } : {}),
     ...(researchFindings.length > 0 ? { research_findings: researchFindings } : {}),
     ...(researchFallbacks.length > 0 ? { research_fallbacks: researchFallbacks } : {}),
+    ...(decisions.length + aiDecisions.length > 0 ? { decisions: [...decisions, ...aiDecisions] } : {}),
   }
 
   const reqHash = createHash('sha256').update(request).digest('hex')
@@ -432,7 +473,7 @@ export async function compileIntent({
   const plan = {
     format_version: 2,
     id: `plan-${reqHash.slice(0, 12)}`,
-    mission_id: `mission-${reqHash.slice(0, 12)}`,
+    mission_id: missionIdOf(request),
     immutable_digest: reqHash,
     direction: briefing.direction,
     next_delivery: briefing.next_delivery,

@@ -22,7 +22,27 @@
     "direction": { "type": "object" },
     "next_delivery": { "type": "object" },
     "intent": { "type": "string" },
-    "briefing": { "type": "object" },
+    "briefing": {
+      "type": "object",
+      "properties": {
+        "decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["value", "origin", "rationale"],
+            "anyOf": [{ "required": ["question_id"] }, { "required": ["unknown_id"] }],
+            "properties": {
+              "question_id": { "type": "string" },
+              "unknown_id": { "type": "string" },
+              "value": { "type": "string" },
+              "origin": { "enum": ["usuario", "ia_supondo", "padrao"] },
+              "rationale": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
     "unknowns": { "type": "array" },
     "authorization": {
       "type": "object",

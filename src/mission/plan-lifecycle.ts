@@ -2,8 +2,9 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { compileIntent } from '../intent/compiler.ts'
-import { applyInterviewAnswer } from '../intent/interview.ts'
+import { compileIntent, missionIdOf } from '../intent/compiler.ts'
+import { applyInterviewAnswer, buildInterview, unknownsFromRequest, type Decision } from '../intent/interview.ts'
+import { AdeError } from '../journal/errors.ts'
 import { validateCompiledPlan } from '../intent/validate.ts'
 import { planCriticsFromConfig } from '../intent/plan-critic.ts'
 import { approvalReasons, critiquePlan, needsPlanCritic, planIssues, planStoriesOf } from '../intent/proportional.ts'
@@ -100,22 +101,33 @@ function contractDigests({ missionDir, plan }: { missionDir: string; plan: any }
 }
 
 /**
- * Aplica respostas da entrevista aos contratos compilados, devolvendo as decisões geradas.
- * A resposta é da missão: vale para todos os contratos do plano.
+ * Marca nas incógnitas de todos os contratos do plano como cada pergunta da entrevista foi
+ * resolvida: a resposta é da missão, não de uma story.
  */
-function applyAnswers(contracts: any[], answers: Array<{ question: any; answer: any }>): any[] {
-  const decisions = []
-  for (const entry of answers) {
-    if (!entry || typeof entry !== 'object' || !entry.question) {
-      throw new TypeError('planMission: resposta de entrevista sem pergunta correspondente')
-    }
+function applyAnswers(contracts: any[], questions: any[], answers: InterviewAnswer[]): void {
+  for (const question of questions) {
+    const answer = answers.find((a) => a.question_id === question.id)?.option_id
     for (let i = 0; i < contracts.length; i++) {
-      const applied = applyInterviewAnswer(contracts[i], entry.question, entry.answer)
-      contracts[i] = applied.contract
-      if (i === 0) decisions.push(applied.decision)
+      contracts[i] = applyInterviewAnswer(contracts[i], question, answer).contract
     }
   }
-  return decisions
+}
+
+/**
+ * Estado de uma missão lido do disco: 'awaiting_answers' enquanto só a entrevista foi
+ * gravada; com plano, 'approved', 'awaiting_approval' ou 'planned'. Null quando não existe.
+ */
+function missionStateOf(missionDir: string): string | null {
+  const planPath = path.join(missionDir, 'plan.json')
+  if (fs.existsSync(planPath)) {
+    const journalPath = path.join(missionDir, 'journal.jsonl')
+    const approved =
+      fs.existsSync(journalPath) &&
+      readJournal(journalPath).events.some((e) => e.kind === 'decision' && e.data?.decision === 'plan_approved')
+    if (approved) return 'approved'
+    return approvalReasons(readJsonIfExists(planPath)).length > 0 ? 'awaiting_approval' : 'planned'
+  }
+  return readJsonIfExists(path.join(missionDir, 'context.json'))?.state ?? null
 }
 
 /**
@@ -131,6 +143,25 @@ function acquireMissionLock(lockPath: string): number | null {
   } catch (err) {
     if ((err as NodeJS.ErrnoException)?.code === 'EEXIST') return null
     throw err
+  }
+}
+
+/**
+ * Roda fn com o lock exclusivo da pasta da missão: suspensão e retomada concorrentes não
+ * podem deixar perguntas pendentes ao lado de um plano gravado.
+ */
+async function withMissionLock<T>(missionDir: string, missionId: string, fn: () => T | Promise<T>): Promise<T> {
+  fs.mkdirSync(missionDir, { recursive: true })
+  const lockPath = path.join(missionDir, 'plan.lock')
+  const lockFd = acquireMissionLock(lockPath)
+  if (lockFd === null) {
+    throw new AdeError('mission_busy', `planejamento concorrente em andamento para a missão ${missionId}`, 5, { mission_id: missionId })
+  }
+  try {
+    return await fn()
+  } finally {
+    fs.closeSync(lockFd)
+    fs.rmSync(lockPath, { force: true })
   }
 }
 
@@ -165,24 +196,32 @@ function getProjectDiscovery(repoDir: string): any {
   }
 }
 
-/**
- * Planeja uma missão a partir de um pedido, salvando plano e contratos na pasta da missão.
- */
-export async function planMission(
-  { request, repoDir, fromMissionId, nonInteractive: _nonInteractive }: {
-    request: string
-    repoDir?: string
-    fromMissionId?: string
-    nonInteractive?: boolean
-  },
-  deps: any = {},
-): Promise<{
+/** Resposta de entrevista: a opção escolhida para uma pergunta gravada. */
+type InterviewAnswer = { question_id: string; option_id: string }
+
+type PlanArgs = {
+  request: string
+  repoDir?: string
+  fromMissionId?: string
+  nonInteractive?: boolean
+}
+
+type PlanResult = {
   missionId: string
-  planPath: string
-  digest: string
+  planPath: string | null
+  digest: string | null
   state: string
   questions: any[]
-}> {
+}
+
+/**
+ * Planeja uma missão a partir de um pedido. Em modo interativo, dúvida de produto sem
+ * resposta suspende a missão em 'awaiting_answers' gravando só as perguntas em context.json;
+ * em modo não interativo a recomendação é adotada com origem 'padrao' e o plano é gravado.
+ */
+export function planMission(args: PlanArgs & { nonInteractive: true }, deps?: any): Promise<PlanResult & { planPath: string; digest: string }>
+export function planMission(args: PlanArgs, deps?: any): Promise<PlanResult>
+export async function planMission({ request, repoDir, fromMissionId, nonInteractive }: PlanArgs, deps: any = {}): Promise<PlanResult> {
   if (typeof request !== 'string' || !request.trim()) {
     throw new TypeError('planMission: request é obrigatório')
   }
@@ -208,13 +247,124 @@ export async function planMission(
   }
 
   const discovery = deps.discovery || getProjectDiscovery(resolvedRepoDir)
+  // Sem lista injetada, as dúvidas são as perguntas que o próprio pedido deixa em aberto.
+  const unknowns = deps.unknowns ?? unknownsFromRequest(request)
+  const interview = buildInterview({ unknowns, discovery, repoIr: deps.repoIr || {}, maxQuestions: 5 })
+  const missionId = missionIdOf(request)
+
+  if (!nonInteractive && interview.length > 0) {
+    // Entrevista antes do plano: nada aprovável é gravado até as respostas chegarem.
+    const missionDir = path.join(resolvedRepoDir, '.ade', 'missions', missionId)
+    return withMissionLock(missionDir, missionId, () => {
+      // O mesmo pedido cai na mesma pasta: perguntas ao lado de um plano anterior tornariam
+      // a missão impossível de retomar, e o plano existente não pode ser apagado.
+      const state = missionStateOf(missionDir)
+      if (state !== null && state !== 'awaiting_answers') {
+        throw new AdeError(
+          'mission_already_planned',
+          `missão ${missionId} já está em ${state}; replaneje com ade plan --from ${missionId}`,
+          2,
+          { mission_id: missionId, state },
+        )
+      }
+      writeJsonAtomic(path.join(missionDir, 'context.json'), {
+        state: 'awaiting_answers',
+        request,
+        discovery,
+        unknowns,
+        questions: interview,
+        answers: [],
+        decisions: [],
+      })
+      return { missionId, planPath: null, digest: null, state: 'awaiting_answers', questions: interview }
+    })
+  }
+
+  return compileAndWritePlan({ missionId, request, repoDir: resolvedRepoDir, discovery, unknowns, interview, answers: [] }, deps)
+}
+
+/**
+ * Retoma uma missão suspensa em 'awaiting_answers' aplicando as respostas às perguntas já
+ * gravadas: a descoberta e a entrevista não rodam de novo e o plano vai para a mesma pasta.
+ */
+export async function resumeMissionAnswers(
+  { missionId, repoDir, answers }: { missionId: string; repoDir?: string; answers: InterviewAnswer[] },
+  deps: any = {},
+): Promise<PlanResult> {
+  if (!Array.isArray(answers) || answers.some((a) => typeof a?.question_id !== 'string' || typeof a?.option_id !== 'string')) {
+    throw new AdeError('invalid_answers', 'respostas devem ser uma lista de { question_id, option_id }', 2)
+  }
+  const resolvedRepoDir = path.resolve(repoDir || process.cwd())
+  const missionDir = path.join(resolvedRepoDir, '.ade', 'missions', String(missionId))
+  if (missionStateOf(missionDir) === null) {
+    throw new AdeError('mission_not_found', `missão ${missionId} não existe`, 2, { mission_id: missionId })
+  }
+
+  // Duas retomadas ao mesmo tempo não podem compilar e gravar dois planos na mesma pasta.
+  return withMissionLock(missionDir, missionId, async () => {
+    const state = missionStateOf(missionDir)
+    if (state !== 'awaiting_answers') {
+      throw new AdeError('mission_not_awaiting_answers', `missão ${missionId} está em ${state}, não aguarda respostas`, 2, {
+        mission_id: missionId,
+        state,
+      })
+    }
+    const context = readJsonIfExists(path.join(missionDir, 'context.json'))
+    const seen = new Set<string>()
+    for (const answer of answers) {
+      if (!context.questions.some((q: any) => q.id === answer.question_id) || seen.has(answer.question_id)) {
+        throw new AdeError('invalid_answer', `resposta cita pergunta inexistente ou repetida: ${answer.question_id}`, 2, {
+          question_id: answer.question_id,
+        })
+      }
+      seen.add(answer.question_id)
+    }
+
+    return compileAndWritePlan(
+      {
+        missionId,
+        request: context.request,
+        repoDir: resolvedRepoDir,
+        discovery: context.discovery,
+        unknowns: context.unknowns,
+        interview: context.questions,
+        answers,
+      },
+      deps,
+    )
+  })
+}
+
+/**
+ * Compila o plano a partir da entrevista já montada e das respostas, grava contratos,
+ * plano e contexto herdável na pasta da missão.
+ */
+async function compileAndWritePlan(
+  { missionId, request, repoDir: resolvedRepoDir, discovery, unknowns, interview, answers }: {
+    missionId: string
+    request: string
+    repoDir: string
+    discovery: any
+    unknowns: any[]
+    interview: any[]
+    answers: InterviewAnswer[]
+  },
+  deps: any,
+): Promise<PlanResult> {
+  // As respostas viram decisões antes da compilação: resposta inválida falha sem chamar modelo
+  // e as escolhas orientam os contratos compilados.
+  const interviewDecisions = interview.map(
+    (q) => applyInterviewAnswer({}, q, answers.find((a) => a.question_id === q.id)?.option_id).decision,
+  )
   const compiled = await compileIntent({
     request,
     discovery,
     repoIr: deps.repoIr || {},
     eligibleSkills: deps.eligibleSkills || [],
     advisor: deps.advisor,
-    unknowns: deps.unknowns || [],
+    unknowns,
+    interview,
+    decisions: interviewDecisions,
     researcher: deps.researcher,
     policy: deps.policy,
     adeConfig: deps.adeConfig,
@@ -223,9 +373,9 @@ export async function planMission(
 
   const { plan, questions } = compiled
   const contracts = compiled.contracts
-  const answers = Array.isArray(deps.answers) ? deps.answers : []
-  const decisions = applyAnswers(contracts, answers)
-  const missionId = plan.mission_id
+  applyAnswers(contracts, interview, answers)
+  const decisions: Decision[] = plan.briefing.decisions || []
+  plan.mission_id = missionId
   const missionDir = path.join(resolvedRepoDir, '.ade', 'missions', missionId)
   const storiesDir = path.join(missionDir, 'stories')
 
@@ -272,6 +422,7 @@ export async function planMission(
   writeJsonAtomic(path.join(missionDir, 'context.json'), {
     request,
     discovery,
+    unknowns,
     questions: questions || [],
     answers,
     decisions,
@@ -757,7 +908,11 @@ export async function replanRemaining(
     if (remaining.length > 0) contract.depends_on = remaining
     else delete contract.depends_on
   }
-  const inheritedDecisions = applyAnswers(newContracts, inheritedAnswers)
+  // As decisões herdadas já estão no contexto anterior; aqui só marcam as incógnitas respondidas.
+  const answeredQuestions = (Array.isArray(oldContext.questions) ? oldContext.questions : []).filter((q: any) =>
+    inheritedAnswers.some((a: any) => a?.question_id === q.id),
+  )
+  applyAnswers(newContracts, answeredQuestions, inheritedAnswers)
 
   const allIds = [...preservedStories.map((s) => s.id), ...newContracts.map((c) => c.id)]
   if (new Set(allIds).size !== allIds.length) {
@@ -813,7 +968,7 @@ export async function replanRemaining(
     discovery,
     questions: compiled.questions || [],
     answers: inheritedAnswers,
-    decisions: [...(Array.isArray(oldContext.decisions) ? oldContext.decisions : []), ...inheritedDecisions],
+    decisions: Array.isArray(oldContext.decisions) ? oldContext.decisions : [],
     replan_from: fromMissionId,
     preserved: preservedResults,
   })
