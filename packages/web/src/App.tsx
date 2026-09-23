@@ -174,7 +174,7 @@ export default function App() {
               : page === 'projects'
               ? <ProjectsPage projects={projects} onOpen={(dir) => act(async () => { await postJson('/api/projects/open', { path: dir }); setPage('home') })} />
               : active
-                ? <IntakeFlow key={active.id} project={active} mission={mission} snapshotLoaded={snapshot?.projectId === active.id} />
+                ? <IntakeFlow key={active.id} project={active} mission={mission} missionCount={snapshot?.projectId === active.id ? snapshot.data.missions.length : 0} snapshotLoaded={snapshot?.projectId === active.id} />
                 : <NoProject onOpen={() => setPage('projects')} />}
           </motion.div>
         </AnimatePresence>

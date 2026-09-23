@@ -32,11 +32,11 @@ export default function Appearance({ mode, palette, onMode, onPalette }: { mode:
       </motion.header>
 
       <motion.div className="setting" {...rise(1)}>
-        <header><h2 id="mode-label">Modo</h2><span className="tag">{MODES.find((m) => m.id === mode)?.name}</span></header>
+        <header><h2 id="mode-label">Modo</h2></header>
         <div className="options" role="radiogroup" aria-labelledby="mode-label">
           {MODES.map(({ id, name, note, Icon }) => (
             <button key={id} className="option" role="radio" aria-checked={mode === id} onClick={() => onMode(id)}>
-              <span className="icon"><Icon size={17} aria-hidden="true" /></span>
+              <span className="icon"><Icon size={18} weight="light" aria-hidden="true" /></span>
               <strong>{name}</strong>
               <small>{note}</small>
               {mode === id && <span className="check"><Check size={12} weight="bold" aria-hidden="true" /></span>}
@@ -46,8 +46,8 @@ export default function Appearance({ mode, palette, onMode, onPalette }: { mode:
       </motion.div>
 
       <motion.div className="setting" {...rise(2)}>
-        <header><h2 id="palette-label">Paleta</h2><span className="tag">{PALETTES.find((p) => p.id === palette)?.name}</span></header>
-        <div className="options" role="radiogroup" aria-labelledby="palette-label">
+        <header><h2 id="palette-label">Paleta</h2></header>
+        <div className="options palettes" role="radiogroup" aria-labelledby="palette-label">
           {PALETTES.map(({ id, name, note, swatch: [ground, side, strong, weak, accent] }) => (
             <button key={id} className="option" role="radio" aria-checked={palette === id} onClick={() => onPalette(id)}>
               <span className="swatch" aria-hidden="true" style={{ background: ground }}>

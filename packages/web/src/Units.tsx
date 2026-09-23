@@ -20,11 +20,14 @@ interface Detail {
 
 // Glifos SMuFL da Bravura: a notação é de verdade, não desenho aproximado.
 const G = {
-  note: '', quarter: '', half: '', xnote: '', quarterRest: '', wholeRest: '',
-  fermata: '', repeat: '',
+  quarter: '', half: '', xnote: '', quarterRest: '', wholeRest: '',
+  fermata: '', repeat: '', gClef: '', percClef: '',
 } as const
 
-/** Pautas da orquestra: cada passo da parte cai na pauta do papel que o executou. */
+/**
+ * Pautas por papel, não por empresa: o journal diz o papel de cada passo (maker, eval, review), e o modelo só é certo
+ * para quem escreve. Uma pauta por empresa inventaria dado; a empresa aparece no rótulo quando o contrato a nomeia.
+ */
 const STAVES = [
   { key: 'escreve', label: 'Escreve', test: /maker|fix|impl/i },
   { key: 'prova', label: 'Prova', test: /eval|gate|test|prova|suite/i },
@@ -34,8 +37,32 @@ const STAVES = [
 type StaffKey = typeof STAVES[number]['key']
 const staffOf = (name: string): StaffKey => STAVES.find((s) => s.test.test(name))!.key
 
+/** Altura da nota vem do dado: a rodada sobe a nota (r1 grave, r3 agudo); prova vermelha grave, verde aguda. */
+function pitchOf(name: string): number {
+  const round = /:r(\d+):/.exec(name)
+  if (round) return Math.min(4, Number(round[1]) - 1)
+  if (/:red:/.test(name)) return 0
+  if (/:green:/.test(name)) return 3
+  return 1
+}
+
+/** O id do passo em português; o id cru fica ao lado, em letra pequena. */
+function stepSentence(name: string): string {
+  const r = /:r(\d+):(maker|fix|review|check\w*)/.exec(name)
+  if (r) return /maker|fix/.test(r[2]) ? `Rodada ${r[1]}: escreveu o código` : `Rodada ${r[1]}: revisão de outra empresa`
+  if (/:red:/.test(name)) return 'Prova escrita antes do código (nasce vermelha)'
+  if (/:green:/.test(name)) return 'Prova conferida depois do código'
+  if (/prepare/.test(name)) return 'Preparou a cópia de trabalho'
+  if (/deliver|commit/.test(name)) return 'Entregou a parte (commit)'
+  if (/gate/.test(name)) return 'Portões de qualidade'
+  if (/contain/.test(name)) return 'Conferiu o que mudou fora do escopo'
+  return 'Passo do motor'
+}
+
 const TEST_LABEL = { passed: 'passou', failed: 'falhou', red_at_start: 'vermelha na largada' } as const
 const FINDING_LABEL: Record<string, string> = { open: 'aberto', withdrawn: 'retirado', resolved: 'resolvido' }
+const SEVERITY_PT: Record<string, string> = { high: 'grave', medium: 'média', low: 'leve', critical: 'crítica' }
+const STEP_STATE_PT: Record<string, string> = { ok: 'feito', running: 'tocando', failed: 'falhou', error: 'falhou' }
 const STATE_PT: Record<string, string> = {
   committed: 'pronta', delivered: 'pronta', done: 'pronta', approved: 'pronta', in_progress: 'tocando agora', running: 'tocando agora',
   pending: 'na fila', queued: 'na fila', failed: 'parou', blocked: 'parou', rejected: 'recusada', skipped: 'pulada',
@@ -46,13 +73,39 @@ const isStopped = (s: string) => /failed|blocked|rejected/.test(s)
 const noteState = (s: string) => (s === 'running' ? 'running' : /fail|error|refused/.test(s) ? 'failed' : 'done')
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
+// Esforço vira dinâmica de partitura: baixo p, médio mf, alto f, muito alto ff, máximo fff.
+const DYNAMIC: Record<string, string> = { low: 'p', medium: 'mf', high: 'f', xhigh: 'ff', max: 'fff' }
+const DYN_GLYPH: Record<string, string> = { p: '', m: '', f: '' }
+const dynamicOf = (effort?: string) => (DYNAMIC[effort ?? ''] ?? '').split('').map((c) => DYN_GLYPH[c]).join('')
+
+function makerOf(mission: Mission | null, unitId?: string) {
+  const stories = mission?.stories ?? []
+  const m = (unitId && stories.find((s) => s.id === unitId)?.maker) || stories.find((s) => s.maker)?.maker
+  return typeof m === 'string' ? { model_id: m, effort: undefined } : m ?? null
+}
+
+/** Batuta presa ao relógio: anda enquanto a parte toca, rápido no começo e devagar depois, e para quando nada roda. */
+function useBatonClock(since: string | null): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!since) return
+    const id = window.setInterval(() => setNow(Date.now()), 5000)
+    return () => window.clearInterval(id)
+  }, [since])
+  if (!since) return 0
+  const minutes = Math.max(0, (now - new Date(since).getTime()) / 60000)
+  return 0.12 + 0.76 * (1 - Math.exp(-minutes / 25))
+}
+
 /** A missão como partitura: pautas por papel, um compasso por parte, a batuta no agora; a parte aberta vira a página ao lado. */
-export default function MissionScore({ projectId, mission, fallbackId, running, projectLine }: {
+export default function MissionScore({ projectId, mission, fallbackId, running, rehearsal, projectLine, composer }: {
   projectId: string
   mission: Mission | null
   fallbackId?: string
   running: boolean
+  rehearsal: string
   projectLine: ReactNode
+  composer: ReactNode
 }) {
   const missionId = mission?.id ?? fallbackId ?? ''
   const base = `/api/projects/${encodeURIComponent(projectId)}/missions/${encodeURIComponent(missionId)}/units`
@@ -81,10 +134,13 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
   }, [drawn, units.length])
 
   const live = units.findIndex((u) => isLive(u.state))
+  const liveUnit = live >= 0 ? units[live] : null
+  const batonFrac = useBatonClock(liveUnit?.steps[0]?.at ?? null)
   const done = units.filter((u) => isDone(u.state)).length
   const waiting = !!mission?.takeover?.intervention_needed || /paused|stopped/i.test(mission?.runtime_state ?? '')
   const title = mission?.title ?? mission?.intent ?? missionId
   const open = units.find((u) => u.id === openId)
+  const maker = makerOf(mission, liveUnit?.id)
 
   const cells = useMemo(() => units.map((u) => {
     const byStaff: Record<StaffKey, Step[]> = { escreve: [], prova: [], revisa: [], motor: [] }
@@ -92,25 +148,26 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
     return byStaff
   }), [units])
 
+  const status = liveUnit
+    ? `parte ${live + 1} de ${units.length} tocando agora${liveUnit.rounds > 1 ? `, rodada ${liveUnit.rounds + 1}` : ''}`
+    : units.length ? `${done} de ${units.length} partes prontas` : 'esperando a primeira parte'
+
   return (
-    <section aria-labelledby="score-title">
+    <section aria-labelledby="score-title" className="score-view">
       <header className="score-head">
         <div className="score-title" data-live={live >= 0}>
-          <div style={{ display: 'grid', gap: '1rem', minWidth: 0 }}>
-            {running && <h2 className="caps" style={{ color: 'var(--baton)' }}>Missão em execução</h2>}
-            <h1 id="score-title" className="display" style={title.length > 32 ? { fontSize: 'clamp(2.4rem, 4.2vw, 4rem)', maxWidth: '22ch' } : undefined}>{title}</h1>
-            {projectLine}
+          <span className="rehearsal big" aria-label={`Missão ${rehearsal}`}>{rehearsal}</span>
+          <div style={{ display: 'grid', gap: '.9rem', minWidth: 0 }}>
+            <h1 id="score-title" className="display" style={title.length > 32 ? { fontSize: 'clamp(2.4rem, 4.2vw, 4rem)', maxWidth: '24ch' } : undefined}>{title}</h1>
+            <h2 className="direction status-line">{running ? `Missão em execução · ${status}` : status}</h2>
           </div>
         </div>
-        <div className="score-meta">
-          <span className="caps">Partes prontas</span>
-          <span className="display" style={{ fontSize: '2.4rem' }}><span className="num" style={{ fontFamily: 'var(--display)' }}>{done}</span><span style={{ color: 'var(--sage)' }}> / {units.length || '—'}</span></span>
-        </div>
+        {projectLine}
       </header>
 
       {error && <div className="alert" role="alert" style={{ marginBottom: '1.5rem' }}>{error}</div>}
 
-      <div className="hall">
+      <div className="hall" data-open={!!open}>
         <div style={{ minWidth: 0 }}>
           {!mission
             ? <p className="empty">A missão {missionId} começou; a partitura aparece assim que a primeira parte entrar.</p>
@@ -140,7 +197,14 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
                     ))}
 
                     {STAVES.map((staff, si) => (
-                      <Staff key={staff.key} staffIndex={si} label={staff.label} sub={staffSub(staff.key, mission, units[live]?.id)} dynamic={staff.key === 'escreve' ? dynamicOf(makerOf(mission, units[live]?.id)?.effort ?? undefined) : ''} percussion={staff.key === 'motor'}>
+                      <Staff
+                        key={staff.key}
+                        label={staff.label}
+                        sub={staff.key === 'escreve' ? maker?.model_id ?? 'quem escreve' : staff.key === 'prova' ? 'antes e depois' : staff.key === 'revisa' ? 'outra empresa' : 'preparo e entrega'}
+                        mono={staff.key === 'escreve' && !!maker}
+                        dynamic={staff.key === 'escreve' ? dynamicOf(maker?.effort ?? undefined) : ''}
+                        percussion={staff.key === 'motor'}
+                      >
                         {units.map((u, mi) => {
                           const steps = cells[mi][staff.key]
                           const queued = !isDone(u.state) && !isLive(u.state) && u.steps.length === 0
@@ -151,6 +215,7 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
                               data-state={queued ? 'queued' : 'played'}
                               style={{ ['--drawn' as string]: drawn ? 1 : 0, transitionDelay: `${mi * 90 + si * 40}ms` }}
                             >
+                              {mi === 0 && <span className="clef" aria-hidden="true">{staff.key === 'motor' ? G.percClef : G.gClef}</span>}
                               {steps.length === 0
                                 ? <span className="rest" aria-hidden="true">{queued ? G.wholeRest : G.quarterRest}</span>
                                 : steps.map((s, ni) => (
@@ -158,11 +223,11 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
                                     key={s.name}
                                     className="note"
                                     data-state={noteState(s.state)}
-                                    title={`${s.name} · ${s.state} · ${hour(s.at)}`}
+                                    title={`${stepSentence(s.name)} · ${STEP_STATE_PT[s.state] ?? s.state} · ${hour(s.at)}`}
                                     initial={reducedMotion() ? false : { opacity: 0, y: -10 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ duration: 0.6, ease: EASE_OUT, delay: 0.35 + mi * 0.09 + ni * 0.05 }}
-                                    style={{ translate: `0 ${((ni * 7 + si * 3) % 5) * 5 - 10}px` }}
+                                    style={{ translate: `0 ${staff.key === 'motor' ? 0 : 10 - pitchOf(s.name) * 5}px` }}
                                   >
                                     {noteState(s.state) === 'failed' ? G.xnote : s.state === 'running' ? G.half : G.quarter}
                                   </motion.span>
@@ -173,11 +238,11 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
                       </Staff>
                     ))}
 
-                    {live >= 0 && (
+                    {liveUnit && (
                       <motion.span
                         aria-hidden="true"
                         className="baton-line"
-                        style={{ left: `calc(var(--label) + (100% - var(--label)) * ${(live + Math.min(0.88, 0.22 + units[live].steps.length * 0.09)) / units.length})` }}
+                        style={{ left: `calc(var(--label) + (100% - var(--label)) * ${(live + batonFrac) / units.length})` }}
                         initial={{ opacity: 0, scaleY: 0 }}
                         animate={{ opacity: 1, scaleY: 1 }}
                         transition={{ duration: 0.9, ease: EASE_OUT, delay: 0.9 }}
@@ -186,54 +251,46 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
                   </div>
                 </div>
               )}
-
-          <AnimatePresence mode="wait">
-            {open && detail?.id === open.id && (
-              <Leaf key={open.id} unit={open} detail={detail} index={units.indexOf(open)} onClose={() => setOpenId(null)} />
-            )}
-          </AnimatePresence>
         </div>
 
-        <aside className="margin" aria-label="Margem da partitura">
-          <div className="fermata" data-waiting={waiting}>
-            <span className="glyph" aria-hidden="true">{G.fermata}</span>
-            <h2>Sua vez</h2>
-            <p>{waiting ? 'A missão parou e espera você decidir.' : 'Nada para decidir agora.'}</p>
-          </div>
-          {mission && <Tally mission={mission} units={units} />}
-          <figure style={{ margin: 0 }}>
-            <img className="plate" src={maestro} alt="Gravura de um regente de costas, com seis braços, cada mão conduzindo um fio" />
-          </figure>
-        </aside>
+        <div className="margin-slot">
+          <AnimatePresence mode="wait" initial={false}>
+            {open && detail?.id === open.id
+              ? <Leaf key={open.id} unit={open} detail={detail} index={units.indexOf(open)} onClose={() => setOpenId(null)} />
+              : (
+                <motion.aside
+                  key="margin"
+                  className="margin"
+                  aria-label="Margem da partitura"
+                  initial={{ opacity: 0, rotateY: -8 }}
+                  animate={{ opacity: 1, rotateY: 0 }}
+                  exit={{ opacity: 0, rotateY: 8 }}
+                  transition={{ duration: 0.5, ease: EASE_OUT }}
+                >
+                  <div className="fermata" data-waiting={waiting}>
+                    <span className="glyph" aria-hidden="true">{G.fermata}</span>
+                    <h2>Sua vez</h2>
+                    <p>{waiting ? 'A missão parou e espera você decidir.' : 'Nada para decidir agora.'}</p>
+                  </div>
+                  {mission && units.length > 0 && <CostChart mission={mission} units={units} live={live} />}
+                  <img className="plate margin-plate" src={maestro} alt="Gravura de um regente de costas, com seis braços, cada mão conduzindo um fio" />
+                </motion.aside>
+              )}
+          </AnimatePresence>
+        </div>
       </div>
+
+      <div className="composer-dock">{composer}</div>
     </section>
   )
 }
 
-// Esforço vira dinâmica de partitura: baixo p, médio mf, alto f, muito alto ff, máximo fff.
-const DYNAMIC: Record<string, string> = { low: 'p', medium: 'mf', high: 'f', xhigh: 'ff', max: 'fff' }
-const DYN_GLYPH: Record<string, string> = { p: '', m: '', f: '' }
-const dynamicOf = (effort?: string) => (DYNAMIC[effort ?? ''] ?? '').split('').map((c) => DYN_GLYPH[c]).join('')
-
-function makerOf(mission: Mission | null, unitId?: string) {
-  const stories = mission?.stories ?? []
-  const m = (unitId && stories.find((s) => s.id === unitId)?.maker) || stories.find((s) => s.maker)?.maker
-  return typeof m === 'string' ? { model_id: m, effort: undefined } : m ?? null
-}
-
-function staffSub(key: StaffKey, mission: Mission | null, liveId?: string): string {
-  if (key === 'escreve') return makerOf(mission, liveId)?.model_id ?? 'quem escreve'
-  if (key === 'prova') return 'antes e depois'
-  if (key === 'revisa') return 'outra empresa'
-  return 'preparo e entrega'
-}
-
-function Staff({ label, sub, dynamic, percussion, staffIndex, children }: { label: string; sub: string; dynamic: string; percussion: boolean; staffIndex: number; children: ReactNode }) {
+function Staff({ label, sub, mono, dynamic, percussion, children }: { label: string; sub: string; mono: boolean; dynamic: string; percussion: boolean; children: ReactNode }) {
   return (
     <>
-      <div className="staff-label" style={percussion ? { minHeight: '4rem' } : undefined} data-staff={staffIndex}>
+      <div className="staff-label" style={percussion ? { minHeight: '4rem' } : undefined}>
         <strong>{label}</strong>
-        <span className={label === 'Escreve' && sub.includes('-') ? 'model' : undefined}>{sub}</span>
+        <span className={mono ? 'model' : undefined}>{sub}</span>
         {dynamic && <em className="dynamic" title="Esforço de quem escreve">{dynamic}</em>}
       </div>
       {children}
@@ -241,51 +298,31 @@ function Staff({ label, sub, dynamic, percussion, staffIndex, children }: { labe
   )
 }
 
-/** Custo por parte como hastes gravadas: a altura é o gasto, a amarela é a parte que toca agora. */
-function Tally({ mission, units }: { mission: Mission; units: Unit[] }) {
+/** Gasto por parte como hastes gravadas com o número do compasso e o valor; a haste dourada é a parte que toca agora. */
+function CostChart({ mission, units, live }: { mission: Mission; units: Unit[]; live: number }) {
   const stories = mission.stories ?? []
   const costs = units.map((u) => stories.find((s) => s.id === u.id)?.cost ?? 0)
   const max = Math.max(0.01, ...costs)
-  const liveIdx = units.findIndex((u) => isLive(u.state))
   return (
-    <div className="tally">
-      <div className="tally-row">
-        <span className="label">Gasto</span>
-        <span className="num">{mission.consumed_usd != null ? brl(mission.consumed_usd) : '—'}</span>
-      </div>
-      <div className="tally-row">
-        <span className="label">Chamadas de IA</span>
-        <span className="num">{mission.total_calls ?? 0}</span>
-      </div>
-      {units.length > 0 && (
-        <div className="pulse" aria-label="Gasto por parte">
-          <svg viewBox={`0 0 ${units.length * 10} 40`} preserveAspectRatio="none" role="img">
-            <title>Gasto por parte</title>
-            <line x1="0" x2={units.length * 10} y1="40" y2="40" stroke="var(--sage)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-            {costs.map((c, i) => {
-              const h = Math.max(1.5, (c / max) * 36)
-              return (
-                <motion.rect
-                  key={units[i].id}
-                  x={i * 10 + 3.5}
-                  width="3"
-                  y={40 - h}
-                  height={h}
-                  fill={i === liveIdx ? 'var(--baton)' : 'var(--ink)'}
-                  initial={reducedMotion() ? false : { scaleY: 0 }}
-                  animate={{ scaleY: 1 }}
-                  style={{ transformOrigin: `${i * 10 + 5}px 40px` }}
-                  transition={{ duration: 0.9, ease: EASE_OUT, delay: 0.6 + i * 0.06 }}
-                >
-                  <title>{`${units[i].title ?? units[i].id}: ${brl(c)}`}</title>
-                </motion.rect>
-              )
-            })}
-          </svg>
-          <p className="caps" style={{ marginTop: '.6rem', fontSize: 10 }}>Gasto por parte</p>
-        </div>
-      )}
-    </div>
+    <figure className="cost-chart">
+      <figcaption className="direction">Gasto por parte</figcaption>
+      <ol className="stems" style={{ ['--n' as string]: units.length }}>
+        {units.map((u, i) => (
+          <li key={u.id} title={`${u.title ?? u.id}: ${brl(costs[i])}`}>
+            <span className="val num">{costs[i] > 0 ? costs[i].toFixed(1) : '·'}</span>
+            <motion.i
+              data-live={i === live}
+              style={{ height: `${Math.max(2, (costs[i] / max) * 100)}%` }}
+              initial={reducedMotion() ? false : { scaleY: 0 }}
+              animate={{ scaleY: 1 }}
+              transition={{ duration: 0.9, ease: EASE_OUT, delay: 0.6 + i * 0.06 }}
+            />
+            <span className="no">{i + 1}</span>
+          </li>
+        ))}
+      </ol>
+      <p className="note-line">Em dólares equivalentes de API; o que pesa de verdade é a cota do plano.</p>
+    </figure>
   )
 }
 
@@ -295,76 +332,81 @@ function Leaf({ unit, detail, index, onClose }: { unit: Unit; detail: Detail; in
     <motion.article
       className="leaf"
       data-testid="unit-detail"
-      initial={{ opacity: 0, clipPath: 'inset(0 0 100% 0)' }}
-      animate={{ opacity: 1, clipPath: 'inset(0 0 0% 0)' }}
-      exit={{ opacity: 0, clipPath: 'inset(0 0 100% 0)' }}
-      transition={{ duration: 0.7, ease: EASE_OUT }}
+      initial={{ opacity: 0, rotateY: -70, x: -30 }}
+      animate={{ opacity: 1, rotateY: 0, x: 0 }}
+      exit={{ opacity: 0, rotateY: -40 }}
+      transition={{ duration: 0.75, ease: EASE_OUT }}
+      style={{ transformOrigin: 'left center' }}
     >
       <header className="leaf-head">
-        <div style={{ display: 'grid', gap: '.6rem' }}>
-          <span className="caps">Compasso {index + 1} · {STATE_PT[unit.state] ?? unit.state} · {unit.rounds} rodada(s)</span>
+        <div style={{ display: 'grid', gap: '.5rem' }}>
           <h2 className="display">{unit.title ?? unit.id}</h2>
+          <p className="direction">Compasso {index + 1}, {STATE_PT[unit.state] ?? unit.state}, {unit.rounds} rodada(s)</p>
         </div>
-        <button className="btn quiet" onClick={onClose}><X size={14} aria-hidden="true" /> Fechar página</button>
+        <button className="btn quiet" onClick={onClose}><X size={14} aria-hidden="true" /> Fechar</button>
       </header>
-      <div className="leaf-grid">
-        <section>
-          <h3>Passos</h3>
-          <ol className="steps">
-            {unit.steps.map((s) => (
-              <li key={s.name} className="step" data-state={s.state}>
-                <span className="glyph" aria-hidden="true">{noteState(s.state) === 'failed' ? G.xnote : G.note}</span>
-                <span className="mono">{s.name}</span>
-                <time>{s.state} · {hour(s.at)}</time>
-              </li>
-            ))}
-          </ol>
-          <h3 style={{ marginTop: '1.5rem' }}>Provas</h3>
-          <TestList tests={detail.tests.filter((t) => !t.baseline_red)} />
-          {detail.tests.some((t) => t.baseline_red) && (
+
+      <section>
+        <h3>Parecer</h3>
+        {!detail.review
+          ? <p className="empty">Ainda sem revisão.</p>
+          : (
             <>
-              <p className="caps" style={{ marginTop: '.5rem' }}>Vermelhas na largada</p>
-              <TestList tests={detail.tests.filter((t) => t.baseline_red)} />
+              <p className="verdict-line">
+                <span className="display">{approved ? 'Aprovado' : 'Pediu mudanças'}</span>
+                <span className="direction"> por <span className="mono" style={{ fontStyle: 'normal' }}>{detail.review.model_id ?? 'revisor não registrado'}</span></span>
+              </p>
+              <ul className="findings">
+                {detail.review.findings.map((f) => (
+                  <li key={f.id}>
+                    <span className="finding-meta">{SEVERITY_PT[f.severity] ?? f.severity} · {FINDING_LABEL[f.status] ?? f.status}</span>
+                    <span>{f.text}</span>
+                    {f.citation && <span className="mono" style={{ color: 'var(--ink-faint)' }}>{f.citation}</span>}
+                  </li>
+                ))}
+              </ul>
             </>
           )}
-        </section>
-        <section>
-          <h3>Parecer</h3>
-          {!detail.review
-            ? <p className="empty">Ainda sem revisão.</p>
-            : (
-              <>
-                <div className="review-verdict">
-                  <span className={`seal${approved ? '' : ' changes'}`}>{approved ? 'Aprovado' : 'Pediu mudanças'}</span>
-                  <span className="direction">revisor <span className="mono" style={{ fontStyle: 'normal' }}>{detail.review.model_id ?? 'desconhecido'}</span></span>
-                </div>
-                <ul className="findings">
-                  {detail.review.findings.map((f) => (
-                    <li key={f.id}>
-                      <span><span className="tag">{f.severity}</span> <span className="tag">{FINDING_LABEL[f.status] ?? f.status}</span></span>
-                      <span>{f.text}</span>
-                      {f.citation && <span className="mono" style={{ color: 'var(--ink-faint)' }}>{f.citation}</span>}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-        </section>
-        <section className="wide">
-          <h3>O que mudou</h3>
-          {detail.diff.length === 0
-            ? <p className="empty">Sem commit da parte ainda.</p>
-            : <p className="mono" style={{ color: 'var(--ink-faint)' }}>{detail.base_commit?.slice(0, 8)}..{detail.head_commit?.slice(0, 8)}</p>}
-          {detail.diff.map((f) => (
-            <div key={f.file} className="diff-file">
-              <p className="mono">{f.file}</p>
-              <pre>
-                {f.lines.map((l, i) => <div key={i} data-kind={l.kind} className={`diff-${l.kind}`}>{l.text}</div>)}
-              </pre>
-            </div>
+      </section>
+
+      <section>
+        <h3>Passos</h3>
+        <ol className="steps">
+          {unit.steps.map((s) => (
+            <li key={s.name} className="step" data-state={s.state}>
+              <span className="glyph" aria-hidden="true">{noteState(s.state) === 'failed' ? G.xnote : s.state === 'running' ? G.half : G.quarter}</span>
+              <span className="step-text">{stepSentence(s.name)}<span className="mono">{s.name}</span></span>
+              <time>{STEP_STATE_PT[s.state] ?? s.state} · {hour(s.at)}</time>
+            </li>
           ))}
-        </section>
-      </div>
+        </ol>
+      </section>
+
+      <section>
+        <h3>Provas</h3>
+        <TestList tests={detail.tests.filter((t) => !t.baseline_red)} />
+        {detail.tests.some((t) => t.baseline_red) && (
+          <>
+            <p className="direction" style={{ marginTop: '.5rem' }}>Vermelhas na largada</p>
+            <TestList tests={detail.tests.filter((t) => t.baseline_red)} />
+          </>
+        )}
+      </section>
+
+      <section>
+        <h3>O que mudou</h3>
+        {detail.diff.length === 0
+          ? <p className="empty">Sem commit da parte ainda.</p>
+          : <p className="mono" style={{ color: 'var(--ink-faint)' }}>{detail.base_commit?.slice(0, 8)}..{detail.head_commit?.slice(0, 8)}</p>}
+        {detail.diff.map((f) => (
+          <div key={f.file} className="diff-file">
+            <p className="mono">{f.file}</p>
+            <pre>
+              {f.lines.map((l, i) => <div key={i} data-kind={l.kind} className={`diff-${l.kind}`}>{l.text}</div>)}
+            </pre>
+          </div>
+        ))}
+      </section>
     </motion.article>
   )
 }

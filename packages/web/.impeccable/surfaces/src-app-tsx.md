@@ -13,9 +13,9 @@ Constraints: accessible names used by tests/panel_web_*.test.ts stay (Enviar ped
 
 ## Direction contract
 
-THESIS: The mission is a live orchestral score. Each AI company is a staff, each part a measure, each model call a note, effort a dynamic mark, rounds repeat signs, the operator's pending decision a fermata. It refuses the category's sidebar-plus-metric-cards dashboard.
+THESIS: The mission is a live orchestral score. Each role is a staff (writes, proves, reviews, engine as percussion), because the journal records the role of every step and only the writer's model is known for sure; the model and its effort appear on the staff label as name and dynamic mark. Each part is a measure, each step a note (pitch from the round and proof phase), rounds are repeat signs, the operator's pending decision a fermata. It refuses the category's sidebar-plus-metric-cards dashboard.
 
-OWN-WORLD: Four inks only: night green-black ground #0f1a15, score ink #e9ece6, sage staff/secondary #5b7a6a, baton yellow #f2c230 reserved for "now" and "needs you"; a fifth tone only as engraved hatching. Hairline rules, sharp corners, engraved plates in off-white crosshatch. Didone display (Bodoni Moda) as score title-page lettering and italic for musical directions; Geist for UI text; Geist Mono tabular numerals; Bravura for real notation glyphs. Light variant "Matinê": the same four roles inverted onto score paper grey, never cream.
+OWN-WORLD: Chosen by Erick after the first render: graphite ground #121216, ink #ecebe8, staff line grey #5f5f6e, baton gold #f0b43c reserved for "now" and "needs you", and a faint blue stage light as ambient only. Four more palettes (Meia-noite, Brasa, Mono, Ardósia) with the same four roles, plus light/dark/system modes, on the Aparência page. Hairline rules, sharp corners, engraved plates as ink-on-alpha. Didone display (Bodoni Moda) as score title-page lettering and italic for musical directions; Geist for UI text; Geist Mono tabular numerals; Bravura for real notation glyphs. Light mode: the same roles on cool score-paper grey, never cream; plates print in dark ink.
 
 STORY: The visitor sees the piece being played: which part is live, who is writing, who reviews, what is done and proven, what waits, what it cost. When something needs them, the fermata lights yellow and the only action on screen is theirs.
 

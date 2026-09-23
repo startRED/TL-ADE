@@ -56,7 +56,7 @@ const rise = (i: number) => ({
 })
 
 /** O pedido do projeto ativo: abertura, entrevista, briefing, plano e, depois, a partitura da missão. */
-export default function IntakeFlow({ project, mission, snapshotLoaded }: { project: ProjectRef; mission: Mission | null; snapshotLoaded: boolean }) {
+export default function IntakeFlow({ project, mission, missionCount, snapshotLoaded }: { project: ProjectRef; mission: Mission | null; missionCount: number; snapshotLoaded: boolean }) {
   const base = `/api/projects/${encodeURIComponent(project.id)}`
   const [intake, setIntake] = useState<Intake | null | undefined>(undefined)
   const [busy, setBusy] = useState(false)
@@ -150,12 +150,17 @@ export default function IntakeFlow({ project, mission, snapshotLoaded }: { proje
   if (mission || running) {
     return (
       <>{alert}
-        <MissionScore projectId={project.id} mission={mission} fallbackId={intake?.mission_id} running={running} projectLine={projectLine} />
-        {!running && (
-          <section style={{ marginTop: '4rem', maxWidth: '52rem' }}>
-            <RequestBox last={intake} busy={busy} compact onSend={(text) => act('/requests', { text })} />
-          </section>
-        )}
+        <MissionScore
+          projectId={project.id}
+          mission={mission}
+          fallbackId={intake?.mission_id}
+          running={running}
+          rehearsal={String.fromCharCode(64 + Math.min(26, Math.max(1, missionCount)))}
+          projectLine={projectLine}
+          composer={running
+            ? <p className="direction">O próximo pedido abre quando esta missão terminar.</p>
+            : <RequestBox last={intake} busy={busy} compact onSend={(text) => act('/requests', { text })} />}
+        />
       </>
     )
   }
@@ -214,23 +219,22 @@ function RequestBox({ last, busy, compact, onSend }: { last: Intake | null; busy
   }
   const what = last?.rejected_at === 'plan' ? 'O plano' : 'O briefing'
   return (
-    <form className="composer" onSubmit={submit}>
+    <form className={`composer${compact ? ' compact' : ''}`} onSubmit={submit}>
       {last?.stage === 'recusada' && <p className="note-line warn">{what} foi recusado: {last.reason}</p>}
       {last?.stage === 'concluida' && (
         <p className={`note-line${last.error ? ' warn' : ''}`}>A missão {last.mission_id} terminou{last.error ? ` com erro: ${last.error}` : '.'}</p>
       )}
-      {compact && <h2 className="caps">Próximo pedido</h2>}
       <textarea
         className="field"
         aria-label="Pedido"
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && text.trim() && !busy) onSend(text) }}
-        placeholder="Descreva o que você quer construir ou mudar"
-        rows={compact ? 2 : 3}
+        placeholder={compact ? 'Peça a próxima mudança' : 'Descreva o que você quer construir ou mudar'}
+        rows={compact ? 1 : 3}
       />
       <div className="composer-row">
-        <span className="note-line">Ctrl + Enter também envia.</span>
+        {!compact && <span className="note-line">Ctrl + Enter também envia.</span>}
         <button className="btn baton" type="submit" disabled={busy || !text.trim()}>
           <PaperPlaneRight size={15} aria-hidden="true" /> {busy ? 'Compilando o pedido…' : 'Enviar pedido'}
         </button>
