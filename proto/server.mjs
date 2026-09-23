@@ -310,6 +310,12 @@ function trackModelCost(event) {
     m.cost.models = {}
     try { for (const l of readFileSync(path.join(ADE_DIR, 'journal.jsonl'), 'utf8').split('\n')) { if (!l.includes(m.id) || !l.includes('"model_call"')) continue; const e = JSON.parse(l); if (e.mission === m.id && e.type === 'model_call') addModelCost(m.cost.models, e) } } catch { }
   }
+  // modelo que ficou sem preço (entrou no catálogo antes do registro) e agora tem: refaz o dele pelo journal. O GPT-6 Sol
+  // ficou com 52 chamadas a "—" no painel mesmo depois de ganhar preço (m-mud7qppy, 23/09)
+  if (m.cost.models[event.model]?.priced === false && priceOf(event.model)) {
+    delete m.cost.models[event.model]
+    try { for (const l of readFileSync(path.join(ADE_DIR, 'journal.jsonl'), 'utf8').split('\n')) { if (!l.includes(m.id) || !l.includes(event.model)) continue; const e = JSON.parse(l); if (e.mission === m.id && e.type === 'model_call' && e.model === event.model) addModelCost(m.cost.models, e) } } catch {}
+  }
   addModelCost(m.cost.models, event)
   // orçamento por parte: só o Claude informa preço real; sem isto, Codex e agy gastavam rodadas sem teto
   // (m-mu8usf5z, s1 e s2: 6 chamadas do Astra, US$ 9,90 equivalentes, com o teto de US$ 5 parado em zero)
