@@ -338,7 +338,7 @@ describe('painel novo servido do último build e vários projetos', () => {
     const ui = await openPanel(panel.url)
     cleanups.push(() => ui.browser.close())
     const { page } = ui
-    const isDark = () => page.evaluate(() => document.querySelector('.radix-themes')?.classList.contains('dark') ?? false)
+    const isDark = () => page.evaluate(() => document.documentElement.dataset.theme === 'dark')
 
     await expect.poll(isDark).toBe(false)
     await page.getByRole('switch', { name: 'Modo noturno' }).click()

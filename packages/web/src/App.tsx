@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { Badge, Box, Button, Card, Flex, Heading, IconButton, Switch, Text, TextField, Theme } from '@radix-ui/themes'
-import { FolderOpen, FolderSimple, Moon, Sparkle, X } from '@phosphor-icons/react'
+import { X } from '@phosphor-icons/react'
+import { AnimatePresence, motion } from 'motion/react'
 import { apiFetch, postJson, subscribeEvents } from './api.ts'
 import IntakeFlow from './Intake.tsx'
-import MissionUnits from './Units.tsx'
+import Appearance, { PALETTES, type Mode, type Palette } from './Appearance.tsx'
+import { EASE_OUT } from './motion.ts'
+import { brl } from './format.ts'
 
 interface Project {
   id: string
@@ -13,32 +15,66 @@ interface Project {
   active: boolean
 }
 
-interface Snapshot {
-  missions: Array<{ id: string; status?: string }>
-  selectedMission: { id: string; status?: string } | null
+export interface ModelRef { family: string; model_id: string; effort?: string }
+export interface MissionStory { id: string; title?: string; status?: string | null; calls?: number; cost?: number | null; maker?: ModelRef | string | null }
+export interface Mission {
+  id: string
+  status?: string
+  title?: string
+  intent?: string
+  consumed_usd?: number | null
+  total_calls?: number
+  stories?: MissionStory[]
+  runtime_state?: string
+  current_story?: string | null
+  takeover?: { active: boolean; intervention_needed: boolean }
 }
 
-type Appearance = 'light' | 'dark'
-type Page = 'home' | 'projects'
+interface Snapshot {
+  missions: Mission[]
+  selectedMission: Mission | null
+}
+
+type Page = 'home' | 'projects' | 'appearance'
 
 const APPEARANCE_KEY = 'ade.appearance'
+const PALETTE_KEY = 'ade.palette'
+const systemDark = () => window.matchMedia('(prefers-color-scheme: dark)').matches
 
-function readAppearance(): Appearance {
+/** Lê uma preferência guardada; armazenamento bloqueado ou valor estranho devolve o padrão, sem lembrar a escolha. */
+function readPref<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   try {
-    return localStorage.getItem(APPEARANCE_KEY) === 'dark' ? 'dark' : 'light'
+    const saved = localStorage.getItem(key)
+    if (saved && (allowed as readonly string[]).includes(saved)) return saved as T
   } catch {
-    return 'light' // armazenamento bloqueado: segue claro, sem lembrar a escolha
+    // armazenamento bloqueado: fica o padrão
   }
+  return fallback
 }
 
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
 export default function App() {
-  const [appearance, setAppearance] = useState<Appearance>(readAppearance)
+  const [mode, setMode] = useState<Mode>(() => readPref<Mode>(APPEARANCE_KEY, ['light', 'dark', 'system'], 'system'))
+  const [palette, setPalette] = useState<Palette>(() => readPref<Palette>(PALETTE_KEY, PALETTES.map((p) => p.id), 'grafite'))
+  const [sysDark, setSysDark] = useState(systemDark)
   const [projects, setProjects] = useState<Project[]>([])
   const [snapshot, setSnapshot] = useState<{ projectId: string; data: Snapshot } | null>(null)
   const [page, setPage] = useState<Page>('home')
   const [error, setError] = useState<string | null>(null)
+
+  const dark = mode === 'system' ? sysDark : mode === 'dark'
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const on = () => setSysDark(mq.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
+  useEffect(() => {
+    const root = document.documentElement
+    root.dataset.theme = dark ? 'dark' : 'light'
+    root.dataset.palette = palette
+  }, [dark, palette])
 
   const refresh = useCallback(async () => {
     const list = await apiFetch<Project[]>('/api/projects')
@@ -55,15 +91,15 @@ export default function App() {
     return subscribeEvents(() => { refresh().catch((err) => setError(messageOf(err))) })
   }, [refresh])
 
-  function toggleAppearance(dark: boolean) {
-    const next: Appearance = dark ? 'dark' : 'light'
-    setAppearance(next)
+  function save(key: string, value: string) {
     try {
-      localStorage.setItem(APPEARANCE_KEY, next)
+      localStorage.setItem(key, value)
     } catch {
-      setError('O navegador não deixou guardar o modo noturno; ele vale só até recarregar.')
+      setError('O navegador não deixou guardar a aparência; ela vale só até recarregar.')
     }
   }
+  function chooseMode(next: Mode) { setMode(next); save(APPEARANCE_KEY, next) }
+  function choosePalette(next: Palette) { setPalette(next); save(PALETTE_KEY, next) }
 
   async function act(fn: () => Promise<unknown>) {
     setError(null)
@@ -77,95 +113,85 @@ export default function App() {
 
   const openProjects = projects.filter((p) => p.open)
   const active = openProjects.find((p) => p.active) ?? null
-  const activeSnapshot = active && snapshot?.projectId === active.id ? snapshot.data : null
+  const mission = active && snapshot?.projectId === active.id ? snapshot.data.selectedMission : null
 
   return (
-    <Theme appearance={appearance} accentColor="indigo" radius="large">
-      <div className="shell">
-        <nav className="sidebar" aria-label="Navegação">
-          <Flex align="center" gap="2" className="brand">
-            <Sparkle weight="fill" aria-hidden="true" />
-            <Text weight="bold">TL-ADE</Text>
-          </Flex>
-
-          <Box>
-            <Text as="p" size="1" color="gray" className="side-lbl">Projeto</Text>
-            <Button variant="soft" className="proj-card" onClick={() => setPage('home')}>
-              <FolderSimple weight="fill" aria-hidden="true" />
-              <span data-testid="active-project">{active?.name ?? 'Nenhuma pasta'}</span>
-            </Button>
-          </Box>
-
-          {openProjects.length > 0 && (
-            <Box>
-              <Text as="p" size="1" color="gray" className="side-lbl">Pastas abertas</Text>
-              <Flex direction="column" gap="1">
-                {openProjects.map((p) => (
-                  <Flex key={p.id} align="center" gap="1">
-                    <Button
-                      variant={p.active ? 'solid' : 'ghost'}
-                      className="grow"
-                      aria-label={`Usar ${p.name}`}
-                      title={p.path}
-                      onClick={() => act(() => postJson('/api/projects/select', { id: p.id }))}
-                    >
-                      {p.name}
-                    </Button>
-                    <IconButton
-                      variant="ghost"
-                      color="gray"
-                      aria-label={`Fechar ${p.name}`}
-                      onClick={() => act(() => postJson('/api/projects/close', { id: p.id }))}
-                    >
-                      <X aria-hidden="true" />
-                    </IconButton>
-                  </Flex>
-                ))}
-              </Flex>
-            </Box>
-          )}
-
-          <Flex direction="column" gap="3" className="side-foot">
-            <Button variant={page === 'projects' ? 'solid' : 'soft'} onClick={() => setPage('projects')}>
-              <FolderOpen aria-hidden="true" /> Projetos
-            </Button>
-            <Text as="label" size="2">
-              <Flex gap="2" align="center">
-                <Switch aria-label="Modo noturno" checked={appearance === 'dark'} onCheckedChange={toggleAppearance} />
-                <Moon aria-hidden="true" /> Modo noturno
-              </Flex>
-            </Text>
-          </Flex>
+    <>
+      <header className="strip">
+        <nav className="brand" aria-label="Projetos abertos">
+          <span className="monogram" aria-hidden="true">T</span>
+          <span className="wordmark">TL-ADE</span>
+          {openProjects.length > 0 && <span className="program"><span className="sep" aria-hidden="true">/</span>
+            {openProjects.map((p) => (
+              <span key={p.id} className="chip-wrap">
+                <button
+                  className="chip"
+                  aria-pressed={p.active}
+                  aria-label={`Usar ${p.name}`}
+                  title={p.path}
+                  onClick={() => { setPage('home'); if (!p.active) act(() => postJson('/api/projects/select', { id: p.id })) }}
+                >
+                  {p.active ? <span data-testid="active-project">{p.name}</span> : p.name}
+                </button>
+                <button className="chip-x" aria-label={`Fechar ${p.name}`} onClick={() => act(() => postJson('/api/projects/close', { id: p.id }))}>
+                  <X size={11} aria-hidden="true" />
+                </button>
+              </span>
+            ))}
+          </span>}
+          {!active && <span className="sr-only" data-testid="active-project">Nenhuma pasta</span>}
         </nav>
 
-        <main className="main">
-          {error && <Card className="warn" role="alert"><Text color="red">{error}</Text></Card>}
-          {page === 'projects'
-            ? <ProjectsPage projects={projects} onOpen={(dir) => act(async () => { await postJson('/api/projects/open', { path: dir }); setPage('home') })} />
-            : <Home project={active} snapshot={activeSnapshot} />}
-        </main>
-      </div>
-    </Theme>
+        <nav className="tabs" aria-label="Seções">
+          <button className="tab" aria-current={page === 'home' ? 'page' : undefined} onClick={() => setPage('home')}>Missão</button>
+          <button className="tab" aria-current={page === 'projects' ? 'page' : undefined} onClick={() => setPage('projects')}>Projetos</button>
+          <button className="tab" aria-current={page === 'appearance' ? 'page' : undefined} onClick={() => setPage('appearance')}>Aparência</button>
+        </nav>
+
+        <div className="readouts">
+          {mission?.consumed_usd != null && <span className="num" title="Custo equivalente de API">{brl(mission.consumed_usd)}</span>}
+          {mission?.total_calls ? <><span className="rule" aria-hidden="true" /><span className="num">{mission.total_calls} chamadas</span></> : null}
+          <span className="rule" aria-hidden="true" />
+          <button className="switch" role="switch" aria-checked={dark} aria-label="Modo noturno" onClick={() => chooseMode(dark ? 'light' : 'dark')}>
+            <span className="track" aria-hidden="true" />
+            <span className="caps" aria-hidden="true">Noite</span>
+          </button>
+        </div>
+      </header>
+
+      <main className="stage">
+        {error && <div className="alert" role="alert" style={{ marginBottom: '2rem' }}>{error}</div>}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={page === 'home' ? active?.id ?? 'none' : page}
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.45, ease: EASE_OUT }}
+          >
+            {page === 'appearance'
+              ? <Appearance mode={mode} palette={palette} onMode={chooseMode} onPalette={choosePalette} />
+              : page === 'projects'
+              ? <ProjectsPage projects={projects} onOpen={(dir) => act(async () => { await postJson('/api/projects/open', { path: dir }); setPage('home') })} />
+              : active
+                ? <IntakeFlow key={active.id} project={active} mission={mission} snapshotLoaded={snapshot?.projectId === active.id} />
+                : <NoProject onOpen={() => setPage('projects')} />}
+          </motion.div>
+        </AnimatePresence>
+      </main>
+    </>
   )
 }
 
-function Home({ project, snapshot }: { project: Project | null; snapshot: Snapshot | null }) {
-  if (!project) {
-    return <Heading as="h1" size="7">Abra uma pasta em Projetos para começar.</Heading>
-  }
-  const count = snapshot?.missions.length ?? 0
+function NoProject({ onOpen }: { onOpen: () => void }) {
   return (
-    <Flex direction="column" gap="4">
-      <Heading as="h1" size="7">O que você quer construir em <span className="accent">{project.name}</span>?</Heading>
-      <Card data-testid="project-state">
-        <Text as="p" size="1" color="gray" className="mono">{project.path}</Text>
-        <Text as="p">
-          {!snapshot ? 'Lendo o estado do projeto…' : count === 0 ? 'Nenhum pedido ainda.' : `${count} pedido(s); o último é ${snapshot.selectedMission?.id}.`}
-        </Text>
-      </Card>
-      <IntakeFlow key={project.id} projectId={project.id} />
-      {snapshot?.selectedMission && <MissionUnits key={`${project.id}:${snapshot.selectedMission.id}`} projectId={project.id} missionId={snapshot.selectedMission.id} />}
-    </Flex>
+    <section className="library">
+      <div style={{ display: 'grid', gap: '2rem' }}>
+        <h1 className="display">Abra uma pasta em Projetos para começar.</h1>
+        <p className="lede">A TL-ADE trabalha dentro de um repositório git do seu computador. Escolha a pasta e peça o que quer construir.</p>
+        <div><button className="btn baton" onClick={onOpen}>Abrir uma pasta</button></div>
+      </div>
+    </section>
   )
 }
 
@@ -179,38 +205,33 @@ function ProjectsPage({ projects, onOpen }: { projects: Project[]; onOpen: (dir:
   }
 
   return (
-    <Flex direction="column" gap="4">
-      <Heading as="h1" size="7">Projetos</Heading>
-      <Text color="gray">A ADE trabalha dentro de um repositório git do seu PC. Abrir outra pasta não interrompe a missão das que já estão abertas.</Text>
-      <Card>
-        <form className="dir-form" onSubmit={submit}>
-          <TextField.Root
-            className="grow"
-            value={dir}
-            onChange={(e) => setDir(e.target.value)}
-            placeholder="E:\meus-projetos\minha-app"
-            aria-label="Caminho da pasta"
-          />
-          <Button type="submit" disabled={!dir.trim()}>Abrir</Button>
+    <section className="library">
+      <div style={{ display: 'grid', gap: '1.75rem' }}>
+        <h1 className="display">Projetos</h1>
+        <p className="lede">A ADE trabalha dentro de um repositório git do seu PC. Abrir outra pasta não interrompe a missão das que já estão abertas.</p>
+        <form className="open-form" onSubmit={submit}>
+          <input className="field mono" value={dir} onChange={(e) => setDir(e.target.value)} placeholder="E:\meus-projetos\minha-app" aria-label="Caminho da pasta" />
+          <button className="btn baton" type="submit" disabled={!dir.trim()}>Abrir</button>
         </form>
-      </Card>
-      {closed.length > 0 && (
-        <Card>
-          <Text as="p" weight="bold">Recentes</Text>
-          <Flex direction="column" gap="2" mt="2">
-            {closed.map((p) => (
-              <Flex key={p.path} align="center" gap="2">
-                <Box className="grow">
-                  <Text as="p">{p.name}</Text>
-                  <Text as="p" size="1" color="gray" className="mono">{p.path}</Text>
-                </Box>
-                <Badge color="gray">fechado</Badge>
-                <Button variant="soft" aria-label={`Reabrir ${p.name}`} onClick={() => onOpen(p.path)}>Reabrir</Button>
-              </Flex>
-            ))}
-          </Flex>
-        </Card>
-      )}
-    </Flex>
+      </div>
+      <div style={{ display: 'grid', gap: '1rem' }}>
+        <h2 className="caps">Recentes</h2>
+        {closed.length === 0
+          ? <p className="empty">Nenhuma pasta fechada por aqui.</p>
+          : (
+            <ul className="shelf">
+              {closed.map((p) => (
+                <li key={p.path}>
+                  <div>
+                    <p>{p.name}</p>
+                    <p className="mono" style={{ color: 'var(--ink-faint)' }}>{p.path}</p>
+                  </div>
+                  <button className="btn" aria-label={`Reabrir ${p.name}`} onClick={() => onOpen(p.path)}>Reabrir</button>
+                </li>
+              ))}
+            </ul>
+          )}
+      </div>
+    </section>
   )
 }

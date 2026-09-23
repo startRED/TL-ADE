@@ -1,0 +1,133 @@
+{
+  "title": "Escolha o mundo visual da TL-ADE",
+  "question": "O sorteio indicou a Partitura. Fique com ela, escolha uma alternativa ou peça outro sorteio.",
+  "options": [
+    {
+      "id": "assigned",
+      "label": "Partitura",
+      "kicker": "O SORTEIO",
+      "lineage": "partitura de regente de orquestra",
+      "thesis": "A missão é uma partitura ao vivo: cada IA é uma pauta, e você vê a batuta atravessar.",
+      "palette": ["#0f1a15", "#e9ece6", "#f2c230", "#5b7a6a"],
+      "materials": ["gravura de partitura", "tinta sobre verde noturno", "lâminas ilustradas em hachura"],
+      "viewport": "Título da missão em tipo condensado gravado; embaixo, três pautas (Claude, Codex, Gemini) com um compasso por parte e a batuta amarela no agora; à direita, a fermata Sua vez.",
+      "risk": "Quem não lê música pode ver enfeite; cada sinal precisa de rótulo em português.",
+      "raised": [
+        {"from": "challenger-steps", "raise": "A batuta anda presa ao relógio real e só se move quando uma IA está trabalhando."},
+        {"from": "challenger-crane", "raise": "Uma folha só, do pedido ao commit: cada rodada fica visível como sinal de repetição."},
+        {"from": "challenger-storm", "raise": "O título age como matéria: condensa quando a missão roda e solta quando pausa."},
+        {"from": "challenger-gameboy", "raise": "Quatro tintas exatas; uma quinta só por hachura."}
+      ],
+      "comp": ".impeccable/mocks/decision/assigned.png"
+    },
+    {
+      "id": "model-pick",
+      "label": "Prova de gráfica",
+      "kicker": "IMPECCABLE’S PICK",
+      "lineage": "provas de impressão e zines em risografia",
+      "thesis": "Cada parte é uma prova de gráfica: marcas de registro, barra de cor e o carimbo APROVADO só depois da prova passar.",
+      "palette": ["#17181c", "#f1efea", "#ffb511", "#ff48b0"],
+      "materials": ["risografia em duas tintas", "retícula", "marcas de corte e registro"],
+      "viewport": "Uma folha de prova com marcas de corte nos cantos; o título da missão como manchete, as partes como tiras de prova, a coluna de carimbos à direita.",
+      "risk": "É onde a maioria das rodadas com o trocadilho prova cai; parada demais sem movimento.",
+      "comp": ".impeccable/mocks/decision/model-pick.png"
+    },
+    {
+      "id": "challenger-jackfield",
+      "label": "Painel de faixas",
+      "verdict": "competitive",
+      "lineage": "painel de patch de sala de máquinas",
+      "thesis": "Cada parte é uma faixa numerada presa à sua prova por uma linha cujo traço diz o estado.",
+      "palette": ["#0b0b0a", "#f2a516", "#3a2c10", "#e8e2d4"],
+      "materials": ["vidro preto retroiluminado", "linha âmbar", "grotesca condensada"],
+      "viewport": "Legenda fixa à esquerda, faixas numeradas correndo por baixo; o bloco dominante invertido numa placa âmbar.",
+      "case": "Funde bem: partes viram faixas e o estado vira traço (contínuo, pausa, pulada, descartada); perde por pouco em identificação.",
+      "risk": "Frio de sala de máquinas; âmbar sobre preto fica perto do escuro-com-neon de sempre.",
+      "comp": ".impeccable/mocks/decision/challenger-jackfield.png",
+      "hero": "https://impeccable.style/worlds/cards/operate-b-normalled-jackfield-hero.webp"
+    },
+    {
+      "id": "challenger-busytown",
+      "label": "Oficina em corte",
+      "verdict": "competitive",
+      "lineage": "livros ilustrados em corte (Busytown)",
+      "thesis": "A oficina sem parede da frente: cada IA é um trabalhador rotulado no meio da tarefa.",
+      "palette": ["#f6f4ee", "#c8412b", "#f2b705", "#3f8f4a"],
+      "materials": ["guache chapado", "contorno marrom fino", "rótulos com fio"],
+      "viewport": "Uma cena contínua da oficina; a sala da parte atual abre como casa de boneca e mostra quem está fazendo o quê.",
+      "case": "Ganha em identificação para quem não programa; perde em clareza, porque uma cena se lê mais devagar que uma lista.",
+      "risk": "Pode parecer infantil e bater de frente com o nível do Hermes.",
+      "comp": ".impeccable/mocks/decision/challenger-busytown.png",
+      "hero": "https://impeccable.style/worlds/cards/graphic-worlds-publishing-busytown-cross-section-hero.webp"
+    },
+    {
+      "id": "challenger-steps",
+      "label": "Bateria eletrônica",
+      "verdict": "declined",
+      "lineage": "sequenciador de 16 passos",
+      "thesis": "As partes como passos acesos sob uma luz que corre.",
+      "palette": ["#26262a", "#e8402a", "#f59b1b", "#f2d21b"],
+      "materials": ["teclas coloridas", "LED", "serigrafia branca"],
+      "viewport": "Uma fileira de passos que nunca quebra.",
+      "case": "Funde mal: parece brinquedo musical e repete a Partitura.",
+      "kept": "A luz que corre presa ao relógio virou a batuta da Partitura.",
+      "risk": "Brinquedo.",
+      "hero": "https://impeccable.style/worlds/cards/signals-instruments-drum-machine-step-row-hero.webp"
+    },
+    {
+      "id": "challenger-crane",
+      "label": "Tsuru de papel",
+      "verdict": "declined",
+      "lineage": "sequência de dobras de origami",
+      "thesis": "Uma folha que vira pássaro em 32 dobras.",
+      "palette": ["#c8321f", "#f2ede4", "#c9a227", "#1a1a1a"],
+      "materials": ["washi", "vincos"],
+      "viewport": "O vinco ativo e a figura lado a lado.",
+      "case": "Funde mal: dobra não conta custo, IA nem prova.",
+      "kept": "Folha única com todos os vincos antigos visíveis virou as rodadas na Partitura.",
+      "risk": "Poético demais para um painel de trabalho.",
+      "hero": "https://impeccable.style/worlds/cards/paper-folds-pleats-deployable-orizuru-crane-sequence-hero.webp"
+    },
+    {
+      "id": "challenger-storm",
+      "label": "Tempestade de letras",
+      "verdict": "declined",
+      "lineage": "mundos surreais de tipografia",
+      "thesis": "Letras que viram clima.",
+      "palette": ["#f5f5f2", "#111111", "#b8bcc2", "#8a8f96"],
+      "materials": ["grotesca monumental", "partículas"],
+      "viewport": "Uma palavra-clima por tela.",
+      "case": "Funde mal: bonito, mas não mostra o que precisa de você.",
+      "kept": "Tipo que age como matéria virou o título vivo da Partitura.",
+      "risk": "Ilegível sob pressão.",
+      "hero": "https://impeccable.style/worlds/cards/dream-surreal-impossible-worlds-alphabet-storm-hero.webp"
+    },
+    {
+      "id": "challenger-gameboy",
+      "label": "Game Boy",
+      "verdict": "declined",
+      "lineage": "tela de quatro verdes",
+      "thesis": "Tudo em quatro tons e blocos de 8 por 8.",
+      "palette": ["#9bbc0f", "#8bac0f", "#306230", "#0f380f"],
+      "materials": ["pixel", "pontilhado"],
+      "viewport": "Moldura fixa com janelas empilhadas.",
+      "case": "Funde mal: resolução baixa demais para diff e custo.",
+      "kept": "A disciplina de contar tintas virou as quatro tintas da Partitura.",
+      "risk": "Nostalgia.",
+      "hero": "https://impeccable.style/worlds/cards/digital-design-canon-gameboy-four-shade-field-hero.webp"
+    }
+  ],
+  "reroll": { "registers": ["safer", "bolder"] },
+  "buildPath": { "value": "code", "toggle": true },
+  "canon": true,
+  "canonCard": {
+    "label": "O padrão da categoria",
+    "thesis": "O painel escuro de IA que todo mundo faz, feito com capricho máximo.",
+    "palette": ["#0b0b0c", "#ededed", "#7c5cff"],
+    "materials": ["barra lateral", "cartões", "gráficos limpos"],
+    "viewport": "Barra lateral, cartões de métricas e gráficos, como Linear, Vercel e Alethe.",
+    "risk": "Igual à concorrência de propósito.",
+    "comp": ".impeccable/mocks/decision/canon.png"
+  },
+  "steer": true
+}

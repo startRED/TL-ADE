@@ -1,0 +1,7 @@
+mocks/
+plates-src/
+questions/
+review/
+*.log
+answer.txt
+plates.out

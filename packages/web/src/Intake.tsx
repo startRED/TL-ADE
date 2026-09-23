@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { Badge, Box, Button, Card, Flex, Heading, RadioGroup, Text, TextArea, TextField } from '@radix-ui/themes'
-import { CheckCircle, PaperPlaneRight, Play, XCircle } from '@phosphor-icons/react'
+import { ArrowRight, Check, PaperPlaneRight, X } from '@phosphor-icons/react'
+import { motion } from 'motion/react'
 import { apiFetch, postJson } from './api.ts'
+import type { Mission } from './App.tsx'
+import MissionScore from './Units.tsx'
+import { EASE_OUT } from './motion.ts'
+import estante from './assets/plates/estante.webp'
+import afinacao from './assets/plates/afinacao.webp'
+import coda from './assets/plates/coda.webp'
+import maestro from './assets/plates/maestro.webp'
 
 interface Question {
   id: string
@@ -36,12 +43,21 @@ interface Intake {
   digest?: string
 }
 
+interface ProjectRef { id: string; name: string; path: string }
+
 const ORIGIN_PT: Record<Decision['origin'], string> = { usuario: 'você escolheu', ia_supondo: 'IA supondo', padrao: 'padrão' }
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
-/** Caminho do pedido no projeto ativo: caixa de pedido, entrevista, briefing, plano e execução. */
-export default function IntakeFlow({ projectId }: { projectId: string }) {
-  const base = `/api/projects/${encodeURIComponent(projectId)}`
+/** Entrada em cascata: cada bloco assenta um pouco depois do anterior, uma vez só. */
+const rise = (i: number) => ({
+  initial: { opacity: 0, y: 18 },
+  animate: { opacity: 1, y: 0 },
+  transition: { duration: 0.7, ease: EASE_OUT, delay: 0.06 * i },
+})
+
+/** O pedido do projeto ativo: abertura, entrevista, briefing, plano e, depois, a partitura da missão. */
+export default function IntakeFlow({ project, mission, snapshotLoaded }: { project: ProjectRef; mission: Mission | null; snapshotLoaded: boolean }) {
+  const base = `/api/projects/${encodeURIComponent(project.id)}`
   const [intake, setIntake] = useState<Intake | null | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -68,58 +84,129 @@ export default function IntakeFlow({ projectId }: { projectId: string }) {
     }
   }
 
-  const alert = error && <Card className="warn" role="alert"><Text color="red">{error}</Text></Card>
-  if (intake === undefined) return <>{alert}<Text color="gray">Lendo o pedido…</Text></>
+  const alert = error && <div className="alert" role="alert" style={{ marginBottom: '2rem' }}>{error}</div>
+  const projectLine = (
+    <p className="project-line" data-testid="project-state">
+      <span className="mono" title={project.path}>{project.path}</span>
+      <span>{!snapshotLoaded ? 'Lendo o estado do projeto…' : mission ? `Última missão: ${mission.id}` : 'Nenhum pedido ainda.'}</span>
+    </p>
+  )
+  if (intake === undefined) return <>{alert}{projectLine}<p className="empty" style={{ marginTop: '2rem' }}>Lendo o pedido…</p></>
 
-  let view: ReactNode
-  if (!intake || intake.stage === 'recusada' || intake.stage === 'concluida') {
-    view = <RequestBox last={intake} busy={busy} onSend={(text) => act('/requests', { text })} />
-  } else if (intake.stage === 'interview') {
-    view = <InterviewView questions={intake.questions ?? []} busy={busy} onAnswer={(answers) => act('/intake/interview', { answers })} />
-  } else if (intake.stage === 'briefing' && intake.briefing) {
-    view = (
-      <Section title="Briefing" note="Confira o que entra e o que fica fora antes de a IA montar o plano.">
-        <BriefingView b={intake.briefing} />
-        <Decisions intake={intake} />
-        <Verdict what="briefing" busy={busy} onApprove={() => act('/intake/briefing/approve', { digest: intake.digest })} onReject={(reason) => act('/intake/briefing/reject', { reason })} />
-      </Section>
-    )
-  } else if (intake.stage === 'plan') {
-    view = (
-      <Section title="Plano" note="Cada parte e os critérios que a prova dela vai cobrar.">
-        <Flex direction="column" gap="2">
-          {(intake.parts ?? []).map((p) => (
-            <Card key={p.id}>
-              <Text as="p" weight="bold"><span className="mono">{p.id}</span> {p.title ?? p.task}</Text>
-              <ul className="list">{p.criteria.map((c) => <li key={c}>{c}</li>)}</ul>
-            </Card>
-          ))}
-        </Flex>
-        <Decisions intake={intake} />
-        <Verdict what="plano" busy={busy} onApprove={() => act('/intake/plan/approve', { digest: intake.digest })} onReject={(reason) => act('/intake/plan/reject', { reason })} />
-      </Section>
-    )
-  } else {
-    view = (
-      <Section title="Missão em execução" note="O plano foi aprovado e a ADE está executando as partes.">
-        <Text className="mono">{intake.mission_id}</Text>
-      </Section>
+  if (intake?.stage === 'interview') {
+    return <>{alert}<InterviewView questions={intake.questions ?? []} busy={busy} onAnswer={(answers) => act('/intake/interview', { answers })} /></>
+  }
+  if (intake?.stage === 'briefing' && intake.briefing) {
+    const b = intake.briefing
+    return (
+      <>{alert}
+        <Movement title="Briefing" note="Confira o que entra e o que fica fora antes de a IA montar o plano." plate={estante}>
+          <motion.p className="goal" {...rise(1)}>{b.goal}</motion.p>
+          <motion.div className="columns" {...rise(2)}>
+            <Ledger title="O que entra" items={b.in_scope} />
+            <Ledger title="O que fica fora" items={b.out_of_scope} kind="out" />
+            <Ledger title="O que é pronto" items={b.done_means} kind="done" />
+          </motion.div>
+          <motion.div {...rise(3)} style={{ display: 'grid', gap: '1rem' }}>
+            <h3 className="caps">{b.versions.length > 1 ? `Versões (${b.versions.length}, uma depois da outra)` : 'Versão'}</h3>
+            <ol className="versions">
+              {b.versions.map((v, i) => (
+                <li key={v.name} className="version">
+                  <span className="rehearsal" aria-hidden="true">{String.fromCharCode(65 + (i % 26))}</span>
+                  <p><strong className="mono">{v.name}</strong> · {v.goal}</p>
+                </li>
+              ))}
+            </ol>
+          </motion.div>
+          <Decisions intake={intake} />
+          <Verdict what="briefing" busy={busy} onApprove={() => act('/intake/briefing/approve', { digest: intake.digest })} onReject={(reason) => act('/intake/briefing/reject', { reason })} />
+        </Movement>
+      </>
     )
   }
-  return <>{alert}{view}</>
-}
+  if (intake?.stage === 'plan') {
+    return (
+      <>{alert}
+        <Movement title="Plano" note="Cada parte e os critérios que a prova dela vai cobrar." plate={estante}>
+          <ol className="parts">
+            {(intake.parts ?? []).map((p, i) => (
+              <motion.li key={p.id} className="part-row" {...rise(i + 1)}>
+                <span className="bar" aria-hidden="true">{i + 1}</span>
+                <div>
+                  <h3><span className="mono" style={{ color: 'var(--ink-faint)', marginRight: '.6rem' }}>{p.id}</span>{p.title ?? p.task}</h3>
+                  <ul className="ledger">{p.criteria.map((c) => <li key={c}>{c}</li>)}</ul>
+                </div>
+              </motion.li>
+            ))}
+          </ol>
+          <Decisions intake={intake} />
+          <Verdict what="plano" busy={busy} onApprove={() => act('/intake/plan/approve', { digest: intake.digest })} onReject={(reason) => act('/intake/plan/reject', { reason })} />
+        </Movement>
+      </>
+    )
+  }
 
-function Section({ title, note, children }: { title: string; note: string; children: ReactNode }) {
+  const running = intake?.stage === 'running'
+  if (mission || running) {
+    return (
+      <>{alert}
+        <MissionScore projectId={project.id} mission={mission} fallbackId={intake?.mission_id} running={running} projectLine={projectLine} />
+        {!running && (
+          <section style={{ marginTop: '4rem', maxWidth: '52rem' }}>
+            <RequestBox last={intake} busy={busy} compact onSend={(text) => act('/requests', { text })} />
+          </section>
+        )}
+      </>
+    )
+  }
+
+  const finished = intake?.stage === 'concluida' && !intake.error
   return (
-    <Flex direction="column" gap="3">
-      <Heading as="h2" size="5">{title}</Heading>
-      <Text color="gray">{note}</Text>
-      {children}
-    </Flex>
+    <>{alert}
+      <section className="overture">
+        <div className="copy">
+          <motion.h1 className="display" {...rise(0)}>O que você quer construir em <em>{project.name}</em>?</motion.h1>
+          <motion.div {...rise(1)}>{projectLine}</motion.div>
+          <motion.div {...rise(2)}><RequestBox last={intake} busy={busy} onSend={(text) => act('/requests', { text })} /></motion.div>
+        </div>
+        <motion.figure
+          className="plate-frame"
+          style={{ margin: 0 }}
+          initial={{ opacity: 0, filter: 'blur(8px)' }}
+          animate={{ opacity: 1, filter: 'blur(0px)' }}
+          transition={{ duration: 1.4, ease: EASE_OUT, delay: 0.2 }}
+        >
+          <img className="plate" src={finished ? coda : maestro} alt={finished ? 'Gravura de um regente agradecendo ao fim do concerto' : 'Gravura de um regente de costas, com seis braços, cada mão conduzindo um fio'} />
+        </motion.figure>
+      </section>
+    </>
   )
 }
 
-function RequestBox({ last, busy, onSend }: { last: Intake | null; busy: boolean; onSend: (text: string) => void }) {
+function Movement({ title, note, plate, children }: { title: string; note: string; plate: string; children: ReactNode }) {
+  return (
+    <section className="movement">
+      <motion.header {...rise(0)}>
+        <h2 className="display">{title}</h2>
+        <p className="lede">{note}</p>
+        <img className="plate" src={plate} alt="" aria-hidden="true" />
+      </motion.header>
+      <div className="body">{children}</div>
+    </section>
+  )
+}
+
+function Ledger({ title, items, kind }: { title: string; items: string[]; kind?: 'out' | 'done' }) {
+  if (items.length === 0) return null
+  return (
+    <div className={`ledger ${kind ?? ''}`}>
+      <h3 className="caps">{title}</h3>
+      <ul className="ledger">{items.map((x) => <li key={x}>{x}</li>)}</ul>
+    </div>
+  )
+}
+
+function RequestBox({ last, busy, compact, onSend }: { last: Intake | null; busy: boolean; compact?: boolean; onSend: (text: string) => void }) {
   const [text, setText] = useState('')
   function submit(e: FormEvent) {
     e.preventDefault()
@@ -127,22 +214,28 @@ function RequestBox({ last, busy, onSend }: { last: Intake | null; busy: boolean
   }
   const what = last?.rejected_at === 'plan' ? 'O plano' : 'O briefing'
   return (
-    <Card>
-      <form className="request-form" onSubmit={submit}>
-        {last?.stage === 'recusada' && <Text as="p" color="amber">{what} foi recusado: {last.reason}</Text>}
-        {last?.stage === 'concluida' && (
-          <Text as="p" color={last.error ? 'red' : 'green'}>
-            A missão {last.mission_id} terminou{last.error ? ` com erro: ${last.error}` : '.'}
-          </Text>
-        )}
-        <TextArea aria-label="Pedido" value={text} onChange={(e) => setText(e.target.value)} placeholder="Descreva o que você quer construir ou mudar" rows={4} />
-        <Flex justify="end">
-          <Button type="submit" disabled={busy || !text.trim()}>
-            <PaperPlaneRight aria-hidden="true" /> {busy ? 'Compilando o pedido…' : 'Enviar pedido'}
-          </Button>
-        </Flex>
-      </form>
-    </Card>
+    <form className="composer" onSubmit={submit}>
+      {last?.stage === 'recusada' && <p className="note-line warn">{what} foi recusado: {last.reason}</p>}
+      {last?.stage === 'concluida' && (
+        <p className={`note-line${last.error ? ' warn' : ''}`}>A missão {last.mission_id} terminou{last.error ? ` com erro: ${last.error}` : '.'}</p>
+      )}
+      {compact && <h2 className="caps">Próximo pedido</h2>}
+      <textarea
+        className="field"
+        aria-label="Pedido"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && text.trim() && !busy) onSend(text) }}
+        placeholder="Descreva o que você quer construir ou mudar"
+        rows={compact ? 2 : 3}
+      />
+      <div className="composer-row">
+        <span className="note-line">Ctrl + Enter também envia.</span>
+        <button className="btn baton" type="submit" disabled={busy || !text.trim()}>
+          <PaperPlaneRight size={15} aria-hidden="true" /> {busy ? 'Compilando o pedido…' : 'Enviar pedido'}
+        </button>
+      </div>
+    </form>
   )
 }
 
@@ -150,53 +243,34 @@ function InterviewView({ questions, busy, onAnswer }: { questions: Question[]; b
   // Só vai o que o usuário mudou: o resto adota a recomendação com origem 'padrão'.
   const [picked, setPicked] = useState<Record<string, string>>({})
   return (
-    <Section title="Entrevista" note="A primeira opção é sempre a recomendada. Não sabe? Deixe como está.">
-      {questions.map((q) => (
-        <Card key={q.id}>
-          <Text as="p" weight="bold" id={`q-${q.id}`}>{q.text}</Text>
-          <RadioGroup.Root
-            mt="2"
-            aria-labelledby={`q-${q.id}`}
-            value={picked[q.id] ?? q.options[0]?.id}
-            onValueChange={(value) => setPicked({ ...picked, [q.id]: value })}
-          >
+    <Movement title="Entrevista" note="A primeira opção é sempre a recomendada. Não sabe? Deixe como está." plate={afinacao}>
+      {questions.map((q, qi) => (
+        <motion.fieldset key={q.id} className="question" style={{ border: 0, margin: 0, padding: '0 0 2rem' }} {...rise(qi + 1)}>
+          <legend style={{ padding: 0 }}><p style={{ font: '500 19px/1.4 var(--text)', marginBottom: '1rem' }}><span className="q-index">{qi + 1}.</span>{q.text}</p></legend>
+          <div className="choices">
             {q.options.map((o, i) => (
-              <RadioGroup.Item key={o.id} value={o.id}>
-                {o.label} {i === 0 && <Badge color="green">recomendado</Badge>}
-                {o.why && <Text size="1" color="gray"> {o.why}</Text>}
-              </RadioGroup.Item>
+              <label key={o.id} className="choice">
+                <input
+                  type="radio"
+                  name={`q-${q.id}`}
+                  value={o.id}
+                  checked={(picked[q.id] ?? q.options[0]?.id) === o.id}
+                  onChange={() => setPicked({ ...picked, [q.id]: o.id })}
+                />
+                <span>
+                  {o.label}{i === 0 && <span className="tag yellow">recomendado</span>}
+                  {o.why && <span className="why">{o.why}</span>}
+                </span>
+              </label>
             ))}
-          </RadioGroup.Root>
-        </Card>
+          </div>
+        </motion.fieldset>
       ))}
-      <Flex gap="2" wrap="wrap">
-        <Button disabled={busy} onClick={() => onAnswer(picked)}><CheckCircle aria-hidden="true" /> Responder</Button>
-        <Button variant="soft" disabled={busy} onClick={() => onAnswer({})}><Play aria-hidden="true" /> Seguir com as recomendações</Button>
-      </Flex>
-    </Section>
-  )
-}
-
-function BriefingView({ b }: { b: Briefing }) {
-  const list = (title: string, items: string[]) => items.length > 0 && (
-    <Box>
-      <Text as="p" weight="bold">{title}</Text>
-      <ul className="list">{items.map((x) => <li key={x}>{x}</li>)}</ul>
-    </Box>
-  )
-  return (
-    <Card>
-      <Flex direction="column" gap="3">
-        <Text as="p" size="3">{b.goal}</Text>
-        {list('O que entra', b.in_scope)}
-        {list('O que fica fora', b.out_of_scope)}
-        {list('O que é pronto', b.done_means)}
-        <Box>
-          <Text as="p" weight="bold">{b.versions.length > 1 ? `Versões (${b.versions.length}, uma depois da outra)` : 'Versão'}</Text>
-          <ul className="list">{b.versions.map((v) => <li key={v.name}><span className="mono">{v.name}</span> · {v.goal}</li>)}</ul>
-        </Box>
-      </Flex>
-    </Card>
+      <div className="verdict-row">
+        <button className="btn baton" disabled={busy} onClick={() => onAnswer(picked)}><Check size={15} aria-hidden="true" /> Responder</button>
+        <button className="btn" disabled={busy} onClick={() => onAnswer({})}>Seguir com as recomendações <ArrowRight size={15} aria-hidden="true" /></button>
+      </div>
+    </Movement>
   )
 }
 
@@ -205,36 +279,37 @@ function Decisions({ intake }: { intake: Intake }) {
   if (decisions.length === 0) return null
   const questionOf = (id?: string) => intake.questions?.find((q) => q.id === id)
   return (
-    <Card>
-      <Text as="p" weight="bold">Decisões da entrevista</Text>
-      <ul className="list">
+    <div style={{ display: 'grid', gap: '.5rem' }}>
+      <h3 className="caps">Decisões da entrevista</h3>
+      <ul className="decisions">
         {decisions.map((d) => {
           const q = questionOf(d.question_id)
           return (
             <li key={d.question_id ?? d.value}>
-              {q?.text ?? d.question_id}: {q?.options.find((o) => o.id === d.value)?.label ?? d.value}{' '}
-              <Badge color={d.origin === 'usuario' ? 'indigo' : 'gray'}>{ORIGIN_PT[d.origin]}</Badge>
+              <span>{q?.text ?? d.question_id}:</span>
+              <strong style={{ color: 'var(--ink)', fontWeight: 500 }}>{q?.options.find((o) => o.id === d.value)?.label ?? d.value}</strong>
+              <span className={`tag${d.origin === 'usuario' ? ' yellow' : ''}`}>{ORIGIN_PT[d.origin]}</span>
             </li>
           )
         })}
       </ul>
-    </Card>
+    </div>
   )
 }
 
 function Verdict({ what, busy, onApprove, onReject }: { what: string; busy: boolean; onApprove: () => void; onReject: (reason: string) => void }) {
   const [reason, setReason] = useState('')
   return (
-    <Card>
-      <Flex direction="column" gap="3">
-        <Button disabled={busy} onClick={onApprove}><CheckCircle weight="fill" aria-hidden="true" /> Aprovar {what}</Button>
-        <Flex gap="2" wrap="wrap" align="center">
-          <TextField.Root className="grow" aria-label="Motivo da recusa" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Por que não serve?" />
-          <Button color="red" variant="soft" disabled={busy || !reason.trim()} onClick={() => onReject(reason)}>
-            <XCircle aria-hidden="true" /> Recusar {what}
-          </Button>
-        </Flex>
-      </Flex>
-    </Card>
+    <div className="verdict">
+      <div className="verdict-row">
+        <button className="btn baton" disabled={busy} onClick={onApprove}><Check size={15} weight="bold" aria-hidden="true" /> Aprovar {what}</button>
+      </div>
+      <div className="verdict-row">
+        <input className="field" aria-label="Motivo da recusa" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Por que não serve?" />
+        <button className="btn" disabled={busy || !reason.trim()} onClick={() => onReject(reason)}>
+          <X size={15} aria-hidden="true" /> Recusar {what}
+        </button>
+      </div>
+    </div>
   )
 }
