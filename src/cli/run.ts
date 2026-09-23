@@ -19,6 +19,7 @@ import { installShutdownDrain, readMissionControl } from '../engine/control.ts'
 import { resumeMission } from '../engine/resume.ts'
 import { checkApproval } from '../engine/schedule.ts'
 import { replanRemaining } from '../mission/plan-lifecycle.ts'
+import { approvalReasons } from '../intent/proportional.ts'
 import { createEvalRunner } from '../evals/eval-runner.ts'
 import { createGateRunner } from '../gates/gates.ts'
 import { createGitPort } from '../git/gitport.ts'
@@ -430,6 +431,7 @@ export async function runCommand(options: {
       loaded.stories.length === 1 &&
       !hasApproval &&
       approvedSkillIds.length === 0 &&
+      approvalReasons(loaded.plan).length === 0 &&
       readMissionControl({ missionDir }).state === 'RUNNING'
     ) {
       const story = loaded.stories[0]

@@ -7,6 +7,7 @@ import { runResearchStep, fallbackArtifact } from './research.ts'
 import { selectEligibleSkills } from './skills.ts'
 import { splitContract } from './split.ts'
 import { validateCompiledPlan } from './validate.ts'
+import { planStoriesOf, storyHumanDecisionOf, type PlanStory } from './proportional.ts'
 import { discoverDesignSignals } from '../visual/design-discovery.ts'
 import { buildDesignBrief } from '../visual/design-brief.ts'
 
@@ -22,12 +23,6 @@ export {
   discoverDesignSignals,
   buildDesignBrief,
 }
-
-/** Classes de complexidade que admitem plano progressivo em fatias. */
-const BROAD_CLASSES = new Set(['feature', 'epic', 'project'])
-
-/** Quantas entregas entram na fatia executável agora; o resto fica como intenção. */
-const IMMEDIATE_SLICE = 2
 
 /**
  * Quebra o pedido nas entregas que ele enumera (vírgulas e conectivo "e").
@@ -179,7 +174,7 @@ export async function compileIntent({
         researcher?: Function
         adeConfig?: any
         budget?: any
-    }): Promise<{ briefing: any; plan: any; contracts: any[]; questions: any[]; refusedQuestions: any[] }> {
+    }): Promise<{ briefing: any; plan: any; contracts: any[]; stories: PlanStory[]; questions: any[]; refusedQuestions: any[] }> {
   if (typeof request !== 'string' || request.trim() === '') {
     throw new TypeError('compileIntent: request é obrigatório')
   }
@@ -371,13 +366,9 @@ export async function compileIntent({
     eligibleSkills,
   })
 
+  // A quantidade de stories segue as entregas do pedido, sem mínimo nem máximo fixos.
   const deliverables = splitDeliverables(request)
-  const isBroad = BROAD_CLASSES.has(classification.complexity) && deliverables.length >= 3
-
-  const immediate = isBroad
-    ? deliverables.slice(0, IMMEDIATE_SLICE)
-    : (deliverables.length > 1 ? deliverables : [request])
-  const futureIntent = isBroad ? deliverables.slice(IMMEDIATE_SLICE) : []
+  const immediate = deliverables.length > 1 ? deliverables : [request]
 
   const researchRefs = researchFindings.map((f) => f.ref)
 
@@ -415,10 +406,23 @@ export async function compileIntent({
     })
   }
 
+  // O contrato é fechado, então a decisão humana vive no briefing, como o design_brief.
+  const humanDecisions: Record<string, { reason: string }> = {}
+  for (const contract of contracts) {
+    const decision = storyHumanDecisionOf(contract)
+    if (!decision) continue
+    humanDecisions[contract.id] = decision
+    questions.push({
+      id: `Q-human-${contract.id}`,
+      text: `Decisão humana na story ${contract.id}: ${decision.reason}`,
+      kind: 'human_decision',
+    } as any)
+  }
+
   const planBriefing = {
     ...briefing,
     ...(Object.keys(designBriefs).length > 0 ? { design_briefs: designBriefs } : {}),
-    ...(futureIntent.length > 0 ? { future_intent: futureIntent } : {}),
+    ...(Object.keys(humanDecisions).length > 0 ? { human_decisions: humanDecisions } : {}),
     ...(researchFindings.length > 0 ? { research_findings: researchFindings } : {}),
     ...(researchFallbacks.length > 0 ? { research_fallbacks: researchFallbacks } : {}),
   }
@@ -449,5 +453,6 @@ export async function compileIntent({
 
   if (divergenceDetected) Object.defineProperty(plan, 'status', { value: 'awaiting_operator', enumerable: false })
 
-  return { briefing: planBriefing, plan, contracts, questions, refusedQuestions }
+  const stories = planStoriesOf(contracts, humanDecisions)
+  return { briefing: planBriefing, plan, contracts, stories, questions, refusedQuestions }
 }

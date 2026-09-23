@@ -5,6 +5,8 @@ import path from 'node:path'
 import { compileIntent } from '../intent/compiler.ts'
 import { applyInterviewAnswer } from '../intent/interview.ts'
 import { validateCompiledPlan } from '../intent/validate.ts'
+import { planCriticsFromConfig } from '../intent/plan-critic.ts'
+import { approvalReasons, critiquePlan, needsPlanCritic, planIssues, planStoriesOf } from '../intent/proportional.ts'
 import { digest16 } from '../journal/canonical.ts'
 import { openJournal, readJournal } from '../journal/journal.ts'
 import { buildRuntimeStamp } from '../journal/stamp.ts'
@@ -241,6 +243,27 @@ export async function planMission(
     throw new Error(`Plano compilado inválido: ${details}`)
   }
 
+  const issues = planIssues({ stories: planStoriesOf(contracts, plan.briefing.human_decisions) })
+  if (issues.length > 0) {
+    throw new Error(`Plano compilado inválido: ${issues.map((i) => `${i.story}: ${i.problem}`).join(', ')}`)
+  }
+
+  // A crítica fica no briefing: entra no digest que o operador aprova. Críticos injetados
+  // sempre leem o plano; os dos papéis de .ade/config.json, só quando o plano é de alto risco.
+  const critics = Array.isArray(deps.planCritics)
+    ? deps.planCritics
+    : needsPlanCritic(plan)
+      ? planCriticsFromConfig(deps.adeConfig, {
+          repoDir: resolvedRepoDir,
+          env: deps.env,
+          runWorkerImpl: deps.runWorkerImpl,
+          resolveBinaryImpl: deps.resolveBinary,
+        })
+      : []
+  if (critics.length > 0) {
+    plan.briefing.plan_critic = await critiquePlan({ plan, contracts }, critics)
+  }
+
   const planPath = path.join(missionDir, 'plan.json')
   writeJsonAtomic(planPath, plan)
 
@@ -260,7 +283,7 @@ export async function planMission(
     missionId,
     planPath,
     digest,
-    state: 'planned',
+    state: approvalReasons(plan).length > 0 ? 'awaiting_approval' : 'planned',
     questions: questions || [],
   }
 }
@@ -676,10 +699,7 @@ export async function replanRemaining(
   const inheritedAnswers = Array.isArray(oldContext.answers) ? oldContext.answers : []
 
   // Determinar requisição restante
-  const effectiveRequest =
-    request ||
-    (oldPlan.briefing?.future_intent && oldPlan.briefing.future_intent.join(' e ')) ||
-    oldPlan.intent
+  const effectiveRequest = request || oldPlan.intent
 
   // Compilar novas stories
   const compiled = await compileIntent({

@@ -203,7 +203,7 @@ describe('v0.3 Intent Compiler Acceptance Criteria', () => {
 
     // Somente o trabalho executável agora entra em contracts/fase inicial
     expect(contracts.length).toBeGreaterThan(0)
-    expect(contracts.length).toBeLessThanOrEqual(3) // fatia executável imediata
+    expect(contracts.length).toBe(4) // sem teto fixo: as 4 entregas do pedido viram stories
     expect(plan.phases[0].epics[0].stories).toHaveLength(contracts.length)
   })
 
