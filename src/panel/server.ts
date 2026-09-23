@@ -11,6 +11,8 @@ import { createInterventionController } from './control.ts'
 import { defaultChatAgent } from './chat/agent.ts'
 import { createChat, type ChatAgent } from './chat/chat.ts'
 import { createSessionManager } from './session.ts'
+import { createLocalQuotaPort } from '../adapters/local/quota.ts'
+import { readModelsView, readUsage, setManualQuota, updateModelSettings, type QuotaPort } from './models-api.ts'
 import { createIntake, defaultIntent, spawnMissionRun, type IntentPort, type RunMission } from './intake.ts'
 import { assertProjectPath, createOpenProjects } from './open-projects.ts'
 import { listProjects, registerProject } from './projects.ts'
@@ -125,6 +127,10 @@ export async function startServer({
             runMission?: RunMission
             /** Agente do chat do painel, que roda na cópia do projeto (padrão: a CLI da empresa escolhida). */
             chatAgent?: ChatAgent
+            /** Leitura oficial da cota (padrão: recibo local em ~/.ade/quota-receipt.json). */
+            quotaPort?: QuotaPort
+            /** Relógio da página Modelos e do relatório de uso. */
+            now?: () => number
         } & import('./control.ts').TerminalDeps
     } = {}) {
   const sessionManager = createSessionManager({ allowedOrigins: [`http://${host}:${port}`] })
@@ -148,6 +154,12 @@ export async function startServer({
   // 3 e 4. Projetos abertos, cada um com o próprio lease exclusivo (exit 5 se colisão) e projeção inicial
   const projects = createOpenProjects()
   const { indexPath } = await projects.open(resolvedRepo)
+  const quotaPort = deps.quotaPort ?? createLocalQuotaPort({ receiptPath: path.join(homeDir, '.ade', 'quota-receipt.json') })
+  const now = deps.now ?? Date.now
+  const activeProject = () => {
+    if (!projects.activeId) throw new AdeError('project_not_found', 'Nenhum projeto aberto.', 2)
+    return projects.get(projects.activeId)
+  }
 
   // 5. Canal WebSocket unidirecional
   const stderrWrite =
@@ -256,8 +268,25 @@ export async function startServer({
           return
         }
 
-        if (pathname.startsWith('/api/projects')) {
+        if (pathname.startsWith('/api/projects') || pathname.startsWith('/api/models') || pathname === '/api/usage') {
           try {
+            if (pathname === '/api/models' && method === 'GET') {
+              sendJson(res, 200, await readModelsView(activeProject().path, now(), quotaPort))
+              return
+            }
+            if (pathname === '/api/models/settings' && method === 'POST') {
+              sendJson(res, 200, updateModelSettings(activeProject().path, await readJsonBody(req)))
+              return
+            }
+            if (pathname === '/api/models/quota' && method === 'POST') {
+              setManualQuota(activeProject().path, await readJsonBody(req), now())
+              sendJson(res, 200, { ok: true })
+              return
+            }
+            if (pathname === '/api/usage' && method === 'GET') {
+              sendJson(res, 200, await readUsage(activeProject(), parsedUrl.searchParams.get('since'), now(), quotaPort))
+              return
+            }
             if (pathname === '/api/projects' && method === 'GET') {
               const open = projects.list()
               const registered = listProjects({ homeDir })

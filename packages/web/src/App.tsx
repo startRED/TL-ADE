@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Badge, Box, Button, Card, Flex, Heading, IconButton, Switch, Text, TextField, Theme } from '@radix-ui/themes'
-import { FolderOpen, FolderSimple, Moon, Sparkle, X } from '@phosphor-icons/react'
+import { Cpu, FolderOpen, FolderSimple, Moon, Sparkle, X } from '@phosphor-icons/react'
 import { apiFetch, postJson, subscribeEvents } from './api.ts'
 import ChatPanel from './Chat.tsx'
 import IntakeFlow from './Intake.tsx'
+import ModelsPage from './Models.tsx'
 import MissionUnits from './Units.tsx'
 
 interface Project {
@@ -20,7 +21,7 @@ interface Snapshot {
 }
 
 type Appearance = 'light' | 'dark'
-type Page = 'home' | 'projects'
+type Page = 'home' | 'projects' | 'models'
 
 const APPEARANCE_KEY = 'ade.appearance'
 
@@ -130,6 +131,9 @@ export default function App() {
             <Button variant={page === 'projects' ? 'solid' : 'soft'} onClick={() => setPage('projects')}>
               <FolderOpen aria-hidden="true" /> Projetos
             </Button>
+            <Button variant={page === 'models' ? 'solid' : 'soft'} onClick={() => setPage('models')}>
+              <Cpu aria-hidden="true" /> Modelos
+            </Button>
             <Text as="label" size="2">
               <Flex gap="2" align="center">
                 <Switch aria-label="Modo noturno" checked={appearance === 'dark'} onCheckedChange={toggleAppearance} />
@@ -143,7 +147,9 @@ export default function App() {
           {error && <Card className="warn" role="alert"><Text color="red">{error}</Text></Card>}
           {page === 'projects'
             ? <ProjectsPage projects={projects} onOpen={(dir) => act(async () => { await postJson('/api/projects/open', { path: dir }); setPage('home') })} />
-            : <Home project={active} snapshot={activeSnapshot} />}
+            : page === 'models'
+              ? active ? <ModelsPage key={active.id} projectId={active.id} /> : <Heading as="h1" size="7">Abra uma pasta em Projetos para ver os modelos.</Heading>
+              : <Home project={active} snapshot={activeSnapshot} />}
         </main>
         {page === 'home' && active && <ChatPanel key={`chat:${active.id}`} projectId={active.id} />}
       </div>
