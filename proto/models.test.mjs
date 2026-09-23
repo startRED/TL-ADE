@@ -70,5 +70,5 @@ test('medição liga a chamada de quem escreve ao próximo parecer do revisor', 
     { type: 'model_call', role: 'prova e código', model: 'm1', files: 3 },
     { type: 'log', text: 'aprovou: ok' },
   ]).m1
-  assert.deepEqual(g, { calls: 2, approved: 1, reviewed: 2, zero: 1, time: { high: { timed: 1, min: 2 } } })
+  assert.deepEqual(g, { calls: 2, approved: 1, reviewed: 2, zero: 1, time: { high: { timed: 1, min: 2 } }, eff: { high: { reviewed: 1, approved: 0 } } }) // a 2ª chamada é da mesma parte: não conta na aprovação por esforço
 })

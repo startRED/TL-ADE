@@ -116,6 +116,7 @@ export function pressure(tier, quota, now = Date.now()) {
 export function measure(events) {
   const out = {}
   let last = null
+  const firsts = new Set()
   for (const e of events) {
     const t = String(e.text || '')
     if (e.type === 'model_call' && /implementação|prova e código/.test(e.role || '')) {
@@ -126,10 +127,14 @@ export function measure(events) {
       // minutos medidos no high e ganhava o código comum com as cotas zeradas)
       const ms = e.wall_ms ?? e.duration_ms, tk = e.effort || '-'
       if (ms) { const x = (g.time ||= {})[tk] ||= { timed: 0, min: 0 }; x.timed++; x.min += ms / 60000 }
-      last = { model: e.model, reviewed: false }
+      // aprovação só da PRIMEIRA chamada de cada parte: o esforço max só entra no fim da escada, com a parte quase pronta, e
+      // aparecia com 94% contra 26% do high (m-mud7qppy, 23/09): media a rodada, não o esforço
+      const part = e.story_id ?? `${e.mission}:${e.story}`, first = !firsts.has(part); firsts.add(part)
+      last = { model: e.model, effort: e.effort || '-', reviewed: false, first }
     }
     const v = /^(aprovou|pediu mudanças):/.exec(t)
-    if (v && last && !last.reviewed) { last.reviewed = true; const g = out[last.model]; g.reviewed++; if (v[1] === 'aprovou') g.approved++ }
+    if (v && last && !last.reviewed) { last.reviewed = true; const g = out[last.model]; g.reviewed++; if (v[1] === 'aprovou') g.approved++
+      if (last.first) { const x = (g.eff ||= {})[last.effort] ||= { reviewed: 0, approved: 0 }; x.reviewed++; if (v[1] === 'aprovou') x.approved++ } }
   }
   return out
 }
@@ -137,13 +142,18 @@ export function measure(events) {
 const measuredOf = (measured, e) => measured?.[`${e.model}-${e.effort}`] || measured?.[e.model] || null
 
 // Nota de um modelo num papel, com o porquê de cada parcela.
-export function scoreFor(entry, role, { tier, quota, measured, now } = {}) {
+export function scoreFor(entry, role, { tier, quota, measured, now, base = 0.4 } = {}) {
   const r = ROLES[role], parts = []
   let q = entry.ai; parts.push(`inteligência ${entry.ai}`)
   const g = r.maker ? measuredOf(measured, entry) : null
-  if (g?.reviewed >= 5) { // retorno de QUALIDADE: aprovação do revisor contra a média, com peso pela amostra
-    const w = g.reviewed / (g.reviewed + 10), adj = (g.approved / g.reviewed - 0.4) * 30 * w - (g.zero / g.calls) * 15
-    q += adj; parts.push(`medido aqui: revisor aprovou ${Math.round(100 * g.approved / g.reviewed)}% de ${g.reviewed}${g.zero ? `, ${g.zero} chamada(s) sem mudar arquivo` : ''} (${adj >= 0 ? '+' : ''}${adj.toFixed(1)})`)
+  // aprovação por ESFORÇO: por modelo, o Opus 5.5 low herdava as aprovações do high e ganhava o código comum (23/09)
+  // Esforço sem amostra própria herda o do modelo pela metade: sem isso, esforço nunca usado escapava da comparação e tomava
+  // o lugar do medido só por não ter dado (o Opus medium tirava o código difícil do high).
+  const own = g?.eff?.[entry.effort], pool = g?.eff && Object.values(g.eff).reduce((a, x) => ({ reviewed: a.reviewed + x.reviewed, approved: a.approved + x.approved }), { reviewed: 0, approved: 0 })
+  const ge = own?.reviewed >= 5 ? own : pool, half = ge === own ? 1 : 0.5
+  if (ge?.reviewed >= 5) { // retorno de QUALIDADE: aprovação do revisor contra a média, com peso pela amostra
+    const w = half * ge.reviewed / (ge.reviewed + 10), adj = (ge.approved / ge.reviewed - base) * 30 * w - (g.zero / g.calls) * 15
+    q += adj; parts.push(`medido aqui${half < 1 ? ' (outro esforço, peso pela metade)' : ''}: revisor aprovou de primeira ${Math.round(100 * ge.approved / ge.reviewed)}% de ${ge.reviewed}${g.zero ? `, ${g.zero} chamada(s) sem mudar arquivo` : ''} (${adj >= 0 ? '+' : ''}${adj.toFixed(1)})`)
   }
   // tempo: o medido aqui (minutos por chamada) vale mais que a velocidade de saída do site quando há amostra
   // abaixo de 15 s o site não diz nada sobre tarefa de vários passos: o GPT-6 Sol medium (6 s, inteligência 40) tirava o código
@@ -168,9 +178,12 @@ export function buildChains({ plans = {}, quota = {}, measured = {}, blocked = [
     return t?.cap > 0 && (!t.models || t.models.includes(e.model)) && !blocked.includes(e.model)
   })
   const chains = {}, why = {}
+  // média de aprovação na primeira tentativa, de todos: o revisor quase sempre pede mudança de primeira, e 40% fixo punia quem tinha amostra
+  const all = Object.values(measured).flatMap((g) => Object.values(g.eff || {})), rv = all.reduce((n, x) => n + x.reviewed, 0)
+  const base = rv >= 10 ? all.reduce((n, x) => n + x.approved, 0) / rv : 0.4
   // quem atinge o mínimo do papel vem antes; os abaixo só completam a fila (plano pequeno não fica sem reserva nem sem fila)
   const rate = (role) => usable
-    .map((e) => ({ e, s: scoreFor(e, role, { tier: tierOf(e.family), quota: quota[e.family], measured, now }) }))
+    .map((e) => ({ e, s: scoreFor(e, role, { tier: tierOf(e.family), quota: quota[e.family], measured, now, base }) }))
     .sort((a, b) => (b.e.ai >= ROLES[role].minAi) - (a.e.ai >= ROLES[role].minAi) || b.s.score - a.s.score)
   // um esforço por modelo; a 2ª posição é de outra empresa quando existe (cota ou falha de uma não para o papel)
   const pick = (rated, avoidFamily = null) => {
