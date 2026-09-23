@@ -847,3 +847,16 @@ h3.ui-heading, h4.ui-heading { font-size: 1.15rem; }
 @media (prefers-reduced-motion: reduce) { .thinking-bar { animation: none; background-position: 50% 0; } }
 .q-why { margin: -.5rem 0 1rem; font: 400 14px/1.5 var(--text); color: var(--ink-faint); max-width: 62ch; }
 .path-line { color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- casas da tabela em palavras ----------
+   Erick não lê partitura: sem clave, pauta, nota ou pausa. Cada casa diz o que o papel fez na parte, com um ícone só
+   (feito, falhou, rodando agora). */
+.bar-cell::before { display: none; }
+.bar-cell { min-height: 3.75rem; justify-content: flex-start; padding: .6rem .9rem; }
+.cell-empty { font: 500 11px/1.2 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-faint); }
+.cell-mark { display: inline-flex; align-items: center; gap: .45rem; font: 450 13.5px/1.3 var(--text); color: var(--ink); }
+.cell-mark[data-mark='fail'] { color: var(--danger, #ff8a7a); }
+.cell-mark[data-mark='live'] { color: var(--baton-text); }
+.cell-mark .pulse { margin-right: 0; }
+.staff-label .dynamic { font: 400 11.5px/1.3 var(--mono); font-style: normal; color: var(--ink-faint); }
+.step .glyph { font: inherit; }

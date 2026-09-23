@@ -18,12 +18,6 @@ interface Detail {
   review: { verdict: string; model_id: string | null; findings: Array<{ id: string; severity: string; text: string; status: string; citation: string | null }> } | null
 }
 
-// Glifos SMuFL da Bravura: a notação é de verdade, não desenho aproximado.
-const G = {
-  quarter: '', half: '', xnote: '', quarterRest: '', wholeRest: '',
-  fermata: '', repeat: '', gClef: '', percClef: '',
-} as const
-
 /**
  * Pautas por papel, não por empresa: o journal diz o papel de cada passo (maker, eval, review), e o modelo só é certo
  * para quem escreve. Uma pauta por empresa inventaria dado; a empresa aparece no rótulo quando o contrato a nomeia.
@@ -36,15 +30,6 @@ const STAVES = [
 ] as const
 type StaffKey = typeof STAVES[number]['key']
 const staffOf = (name: string): StaffKey => STAVES.find((s) => s.test.test(name))!.key
-
-/** Altura da nota vem do dado: a rodada sobe a nota (r1 grave, r3 agudo); prova vermelha grave, verde aguda. */
-function pitchOf(name: string): number {
-  const round = /:r(\d+):/.exec(name)
-  if (round) return Math.min(4, Number(round[1]) - 1)
-  if (/:red:/.test(name)) return 0
-  if (/:green:/.test(name)) return 3
-  return 1
-}
 
 /** O id do passo em português; o id cru fica ao lado, em letra pequena. */
 function stepSentence(name: string): string {
@@ -62,14 +47,14 @@ function stepSentence(name: string): string {
 const TEST_LABEL = { passed: 'passou', failed: 'falhou', red_at_start: 'vermelha na largada' } as const
 const FINDING_LABEL: Record<string, string> = { open: 'aberto', withdrawn: 'retirado', resolved: 'resolvido' }
 const SEVERITY_PT: Record<string, string> = { high: 'grave', medium: 'média', low: 'leve', critical: 'crítica' }
-const STEP_STATE_PT: Record<string, string> = { ok: 'feito', running: 'tocando', failed: 'falhou', error: 'falhou' }
+const STEP_STATE_PT: Record<string, string> = { ok: 'feito', running: 'rodando', failed: 'falhou', error: 'falhou' }
 const STATE_PT: Record<string, string> = {
-  committed: 'pronta', delivered: 'pronta', done: 'pronta', approved: 'pronta', in_progress: 'tocando agora', running: 'tocando agora',
+  committed: 'pronta', delivered: 'pronta', done: 'pronta', approved: 'pronta', in_progress: 'rodando agora', running: 'rodando agora',
   pending: 'na fila', queued: 'na fila', awaiting_operator: 'parou', failed: 'parou', blocked: 'parou', rejected: 'recusada', skipped: 'pulada',
 }
 /** Por que a parte parou, em linguagem de quem pediu; o código cru fica só quando não há tradução. */
 const PARKED_PT: Record<string, string> = {
-  eval_red_not_red: 'A prova desta parte não chegou a rodar antes do código: o comando de teste do projeto falha sozinho. Confira o script "test" do package.json e peça de novo.',
+  eval_red_not_red: 'A prova desta parte não falhou antes do código (ou nem conseguiu rodar), então não serve para provar a mudança.',
   quota_unavailable: 'Sem leitura oficial da cota do plano, e a TL-ADE não gasta às cegas.',
   quota_untrusted: 'A leitura da cota do plano não é confiável agora.',
   quota_exhausted: 'A cota da semana do plano passou do limite desta missão.',
@@ -93,16 +78,28 @@ const parkedWhy = (reason?: string | null) => (!reason ? 'Sem motivo registrado.
 const isDone = (s: string) => /committed|delivered|done|approved|pronta/.test(s)
 const isLive = (s: string) => /in_progress|running/.test(s)
 const isStopped = (s: string) => /failed|blocked|rejected|awaiting_operator/.test(s)
-const noteState = (s: string) => (s === 'running' ? 'running' : /fail|error|refused/.test(s) ? 'failed' : 'done')
+type Mark = 'ok' | 'fail' | 'live'
+const markOf = (state: string): Mark => (state === 'running' ? 'live' : /fail|error|refused/.test(state) ? 'fail' : 'ok')
+function MarkIcon({ mark }: { mark: Mark }) {
+  if (mark === 'live') return <span className="pulse running" aria-hidden="true" />
+  return mark === 'fail' ? <X size={13} weight="bold" aria-hidden="true" /> : <Check size={13} weight="bold" aria-hidden="true" />
+}
+
+/** O que cada papel fez na parte, em poucas palavras: o último passo manda. Sem símbolo que precise de legenda. */
+function cellSentence(role: StaffKey, steps: Step[]): string {
+  const last = steps[steps.length - 1]
+  const mark = markOf(last.state)
+  if (role === 'escreve') return mark === 'live' ? 'escrevendo' : mark === 'fail' ? 'falhou ao escrever' : steps.length > 1 ? `escreveu ${steps.length} vezes` : 'escreveu'
+  if (role === 'prova') return mark === 'live' ? 'rodando a prova' : mark === 'fail' ? 'prova falhou' : /:green:/.test(last.name) ? 'prova passou' : 'prova escrita'
+  if (role === 'revisa') return mark === 'live' ? 'revisando' : mark === 'fail' ? 'pediu correção' : 'revisou'
+  return mark === 'live' ? 'trabalhando' : mark === 'fail' ? 'parou' : /deliver|commit/.test(last.name) ? 'entregou' : 'preparou'
+}
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err))
 /** Uma contagem só em toda a tela: quantas revisões a parte já teve (o sinal de repetição mostra o mesmo número). */
 const reviews = (n: number) => (n === 1 ? '1 revisão' : `${n} revisões`)
 const decimal = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-// Esforço vira dinâmica de partitura: baixo p, médio mf, alto f, muito alto ff, máximo fff.
-const DYNAMIC: Record<string, string> = { low: 'p', medium: 'mf', high: 'f', xhigh: 'ff', max: 'fff' }
-const DYN_GLYPH: Record<string, string> = { p: '', m: '', f: '' }
-const dynamicOf = (effort?: string) => (DYNAMIC[effort ?? ''] ?? '').split('').map((c) => DYN_GLYPH[c]).join('')
+const EFFORT_PT: Record<string, string> = { low: 'esforço baixo', medium: 'esforço médio', high: 'esforço alto', xhigh: 'esforço muito alto', max: 'esforço máximo' }
 
 function makerOf(mission: Mission | null, unitId?: string) {
   const stories = mission?.stories ?? []
@@ -176,7 +173,7 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
   }), [units])
 
   const status = liveUnit
-    ? `parte ${live + 1} de ${units.length} tocando agora${liveUnit.rounds > 0 ? `, ${reviews(liveUnit.rounds)} até agora` : ''}`
+    ? `parte ${live + 1} de ${units.length} rodando agora${liveUnit.rounds > 0 ? `, ${reviews(liveUnit.rounds)} até agora` : ''}`
     : units.length ? `${done} de ${units.length} partes prontas` : 'esperando a primeira parte'
 
   return (
@@ -197,7 +194,7 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
       <div className="hall" data-open={!!open}>
         <div style={{ minWidth: 0 }}>
           {!mission
-            ? <p className="empty">A missão {missionId} começou; a partitura aparece assim que a primeira parte entrar.</p>
+            ? <p className="empty">A missão {missionId} começou; a tabela aparece assim que a primeira parte entrar.</p>
             : units.length === 0
               ? <p className="empty">Lendo as partes…</p>
               : (
@@ -215,9 +212,9 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
                         <span className="bar-no" aria-hidden="true">{i + 1}</span>
                         <span className="part-name">{u.title ?? u.id}</span>
                         <span className="part-state">
-                          {isDone(u.state) ? <span className="stamp" title="Pronta e provada"><Check size={14} weight="bold" aria-hidden="true" /></span>
-                            : isStopped(u.state) ? <span className="stamp" title="Parou"><X size={14} weight="bold" aria-hidden="true" /></span>
-                              : u.rounds > 1 ? <span className="repeat" title={reviews(u.rounds)}>{u.rounds}x<span className="glyph" aria-hidden="true">{G.repeat}</span></span>
+                          {isDone(u.state) ? <span className="cell-mark" data-mark="ok"><Check size={13} weight="bold" aria-hidden="true" />pronta e provada</span>
+                            : isStopped(u.state) ? <span className="cell-mark" data-mark="fail"><X size={13} weight="bold" aria-hidden="true" />parou</span>
+                              : u.rounds > 1 ? <span className="repeat">{reviews(u.rounds)}</span>
                                 : <span className="caps" style={{ fontSize: 10 }}>{STATE_PT[u.state] ?? u.state}</span>}
                         </span>
                         <span className="sr-only">{STATE_PT[u.state] ?? u.state}, {reviews(u.rounds)}</span>
@@ -230,7 +227,7 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
                         label={staff.label}
                         sub={staff.key === 'escreve' ? maker?.model_id ?? 'quem escreve' : staff.key === 'prova' ? 'antes e depois' : staff.key === 'revisa' ? 'outra empresa' : 'preparo e entrega'}
                         mono={staff.key === 'escreve' && !!maker}
-                        dynamic={staff.key === 'escreve' ? dynamicOf(maker?.effort ?? undefined) : ''}
+                        dynamic={staff.key === 'escreve' ? EFFORT_PT[maker?.effort ?? ''] ?? '' : ''}
                         percussion={staff.key === 'motor'}
                       >
                         {units.map((u, mi) => {
@@ -244,23 +241,21 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
                               data-live={mi === live}
                               style={{ ['--drawn' as string]: drawn ? 1 : 0, transitionDelay: `${mi * 90 + si * 40}ms` }}
                             >
-                              {mi === 0 && <span className="clef" aria-hidden="true">{staff.key === 'motor' ? G.percClef : G.gClef}</span>}
                               {steps.length === 0
-                                ? <span className="rest" aria-hidden="true">{queued ? G.wholeRest : G.quarterRest}</span>
-                                : steps.map((s, ni) => (
+                                ? <span className="cell-empty">{queued ? 'na fila' : '—'}</span>
+                                : (
                                   <motion.span
-                                    key={s.name}
-                                    className="note"
-                                    data-state={noteState(s.state)}
-                                    title={`${stepSentence(s.name)} · ${STEP_STATE_PT[s.state] ?? s.state} · ${hour(s.at)}`}
-                                    initial={reducedMotion() ? false : { opacity: 0, y: -10 }}
+                                    className="cell-mark"
+                                    data-mark={markOf(steps[steps.length - 1].state)}
+                                    title={steps.map((s) => `${stepSentence(s.name)} · ${STEP_STATE_PT[s.state] ?? s.state} · ${hour(s.at)}`).join('\n')}
+                                    initial={reducedMotion() ? false : { opacity: 0, y: 6 }}
                                     animate={{ opacity: 1, y: 0 }}
-                                    transition={{ duration: 0.6, ease: EASE_OUT, delay: 0.35 + mi * 0.09 + ni * 0.05 }}
-                                    style={{ translate: `0 ${staff.key === 'motor' ? 0 : 10 - pitchOf(s.name) * 5}px` }}
+                                    transition={{ duration: 0.6, ease: EASE_OUT, delay: 0.35 + mi * 0.09 + si * 0.04 }}
                                   >
-                                    {noteState(s.state) === 'failed' ? G.xnote : s.state === 'running' ? G.half : G.quarter}
+                                    <MarkIcon mark={markOf(steps[steps.length - 1].state)} />
+                                    {cellSentence(staff.key, steps)}
                                   </motion.span>
-                                ))}
+                                )}
                             </div>
                           )
                         })}
@@ -298,7 +293,6 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
                   transition={{ duration: 0.5, ease: EASE_OUT }}
                 >
                   <div className="fermata" data-waiting={waiting}>
-                    <span className="glyph" aria-hidden="true">{G.fermata}</span>
                     <h2>Sua vez</h2>
                     {parked
                       ? <>
@@ -408,7 +402,7 @@ function Leaf({ unit, detail, index, onClose }: { unit: Unit; detail: Detail; in
         <ol className="steps">
           {unit.steps.map((s) => (
             <li key={s.name} className="step" data-state={s.state}>
-              <span className="glyph" aria-hidden="true">{noteState(s.state) === 'failed' ? G.xnote : s.state === 'running' ? G.half : G.quarter}</span>
+              <span className="glyph"><MarkIcon mark={markOf(s.state)} /></span>
               <span className="step-text">{stepSentence(s.name)}<span className="mono">{s.name}</span></span>
               <time>{STEP_STATE_PT[s.state] ?? s.state} · {hour(s.at)}</time>
             </li>

@@ -181,7 +181,7 @@ export default function IntakeFlow({ project, mission, missionCount, snapshotLoa
           mission={mission}
           fallbackId={intake?.mission_id}
           running={running}
-          rehearsal={String.fromCharCode(64 + Math.min(26, Math.max(1, missionCount)))}
+          rehearsal={String(Math.max(1, missionCount))}
           projectLine={projectLine}
           composer={running
             ? <p className="direction">O próximo pedido abre quando esta missão terminar.</p>
