@@ -589,6 +589,8 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
       role: 'checker_round',
     })
     expect(codexArgs).toContain('--ignore-user-config')
+    // o codex 0.156 recusa 0 e a chamada nem roda; 1 é o menor aceito e já tira todas as skills
+    expect(codexArgs.join(' ')).toContain('-c skills.max_context_tokens=1')
   })
 
   // Critério 11: Dados os planos, aprovações, packs e histórias válidos já existentes,

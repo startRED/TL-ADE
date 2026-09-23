@@ -57,7 +57,9 @@ export function buildCodexArgs(opts: {
     '--ignore-rules',
     '--ephemeral',
     '-c',
-    'skills.max_context_tokens=0',
+    // 0 desliga as skills, mas o codex 0.156 recusa 0 ("expected a nonzero usize") e não roda: vale o menor aceito,
+    // que já tira todas (architecture.md §11 E16 previa essa troca)
+    'skills.max_context_tokens=1',
     '--skip-git-repo-check',
     '-C',
     cwd,
