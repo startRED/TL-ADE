@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { AdeError } from '../../journal/errors.ts'
 import { buildCodexArgs } from './argv.ts'
 import { parseCodexOutput, parseCodexTokens, parseReviewResult } from './parse.ts'
+import { dropNulls, strictSchemaFile } from './strict-schema.ts'
 import { runWorker } from '../../runner/spawn.ts'
 import { safeId } from '../../gates/output.ts'
 import { assertPaidAuthorization } from '../../engine/paid-call.ts'
@@ -104,7 +105,8 @@ export async function dispatchCodex(opts: {
   const args = buildCodexArgs({
     role,
     cwd,
-    schemaPath,
+    // cópia estrita do schema: o modo estrito da OpenAI recusa o original com 400 antes de o modelo rodar
+    schemaPath: strictSchemaFile(schemaPath, path.dirname(resultFile)),
     resultFile,
     model,
     effort,
@@ -146,7 +148,9 @@ export async function dispatchCodex(opts: {
       stdinData,
     })
 
-    const { envelope, error } = parseCodexOutput(result.stdout, resultFile)
+    const parsed = parseCodexOutput(result.stdout, resultFile)
+    const envelope = dropNulls(parsed.envelope)
+    const error = parsed.error
     const pr = parseReviewResult(envelope)
     const tokens = parseCodexTokens(envelope)
     const failed = result.exitCode !== 0
