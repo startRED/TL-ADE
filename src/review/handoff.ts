@@ -2,7 +2,7 @@
 import crypto from 'node:crypto'
 import { normalize } from '../engine/loop.ts'
 
-interface Finding {
+export interface Finding {
   id: string
   severity: 'critical' | 'high' | 'medium' | 'low'
   category: 'patch' | 'bad_spec' | 'intent_gap'
@@ -13,6 +13,9 @@ interface Finding {
   required_action: string
   state?: 'open' | 'resolved' | 'deferred'
   resolution_evidence?: string | null
+  citation?: string
+  withdrawn?: boolean
+  withdrawn_reason?: string
 }
 
 /**
@@ -46,6 +49,10 @@ export function normalizeFinding(item: any, index: number = 0): Finding {
     required_action,
     state: item.state ?? 'open',
     resolution_evidence: item.resolution_evidence ?? null,
+    // retirada pelo revisor: só vale com citação conferida em `blockingReviewFindings`
+    ...(typeof item.citation === 'string' ? { citation: item.citation } : {}),
+    ...(typeof item.withdrawn === 'boolean' ? { withdrawn: item.withdrawn } : {}),
+    ...(typeof item.withdrawn_reason === 'string' ? { withdrawn_reason: item.withdrawn_reason } : {}),
   }
 }
 
@@ -123,9 +130,9 @@ export function detectUnresolvedFindings(opts: {
 }
 
 /**
- * Monta um handoff compacto preservando contrato, árvore-base, decisões e achados abertos entre tentativas.
+ * Monta o handoff de retrabalho do maker preservando contrato, árvore-base, decisões e achados abertos entre tentativas.
  */
-export function buildReviewHandoff(opts: {
+export function buildReworkHandoff(opts: {
     storyId: string
     contractRevision: string
     treeBase: string

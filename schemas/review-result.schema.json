@@ -68,7 +68,21 @@
         },
         "required_action": {
           "type": "string"
+        },
+        "citation": {
+          "type": "string",
+          "pattern": "^(file:|contract:).+"
+        },
+        "withdrawn": {
+          "type": "boolean"
+        },
+        "withdrawn_reason": {
+          "type": "string",
+          "minLength": 1
         }
+      },
+      "dependencies": {
+        "withdrawn": ["citation", "withdrawn_reason"]
       }
     }
   },
@@ -151,6 +165,25 @@
     "summary": {
       "type": "string",
       "maxLength": 400
+    },
+    "wrong_tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "agreed", "reason"],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "agreed": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
     },
     "handoff": {
       "type": "object",

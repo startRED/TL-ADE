@@ -33,12 +33,12 @@ export function computeObservedInputDigest({ tree, changedPaths, contractRevisio
   return `sha256:${createHash('sha256').update(payload, 'utf8').digest('hex')}`
 }
 import {
-  buildReviewHandoff,
+  buildReworkHandoff,
   computeFindingsDigest,
   detectUnresolvedFindings,
   normalizeFinding,
-  isBlockingFinding,
 } from './review/handoff.ts'
+import { blockingReviewFindings, buildReviewHandoff, testEditViolations, wrongTestClaims, wrongTestVerdict } from './review/contract.ts'
 import { isReviewApproved } from './review/validate.ts'
 import { buildModelTelemetry, modelsFromUsage } from './telemetry/telemetry.ts'
 
@@ -608,6 +608,9 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   let openFindings = []
   // vermelhas cobráveis da última tentativa reprovada por portão ou eval
   let redTests: string[] = []
+  // provas que o maker alegou erradas e as que o revisor liberou para edição
+  let claimedWrongTests: string[] = []
+  let allowedWrongTests: string[] = []
   let treeBeforeRound = treeBefore
   // Escada de quem escreve: os degraus vêm de quem chama; sem eles, só o maker do contrato.
   const rungs = deps.makerLadder ?? [{ model: makerModel ?? null, family: makerFamily }]
@@ -668,7 +671,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     if (round > 1) {
       // O pedido de correção leva as vermelhas cobráveis e os achados graves abertos.
       const correction = correctionRequest({ redTests, findings: openFindings })
-      const reworkHandoff = buildReviewHandoff({
+      const reworkHandoff = buildReworkHandoff({
         storyId,
         contractRevision: (story).contract_revision ?? 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
         treeBase: treeBefore,
@@ -910,6 +913,34 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       } else {
         attempt++
       }
+      continue
+    }
+
+    // Prova alegada errada só pode ser editada depois do veredito favorável do revisor; antes, reprova a rodada.
+    claimedWrongTests = [...new Set([...claimedWrongTests, ...wrongTestClaims(dispatch?.result_text ?? '')])]
+    const testViolations = testEditViolations({ changedPaths, claimed: claimedWrongTests, allowedPaths: allowedWrongTests })
+    if (testViolations.length > 0) {
+      await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'wrong_test_edit_rejected', paths: testViolations } })
+      const { parkReason } = await climbLadder({ kind: 'rejected' }, 'wrong_test_edit')
+      if (parkReason) {
+        await appendMakerTelemetry(dispatch, 'park')
+        return await parkStory(parkReason)
+      }
+      await appendMakerTelemetry(dispatch, 'rework')
+      openFindings = testViolations.map((p, i) => normalizeFinding({
+        id: `wrong-test-edit-${i + 1}`,
+        severity: 'critical',
+        category: 'patch',
+        target_role: 'maker',
+        location: p,
+        problem: 'prova alegada errada editada sem veredito favorável do revisor',
+        evidence_refs: [`file:${p}`],
+        required_action: 'desfazer a edição na prova e manter a alegação PROVA ERRADA para o revisor julgar',
+      }, i))
+      treeBeforeRound = tree
+      treeBeforeAttempt = tree
+      round++
+      attempt = 0
       continue
     }
 
@@ -1184,6 +1215,29 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       contractRevision: (story).contract_revision,
     })
 
+    // O revisor recebe o mesmo contrato do maker, os achados anteriores e a resposta do maker.
+    const reviewRequest = buildReviewHandoff({
+      contract: {
+        scope_paths: contract.guardrails?.scope_paths ?? [],
+        do_not_touch: contract.guardrails?.do_not_touch ?? [],
+        out_of_scope: story.out_of_scope ?? [],
+        interfaces: story.interfaces ?? [],
+        decisions: story.decisions ?? [],
+      },
+      priorFindings: previousFindings,
+      makerResponse: dispatch?.result_text ?? '',
+      diff: changedPaths,
+    })
+    const reviewPack = deps.compilePack({
+      sections: {
+        contract: JSON.stringify(contract),
+        policy: 'review',
+        story: JSON.stringify({ ...JSON.parse(dedupStorySection(story).text), review_request: reviewRequest }, null, 2),
+      },
+      missionDir,
+      stepId: `${storyId}:r${round}:review-pack`,
+    })
+
     const checkerResultFile = path.join(missionDir, `checker-result-r${round}.json`)
     const checkerStepId = `${storyId}:r${round}:checker`
     const checkerWorkerEnv = {
@@ -1210,8 +1264,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         duration_ms: Math.max(0, (deps.now?.() ?? Date.now()) - checkerStartedAt),
         tokens: dispatch?.tokens ?? { source: 'unavailable' },
         usage: dispatch?.usage,
-        pack: packTelemetry(currentManifest),
-        skills: currentManifest.skills ?? [],
+        pack: packTelemetry(reviewPack.manifest),
+        skills: reviewPack.manifest.skills ?? [],
         sources: (dispatch?.review_result?.sources ?? []).filter((x: unknown) => typeof x === 'string'),
         outcome,
         ttft_ms: null,
@@ -1234,7 +1288,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         authorization: paidAuthorization,
         unit: storyId,
         stepId: checkerStepId,
-        packPath: currentPackPath,
+        packPath: reviewPack.pack_path,
         missionDir,
         missionId,
         cwd: worktreeDir,
@@ -1468,7 +1522,10 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
 
     previousFindingsDigest = currentFindingsDigest
     previousFindings = findings
-    openFindings = findings.filter(isBlockingFinding)
+    allowedWrongTests = [
+      ...new Set([...allowedWrongTests, ...wrongTestVerdict({ claimed: reviewRequest.maker_response.wrong_tests, verdicts: reviewDoc.wrong_tests ?? [] }).allowedPaths]),
+    ]
+    openFindings = blockingReviewFindings({ findings: reviewDoc.action_items ?? reviewDoc.findings ?? [], request: reviewRequest, round })
     treeBeforeRound = treeAfterContain
     treeBeforeAttempt = treeAfterContain
     round++
