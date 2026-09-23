@@ -639,10 +639,11 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
   display: grid;
   place-items: center;
   isolation: isolate;
-  background: radial-gradient(ellipse 70% 60% at 50% 40%, color-mix(in srgb, var(--field-ink) 16%, var(--field)), var(--field) 72%);
-  overflow: hidden;
+  overflow: visible;
 }
-.plate-dots { position: absolute; inset: -24px; z-index: -1; background: radial-gradient(color-mix(in srgb, var(--field-ink) 16%, transparent) .6px, transparent .9px) 0 0 / 5px 5px; }
+/* O campo é luz, não moldura: a cor se dissolve no fundo e só a gravura tem contorno. */
+.plate-field::before { content: ''; position: absolute; inset: -8%; z-index: -2; background: radial-gradient(closest-side, color-mix(in srgb, var(--field-ink) 14%, var(--field)) 0%, var(--field) 45%, color-mix(in srgb, var(--field) 55%, transparent) 72%, transparent 100%); filter: blur(6px); }
+.plate-dots { position: absolute; inset: -24px; z-index: -1; mask-image: radial-gradient(closest-side, #000 35%, transparent 85%); background: radial-gradient(color-mix(in srgb, var(--field-ink) 16%, transparent) .6px, transparent .9px) 0 0 / 5px 5px; }
 .plate-field .plate { position: absolute; inset: 0; margin: auto; width: 92%; height: 92%; object-fit: contain; will-change: transform; }
 .plate-field .plate { filter: none; background: none; mix-blend-mode: normal; }
 .bar-cell[data-live='true'], .measure-head[data-live='true'] { background: color-mix(in srgb, var(--field) 16%, transparent); }
