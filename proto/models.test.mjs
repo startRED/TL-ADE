@@ -57,11 +57,11 @@ test('pressão projeta o gasto até a renovação; API não pesa; sem plano é i
 
 test('medição liga a chamada de quem escreve ao próximo parecer do revisor', () => {
   const g = measure([
-    { type: 'model_call', role: 'implementação', model: 'm1', files: 0, wall_ms: 120000 },
+    { type: 'model_call', role: 'implementação', model: 'm1', files: 0, wall_ms: 120000, effort: 'high' },
     { type: 'log', text: 'pediu mudanças: falta teste' },
     { type: 'log', text: 'aprovou: ok' }, // segundo parecer da mesma chamada não conta
     { type: 'model_call', role: 'prova e código', model: 'm1', files: 3 },
     { type: 'log', text: 'aprovou: ok' },
   ]).m1
-  assert.deepEqual(g, { calls: 2, approved: 1, reviewed: 2, zero: 1, timed: 1, min: 2 })
+  assert.deepEqual(g, { calls: 2, approved: 1, reviewed: 2, zero: 1, time: { high: { timed: 1, min: 2 } } })
 })

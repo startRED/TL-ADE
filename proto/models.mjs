@@ -114,10 +114,13 @@ export function measure(events) {
   for (const e of events) {
     const t = String(e.text || '')
     if (e.type === 'model_call' && /implementação|prova e código/.test(e.role || '')) {
-      const g = out[e.model] || (out[e.model] = { calls: 0, approved: 0, reviewed: 0, zero: 0, timed: 0, min: 0 })
+      const g = out[e.model] || (out[e.model] = { calls: 0, approved: 0, reviewed: 0, zero: 0 })
       g.calls++
       const f = e.files ?? e.touched; if (f === 0) g.zero++
-      const ms = e.wall_ms ?? e.duration_ms; if (ms) { g.timed++; g.min += ms / 60000 }
+      // tempo por esforço: um esforço herdava o tempo medido de outro (o Opus 5.5 max, 5 min por resposta no site, levava os
+      // minutos medidos no high e ganhava o código comum com as cotas zeradas)
+      const ms = e.wall_ms ?? e.duration_ms, tk = e.effort || '-'
+      if (ms) { const x = (g.time ||= {})[tk] ||= { timed: 0, min: 0 }; x.timed++; x.min += ms / 60000 }
       last = { model: e.model, reviewed: false }
     }
     const v = /^(aprovou|pediu mudanças):/.exec(t)
@@ -140,8 +143,9 @@ export function scoreFor(entry, role, { tier, quota, measured, now } = {}) {
   // tempo: o medido aqui (minutos por chamada) vale mais que a velocidade de saída do site quando há amostra
   // abaixo de 15 s o site não diz nada sobre tarefa de vários passos: o GPT-6 Sol medium (6 s, inteligência 40) tirava o código
   // do Opus 5.5 high (19 s, 54) só pela latência de uma pergunta, e modelo mais fraco paga em rodadas o que ganhou em segundos
-  const sp = g?.timed >= 10 ? Math.log2(6 / (g.min / g.timed)) : Math.log2(30 / Math.max(15, entry.secs))
-  const speed = r.speed * 10 * sp; parts.push(g?.timed >= 10 ? `${(g.min / g.timed).toFixed(1)} min por chamada aqui` : `${entry.secs} s por resposta`)
+  const tm = g?.time?.[entry.effort] || g?.time?.['-'] // '-' = chamada antiga sem esforço gravado
+  const sp = tm?.timed >= 10 ? Math.log2(6 / (tm.min / tm.timed)) : Math.log2(30 / Math.max(15, entry.secs))
+  const speed = r.speed * 10 * sp; parts.push(tm?.timed >= 10 ? `${(tm.min / tm.timed).toFixed(1)} min por chamada aqui` : `${entry.secs} s por resposta`)
   const p = pressure(tier, quota, now) // retorno de CAPACIDADE
   const cap = tier?.api ? r.volume * entry.cpt * 4 : r.volume * Math.min(p, 2) * entry.cpt * 10
   parts.push(tier?.api ? `API: US$ ${entry.cpt} por tarefa do índice` : `cota da semana no ritmo atual: ${Math.round(p * 100)}% na renovação`)
