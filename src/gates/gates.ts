@@ -1,8 +1,19 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { judgeSuite } from '../runner/baseline.ts'
+import { execSuite, findSuites, runSuites } from '../runner/suites.ts'
+import type { SpawnSuite } from '../runner/suites.ts'
+import { TestRunnerError } from '../runner/test-reports.ts'
+import type { TestResult } from '../runner/test-reports.ts'
 import { resolveGateArgv, runContained } from './command.ts'
+import { newDiagnostics, parseDiagnostics } from './diagnostics.ts'
+import type { Diagnostic, DiagnosticTool } from './diagnostics.ts'
 import { buildExtract, safeId, writeRawArtifact } from './output.ts'
+import type { BuildExtractResult } from './output.ts'
 import type { GateSpec, PackageJsonSpec } from './types.ts'
+
+// portão cuja saída se compara com o commit-base da parte por diagnóstico
+const DIAGNOSTIC_TOOL: Readonly<Record<string, DiagnosticTool>> = Object.freeze({ typecheck: 'tsc', lint: 'oxlint' })
 
 interface GitPort {
   worktreeDir: string
@@ -18,6 +29,15 @@ interface GateResult {
   extract: import('./output.ts').BuildExtractResult
   raw_ref: string
   reused: boolean
+  new_diagnostics?: Diagnostic[]
+  chargeable_reds?: string[]
+}
+
+// só o que a parte responde: diagnóstico novo ou prova cobrada
+interface Judged {
+  extract: BuildExtractResult
+  new_diagnostics?: Diagnostic[]
+  chargeable_reds?: string[]
 }
 
 interface RestorePendingGateResult {
@@ -85,6 +105,7 @@ interface CreateGateRunnerOptions {
   missionDir: string
   gitPort: GitPort
   packageJson?: PackageJsonSpec
+  spawnSuite?: SpawnSuite
 }
 
 interface RunGatesOptions {
@@ -93,6 +114,7 @@ interface RunGatesOptions {
   tree: string
   unit: string
   changedFiles?: string[]
+  baseTree?: string
 }
 
 interface RunGatesResult {
@@ -137,7 +159,7 @@ export function selectGates(gates: GateSpec[], flags: string[]): GateSpec[] {
 /**
  * Cria o executor de portões (gates) com cache por árvore via step().
  */
-export function createGateRunner({ step, missionDir, gitPort, packageJson = {} }: CreateGateRunnerOptions): { runGates: (options: RunGatesOptions) => Promise<RunGatesResult> } {
+export function createGateRunner({ step, missionDir, gitPort, packageJson = {}, spawnSuite = execSuite }: CreateGateRunnerOptions): { runGates: (options: RunGatesOptions) => Promise<RunGatesResult> } {
   if (typeof step !== 'function') {
     throw new TypeError('step precisa ser uma função')
   }
@@ -154,9 +176,61 @@ export function createGateRunner({ step, missionDir, gitPort, packageJson = {} }
   }
 
   /**
-   * Executa os gates selecionados sobre a árvore informada.
+   * Gate vermelho julgado contra o commit-base da parte: tipos e lint travam só com diagnóstico novo; provas, só com
+   * vermelha que estava verde na largada (estouro de tempo repete com limite folgado). Sem leitura possível, segue vermelho.
    */
-  async function runGates({ gates, flags, tree, unit, changedFiles = [] }: RunGatesOptions): Promise<RunGatesResult> {
+  async function judgeAgainstBase({ gate, kind, argv, timeoutS, tree, baseTree, text, extract }: { gate: GateSpec; kind: string; argv: string[]; timeoutS: number; tree: string; baseTree: string; text: string; extract: BuildExtractResult }): Promise<Judged> {
+    const cwd = gitPort.worktreeDir
+    const label = 'gate-base-' + safeId(gate.id)
+    const tool = DIAGNOSTIC_TOOL[kind]
+    if (tool) {
+      const after = parseDiagnostics(tool, text)
+      if (!after.length) return { extract }
+      await gitPort.restoreTree(baseTree, { label })
+      const base = await runContained({ argv, cwd, timeoutS })
+      await gitPort.restoreTree(tree, { label })
+      const fresh = newDiagnostics(parseDiagnostics(tool, base.stdout + '\n' + base.stderr), after)
+      const excerpt = fresh.map((d) => `${d.file}: ${d.code} ${d.message}`).join('\n')
+      return fresh.length
+        ? { extract: { ...extract, excerpt, bytes_model: Buffer.byteLength(excerpt, 'utf8') }, new_diagnostics: fresh }
+        : { extract: { ...extract, status: 'success', summary: `${extract.summary} sem diagnóstico novo sobre ${after.length} da linha de base` }, new_diagnostics: [] }
+    }
+    if (kind !== 'test') return { extract }
+    try {
+      const suites = findSuites(cwd)
+      if (!suites.length) return { extract }
+      const timeoutMs = timeoutS * 1000
+      await gitPort.restoreTree(baseTree, { label })
+      const baseline = await runSuites(cwd, suites, { spawn: spawnSuite, timeoutMs })
+      await gitPort.restoreTree(tree, { label })
+      // a repetição folgada também ganha o limite por prova no total, senão o processo cai antes de aproveitá-lo
+      // ponytail: soma um limite folgado só; várias lentas em série pedem limite por contagem
+      const seen: TestResult[] = []
+      const verdict = await judgeSuite(async (testTimeoutMs) => {
+        const run = await runSuites(cwd, suites, { spawn: spawnSuite, timeoutMs: timeoutMs + (testTimeoutMs ?? 0), testTimeoutMs })
+        seen.push(...run)
+        return run
+      }, baseline)
+      const reds = verdict.reds.map((t) => t.id)
+      const excerpt = reds.map((id) => `prova vermelha: ${id}`).join('\n')
+      // a isenção cobre só a falha que o próprio gate atribui às provas comparadas: a saída dele cita (arquivo ou nome) uma
+      // vermelha ou estouro da suíte prova a prova. Sem citação a causa é outra (configuração, script) e segue vermelho
+      const cited = text.replace(/\\+/g, '/')
+      const explained = seen.some((t) => (t.status === 'failed' || t.status === 'timeout') && (cited.includes(t.suite) || cited.includes(t.name)))
+      if (verdict.ok && !explained) return { extract: { ...extract, summary: `${extract.summary} sem prova vermelha citada pelo gate que explique a falha` } }
+      return verdict.ok
+        ? { extract: { ...extract, status: 'success', summary: `${extract.summary} sem prova vermelha nova${verdict.retried ? ' (repetida com limite folgado)' : ''}` }, chargeable_reds: [] }
+        : { extract: { ...extract, excerpt, bytes_model: Buffer.byteLength(excerpt, 'utf8') }, chargeable_reds: reds }
+    } catch (err) {
+      if (!(err instanceof TestRunnerError)) throw err
+      return { extract: { ...extract, summary: `${extract.summary} sem julgamento prova a prova: ${err.message}` } }
+    }
+  }
+
+  /**
+   * Executa os gates selecionados sobre a árvore informada. Com `baseTree`, gate vermelho é julgado contra ela.
+   */
+  async function runGates({ gates, flags, tree, unit, changedFiles = [], baseTree }: RunGatesOptions): Promise<RunGatesResult> {
     if (!Array.isArray(gates)) {
       throw new TypeError('gates precisa ser um array')
     }
@@ -216,6 +290,7 @@ export function createGateRunner({ step, missionDir, gitPort, packageJson = {} }
             expect_exit,
             timeout_s,
             tree,
+            ...(baseTree ? { base_tree: baseTree } : {}),
           },
           worktree: gitPort.worktreeDir,
         },
@@ -252,10 +327,15 @@ export function createGateRunner({ step, missionDir, gitPort, packageJson = {} }
               bytesRaw: rawArtifact.bytes,
             })
 
+            const judged: Judged =
+              extract.status === 'error' && baseTree && baseTree !== tree
+                ? await judgeAgainstBase({ gate, kind, argv, timeoutS: timeout_s, tree, baseTree, text, extract })
+                : { extract }
+
             return {
               exit_code: contained.exitCode,
-              extract,
               raw_ref: rawRef,
+              ...judged,
             }
           } finally {
             await gitPort.restoreTree(treeBefore, { label: 'gate-' + safeId(gate.id) })
@@ -265,7 +345,7 @@ export function createGateRunner({ step, missionDir, gitPort, packageJson = {} }
       )
 
       
-      const res: { exit_code: number | null; extract: import('./output.ts').BuildExtractResult; raw_ref: string } = stepOutput.result
+      const res: Judged & { exit_code: number | null; raw_ref: string } = stepOutput.result
 
       
       const gateResult: GateResult = {
@@ -276,6 +356,8 @@ export function createGateRunner({ step, missionDir, gitPort, packageJson = {} }
         extract: res.extract,
         raw_ref: res.raw_ref,
         reused: Boolean(stepOutput.reused),
+        ...(res.new_diagnostics ? { new_diagnostics: res.new_diagnostics } : {}),
+        ...(res.chargeable_reds ? { chargeable_reds: res.chargeable_reds } : {}),
       }
 
       results.push(gateResult)

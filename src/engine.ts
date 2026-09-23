@@ -892,6 +892,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       tree: treeAfterContain,
       unit: storyId,
       changedFiles: changedPaths,
+      // tipos, lint e provas travam só com o que é novo desde a largada da parte
+      baseTree: treeBefore,
     })
 
     await deps.journal.append({

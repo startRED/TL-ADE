@@ -42,11 +42,13 @@ function testScript(dir: string): string {
 // pelo manifesto, não pelo executável instalado: checkout sem node_modules não pode sumir com a suíte (falha ao rodar)
 const jsRunner = (d: string, name: string): boolean => has(d, 'package.json') && new RegExp(`\\b${name}\\b`).test(testScript(d))
 
-// Na ordem; por pasta vale o primeiro de cada grupo. `one` = o runner aceita rodar um arquivo só (`only`).
-const TOOLCHAINS: Array<{ toolchain: string; group: string; report: Report; one: boolean; argv: string[]; when: (dir: string) => boolean }> = [
-  { toolchain: 'vitest', group: 'js', report: 'jest', one: true, argv: ['node', 'node_modules/vitest/vitest.mjs', 'run', '--reporter=json', '--outputFile={out}'], when: (d) => jsRunner(d, 'vitest') },
-  { toolchain: 'jest', group: 'js', report: 'jest', one: true, argv: ['node', 'node_modules/jest/bin/jest.js', '--ci', '--json', '--outputFile={out}'], when: (d) => jsRunner(d, 'jest') },
-  { toolchain: 'node-test', group: 'js', report: 'junit', one: true, argv: ['node', '--test', '--test-reporter=junit', '--test-reporter-destination={out}'], when: (d) => jsRunner(d, 'node\\s+--test') },
+// Na ordem; por pasta vale o primeiro de cada grupo. `one` = o runner aceita rodar um arquivo só (`only`); `perTest` = flag
+// do limite de tempo por prova ({ms}).
+// ponytail: go, cargo e dotnet sem limite por prova; a repetição folgada roda com o limite deles
+const TOOLCHAINS: Array<{ toolchain: string; group: string; report: Report; one: boolean; perTest?: string; argv: string[]; when: (dir: string) => boolean }> = [
+  { toolchain: 'vitest', group: 'js', report: 'jest', one: true, perTest: '--testTimeout={ms}', argv: ['node', 'node_modules/vitest/vitest.mjs', 'run', '--reporter=json', '--outputFile={out}'], when: (d) => jsRunner(d, 'vitest') },
+  { toolchain: 'jest', group: 'js', report: 'jest', one: true, perTest: '--testTimeout={ms}', argv: ['node', 'node_modules/jest/bin/jest.js', '--ci', '--json', '--outputFile={out}'], when: (d) => jsRunner(d, 'jest') },
+  { toolchain: 'node-test', group: 'js', report: 'junit', one: true, perTest: '--test-timeout={ms}', argv: ['node', '--test', '--test-reporter=junit', '--test-reporter-destination={out}'], when: (d) => jsRunner(d, 'node\\s+--test') },
   { toolchain: 'go', group: 'go', report: 'go', one: false, argv: ['go', 'test', '-json', './...'], when: (d) => has(d, 'go.mod') },
   { toolchain: 'cargo', group: 'rust', report: 'cargo', one: false, argv: ['cargo', 'test', '--no-fail-fast'], when: (d) => has(d, 'Cargo.toml') },
   { toolchain: 'dotnet', group: 'dotnet', report: 'trx', one: false, argv: ['dotnet', 'test', '--logger', 'trx', '--results-directory', '{outdir}'], when: (d) => readdirSync(d).some((f) => /\.(sln|slnx|csproj|fsproj)$/i.test(f)) },
@@ -132,10 +134,12 @@ async function readReport(report: Report, { out, outdir, cwd, r }: { out: string
 /**
  * Roda cada suíte e devolve o resultado prova a prova. Suíte de subpasta leva a pasta na frente da suíte do relatório.
  * `only` (relativo à raiz) roda só esse arquivo de prova, nas suítes que o contêm.
+ * `testTimeoutMs` troca o limite de tempo por prova nos runners que o aceitam.
  * Relatório ausente ou ilegível lança `runner_report_unreadable`; nunca vira verde.
  */
-export async function runSuites(root: string, suites: Suite[], { spawn, timeoutMs, only }: { spawn: SpawnSuite; timeoutMs: number; only?: string }): Promise<TestResult[]> {
+export async function runSuites(root: string, suites: Suite[], { spawn, timeoutMs, only, testTimeoutMs }: { spawn: SpawnSuite; timeoutMs: number; only?: string; testTimeoutMs?: number }): Promise<TestResult[]> {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new TestRunnerError('config', `timeoutMs inválido: ${timeoutMs}`)
+  if (testTimeoutMs !== undefined && !(Number.isInteger(testTimeoutMs) && testTimeoutMs > 0)) throw new TestRunnerError('config', `testTimeoutMs inválido: ${testTimeoutMs}`)
   const results: TestResult[] = []
   let ranOnly = false
   for (const s of suites) {
@@ -143,6 +147,7 @@ export async function runSuites(root: string, suites: Suite[], { spawn, timeoutM
     if (!tc) throw new TestRunnerError('config', `toolchain desconhecido: ${s.toolchain}`, { dir: s.dir })
     const cwd = path.join(root, s.dir)
     let argv = s.argv
+    if (testTimeoutMs !== undefined && tc.perTest) argv = [...argv, tc.perTest.replace('{ms}', String(testTimeoutMs))]
     if (only !== undefined) {
       const rel = path.relative(cwd, path.resolve(root, only))
       if (!rel || rel.startsWith('..') || path.isAbsolute(rel) || !tc.one) continue
