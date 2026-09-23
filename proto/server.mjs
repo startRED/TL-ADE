@@ -1041,6 +1041,7 @@ async function chatTurn(e, text, { family, model, effort }) {
 // Chamado pelo motor antes de planejar (pergunta focada no pedido/épico) e pelo maker sob demanda (scout.mjs, quando precisa de
 // documentação, arquivo grande ou fato de fora). O recibo entra nos prompts; os outros modelos leem só o trecho apontado.
 const SCOUT_SCRIPT = path.join(ROOT, 'scout.mjs')
+const OLHAR_SCRIPT = path.join(ROOT, 'olhar.mjs')
 async function scout(question, { web = false, files = [] } = {}) {
   const m = state.mission
   // batedor num modelo Claude (papel configurado em Modelos): mesmo prompt e mesmo schema do scout.mjs, só leitura.
@@ -1336,6 +1337,15 @@ async function uiShots(st, round) {
       return { shots, errors: errs }
     } finally { pv.stop() }
   } catch (err) { log('engine', `olho na tela falhou: ${err.message}`, 'warn'); return { error: err.message } } finally { setLive(null) }
+}
+// Navegador de ferramenta (olhar.mjs) para quem escreve em parte com interface: ver a tela, clicar e ler o console enquanto trabalha.
+function browserBlock() {
+  const cfg = uiPreviewCfg(), m = state.mission
+  if (!cfg || !m.plan.needs_ui || !m.allow_commands) return ''
+  const q = (a) => a.map((x) => /[\s"]/.test(x) ? `"${x}"` : x).join(' ')
+  return [`NAVEGADOR SEM JANELA (use; ele não abre nada na tela do usuário): depois de mexer na interface${cfg.build?.length ? `, rode o build (${q(cfg.build)}) e` : ''} veja a tela de verdade com`,
+    `  node "${OLHAR_SCRIPT}" ${(cfg.path || '').replace(/^\//, '') || '.'} --serve '${JSON.stringify(cfg.serve)}' [--width 390] [passos]`,
+    'Passos na ordem: click:<texto visível>, fill:<seletor css>=<valor>, press:<tecla>, wait:<ms>, shot. Ele sobe o servidor, segue os passos, fotografa, fecha tudo e imprime as fotos, os erros do console e o texto da tela. Abra as fotos (Read) e confira no computador (padrão 1440) e no celular (--width 390). Tela vazia, presa em carregando, erro no console ou passo que falha é defeito seu: corrija antes de terminar.'].join('\n')
 }
 // Bloco das fotos para o prompt de quem revisa e de quem escreve. Cada CLI abre imagem local (Claude: Read; Codex: -i e view_image).
 function shotsBlock(st, who) {
@@ -1655,6 +1665,7 @@ function common(st) {
     st.scope_paths?.length ? `CONTRATO. Pode criar ou alterar SÓ: ${st.scope_paths.join(', ')}${st.do_not_touch?.length ? `. NÃO altere: ${st.do_not_touch.join(', ')}` : ''}${st.out_of_scope?.length ? `. Fora do escopo (não faça): ${st.out_of_scope.join('; ')}` : ''}${st.interfaces?.length ? `. Interfaces a respeitar: ${st.interfaces.join(' | ')}` : ''}. Precisa tocar em outro arquivo? Faça o mínimo e diga na frase final.` : '',
     'Trabalhe só dentro do diretório atual; não suba para diretórios acima. Leia antes de escrever.',
     scoutBlock(m.scout),
+    browserBlock(),
     'Arquivos grandes: use o MAPA DO CÓDIGO e leia só o trecho (Read com offset e limit); não leia inteiro um arquivo com mais de 300 linhas sem precisar. Código novo vai em módulo novo e pequeno quando o arquivo de destino já passa de 400 linhas; nunca reescreva um arquivo inteiro para mudar um trecho.',
     m.allow_commands && state.settings.scout_enabled !== false ? `Batedor sob demanda (Gemini; cada chamada leva de 1 a 3 min): só para documentação, fato de biblioteca/API ou algo na internet/GitHub, NÃO pesquise você: rode  node "${SCOUT_SCRIPT}" "pergunta objetiva" [arquivos]  (acrescente --web para pesquisar fora) e use o recibo impresso. Uma chamada por dúvida, pergunta curta e específica. Arquivo grande DESTE projeto não vai para o batedor: o pacote traz o mapa de símbolos com as linhas; leia só o trecho que precisa.` : '',
     m.allow_commands ? 'Você pode rodar comandos (instalar dependências, inicializar projeto). Não rode servidores que fiquem abertos. NUNCA use git para gravar ou desfazer (add, commit, stash, reset, checkout, restore, clean, push): o motor faz o commit depois das provas e da revisão; commit seu esconde o trabalho do revisor e derruba a parte. git status, diff e log, só para ler, pode. PROVAS: rode no máximo o arquivo de prova desta parte, uma vez depois de cada mudança; NUNCA a suíte inteira, modo watch ou comando que fique esperando: o motor roda a suíte completa depois de você. Não fique aguardando processo.' : 'Você só tem ferramentas de leitura e edição; o harness roda as provas.',
