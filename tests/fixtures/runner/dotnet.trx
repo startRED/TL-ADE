@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="r1" name="run" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Results>
+    <UnitTestResult executionId="e1" testId="t1" testName="Soma" computerName="pc" duration="00:00:00.0120000" outcome="Passed" />
+    <UnitTestResult executionId="e2" testId="t2" testName="Falha" computerName="pc" duration="00:00:01.5000000" outcome="Failed">
+      <Output><ErrorInfo><Message>Assert.Equal() Failure</Message></ErrorInfo></Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="e3" testId="t3" testName="Lenta" computerName="pc" duration="00:00:02.0000000" outcome="Timeout" />
+    <UnitTestResult executionId="e4" testId="t4" testName="Pula" computerName="pc" outcome="NotExecuted" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="Soma" id="t1"><TestMethod codeBase="calc.dll" className="Calc.Tests" name="Soma" /></UnitTest>
+    <UnitTest name="Falha" id="t2"><TestMethod codeBase="calc.dll" className="Calc.Tests" name="Falha" /></UnitTest>
+    <UnitTest name="Lenta" id="t3"><TestMethod codeBase="calc.dll" className="Calc.Tests" name="Lenta" /></UnitTest>
+    <UnitTest name="Pula" id="t4"><TestMethod codeBase="calc.dll" className="Calc.Tests" name="Pula" /></UnitTest>
+  </TestDefinitions>
+</TestRun>

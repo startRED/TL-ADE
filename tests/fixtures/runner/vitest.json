@@ -1,0 +1,5 @@
+{"numTotalTests":4,"success":false,"testResults":[{"name":"/repo/src/calc.test.ts","status":"failed","message":"","assertionResults":[
+{"ancestorTitles":["calc"],"fullName":"calc soma","title":"soma","status":"passed","duration":4.2,"failureMessages":[]},
+{"ancestorTitles":["calc"],"fullName":"calc falha","title":"falha","status":"failed","duration":1,"failureMessages":["AssertionError: expected 1 to be 2"]},
+{"ancestorTitles":["calc"],"fullName":"calc lenta","title":"lenta","status":"failed","duration":5003,"failureMessages":["Error: Test timed out in 5000ms."]},
+{"ancestorTitles":["calc"],"fullName":"calc pulada","title":"pulada","status":"skipped","duration":null,"failureMessages":[]}]}]}

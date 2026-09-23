@@ -1,0 +1,12 @@
+{"Action":"start","Package":"x"}
+{"Action":"run","Package":"x","Test":"TestA"}
+{"Action":"output","Package":"x","Test":"TestA","Output":"    a_test.go:9: esperado 2\n"}
+{"Action":"fail","Package":"x","Test":"TestA","Elapsed":0.1}
+{"Action":"run","Package":"x","Test":"TestB"}
+{"Action":"pass","Package":"x","Test":"TestB","Elapsed":0.02}
+{"Action":"run","Package":"x","Test":"TestC"}
+{"Action":"skip","Package":"x","Test":"TestC","Elapsed":0}
+{"Action":"run","Package":"x","Test":"TestSlow"}
+{"Action":"output","Package":"x","Test":"TestSlow","Output":"panic: test timed out after 1s\n"}
+{"Action":"fail","Package":"x","Test":"TestSlow","Elapsed":1}
+{"Action":"fail","Package":"x","Elapsed":1.3}

@@ -1,0 +1,4 @@
+   Compiling calc v0.1.0 (/repo/engine)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.50s
+     Running unittests src/lib.rs (target/debug/deps/calc-1234abcd)
+     Running tests/integra.rs (target/debug/deps/integra-5678abcd)

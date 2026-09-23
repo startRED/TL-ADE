@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+	<testcase name="soma" time="0.012" classname="test" file="/repo/tests/a.test.mjs"/>
+	<testcase name="falha" time="0.003" classname="test" file="/repo/tests/a.test.mjs" failure="1 == 2">
+		<failure type="testCodeFailure" message="1 == 2">
+[Error [ERR_TEST_FAILURE]: 1 == 2]
+		</failure>
+	</testcase>
+	<testcase name="pula" time="0.000102" classname="test" file="/repo/tests/a.test.mjs">
+		<skipped type="skipped" message="true"/>
+	</testcase>
+	<!-- tests 3 -->
+</testsuites>
