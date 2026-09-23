@@ -23,8 +23,21 @@ export const CATALOG = [
   { family: 'claude', model: 'opus', label: 'Opus 5', effort: 'medium', ai: 45, cpt: 2.19, secs: 13.6 },
   { family: 'claude', model: 'sonnet', label: 'Sonnet 5', effort: 'high', ai: 32, cpt: 1.79, secs: 18.6 },
   { family: 'claude', model: 'haiku', label: 'Haiku 4.5', effort: 'high', ai: 17, cpt: 0.21, secs: 25.8 },
+  { family: 'codex', model: 'gpt-6-astra', label: 'GPT-6 Astra', effort: 'max', ai: 53, cpt: 3.26, secs: 333 },
+  { family: 'codex', model: 'gpt-6-astra', label: 'GPT-6 Astra', effort: 'xhigh', ai: 52, cpt: 2.31, secs: 212.4 },
   { family: 'codex', model: 'gpt-6-astra', label: 'GPT-6 Astra', effort: 'high', ai: 51, cpt: 1.73, secs: 89.3, tb: 57.9 },
   { family: 'codex', model: 'gpt-6-astra', label: 'GPT-6 Astra', effort: 'medium', ai: 50, cpt: 1.54, secs: 17.1 },
+  // 22/09 noite: GPT-6 Sol e GPT-6 Luna (exigem Codex CLI 0.156+; a 0.154 recusa na conta do ChatGPT). O Sol novo tem a
+  // inteligência do 5.6 pela metade do custo e do tempo; o esforço max também passa pela CLI.
+  { family: 'codex', model: 'gpt-6-sol', label: 'GPT-6 Sol', effort: 'max', ai: 48, cpt: 1.06, secs: 106.5 },
+  { family: 'codex', model: 'gpt-6-sol', label: 'GPT-6 Sol', effort: 'xhigh', ai: 44, cpt: 0.53, secs: 50.4 },
+  { family: 'codex', model: 'gpt-6-sol', label: 'GPT-6 Sol', effort: 'high', ai: 43, cpt: 0.37, secs: 14.1 },
+  { family: 'codex', model: 'gpt-6-sol', label: 'GPT-6 Sol', effort: 'medium', ai: 40, cpt: 0.25, secs: 6.3 },
+  { family: 'codex', model: 'gpt-6-sol', label: 'GPT-6 Sol', effort: 'low', ai: 34, cpt: 0.13, secs: 5.2 },
+  { family: 'codex', model: 'gpt-6-luna', label: 'GPT-6 Luna', effort: 'max', ai: 37, cpt: 0.07, secs: 127.5 },
+  { family: 'codex', model: 'gpt-6-luna', label: 'GPT-6 Luna', effort: 'xhigh', ai: 34, cpt: 0.04, secs: 25.8 },
+  { family: 'codex', model: 'gpt-6-luna', label: 'GPT-6 Luna', effort: 'high', ai: 32, cpt: 0.03, secs: 11.3 },
+  { family: 'codex', model: 'gpt-6-luna', label: 'GPT-6 Luna', effort: 'medium', ai: 29, cpt: 0.02, secs: 8.8 },
   { family: 'codex', model: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', effort: 'xhigh', ai: 44, cpt: 1.18, secs: 42.8 },
   { family: 'codex', model: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', effort: 'high', ai: 42, cpt: 0.81, secs: 25.3, tb: 37.3 },
   { family: 'codex', model: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', effort: 'medium', ai: 39, cpt: 0.5, secs: 13.7 },
@@ -49,7 +62,7 @@ export const PLANS = {
   ] },
   codex: { label: 'ChatGPT / Codex', tiers: [
     { id: 'none', label: 'Não tenho', cap: 0 },
-    { id: 'plus', label: 'Plus (US$ 20)', cap: 1, models: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'] },
+    { id: 'plus', label: 'Plus (US$ 20)', cap: 1, models: ['gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'] },
     { id: 'pro_lite', label: 'Pro 5x (US$ 100)', cap: 5 },
     { id: 'pro', label: 'Pro 20x (US$ 200)', cap: 20 },
     { id: 'api', label: 'API (paga por uso)', cap: 20, api: true },
@@ -125,7 +138,9 @@ export function scoreFor(entry, role, { tier, quota, measured, now } = {}) {
     q += adj; parts.push(`medido aqui: revisor aprovou ${Math.round(100 * g.approved / g.reviewed)}% de ${g.reviewed}${g.zero ? `, ${g.zero} chamada(s) sem mudar arquivo` : ''} (${adj >= 0 ? '+' : ''}${adj.toFixed(1)})`)
   }
   // tempo: o medido aqui (minutos por chamada) vale mais que a velocidade de saída do site quando há amostra
-  const sp = g?.timed >= 10 ? Math.log2(6 / (g.min / g.timed)) : Math.log2(30 / entry.secs)
+  // abaixo de 15 s o site não diz nada sobre tarefa de vários passos: o GPT-6 Sol medium (6 s, inteligência 40) tirava o código
+  // do Opus 5.5 high (19 s, 54) só pela latência de uma pergunta, e modelo mais fraco paga em rodadas o que ganhou em segundos
+  const sp = g?.timed >= 10 ? Math.log2(6 / (g.min / g.timed)) : Math.log2(30 / Math.max(15, entry.secs))
   const speed = r.speed * 10 * sp; parts.push(g?.timed >= 10 ? `${(g.min / g.timed).toFixed(1)} min por chamada aqui` : `${entry.secs} s por resposta`)
   const p = pressure(tier, quota, now) // retorno de CAPACIDADE
   const cap = tier?.api ? r.volume * entry.cpt * 4 : r.volume * Math.min(p, 2) * entry.cpt * 10

@@ -63,6 +63,7 @@ const REGISTRY = {
 }
 // Esforço por papel (Erick, 17/09): Claude → --effort; Codex → model_reasoning_effort; Antigravity → sufixo do modelo (pro só tem high/low).
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] // a CLI do Claude aceita os 5 (Opus 5.5); o Codex vai até xhigh; o Gemini só low/medium/high (agyModel)
+const CODEX_BIN = process.env.ADE_CODEX_BIN || 'codex' // CLI do Codex nova sem atualizar a global (22/09: o GPT-6 Sol exige 0.156; o `codex update` baixou pacote quebrado)
 function effortOf(role) { return state.settings.roles[role]?.effort || DEFAULT_SETTINGS.roles[role]?.effort || 'medium' }
 function agyModel(id, effort) { const mm = /^(gemini-[\d.]+-(flash|pro))(?:-(high|medium|low))?$/.exec(id || ''); if (!mm) return id; const e = mm[2] === 'pro' && effort === 'medium' ? 'high' : (effort || 'medium'); return `${mm[1]}-${e}` }
 function plannerChoice(kind = 'complex') { const key = kind === 'light' ? 'plan' : 'epics', x = chainOf(key)[0] || state.settings.roles.planner; return { family: x.family || 'claude', model: x.model, effort: x.effort || 'high', key } }
@@ -85,7 +86,7 @@ async function plannerOnce(who, { role, prompt, schema, maxTurns, timeoutMs = 30
     log('engine', `codex (${role}, ${who.model}, esforço ${who.effort}) com saída estruturada`); setLive({ source: 'codex', kind: 'thinking', text: `${role}: lendo o projeto…` })
     let last = null, usage = null; const t0 = Date.now()
     // `--ignore-user-config` desliga a busca na web do config pessoal; papéis que precisam de fato de fora pedem web: true
-    const r = await run('codex', ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', ...(web ? ['-c', 'tools.web_search=true'] : []), '-c', `model_reasoning_effort=${who.effort}`, '-C', dir, '-m', who.model, '--output-schema', file, '-'], { cwd: dir, stdin: prompt, timeoutMs, onLine: (line) => {
+    const r = await run(CODEX_BIN, ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', ...(web ? ['-c', 'tools.web_search=true'] : []), '-c', `model_reasoning_effort=${who.effort}`, '-C', dir, '-m', who.model, '--output-schema', file, '-'], { cwd: dir, stdin: prompt, timeoutMs, onLine: (line) => {
       let ev; try { ev = JSON.parse(line) } catch { return }
       if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') last = ev.item.text
       if (ev.type === 'item.started' && ev.item?.type === 'command_execution') setLive({ source: 'codex', kind: 'tool', text: ev.item.command || '' })
@@ -1115,7 +1116,7 @@ Confira também: critério do épico que nenhuma story entrega vira issue com st
     log('engine', `codex (crítica do plano, ${model})`); setLive({ source: 'codex', kind: 'thinking', text: 'lendo o plano como quem vai implementar…' })
     let last = null, usage = null
     const t0 = Date.now()
-    r = await run('codex', ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${who.effort || effortOf('checker')}`, '-C', dir, '-m', model, '--output-schema', PLANCRITIC_SCHEMA, '-'], { cwd: dir, stdin: prompt, onLine: (line) => { let ev; try { ev = JSON.parse(line) } catch { return } if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') last = ev.item.text; if (ev.type === 'turn.completed') usage = ev.usage } })
+    r = await run(CODEX_BIN, ['exec', '--json', '--sandbox', 'read-only', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${who.effort || effortOf('checker')}`, '-C', dir, '-m', model, '--output-schema', PLANCRITIC_SCHEMA, '-'], { cwd: dir, stdin: prompt, onLine: (line) => { let ev; try { ev = JSON.parse(line) } catch { return } if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') last = ev.item.text; if (ev.type === 'turn.completed') usage = ev.usage } })
     setLive(null); m.cost.calls += 1
     if (usage) { m.cost.tokens_in += usage.input_tokens || 0; m.cost.tokens_out += usage.output_tokens || 0 }
     try { crit = JSON.parse(last) } catch {}
@@ -1229,7 +1230,7 @@ async function checkerCodex(prompt, model, effort) {
   log('engine', `codex (revisão, ${model}, esforço ${effort})`)
   let lastMessage = null, usage = null
   const t0 = Date.now()
-  const r = await run('codex', args, {
+  const r = await run(CODEX_BIN, args, {
     cwd: dir, stdin: prompt,
     onLine: (line) => {
       let ev; try { ev = JSON.parse(line) } catch { return }
@@ -1282,7 +1283,7 @@ async function makeAssets() {
       'Do not create or modify any other file. When the file is saved, reply with just the path.',
     ].filter(Boolean).join(' ')
     // configuração completa do Codex (a skill imagegen precisa estar visível); sandbox só na pasta do projeto
-    const r = await run('codex', ['exec', '--json', '--sandbox', 'workspace-write', '--skip-git-repo-check', '-C', dir, '-m', model, prompt], {
+    const r = await run(CODEX_BIN, ['exec', '--json', '--sandbox', 'workspace-write', '--skip-git-repo-check', '-C', dir, '-m', model, prompt], {
       cwd: dir, stdin: '', timeoutMs: 10 * 60 * 1000,
       onLine: (line) => { let ev; try { ev = JSON.parse(line) } catch { return } if (ev.type === 'item.completed' && ev.item?.type === 'agent_message') log('codex', ev.item.text.slice(0, 200), 'text'); if (ev.type === 'item.completed' && ev.item?.type === 'command_execution') log('codex', `$ ${ev.item.command}`.slice(0, 160), 'tool') },
     })
@@ -2112,7 +2113,7 @@ async function codexMaker({ role, prompt, model, effort }) {
   log('engine', `codex (${role}, ${model}, esforço ${effort})`); setLive({ source: 'codex', kind: 'thinking', text: `${role}: Codex trabalhando…` })
   let last = null, usage = null, r
   try {
-    r = await run('codex', ['exec', '--json', '--sandbox', 'workspace-write', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${effort}`, '-C', dir, '-m', model, '-'], {
+    r = await run(CODEX_BIN, ['exec', '--json', '--sandbox', 'workspace-write', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules', '-c', 'skills.max_context_tokens=1', '-c', `model_reasoning_effort=${effort}`, '-C', dir, '-m', model, '-'], {
       cwd: dir, stdin: prompt, timeoutMs: 22 * 60 * 1000,
       onLine: (line) => {
         let ev; try { ev = JSON.parse(line) } catch { return }
