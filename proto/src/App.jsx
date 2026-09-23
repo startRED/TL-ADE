@@ -452,7 +452,7 @@ export default function App() {
                     <button className="run" type="submit" disabled={mode === 'ask' ? (!p || state.chat_busy || pendingProposal || !request.trim()) : (busy || !request.trim())}>{mode === 'ask' ? (state.chat_busy ? 'Respondendo' : 'Perguntar') : busy ? 'Rodando' : 'Rodar'}</button>
                   </div>
                 </div>
-                {s && <p className="composer-hint"><span className="mono">{(s.chains?.plan?.[0] || s.roles.planner).model}</span> planeja · <span className="mono">{(s.chains?.impl?.[0] || s.roles.maker).model}</span> escreve · <span className="mono">{(s.chains?.checker?.[0] || s.roles.checker).model}</span> revisa · comandos {s.allow_commands ? 'liberados' : 'bloqueados'}</p>}
+                {s && (() => { const c = (s.auto_chains && state.auto?.chains) || s.chains || {}; return <p className="composer-hint"><span className="mono">{(c.plan?.[0] || s.roles.planner).model}</span> planeja · <span className="mono">{(c.impl?.[0] || s.roles.maker).model}</span> escreve · <span className="mono">{(c.checker?.[0] || s.roles.checker).model}</span> revisa · comandos {s.allow_commands ? 'liberados' : 'bloqueados'}</p> })()}
               </div>
             </form>
           </>
