@@ -174,7 +174,7 @@ function walkDir(dir: string): string[] {
  * Sincroniza fontes declaradas no catálogo local ~/.ade/catalog.
  */
 export async function syncCatalog({ config = {}, catalogDir }: {
-        config: { sources?: Array<{ name: string; repo: string; commit?: string; paths?: string[]; license?: string }>; trust_default?: string;[key: string]: any }
+        config: { sources?: Array<{ name: string; repo: string; commit?: string; paths?: string[]; license?: string; reason?: string; community_signal?: string }>; trust_default?: string;[key: string]: any }
         catalogDir: string
         git?: any
         validator?: any
@@ -355,6 +355,13 @@ export async function syncCatalog({ config = {}, catalogDir }: {
 
           if (quarantineReason) {
             entry.quarantine_reason = quarantineReason
+          }
+          // Proveniência declarada na fonte: por que foi escolhida e o sinal de uso da comunidade.
+          if (typeof source.reason === 'string' && source.reason.trim()) {
+            entry.reason = source.reason.trim()
+          }
+          if (typeof source.community_signal === 'string' && source.community_signal.trim()) {
+            entry.community_signal = source.community_signal.trim()
           }
 
           allEntries.push(entry)

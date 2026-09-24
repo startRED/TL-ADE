@@ -133,7 +133,14 @@ export async function main(argv: string[], deps: {
 
       stdout.write(`Habilidade: ${inspection.entry.id}\n`)
       stdout.write(`Origem: ${inspection.entry.source}\n`)
+      stdout.write(`Commit: ${inspection.entry.commit}\n`)
       stdout.write(`Licença: ${inspection.entry.license}\n`)
+      if (inspection.entry.reason) {
+        stdout.write(`Motivo da escolha: ${inspection.entry.reason}\n`)
+      }
+      if (inspection.entry.community_signal) {
+        stdout.write(`Sinal da comunidade: ${inspection.entry.community_signal}\n`)
+      }
       stdout.write(`Confiança: ${inspection.entry.trust}\n`)
       if (inspection.quarantineReason) {
         stdout.write(`Motivo da quarentena: ${inspection.quarantineReason}\n`)
