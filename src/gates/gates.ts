@@ -292,7 +292,6 @@ export function createGateRunner({ step, missionDir, gitPort, packageJson = {}, 
             tree,
             ...(baseTree ? { base_tree: baseTree } : {}),
           },
-          intent_context: { tree_before: tree },
           worktree: gitPort.worktreeDir,
         },
         async () => {

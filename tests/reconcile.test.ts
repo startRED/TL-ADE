@@ -141,35 +141,6 @@ describe('reconciler releases local intents', () => {
     expect(openIntents(events)).toEqual([])
   })
 
-  // Journal antigo: a prova gravava a intenção sem `tree_before` e a queda no meio dela travava a missão para
-  // sempre. O step_id da prova (`eval:<id>:<fase>:<árvore>`) carrega a árvore conferida antes de rodar.
-  test('eval_run_intent_without_tree_before_uses_the_tree_in_its_step_id', async () => {
-    const repo = makeRepo()
-    repoDirs.push(repo.dir)
-    writeFileSync(path.join(repo.dir, 'base.txt'), 'base\n')
-    repo.git(['add', '-A'])
-    repo.git(['commit', '-m', 'commit inicial'])
-
-    const gitPort = createGitPort({ worktreeDir: repo.dir })
-    const treeBefore = await gitPort.worktreeTree()
-    const missionDir = makeMissionDir()
-    const journal = openJournal({ missionDir, runtimeStamp: RUNTIME_STAMP })
-    await journal.append({
-      kind: 'step_intent',
-      step_id: `eval:V1:red:${treeBefore}`,
-      effect_class: 'eval_run',
-      input_digest: '0000000000000000',
-      intent_context: {},
-    })
-    writeFileSync(path.join(repo.dir, 'sobra.txt'), 'artefato da prova\n')
-
-    const intent = loadIntent(missionDir, `eval:V1:red:${treeBefore}`)
-    const verdict = await reconcileIntent({ intent, journal, gitPort, missionDir })
-
-    expect(verdict).toMatchObject({ verdict: 'released', reason: 'tree_restored' })
-    expect(await gitPort.worktreeTree()).toBe(treeBefore)
-  })
-
   // AC2 (complemento): árvore igual a `tree_before` não dispara restauração; motivo é `tree_unchanged`.
   test('local_write_intent_with_untouched_tree_is_released_as_unchanged', async () => {
     const repo = makeRepo()

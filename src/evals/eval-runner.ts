@@ -42,8 +42,6 @@ interface EvalRecord {
 }
 
 const VALID_STRICTNESS_MODES = new Set(['must_fail_before', 'additive', 'mutate'])
-/** Teto mínimo de uma prova: o do contrato vale só acima disso (a suíte inteira do projeto leva minutos). */
-const EVAL_TIMEOUT_FLOOR_S = 600
 
 /**
  * Corta o texto no teto de bytes do kind, mantendo o início e anexando a marca de corte
@@ -266,9 +264,7 @@ export function createEvalRunner({ step, missionDir, gitPort }: CreateEvalRunner
     const contained = await runContained({
       argv: evalDef.argv,
       cwd: gitPort.worktreeDir,
-      // ponytail: piso fixo de 10 min; o compilador de intenção dava 30s à suíte inteira, que leva minutos, e a
-      // prova morria por tempo nas duas fases. Medir a duração da suíte no preparo se o piso ficar curto.
-      timeoutS: Math.max(evalDef.timeout_s, EVAL_TIMEOUT_FLOOR_S),
+      timeoutS: evalDef.timeout_s,
     })
 
     const artRef = `evals/${safeEvalId}/${phase}`
@@ -336,8 +332,6 @@ export function createEvalRunner({ step, missionDir, gitPort }: CreateEvalRunner
           id: stepId,
           effect_class: 'eval_run',
           input: buildStepInput({ eval: evalDef, phase, tree, scenario }),
-          // Queda no meio da prova é reconciliada restaurando esta árvore; sem ela a missão travava para sempre.
-          intent_context: { tree_before: tree },
           worktree: gitPort.worktreeDir,
         },
         async () => {
@@ -404,8 +398,6 @@ export function createEvalRunner({ step, missionDir, gitPort }: CreateEvalRunner
           id: stepId,
           effect_class: 'eval_run',
           input: buildStepInput({ eval: evalDef, phase, tree, scenario }),
-          // Queda no meio da prova é reconciliada restaurando esta árvore; sem ela a missão travava para sempre.
-          intent_context: { tree_before: tree },
           worktree: gitPort.worktreeDir,
         },
         async () => record
@@ -428,7 +420,6 @@ export function createEvalRunner({ step, missionDir, gitPort }: CreateEvalRunner
         id: stepId,
         effect_class: 'eval_run',
         input: buildStepInput({ eval: evalDef, phase, tree, scenario }),
-        intent_context: { tree_before: tree },
         worktree: gitPort.worktreeDir,
       },
       async () => {

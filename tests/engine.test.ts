@@ -439,6 +439,29 @@ describe('engine', () => {
     expect(reviewPack).toContain('Copie contract_revision e input_revision')
   }, 90_000)
 
+  // Queda depois de escrever as provas e antes do vermelho delas: a retomada partia da árvore de antes das provas
+  // (cujo vermelho em cache nasceu verde), não reescrevia provas por a parte já ter começado e estacionava em
+  // eval_red_not_red. A retomada parte da árvore das provas gravada em proof_written.
+  test('retomada_depois_das_provas_escritas_parte_da_arvore_das_provas', async () => {
+    const fixture = setupStoryFixture({ proof: true })
+    const original = fixture.deps.createEvalRunner
+    let reds = 0
+    fixture.deps.createEvalRunner = (opts: any) => {
+      const runner = original(opts)
+      return {
+        ...runner,
+        runEval: async (args: any) => {
+          if (args.phase === 'red' && ++reds === 2) throw new Error('queda no meio do vermelho das provas')
+          return runner.runEval(args)
+        },
+      }
+    }
+    await expect(runStory(fixture.deps, fixture.input)).rejects.toThrow('queda no meio')
+
+    const result = await runStory(fixture.deps, fixture.input)
+    expect(result).toMatchObject({ status: 'delivered', reason: null })
+  }, 120_000)
+
   // CA2: Dado um contrato com roles.maker.family 'codex', quando runStory roda, então
   // lança AdeError com code 'family_without_canary' e exit 4, e o journal não tem nenhum
   // step_intent com step_id terminando em ':maker'.

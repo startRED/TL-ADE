@@ -460,6 +460,11 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         interrupted_reapplied: kept.reapplied,
       },
     })
+    // Provas já escritas antes da queda ficaram na árvore (a interrompida pertence à parte): a parte recomeça da
+    // árvore das provas, como no caminho sem queda; a de antes delas só teria o vermelho que nasceu verde.
+    const proofTree = [...readEvents()].reverse().find((e) =>
+      e.kind === 'decision' && e.data?.decision === 'proof_written' && (e.unit ?? e.data?.unit) === storyId)?.data?.tree
+    if (kept.reapplied && typeof proofTree === 'string') treeBefore = proofTree
   } else {
     // Sem headInfo não há base observável: a story roda e fica sem alvo de fast-forward,
     // em vez de a entrega escolher uma base calada (mesmo guarda de reconcileLocalMerge).
