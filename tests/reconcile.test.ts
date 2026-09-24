@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { createGitPort } from '../src/git/gitport.ts'
@@ -139,6 +139,71 @@ describe('reconciler releases local intents', () => {
 
     const events = readEvents(missionDir)
     expect(openIntents(events)).toEqual([])
+  })
+
+  // Journal antigo: a prova gravava a intenção sem `tree_before` e a queda no meio dela travava a missão para
+  // sempre. O step_id da prova (`eval:<id>:<fase>:<árvore>`) carrega a árvore conferida antes de rodar.
+  test('eval_run_intent_without_tree_before_uses_the_tree_in_its_step_id', async () => {
+    const repo = makeRepo()
+    repoDirs.push(repo.dir)
+    writeFileSync(path.join(repo.dir, 'base.txt'), 'base\n')
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'commit inicial'])
+
+    const gitPort = createGitPort({ worktreeDir: repo.dir })
+    const treeBefore = await gitPort.worktreeTree()
+    const missionDir = makeMissionDir()
+    const journal = openJournal({ missionDir, runtimeStamp: RUNTIME_STAMP })
+    await journal.append({
+      kind: 'step_intent',
+      step_id: `eval:V1:red:${treeBefore}`,
+      effect_class: 'eval_run',
+      input_digest: '0000000000000000',
+      intent_context: {},
+    })
+    writeFileSync(path.join(repo.dir, 'sobra.txt'), 'artefato da prova\n')
+
+    const intent = loadIntent(missionDir, `eval:V1:red:${treeBefore}`)
+    const verdict = await reconcileIntent({ intent, journal, gitPort, missionDir })
+
+    expect(verdict).toMatchObject({ verdict: 'released', reason: 'tree_restored' })
+    expect(await gitPort.worktreeTree()).toBe(treeBefore)
+  })
+
+  // 24/09: a reconciliação de uma prova interrompida recebia a porta da raiz do projeto e restaurou ali a árvore
+  // da prova, apagando as edições não commitadas do operador. A worktree gravada na intenção manda.
+  test('tree_intent_restores_its_own_worktree_never_the_project_root', async () => {
+    const root = makeRepo()
+    repoDirs.push(root.dir)
+    writeFileSync(path.join(root.dir, 'base.txt'), 'base\n')
+    root.git(['add', '-A'])
+    root.git(['commit', '-m', 'commit inicial'])
+    const wtDir = path.join(root.dir, '.ade', 'wt', 'S1')
+    root.git(['worktree', 'add', '-b', 'ade/m/S1', wtDir])
+    const wtPort = createGitPort({ worktreeDir: wtDir })
+    const treeBefore = await wtPort.worktreeTree()
+
+    const missionDir = makeMissionDir()
+    const journal = openJournal({ missionDir, runtimeStamp: RUNTIME_STAMP })
+    await journal.append({
+      kind: 'step_intent',
+      step_id: `eval:V1:red:${treeBefore}`,
+      effect_class: 'eval_run',
+      input_digest: '0000000000000000',
+      intent_context: { tree_before: treeBefore },
+      worktree: wtDir,
+    })
+    writeFileSync(path.join(wtDir, 'sobra.txt'), 'artefato\n')
+    writeFileSync(path.join(root.dir, 'base.txt'), 'edição do operador\n')
+    writeFileSync(path.join(root.dir, 'rascunho.txt'), 'não commitado\n')
+
+    const intent = loadIntent(missionDir, `eval:V1:red:${treeBefore}`)
+    const verdict = await reconcileIntent({ intent, journal, gitPort: createGitPort({ worktreeDir: root.dir }), missionDir })
+
+    expect(verdict).toMatchObject({ verdict: 'released', reason: 'tree_restored' })
+    expect(await wtPort.worktreeTree()).toBe(treeBefore)
+    expect(readFileSync(path.join(root.dir, 'base.txt'), 'utf8')).toBe('edição do operador\n')
+    expect(readFileSync(path.join(root.dir, 'rascunho.txt'), 'utf8')).toBe('não commitado\n')
   })
 
   // AC2 (complemento): árvore igual a `tree_before` não dispara restauração; motivo é `tree_unchanged`.

@@ -391,6 +391,40 @@ describe('eval runner phase red execution and strictness', () => {
     expect(stepResult?.status).toBe('ok')
   })
 
+  // O compilador de intenção dava 30s à suíte inteira do projeto, que leva minutos: a prova morria por tempo
+  // no vermelho e no verde e a parte nunca ficava verde. O teto do contrato vale como mínimo de 10 minutos.
+  test('eval_timeout_below_floor_does_not_kill_a_slow_suite', async () => {
+    const missionDir = mkdtempSync(path.join(os.tmpdir(), 'eval-mission-'))
+    const fixtureDir = mkdtempSync(path.join(os.tmpdir(), 'eval-fixture-'))
+    const tree = 'tree-slow'
+    const gitPort = { worktreeDir: fixtureDir, worktreeTree: async () => tree }
+    const journal = openJournal({ missionDir, runtimeStamp: '1:aaaaaaaa:bbbbbbbb' })
+    const { step } = createStepRunner({ journal, missionDir, gitPort: gitPort as any, env: {} })
+    const runner = createEvalRunner({ step, missionDir, gitPort: gitPort as any })
+
+    const record = await runner.runEval({
+      eval: {
+        id: 'slow',
+        argv: ['node', '-e', 'setTimeout(() => process.exit(0), 2500)'],
+        kind: 'script',
+        expect_exit: 0,
+        timeout_s: 1,
+        max_output_bytes: 1024,
+        strictness: { mode: 'must_fail_before' as const },
+      },
+      phase: 'green',
+      tree,
+      unit: 'u1',
+    })
+
+    expect(record.exit_code).toBe(0)
+    // A intenção grava a árvore: queda no meio da prova é reconciliável em vez de travar a missão.
+    const { events } = readJournal(path.join(missionDir, 'journal.jsonl'))
+    const intent = events.find((e) => e.kind === 'step_intent' && e.effect_class === 'eval_run')
+    expect(intent?.intent_context?.tree_before).toBe(tree)
+    await journal.close()
+  }, 30_000)
+
   // CA2: Dado o mesmo mini-projeto com o teste falhando por asserção,
   // quando runEval({phase:'red', ...}) roda, então o EvalRecord traz verdict:'red_valid',
   // red_reason:'assertion', exit_code diferente de expect_exit e raw_ref art:evals/<id>/red.

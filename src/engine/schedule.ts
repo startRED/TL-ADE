@@ -103,6 +103,9 @@ export function deriveStoryStates(events: Array<Record<string, any>>, storiesByI
           : { status, commit: p.commit ?? null, reason: 'preserved' }
       }
     }
+    if (ev.kind === 'decision' && ev.data?.decision === 'unit_retry' && ev.data?.unit) {
+      delete states[ev.data.unit]
+    }
     if (ev.kind === 'story_skipped') {
       const unit = ev.unit || ev.data?.unit
       if (unit) {
@@ -420,6 +423,16 @@ export async function runSequentialMission(deps: Record<string, any>, { loaded, 
         })
       }
     }
+  }
+
+  // "Tentar de novo" do painel: o pedido vem por arquivo (o painel não escreve no journal) e o motor, escritor
+  // único, registra a nova tentativa de cada parte parada antes de escolher a próxima.
+  const retryPath = path.join(currentMissionDir, 'retry-request.json')
+  if (deps.journal && fs.existsSync(retryPath)) {
+    for (const [unit, st] of Object.entries(deriveStoryStates(readEvents(currentMissionDir)))) {
+      if (st.status === 'awaiting_operator') await deps.journal.append({ kind: 'decision', unit, data: { decision: 'unit_retry', unit, previous_reason: st.reason ?? null } })
+    }
+    fs.rmSync(retryPath, { force: true })
   }
 
   const startGate = await controlGate([])

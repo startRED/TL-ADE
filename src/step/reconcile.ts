@@ -200,9 +200,14 @@ remotePort?: { readRef: (remote: string,ref: string) => Promise<string|null> }
   }
 
   if (TREE_RESTORING_CLASSES.includes(intent.effect_class)) {
-    const treeBefore = intent.intent_context?.tree_before
+    // Prova e portão de journal antigo gravavam a intenção sem `tree_before`, mas o step_id termina na árvore
+    // conferida antes de rodar (`eval:<id>:<fase>:<árvore>`, `gate:<id>:<árvore>`).
+    const idTree = /^(eval|gate):.*:([0-9a-f]{40})$/.exec(String(intent.step_id))?.[2]
+    const treeBefore = intent.intent_context?.tree_before ?? (['eval_run', 'gate'].includes(intent.effect_class) ? idTree : undefined)
+    // A worktree gravada na intenção manda: a porta recebida é a da raiz do projeto, e restaurar ali a árvore de uma
+    // prova apagou as edições não commitadas do operador (e trocou o índice dele) em 24/09.
     const port =
-      gitPort ?? (typeof intent.worktree === 'string' && intent.worktree ? createGitPort({ worktreeDir: intent.worktree }) : null)
+      typeof intent.worktree === 'string' && intent.worktree ? createGitPort({ worktreeDir: intent.worktree }) : gitPort
     // Sem porta Git ou sem `tree_before` não dá para comparar nem restaurar a árvore: fechar aqui
     // marcaria como inalterada uma intenção que pode ter escrito no worktree. A intenção fica aberta.
     if (!port) {

@@ -732,6 +732,31 @@ describe('v0.3: Executar e retomar missão sequencial', { timeout: 80_000 }, () 
     expect(result.completedStories).toEqual(['S1', 'S2', 'S3'])
   })
 
+  // "Tentar de novo" no painel: o pedido de nova tentativa (arquivo, porque o painel não escreve no journal) faz o
+  // motor registrar unit_retry para cada parte parada e rodá-las de novo, em vez de a parte ficar parada para sempre.
+  test('pedido_de_nova_tentativa_roda_de_novo_as_partes_paradas', async () => {
+    const fixture = await setupThreeStoryFixture({
+      dependencies: { S1: [], S2: ['S1'], S3: ['S2'] },
+    })
+    await fixture.deps.journal.append({
+      kind: 'story_done',
+      unit: 'S1',
+      data: { unit: 'S1', status: 'awaiting_operator', reason: 'eval_red_not_red', commit: null },
+    })
+    fs.writeFileSync(path.join(fixture.missionDir, 'retry-request.json'), '{}')
+
+    const result = await runSequentialMission(fixture.deps, {
+      loaded: fixture.loaded,
+      repoDir: fixture.repo.dir,
+      missionDir: fixture.missionDir,
+    })
+
+    expect(result.status).toBe('completed')
+    expect(fs.existsSync(path.join(fixture.missionDir, 'retry-request.json'))).toBe(false)
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    expect(events.filter((e) => e.kind === 'decision' && e.data?.decision === 'unit_retry').map((e) => e.data?.unit)).toEqual(['S1'])
+  })
+
   // Critério (6): Dado o cenário rápido trivial em repositório temporário, quando a missão completa é executada com CLIs falsas,
   // então a primeira edição ocorre dentro do limite contratado, não há perguntas e o número total de chamadas respeita o orçamento.
   test('test_criterio_6_cenario_rapido_trivial_com_clis_falsas_respeita_orcamento_e_limites', async () => {
