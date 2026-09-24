@@ -121,3 +121,17 @@ test('CA4_borda_veredito_malformado_falha_fechado_e_schema_aceita_wrong_tests', 
   const bad = reviewDoc({ wrong_tests: [{ path: 'tests/a.test.ts' }] })
   expect(validateSupported('review-result', bad).valid).toBe(false)
 })
+
+// 24/09, missão real (S2): o revisor mandou uma decisão para "human" (taste-skill fora da prova de sincronização). A
+// TL-ADE é autônoma: sem operador, o achado grave vai ao modelo com a instrução de escolher a opção conservadora dentro
+// do escopo e registrar a escolha, em vez de sumir e deixar a rodada nova sem nada para corrigir.
+test('achado_grave_para_humano_vai_ao_modelo_com_opcao_conservadora', () => {
+  const request = buildReviewHandoff({ contract: CONTRACT, priorFindings: [], makerResponse: '', diff: DIFF })
+  const human = finding({ id: 'F3', severity: 'high', category: 'intent_gap', target_role: 'human', required_action: 'Decidir como compatibilizar a fonte.' })
+  const kept = blockingReviewFindings({ findings: [human], request, round: 1 })
+  expect(kept.map((f) => f.id)).toEqual(['F3'])
+  expect(kept[0].target_role).toBe('maker')
+  expect(kept[0].required_action).toContain('opção conservadora')
+  // achado leve para humano continua fora
+  expect(blockingReviewFindings({ findings: [finding({ id: 'F4', severity: 'low', target_role: 'human' })], request, round: 1 })).toEqual([])
+})

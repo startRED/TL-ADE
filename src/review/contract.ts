@@ -76,13 +76,27 @@ function citationExists(citation: string | undefined, request: ReviewRequest): b
 const findingKey = (f: Finding) => `${normalize(f.location)}|${normalize(f.problem)}`
 
 /**
+ * A TL-ADE é autônoma: achado grave que o revisor manda para "human" (decisão de intenção) não tem quem decida. Ele vai
+ * ao modelo com a instrução de escolher a opção conservadora dentro do escopo e registrar a escolha (S2 da missão real:
+ * sem isso a rodada nova começava sem nada para corrigir).
+ */
+function autonomousFinding(f: Finding): Finding {
+  if (f.target_role !== 'human' || (f.severity !== 'critical' && f.severity !== 'high')) return f
+  return {
+    ...f,
+    target_role: 'maker',
+    required_action: `${f.required_action ?? ''} Sem operador para decidir: escolha a opção conservadora dentro do escopo (por exemplo, tirar o item em conflito em vez de mexer fora do escopo) e registre a escolha no resultado.`.trim(),
+  }
+}
+
+/**
  * Achados que bloqueiam a rodada: retirado com citação válida sai; citação inexistente mantém;
  * depois da primeira rodada, achado novo só bloqueia se grave.
  */
 export function blockingReviewFindings(opts: { findings: unknown[]; request: ReviewRequest; round: number }): Finding[] {
   const priorIds = new Set(opts.request.prior_findings.map((f) => f.id))
   const priorKeys = new Set(opts.request.prior_findings.map(findingKey))
-  return opts.findings.map(normalizeFinding).filter((f) => {
+  return opts.findings.map(normalizeFinding).map(autonomousFinding).filter((f) => {
     if (f.withdrawn === true && citationExists(f.citation, opts.request)) return false
     const isNew = opts.round > 1 && !priorIds.has(f.id) && !priorKeys.has(findingKey(f))
     if (isNew && f.severity !== 'critical' && f.severity !== 'high') return false
