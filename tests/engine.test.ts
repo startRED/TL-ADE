@@ -521,6 +521,10 @@ describe('engine', () => {
     const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
     expect(events.some((e) => e.kind === 'decision' && (e.data as any).decision === 'review_invalid_retry')).toBe(true)
     expect(events.some((e) => String(e.step_id ?? '').includes(':r2:'))).toBe(false)
+    // a segunda revisão recebe os erros da primeira
+    const retryPack = fs.readFileSync(path.join(fixture.missionDir, 'artifacts', 'packs', 'ADE-T1_r1_review-pack-t1', 'pack.md'), 'utf8')
+    expect(retryPack).toContain('previous_review_rejected_by_validation')
+    expect(retryPack).toContain('eval:NAO_RODOU')
   }, 120_000)
 
   // 24/09, missão real (S2): a V1 era a suíte inteira e já falhava na base por vermelhas antigas; o vermelho "valeu" e a

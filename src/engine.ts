@@ -65,6 +65,7 @@ const REVIEW_POLICY = [
   '- Aprove só se o código e as provas cumprem os critérios do contrato; senão, liste os achados com severidade e ação.',
   '- Copie contract_revision e input_revision exatamente como estão em echo_exactly.',
   '- Em evidence, sources, evidence_refs e result_ref, cite só referências da lista citable_refs, escritas igual (arquivo sempre com intervalo de linhas).',
+  '- Toda ref que um achado (action_items, deferred, rejected) ou uma claim do handoff cita em evidence_refs precisa aparecer também como result_ref de um item de evidence; e cada critério do contrato precisa de um item de evidence.',
   '- As provas já rodaram no motor, fora da sua sandbox: proof_results é o resultado oficial (verde julgado contra a largada conta como verde, e as vermelhas listadas nos avisos já existiam antes da parte). Não rode a suíte inteira nem reprove por não conseguir rodá-la; se precisar conferir, rode só as provas da parte.',
   '- Responda somente pelo schema.',
 ].join('\n')
@@ -1426,12 +1427,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       makerResponse: dispatch?.result_text ?? '',
       diff: changedPaths,
     })
-    const reviewPack = deps.compilePack({
-      sections: {
-        contract: JSON.stringify(contract),
-        policy: REVIEW_POLICY,
-        // o revisor real não adivinha as revisões nem as refs: copia estas (a validação compara com elas)
-        story: JSON.stringify({
+    // o revisor real não adivinha as revisões nem as refs: copia estas (a validação compara com elas)
+    const reviewStory = JSON.stringify({
           ...JSON.parse(dedupStorySection(story).text),
           review_request: reviewRequest,
           echo_exactly: { contract_revision: expectedContractRevision, input_revision: { tree: treeAfterContain, digest: observedDigest } },
@@ -1439,8 +1436,9 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
           proof_results: proofResults,
           // só refs que também passam no padrão do schema: arquivo sem intervalo de linhas (file:x) é recusado na validação
           citable_refs: Array.from(verifiedRefs).filter((ref) => typeof ref === 'string' && (!ref.startsWith('file:') || /#L[1-9][0-9]*-L[1-9][0-9]*$/.test(ref))),
-        }, null, 2),
-      },
+        }, null, 2)
+    const reviewPack = deps.compilePack({
+      sections: { contract: JSON.stringify(contract), policy: REVIEW_POLICY, story: reviewStory },
       missionDir,
       stepId: `${storyId}:r${round}:review-pack`,
     })
@@ -1488,7 +1486,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     })
     }
 
-    const dispatchChecker = (stepId: string) => checkerDispatchFn({
+    const dispatchChecker = (stepId: string, packPath: string = reviewPack.pack_path) => checkerDispatchFn({
         step: authorizedStep(
           deps.step,
           paidAuthorization,
@@ -1497,7 +1495,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         authorization: paidAuthorization,
         unit: storyId,
         stepId,
-        packPath: reviewPack.pack_path,
+        packPath,
         missionDir,
         missionId,
         cwd: worktreeDir,
@@ -1603,9 +1601,20 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     if (!reviewApproval.approved && reviewApproval.errors.length > 0) {
       const retryStepId = `${checkerStepId}:t1`
       await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'review_invalid_retry', unit: storyId, step_id: retryStepId, errors: reviewApproval.errors.slice(0, 5) } })
+      // A segunda revisão recebe os erros da primeira: sem eles o revisor repetia o mesmo erro (S2 da missão real).
+      const retryPack = deps.compilePack({
+        sections: {
+          contract: JSON.stringify(contract),
+          policy: REVIEW_POLICY,
+          story: reviewStory,
+          retrieved: JSON.stringify({ previous_review_rejected_by_validation: reviewApproval.errors.slice(0, 20).map((e) => ({ ...e, value: String(e.path ?? '').split('/').slice(1).reduce((v: any, k) => v?.[k], reviewDoc) ?? null })), instruction: 'Refaça o parecer corrigindo exatamente estes erros de formato e de referência; o julgamento do código é seu.' }, null, 2),
+        },
+        missionDir,
+        stepId: `${storyId}:r${round}:review-pack-t1`,
+      })
       let retried: any = null
       try {
-        retried = await dispatchChecker(retryStepId)
+        retried = await dispatchChecker(retryStepId, retryPack.pack_path)
       } catch {
         // sem segunda revisão, vale a primeira (reprovada)
       }
