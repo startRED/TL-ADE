@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 
-import { parseClaudeRateLimit, readCodexRateLimit, refreshQuotaReceipts } from '../src/adapters/local/official-quota.ts'
+import { parseAgyQuota, parseClaudeRateLimit, readCodexRateLimit, refreshQuotaReceipts } from '../src/adapters/local/official-quota.ts'
 import { createLocalQuotaPort } from '../src/adapters/local/quota.ts'
 
 const dirs: string[] = []
@@ -36,10 +36,26 @@ describe('cota oficial dos planos', () => {
     expect(readCodexRateLimit(tmp())).toBeNull()
   })
 
+  test('lê a semana e as 5 h do grupo Gemini no /quota do agy e ignora o grupo Claude e GPT', () => {
+    // formato real de `agy -p /quota --output-format json` (1.2.9, 24/09/2026)
+    const out = JSON.stringify({ status: 'SUCCESS', command: { name: 'usage', data: { groups: [
+      { name: 'Gemini Models', buckets: [
+        { id: 'gemini-weekly', window: 'weekly', remaining_fraction: 0.5300685167312622, reset_time: '2026-09-26T13:49:53Z' },
+        { id: 'gemini-5h', window: '5h', remaining_fraction: 0.9407551288604736, reset_time: '2026-09-24T19:17:55Z' },
+      ] },
+      { name: 'Claude and GPT models', buckets: [{ id: '3p-weekly', window: 'weekly', remaining_fraction: 0, reset_time: '2026-09-26T14:08:44Z' }] },
+    ] } } })
+    expect(parseAgyQuota(out)).toEqual({
+      seven_day: { used_percent: 47, resets_at: '2026-09-26T13:49:53.000Z' },
+      five_hour: { used_percent: 6, resets_at: '2026-09-24T19:17:55.000Z' },
+    })
+    expect(parseAgyQuota('jetski: no output produced')).toBeNull()
+  })
+
   test('grava um recibo oficial por família que a porta do motor aceita', async () => {
     const home = tmp()
     const now = Date.parse('2026-09-23T22:00:00Z')
-    const written = await refreshQuotaReceipts({ home, now, readClaude: async () => CLAUDE_OUT, readCodex: () => ({ seven_day: { used_percent: 81, resets_at: '2026-09-26T08:23:58.000Z' }, observed_at: '2026-09-23T21:00:00.000Z' }) })
+    const written = await refreshQuotaReceipts({ home, now, readClaude: async () => CLAUDE_OUT, readCodex: () => ({ seven_day: { used_percent: 81, resets_at: '2026-09-26T08:23:58.000Z' }, observed_at: '2026-09-23T21:00:00.000Z' }), readAgy: async () => '' })
     expect(written.map((r) => [r.family, r.used_percent])).toEqual([['claude', 13], ['codex', 81]])
     const port = createLocalQuotaPort({ receiptPath: path.join(home, '.ade', 'quota-receipt.json') })
     expect(await port.readReceipt({ family: 'claude', now })).toMatchObject({ source: 'official', family: 'claude', used_percent: 13, reserved_percent: 0 })

@@ -12,6 +12,7 @@ import { defaultChatAgent } from './chat/agent.ts'
 import { createChat, type ChatAgent } from './chat/chat.ts'
 import { createSessionManager } from './session.ts'
 import { createLocalQuotaPort } from '../adapters/local/quota.ts'
+import { refreshQuotaReceipts } from '../adapters/local/official-quota.ts'
 import { readModelsView, readUsage, setManualQuota, updateModelSettings, type QuotaPort } from './models-api.ts'
 import { createIntake, spawnMissionRun, type IntentPort, type RunMission } from './intake.ts'
 import { llmIntent } from '../intent/llm-intent.ts'
@@ -145,6 +146,8 @@ export async function startServer({
             chatAgent?: ChatAgent
             /** Leitura oficial da cota (padrão: recibo local em ~/.ade/quota-receipt.json). */
             quotaPort?: QuotaPort
+            /** Relê a cota oficial dos planos (padrão: Claude, Codex e Google; só com a porta de cota real). */
+            refreshQuota?: () => Promise<unknown>
             /** Relógio da página Modelos e do relatório de uso. */
             now?: () => number
             /** Catálogo de skills sincronizado (padrão: ~/.ade/catalog). */
@@ -174,6 +177,15 @@ export async function startServer({
   const { indexPath } = await projects.open(resolvedRepo)
   const quotaPort = deps.quotaPort ?? createLocalQuotaPort({ receiptPath: path.join(homeDir, '.ade', 'quota-receipt.json') })
   const now = deps.now ?? Date.now
+  // Cota dos planos na página Modelos sem passo manual: abrir a página relê em segundo plano, no máximo a cada 10 min
+  // (o Claude gasta uma chamada mínima; Codex e Google não gastam). A leitura nova aparece na próxima abertura.
+  const refreshQuota = deps.refreshQuota ?? (deps.quotaPort ? null : () => refreshQuotaReceipts({ home: homeDir }))
+  let quotaReadAt = -Infinity
+  const refreshQuotaSoon = () => {
+    if (!refreshQuota || now() - quotaReadAt < 10 * 60_000) return
+    quotaReadAt = now()
+    refreshQuota().catch((err) => stderrWrite(`ade serve: falha ao ler a cota dos planos: ${err instanceof Error ? err.message : String(err)}\n`))
+  }
   const catalogDir = deps.catalogDir ?? path.join(homeDir, '.ade', 'catalog')
   const activeProject = () => {
     if (!projects.activeId) throw new AdeError('project_not_found', 'Nenhum projeto aberto.', 2)
@@ -328,6 +340,7 @@ export async function startServer({
               return
             }
             if (pathname === '/api/models' && method === 'GET') {
+              refreshQuotaSoon()
               sendJson(res, 200, await readModelsView(activeProject().path, now(), quotaPort))
               return
             }

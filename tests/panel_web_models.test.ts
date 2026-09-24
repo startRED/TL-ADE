@@ -289,4 +289,22 @@ describe('painel: página Modelos com filas, cota e uso', () => {
     expect(await page.evaluate(() => (window as unknown as { marca?: number }).marca)).toBe(1)
     await expect.poll(() => page.getByRole('region', { name: 'Modelos bloqueados' }).textContent()).toContain('claude-opus-5-5')
   }, 180_000)
+
+  test('abrir_modelos_rele_a_cota_dos_planos_em_segundo_plano_no_maximo_a_cada_10_minutos', async () => {
+    let clock = NOW
+    let reads = 0
+    const homeDir = makeTmpDir('ade-models-home-')
+    const server = await startServer({
+      repoDir: repoFixture(PLANS).dir, port: await freePort(), openBrowser: false,
+      deps: { stdout: () => {}, homeDir, quotaPort: quotaPortFixture(), now: () => clock, refreshQuota: async () => { reads++ } },
+    })
+    cleanups.push(async () => { await server.close(); removeTmpDir(homeDir) })
+    const get = () => apiRequest(server.port, '/api/models', { token: server.sessionToken })
+    expect((await get()).status).toBe(200)
+    await get()
+    expect(reads).toBe(1)
+    clock += 11 * 60_000
+    await get()
+    expect(reads).toBe(2)
+  }, 180_000)
 })

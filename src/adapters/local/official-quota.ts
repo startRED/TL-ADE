@@ -1,6 +1,6 @@
 // Cota oficial de cada plano, lida de onde cada CLI realmente informa (o mesmo desenho da demo, proto/server.mjs):
 // Claude: o evento rate_limit_event que o próprio CLI devolve numa chamada em stream-json; Codex: o rate_limits que
-// cada sessão grava em ~/.codex/sessions. O resultado vira os recibos ~/.ade/quota-<família>.json que o motor exige
+// cada sessão grava em ~/.codex/sessions; Google: `agy -p /quota --output-format json`, que não gasta token nem abre conversa. O resultado vira os recibos ~/.ade/quota-<família>.json que o motor exige
 // antes de uma chamada paga (source 'official').
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
@@ -63,6 +63,39 @@ export function readCodexRateLimit(home = os.homedir()): { seven_day: QuotaWindo
   return null
 }
 
+/** Janela da semana (e a de 5 h) do grupo Gemini na resposta de `agy -p /quota --output-format json`; null sem leitura. */
+export function parseAgyQuota(stdout: string): { seven_day: QuotaWindow; five_hour: QuotaWindow | null } | null {
+  let groups: any[] = []
+  try {
+    groups = JSON.parse(stdout.slice(stdout.indexOf('{')))?.command?.data?.groups ?? []
+  } catch {
+    return null
+  }
+  // os modelos da família agy no catálogo são Gemini; o grupo "Claude and GPT" do agy é outra cota
+  const gemini = groups.find((g: any) => /gemini/i.test(String(g?.name)))
+  const win = (window: string): QuotaWindow | null => {
+    const b = (gemini?.buckets ?? []).find((x: any) => x?.window === window && x?.disabled !== true)
+    return b && typeof b.remaining_fraction === 'number' && typeof b.reset_time === 'string'
+      ? { used_percent: Math.round((1 - b.remaining_fraction) * 100), resets_at: new Date(b.reset_time).toISOString() }
+      : null
+  }
+  const seven = win('weekly')
+  return seven ? { seven_day: seven, five_hour: win('5h') } : null
+}
+
+/** Comando de cota do agy: responde sem turno de modelo. Sem shell, o "/quota" chega como está. */
+function agyProbe(): Promise<string> {
+  const { exe, prefixArgs } = resolveBinary('agy')
+  return new Promise((resolve, reject) => {
+    const child = spawn(exe, [...prefixArgs, '-p', '/quota', '--output-format', 'json'], { shell: false, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
+    let out = ''
+    child.stdout.on('data', (d) => { out += d })
+    const timer = setTimeout(() => child.kill(), 60_000)
+    child.once('error', (err) => { clearTimeout(timer); reject(err) })
+    child.once('exit', () => { clearTimeout(timer); resolve(out) })
+  })
+}
+
 /** Chamada mínima do claude (modelo leve) só para ler o rate_limit_event; o prompt vai pela entrada padrão. */
 function claudeProbe(): Promise<string> {
   const { exe, prefixArgs } = resolveBinary('claude')
@@ -79,14 +112,15 @@ function claudeProbe(): Promise<string> {
 }
 
 /**
- * Lê a cota oficial do Claude e do Codex e grava um recibo por família em ~/.ade/quota-<família>.json.
+ * Lê a cota oficial do Claude, do Codex e do Google (agy) e grava um recibo por família em ~/.ade/quota-<família>.json.
  * Família sem leitura fica sem recibo (o motor então não gasta aquele plano às cegas). Devolve os recibos gravados.
  */
-export async function refreshQuotaReceipts({ home = os.homedir(), now = Date.now(), readClaude = claudeProbe, readCodex = readCodexRateLimit }: {
+export async function refreshQuotaReceipts({ home = os.homedir(), now = Date.now(), readClaude = claudeProbe, readCodex = readCodexRateLimit, readAgy = agyProbe }: {
   home?: string
   now?: number
   readClaude?: () => Promise<string>
   readCodex?: (home: string) => ReturnType<typeof readCodexRateLimit>
+  readAgy?: () => Promise<string>
 } = {}): Promise<QuotaReceipt[]> {
   const dir = path.join(home, '.ade')
   fs.mkdirSync(dir, { recursive: true })
@@ -99,5 +133,7 @@ export async function refreshQuotaReceipts({ home = os.homedir(), now = Date.now
   if (claude) write({ source: 'official', family: 'claude', used_percent: claude.seven_day.used_percent, reserved_percent: 0, observed_at: new Date(now).toISOString(), weekly_reset_at: claude.seven_day.resets_at, five_hour: claude.five_hour })
   const codex = readCodex(home)
   if (codex) write({ source: 'official', family: 'codex', used_percent: codex.seven_day.used_percent, reserved_percent: 0, observed_at: codex.observed_at, weekly_reset_at: codex.seven_day.resets_at })
+  const agy = parseAgyQuota(await readAgy().catch(() => ''))
+  if (agy) write({ source: 'official', family: 'agy', used_percent: agy.seven_day.used_percent, reserved_percent: 0, observed_at: new Date(now).toISOString(), weekly_reset_at: agy.seven_day.resets_at, five_hour: agy.five_hour })
   return written
 }
