@@ -176,6 +176,11 @@ describe('v0.5 telemetria completa e auditoria do harness', () => {
     expect(() => buildModelTelemetry(baseInput({
       skills: [{ name: 'x', bytes: 1, sha256: 'curto', source: 'local' }],
     }))).toThrow(/sha256/)
+    // Skill de coleção do catálogo tem a origem `<coleção>@<commit>` (src/skills/catalog.ts); recusá-la derrubava a missão
+    // logo depois do modelo terminar a parte (24/09).
+    expect(() => buildModelTelemetry(baseInput({
+      skills: [{ name: 'javascript-testing-patterns', bytes: 1, sha256: SHA_A, source: 'wshobson-agents@4236bb91f8395b0435f1d8b8baf9e8e4c69a8620' }],
+    }))).not.toThrow()
   })
 
   // (3) Família sem custo informado: cost_usd nulo e cost_source unknown.

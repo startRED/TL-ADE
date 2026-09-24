@@ -3,7 +3,8 @@ import { callCost } from './cost.ts'
 
 const OUTCOMES = ['ok', 'retry', 'rework', 'park', 'stop']
 const MISSION_OUTCOMES = ['completed', 'parked', 'interrupted']
-const SKILL_SOURCE = /^(catalog@[0-9a-f]{7,40}|local)$/
+// catalog@<commit> (catálogo antigo), <coleção>@<commit> (fontes do catálogo) ou local
+const SKILL_SOURCE = /^([A-Za-z0-9][A-Za-z0-9._-]*@[0-9a-f]{7,40}|local)$/
 const SHA256 = /^[0-9a-f]{64}$/
 
 /**
@@ -74,7 +75,7 @@ export function buildModelTelemetry(input: Record<string,any>): Record<string,an
   const skills = (input.skills ?? []).map((s: any) => {
     if (typeof s?.name !== 'string' || !isCount(s.bytes)) throw new TelemetryInvalidError('skill sem nome ou bytes')
     if (!SHA256.test(String(s.sha256))) throw new TelemetryInvalidError(`skill ${s.name} sem sha256 do conteúdo`)
-    if (!SKILL_SOURCE.test(String(s.source))) throw new TelemetryInvalidError(`skill ${s.name} com origem ${s.source} (esperado catalog@<commit> ou local)`)
+    if (!SKILL_SOURCE.test(String(s.source))) throw new TelemetryInvalidError(`skill ${s.name} com origem ${s.source} (esperado <fonte>@<commit> ou local)`)
     return { name: s.name, bytes: s.bytes, cited: cited.has(s.sha256), sha256: s.sha256, source: s.source }
   })
 
