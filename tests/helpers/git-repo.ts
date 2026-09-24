@@ -33,5 +33,6 @@ export function makeRepo(): { dir: string; git(args: string[]): string } {
 }
 
 export function removeRepo(dir: string): void {
-  rmSync(dir, { recursive: true, force: true })
+  // Windows segura por instantes os arquivos que o servidor do painel acabou de ler (EPERM na limpeza): tenta de novo
+  rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
 }
