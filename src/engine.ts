@@ -1439,13 +1439,16 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
 
     const checkerStartedAt = deps.now?.() ?? Date.now()
     
-    const appendCheckerTelemetry: (dispatch: any, outcome: 'ok' | 'rework' | 'park') => Promise<void> = (dispatch, outcome): Promise<void> => deps.journal.append({
+    // Uma telemetria por chamada: a retomada reaproveita a revisão já feita e não soma o gasto dela de novo.
+    const appendCheckerTelemetry: (dispatch: any, outcome: 'ok' | 'rework' | 'park', stepId?: string) => Promise<void> = async (dispatch, outcome, stepId = checkerStepId): Promise<void> => {
+      if (readEvents().some((e) => e.kind === 'telemetry' && e.data?.step_id === stepId)) return
+      await deps.journal.append({
       kind: 'telemetry',
       unit: storyId,
       data: buildModelTelemetry({
         mission_id: missionId,
         story_id: storyId,
-        step_id: checkerStepId,
+        step_id: stepId,
         family: checker.family,
         role: 'checker_round',
         effort: checker.effort ?? 'default',
@@ -1465,10 +1468,9 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         tool_output_model_bytes: 0,
       }),
     })
+    }
 
-    let checkerDispatch
-    try {
-      checkerDispatch = await checkerDispatchFn({
+    const dispatchChecker = (stepId: string) => checkerDispatchFn({
         step: authorizedStep(
           deps.step,
           paidAuthorization,
@@ -1476,7 +1478,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         ),
         authorization: paidAuthorization,
         unit: storyId,
-        stepId: checkerStepId,
+        stepId,
         packPath: reviewPack.pack_path,
         missionDir,
         missionId,
@@ -1490,6 +1492,10 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         role: 'checker_round',
         sandbox: 'read-only',
       })
+
+    let checkerDispatch
+    try {
+      checkerDispatch = await dispatchChecker(checkerStepId)
     } catch (err) {
       const dispatchErrorReason = err instanceof AdeError ? err.code : 'checker_dispatch_failed'
       await appendCheckerTelemetry(undefined, 'park')
@@ -1560,7 +1566,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       verifiedRefs: Array.from(verifiedRefs),
     }
 
-    const reviewApproval = isReviewApproved(reviewDoc, reviewContext)
+    let reviewApproval = isReviewApproved(reviewDoc, reviewContext)
 
     await deps.journal.append({
       kind: 'review_result',
@@ -1573,6 +1579,30 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         result: reviewDoc,
       },
     })
+
+    // Parecer inválido (formato ou referência que o motor não confere) é falha do revisor, não do código: pede uma nova
+    // revisão antes de abrir rodada. Na missão real, um parecer recusado por formato virou rodada de código.
+    if (!reviewApproval.approved && reviewApproval.errors.length > 0) {
+      const retryStepId = `${checkerStepId}:t1`
+      await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'review_invalid_retry', unit: storyId, step_id: retryStepId, errors: reviewApproval.errors.slice(0, 5) } })
+      let retried: any = null
+      try {
+        retried = await dispatchChecker(retryStepId)
+      } catch {
+        // sem segunda revisão, vale a primeira (reprovada)
+      }
+      if (retried?.review_result) {
+        await appendCheckerTelemetry(retried, 'rework', retryStepId)
+        checkerDispatch = retried
+        reviewDoc = retried.review_result
+        reviewApproval = isReviewApproved(reviewDoc, reviewContext)
+        await deps.journal.append({
+          kind: 'review_result',
+          unit: storyId,
+          data: { round, approved: reviewApproval.approved, verdict: reviewDoc?.verdict ?? 'unknown', errors: reviewApproval.errors, result: reviewDoc },
+        })
+      }
+    }
 
     if (reviewApproval.approved) {
       maybeEngineFault('before_commit', env)

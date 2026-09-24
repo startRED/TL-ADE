@@ -504,6 +504,22 @@ describe('engine', () => {
     expect(events.some((e) => e.kind === 'step_result' && e.step_id === 'ADE-T1:r1t1:maker' && e.status === 'ok')).toBe(true)
   }, 120_000)
 
+  // 24/09: parecer recusado por formato virou rodada de código. Parecer inválido é falha do revisor: uma nova revisão
+  // vem antes de abrir rodada, e a parte é entregue sem o modelo reescrever nada.
+  test('parecer_invalido_pede_nova_revisao_sem_abrir_rodada_de_codigo', async () => {
+    const fixture = setupStoryFixture()
+    const invalid = approvedReviewAction()
+    ;(invalid.result as any).evidence[0].result_ref = 'eval:NAO_RODOU'
+    ;(invalid.result as any).sources = ['eval:NAO_RODOU']
+    fs.writeFileSync(path.join(fixture.scenarioDir, 'checker.json'), JSON.stringify([invalid, approvedReviewAction()], null, 2))
+
+    const result = await runStory(fixture.deps, fixture.input)
+    expect(result).toMatchObject({ status: 'delivered' })
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    expect(events.some((e) => e.kind === 'decision' && (e.data as any).decision === 'review_invalid_retry')).toBe(true)
+    expect(events.some((e) => String(e.step_id ?? '').includes(':r2:'))).toBe(false)
+  }, 120_000)
+
   // CA2: Dado um contrato com roles.maker.family 'codex', quando runStory roda, então
   // lança AdeError com code 'family_without_canary' e exit 4, e o journal não tem nenhum
   // step_intent com step_id terminando em ':maker'.
