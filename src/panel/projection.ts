@@ -126,8 +126,10 @@ export function projectMissionFromSources({ missionDir }: { missionDir: string }
     const unit = ev.unit || ev.data?.unit
     const targetStory = unit ? storyStates.get(unit) : null
 
-    if (ev.kind === 'story_started' && targetStory) {
+    // Retomada (queda, pausa, "tentar de novo") volta a parte a andar; antes a tela ficava no último story_done.
+    if ((ev.kind === 'story_started' || ev.kind === 'story_resumed') && targetStory) {
       targetStory.status = 'in_progress'
+      targetStory.reason = null
     } else if (ev.kind === 'story_done' && targetStory) {
       targetStory.status = ev.data?.status || 'committed'
       targetStory.reason = ev.data?.reason || null
@@ -152,7 +154,8 @@ export function projectMissionFromSources({ missionDir }: { missionDir: string }
         source: ev.source || 'operator',
         data: ev.data,
       })
-    } else if (ev.kind === 'model_call') {
+    } else if (ev.kind === 'model_call' || (ev.kind === 'telemetry' && ev.data?.scope !== 'mission_summary')) {
+      // O motor grava o gasto de cada chamada (prova, código, revisão) na telemetria; model_call é o formato antigo.
       totalCalls++
       if (targetStory) targetStory.calls++
       const cost = Number(ev.data?.cost_usd ?? ev.data?.cost ?? 0)
