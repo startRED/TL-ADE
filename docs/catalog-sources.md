@@ -54,6 +54,28 @@ justifica a seleção externa como requisito e não como otimização.
 
 ---
 
+## 1.1 Fontes ativas no catálogo sincronizado (2026-09-24, ADR 0039)
+
+Candidatas vieram de pesquisa do Grok e do ChatGPT a pedido de Erick; cada uma foi reclonada e medida aqui (licença do
+repositório e do frontmatter, commit que tocou o `SKILL.md`, palavras, scripts, achados do SkillGuard). Pins completos e
+caminhos em `~/.ade/catalog-repos/.ade/config.json`; sincroniza com `ade catalog sync` rodado dentro dessa pasta.
+
+| Fonte | Licença | Commit | Skills pinadas | Estado no índice |
+| :--- | :--- | :--- | :--- | :--- |
+| `mattpocock/skills` | MIT | `c55ee46` | `tdd`, `code-review`, `codebase-design` | as 3 liberadas |
+| `helderberto/agent-skills` | MIT | `369b84f` | `frontend-ui-engineering` | liberada |
+| `mblode/agent-skills` | MIT | `e7db33d` | `tidy`, `ui-design` | quarentena (`credentials`, `<!--`, `.env` em referência) |
+| `product-on-purpose/pm-skills` | Apache-2.0 | `1cef1a9` | `deliver-acceptance-criteria`, `deliver-edge-cases` | quarentena (`<!--` de atribuição e de template) |
+| `Jeffallan/claude-skills` | MIT | `882ef55` | `react-expert`, `test-master`, `code-reviewer` | `react-expert` liberada; as outras em quarentena (`<!--`, `<script` de teste XSS, `credentials`) |
+| `wshobson/agents` | MIT | `4236bb9` | `typescript-advanced-types`, `javascript-testing-patterns`, `nodejs-backend-patterns`, `error-handling-patterns`, `accessibility-compliance` | 3 liberadas; `nodejs-backend-patterns` (`credentials`) e `accessibility-compliance` (`<!--`) em quarentena |
+| `DevelopersGlobal/ai-agent-skills` | MIT | `f47f948` | `debugging-methodology` | liberada |
+| `antfu/skills` | MIT | `a74f281` | `vitest` | quarentena (`<!--`, `--env-file=.env.staging` em referência) |
+
+**Cortadas na medição:** `mattpocock/diagnosing-bugs` (traz `scripts/hitl-loop.template.sh`), `mcollina/skills/node`
+(`SKILL.md` parado desde 2026-03-13 e assets `.ts`), `facebookresearch/secpriv-skill` (`SKILL.md` na raiz, sem `name`),
+`helderberto/a11y-audit` (manda rodar `npx`), `helderberto/tdd` (repete a do mattpocock), `alirezarezvani/claude-skills`
+(biblioteca com scripts; fica para uma rodada própria).
+
 ## 2. Ferramentas (integradas, não sincronizadas como skill)
 
 | Fonte | Licença | Pin | Papel na ADE | Decisão |

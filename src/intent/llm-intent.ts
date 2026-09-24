@@ -98,7 +98,7 @@ export const PLAN_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['id', 'title', 'request', 'acceptance', 'scope_paths', 'do_not_touch', 'depends_on', 'test_file'],
+        required: ['id', 'title', 'request', 'acceptance', 'scope_paths', 'do_not_touch', 'depends_on', 'test_file', 'skills'],
         properties: {
           id: str,
           title: str,
@@ -108,6 +108,7 @@ export const PLAN_SCHEMA = {
           do_not_touch: strs,
           depends_on: strs,
           test_file: str,
+          skills: strs,
         },
       },
     },
@@ -115,7 +116,7 @@ export const PLAN_SCHEMA = {
 }
 
 type IntentAnswer = { title: string; summary: string; complexity: string; difficulty: string; domains: string[]; needs_ui: boolean; questions: Array<{ id: string; question: string; why: string; allow_other: boolean; options: Array<{ label: string; hint: string }> }> }
-type PlanAnswer = { title: string; summary: string; explanation: string; decisions: string[]; stories: Array<{ id: string; title: string; request: string; acceptance: Array<{ given: string; when: string; then: string }>; scope_paths: string[]; do_not_touch: string[]; depends_on: string[]; test_file: string }> }
+type PlanAnswer = { title: string; summary: string; explanation: string; decisions: string[]; stories: Array<{ id: string; title: string; request: string; acceptance: Array<{ given: string; when: string; then: string }>; scope_paths: string[]; do_not_touch: string[]; depends_on: string[]; test_file: string; skills?: string[] }> }
 
 function readConfig(repoDir: string): any {
   const p = path.join(repoDir, '.ade', 'config.json')
@@ -193,7 +194,7 @@ export function briefPrompt(request: string, repoDir: string, understanding: Und
   ].filter(Boolean).join('\n')
 }
 
-export function planPrompt(request: string, repoDir: string, understanding: Understanding, answers: string, briefingBlock: string): string {
+export function planPrompt(request: string, repoDir: string, understanding: Understanding, answers: string, briefingBlock: string, skills: Array<{ id: string; summary: string }> = []): string {
   return [
     'Você é o Intent Compiler da TL-ADE. Transforme o pedido do usuário em um plano executável por outra IA, em português, no JSON exigido.',
     `Pedido: ${request}`,
@@ -205,9 +206,12 @@ export function planPrompt(request: string, repoDir: string, understanding: Unde
     '- title (≤8 palavras) e summary (2 frases: o que será entregue).',
     '- explanation: 3 a 6 linhas curtas para um usuário leigo, sem termos técnicos: o que ele vai ter no fim, o que cada parte entrega em uma frase e o que você assumiu por conta própria.',
     '- decisions: cada uma "X, porque Y"; quando havia alternativa real, "; descartado: Z".',
-    '- stories: partes pequenas, na ordem de construção (trivial ou bounded: 1 a 3; feature: 2 a 6). Cada uma com id (S1, S2…), title (≤8 palavras), request (o que fazer, 1 a 3 frases, para quem implementa), acceptance, scope_paths, do_not_touch, depends_on (ids de partes ANTERIORES) e test_file.',
+    '- stories: partes pequenas, na ordem de construção (trivial ou bounded: 1 a 3; feature: 2 a 6). Cada uma com id (S1, S2…), title (≤8 palavras), request (o que fazer, 1 a 3 frases, para quem implementa), acceptance, scope_paths, do_not_touch, depends_on (ids de partes ANTERIORES), test_file e skills.',
     '- acceptance: 2 a 6 critérios, cada um {given, when, then} ("Dado…, quando…, então…" sem essas palavras), de comportamento observável pelo usuário ou por uma prova automatizada sem rede, CLI ou serviço real (use dublês). Nunca fixe implementação: nome de variável, valor exato de estilo, estrutura interna.',
     '- scope_paths: arquivos que a parte pode criar ou mudar (caminhos reais do projeto ou novos). do_not_touch: o que não pode mudar. test_file: o arquivo de prova, num lugar que o comando de provas realmente roda.',
+    skills.length > 0
+      ? ['- skills: até 3 ids desta lista que ajudam quem escreve a prova e o código daquela parte; [] se nenhuma serve.', ...skills.map((k) => `  - ${k.id}: ${k.summary}`)].join('\n')
+      : '- skills: [] (o projeto não tem catálogo de skills).',
     '- Menor código que resolve: reuse o que já existe, depois a biblioteca padrão, depois a plataforma (CSS antes de JS, elemento nativo antes de componente). Nada de camada ou configuração que nenhuma parte usa.',
     '- Nenhuma parte manda commitar, dar push ou rodar a suíte inteira: o motor faz isso depois das provas e da revisão.',
   ].filter(Boolean).join('\n')
@@ -238,7 +242,7 @@ export function toIntakeQuestions(questions: IntentAnswer['questions']): any[] {
 const uniq = (xs: string[]) => Array.from(new Set(xs.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim())))
 
 /** Um contrato do compilador ganha o que a IA planejou: título, tarefa, critérios, requisitos e escopo reais. */
-function withStory(contract: any, story: PlanAnswer['stories'][number], index: number, deliverable: string, idOf: Map<string, string>): any {
+function withStory(contract: any, story: PlanAnswer['stories'][number], index: number, deliverable: string, idOf: Map<string, string>, catalog: Set<string>): any {
   const n = index + 1
   const verifierIds: string[] = contract.scenarios?.[0]?.verifiers ?? []
   const negative = (contract.scenarios ?? []).filter((sc: any) => String(sc.id).endsWith('-neg'))
@@ -258,6 +262,8 @@ function withStory(contract: any, story: PlanAnswer['stories'][number], index: n
       scope_paths: uniq([...story.scope_paths, story.test_file, ...evidence]).length > 0 ? uniq([...story.scope_paths, story.test_file, ...evidence]) : contract.guardrails.scope_paths,
       do_not_touch: uniq([...contract.guardrails.do_not_touch, ...story.do_not_touch]),
     },
+    // skill que a IA inventou ou que saiu do catálogo não entra
+    skills: uniq(story.skills ?? []).filter((id) => catalog.has(id)).slice(0, 3),
     ...(deps.length > 0 ? { depends_on: deps } : {}),
   }
 }
@@ -284,7 +290,7 @@ function asPlan(raw: unknown): PlanAnswer {
  */
 export function createLlmIntent({ askFor = (repoDir: string) => refsModelCall(intentRefs(repoDir), 'intent', { repoDir }) }: { askFor?: (repoDir: string) => Ask } = {}): IntentPort {
   return {
-    async compile({ request, repoDir, missionId, options, answers, briefing, questions: stored, understanding: known }) {
+    async compile({ request, repoDir, missionId, options, eligibleSkills, answers, briefing, questions: stored, understanding: known }) {
       // "Pesquisar fatos" ligado nas opções: entender, briefing e plano podem buscar na internet e dizem a fonte
       const web = options?.research === true
       const webNote = web ? '\n\nPesquisa na internet ligada: quando o pedido depender de fato de fora do projeto (API, versão, preço, regra), confirme na web antes de decidir e cite a fonte (URL) na decisão.' : ''
@@ -309,7 +315,7 @@ export function createLlmIntent({ askFor = (repoDir: string) => refsModelCall(in
       const briefingBlock = briefing && version
         ? `BRIEFING APROVADO PELO USUÁRIO (vale mais que o pedido): objetivo ${briefing.goal}. Construa AGORA só a versão ${briefing.versions[0].name}: ${briefing.versions[0].goal}. Entra: ${version.deliverables.join('; ')}. Fora do escopo: ${briefing.out_of_scope.join('; ')}. Restrições: ${briefing.constraints.join('; ')}.`
         : ''
-      const plan = asPlan(await ask({ missionId, stepId: 'planejar', prompt: planPrompt(version?.request ?? request, repoDir, understanding, answered, briefingBlock), schema: PLAN_SCHEMA, maxTurns: 16 }))
+      const plan = asPlan(await ask({ missionId, stepId: 'planejar', prompt: planPrompt(version?.request ?? request, repoDir, understanding, answered, briefingBlock, eligibleSkills ?? []), schema: PLAN_SCHEMA, maxTurns: 16 }))
 
       const stories = plan.stories.slice(0, 8)
       const idOf = new Map(stories.map((s, i) => [s.id, `S${i + 1}`]))
@@ -325,8 +331,10 @@ export function createLlmIntent({ askFor = (repoDir: string) => refsModelCall(in
         deliverables,
         adeConfig: readConfig(repoDir),
       })
-      let contracts = compiled.contracts.map((c, i) => withStory(c, stories[i], i, deliverables[i], idOf))
+      const catalog = new Set((eligibleSkills ?? []).map((k) => k.id))
+      let contracts = compiled.contracts.map((c, i) => withStory(c, stories[i], i, deliverables[i], idOf, catalog))
       for (const q of questions) contracts = contracts.map((c) => applyInterviewAnswer(c, q, answers?.[q.id], { allowWritten: true }).contract)
+      compiled.plan.authorization.eligible_skills = uniq(contracts.flatMap((c) => c.skills))
       if (version) Object.assign(compiled.plan.briefing, version.briefing)
       return { plan: compiled.plan, contracts, understanding: { ...understanding, title: plan.title, summary: plan.summary, explanation: plan.explanation, decisions: plan.decisions } }
     },

@@ -388,7 +388,9 @@ export async function buildStoryContext(input: {
       skillBodies.push(`### Skill: ${sk.name}\n\n${cleanBody}`)
     }
   }
-  const skillsSection = skillBodies.join('\n\n')
+  // Skills de terceiros são escritas para sessão com humano; a missão roda desatendida.
+  const SKILLS_HEADER = 'Guias de método para esta parte. A missão roda sem humano: onde um guia mandar perguntar ou confirmar com o usuário, decida pelo contrato (escopo, critérios, arquivo de prova) e siga; ignore menções a outras skills, sub-agentes ou comandos que você não tem. O contrato e a política acima sempre valem mais que um guia.'
+  const skillsSection = skillBodies.length > 0 ? [SKILLS_HEADER, ...skillBodies].join('\n\n') : ''
 
   // Mapa símbolo@linha dos arquivos do escopo e trechos dos símbolos que as interfaces do contrato nomeiam.
   const interfaces = story.interfaces ?? contract.interfaces ?? []

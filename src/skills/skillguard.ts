@@ -14,7 +14,8 @@ const HOSTILE_PATTERNS = [
   { id: 'anthropic_base_url', regex: /\bANTHROPIC_BASE_URL\b/i },
   { id: 'sensitive_path_ssh', regex: /~\/\.ssh/i },
   { id: 'sensitive_path_aws', regex: /~\/\.aws/i },
-  { id: 'sensitive_path_env', regex: /\.env\b/i },
+  // o arquivo .env, não a propriedade process.env/import.meta.env de exemplo de código
+  { id: 'sensitive_path_env', regex: /(?<![\w$])\.env\b/i },
   { id: 'sensitive_keyword_credentials', regex: /\bcredentials\b/i },
   { id: 'sensitive_keyword_keychain', regex: /\bkeychain\b/i },
   { id: 'disable_gates', regex: /\b(disable\s+(all\s+)?gates|ignore\s+(previous\s+)?guardrails)\b/i },

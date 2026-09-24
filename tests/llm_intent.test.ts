@@ -99,6 +99,20 @@ describe('cérebro do pedido com IA', () => {
     expect(off.calls[0].prompt).not.toContain('Pesquisa na internet')
   })
 
+  test('o_plano_escolhe_skills_do_catalogo_por_parte_e_so_as_que_existem_entram', async () => {
+    const withSkills = { ...PLAN, stories: [{ ...PLAN.stories[0], skills: ['tdd', 'inventada'] }, { ...PLAN.stories[1], skills: [] }] }
+    const { ask, calls } = fakeAsk({ entender: INTENT, planejar: withSkills })
+    const intent = createLlmIntent({ askFor: () => ask })
+    const dir = repo()
+    const eligibleSkills = [{ id: 'tdd', domain: null, trust: 'allowlisted', source: 'mattpocock', summary: 'Testes antes do código' }]
+    const first = await intent.compile({ request: 'Quero anexar imagens no pedido', repoDir: dir, missionId: 'm1', options: {} as any, eligibleSkills })
+    const res = await intent.compile({ request: 'Quero anexar imagens no pedido', repoDir: dir, missionId: 'm1', options: {} as any, eligibleSkills, questions: first.questions, understanding: first.understanding, answers: {} })
+
+    expect(calls[1].prompt).toContain('- tdd: Testes antes do código')
+    expect((res.contracts as any[]).map((c) => c.skills)).toEqual([['tdd'], []])
+    expect((res.plan as any).authorization.eligible_skills).toEqual(['tdd'])
+  })
+
   test('pedido grande vira briefing antes do plano', async () => {
     const briefing = { title: 'App de receitas', goal: 'Guardar e buscar receitas.', users: 'Quem cozinha em casa.', in_scope: ['Cadastrar receita', 'Buscar por ingrediente'], out_of_scope: [], done_means: ['Receita salva aparece na busca'], constraints: [], versions: [{ name: 'v1', goal: 'Cadastro e busca', includes: ['Cadastrar receita', 'Buscar por ingrediente'] }] }
     const { ask, calls } = fakeAsk({ entender: { ...INTENT, complexity: 'project', questions: [] }, briefing })

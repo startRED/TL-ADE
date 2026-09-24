@@ -133,6 +133,24 @@ function isPathDeclared(filePath: string, declaredPaths: string[] = ['skills/**'
   return false
 }
 
+/** Pastas com SKILL.md sob a raiz (a raiz não conta); não desce dentro de uma skill. */
+function skillDirsUnder(root: string): string[] {
+  const found: string[] = []
+  const visit = (dir: string) => {
+    for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!item.isDirectory()) continue
+      const full = path.join(dir, item.name)
+      if (fs.existsSync(path.join(full, 'SKILL.md'))) found.push(full)
+      else visit(full)
+    }
+  }
+  if (fs.existsSync(root)) visit(root)
+  return found.sort()
+}
+
+/** Pasta da skill dentro da fonte; índice antigo, sem `dir`, usa o layout plano. */
+const skillRel = (entry: { dir?: string; id: string }) => entry.dir ?? path.join('skills', entry.id)
+
 /**
  * Coleta recursivamente todos os arquivos sob um diretório.
  */
@@ -255,14 +273,10 @@ export async function syncCatalog({ config = {}, catalogDir }: {
         fs.writeFileSync(destPath, fileContent)
       }
 
-      // Fase 3 a 7: escanear skills materializadas
-      const skillsRoot = path.join(sourceDir, 'skills')
-      if (fs.existsSync(skillsRoot)) {
-        const skillDirs = fs
-          .readdirSync(skillsRoot, { withFileTypes: true })
-          .filter((d) => d.isDirectory())
-          .map((d) => path.join(skillsRoot, d.name))
-
+      // Fase 3 a 7: escanear skills materializadas. A skill é a pasta com SKILL.md em qualquer profundidade
+      // (skills/engineering/tdd, plugins/x/skills/y); sobra de sync anterior fora dos paths não entra.
+      const skillDirs = skillDirsUnder(sourceDir).filter((d) => isPathDeclared(path.relative(sourceDir, path.join(d, 'SKILL.md')).split(path.sep).join('/'), declaredPaths))
+      if (skillDirs.length > 0) {
         for (const skillDir of skillDirs) {
           const folderName = path.basename(skillDir)
           const skillMdPath = path.join(skillDir, 'SKILL.md')
@@ -319,6 +333,7 @@ export async function syncCatalog({ config = {}, catalogDir }: {
             id: fm.name,
             name: fm.name,
             source: source.name,
+            dir: path.relative(sourceDir, skillDir).split(path.sep).join('/'),
             commit: source.commit,
             sha256: scanResult.hashes['SKILL.md'] || createHash('sha256').update(rawContent).digest('hex'),
             file_hashes: fileHashes,
@@ -463,7 +478,7 @@ export function inspectCatalog({ index, id, includeBody = false, catalogDir }: {
     let body = ''
     if (catalogDir) {
       const candidates = [
-        path.join(catalogDir, 'sources', `${entry.source}@${entry.commit}`, 'skills', entry.id, 'SKILL.md'),
+        path.join(catalogDir, 'sources', `${entry.source}@${entry.commit}`, skillRel(entry), 'SKILL.md'),
         path.join(catalogDir, 'sources', entry.source, 'skills', entry.id, 'SKILL.md'),
         path.join(catalogDir, 'quarantine', `${entry.source}@${entry.commit}`, 'skills', entry.id, 'SKILL.md'),
       ]
@@ -504,7 +519,7 @@ export function loadApprovedSkills({ catalogDir, approvedSkills }: { catalogDir:
       throw new AdeError('skill_not_eligible', `Habilidade aprovada '${id}' não está elegível`, 3)
     }
 
-    const skillDir = path.join(catalogDir, 'sources', `${entry.source}@${entry.commit}`, 'skills', entry.id)
+    const skillDir = path.join(catalogDir, 'sources', `${entry.source}@${entry.commit}`, skillRel(entry))
     const files = walkDir(skillDir)
     const actualHashes = Object.fromEntries(
       files
