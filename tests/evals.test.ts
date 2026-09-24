@@ -8,6 +8,8 @@ import { validateScenarioStrictness } from '../src/evals/strictness.ts'
 import { openJournal, readJournal } from '../src/journal/journal.ts'
 import { validate } from '../src/schema/index.ts'
 import { createStepRunner } from '../src/step/step.ts'
+import { createGitPort } from '../src/git/gitport.ts'
+import { makeRepo, removeRepo } from './helpers/git-repo.ts'
 
 describe('evals classification and strictness', () => {
   // CA1: Dado um stdout de reporter com {"numTotalTests":0,"numPassedTests":0,"numFailedTests":0}
@@ -1621,4 +1623,47 @@ describe('resumo do executor sem reporter JSON', () => {
     const importError = 'SyntaxError: The requested module does not provide an export named apagar\nℹ tests 1\nℹ pass 0\nℹ fail 1\n'
     expect(classifyRed({ exitCode: 1, expectExit: 0, timedOut: false, stdout: importError, stderr: '', report: parseRunnerSummary(importError) }).red_reason).toBe('compile_error')
   })
+})
+
+// Suíte inteira como prova: teste que já falhava na árvore original da parte (instável, fim de linha, dívida antiga) não
+// pode impedir o verde para sempre. Com a árvore original, o verde é julgado prova a prova contra ela, como os portões:
+// só vermelha nova conta, e a prova nova (que não existia na base) precisa passar.
+describe('verde da suíte julgado contra a base', () => {
+  const setup = async (proofPasses: boolean) => {
+    const repo = makeRepo()
+    const missionDir = mkdtempSync(path.join(os.tmpdir(), 'eval-mission-'))
+    writeFileSync(path.join(repo.dir, 'package.json'), JSON.stringify({ scripts: { test: 'node --test' } }))
+    writeFileSync(path.join(repo.dir, 'old.test.mjs'), "import test from 'node:test'\nimport assert from 'node:assert'\ntest('antiga', () => assert.equal(1, 2))\n")
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'base com prova antiga vermelha'])
+    const gitPort = createGitPort({ worktreeDir: repo.dir })
+    const baseTree = await gitPort.worktreeTree()
+    writeFileSync(path.join(repo.dir, 'new.test.mjs'), `import test from 'node:test'\nimport assert from 'node:assert'\ntest('nova', () => assert.equal(1, ${proofPasses ? 1 : 3}))\n`)
+    const tree = await gitPort.worktreeTree()
+    const journal = openJournal({ missionDir, runtimeStamp: '1:aaaaaaaa:bbbbbbbb' })
+    const { step } = createStepRunner({ journal, missionDir, gitPort, env: {} })
+    const runner = createEvalRunner({ step, missionDir, gitPort })
+    const record = await runner.runEval({
+      eval: { id: 'V1', argv: ['node', '--test'], kind: 'script', expect_exit: 0, timeout_s: 120, max_output_bytes: 1024, strictness: { mode: 'must_fail_before' as const } },
+      phase: 'green',
+      tree,
+      unit: 'S1',
+      baseTree,
+    })
+    await journal.close()
+    return { record, tree: await gitPort.worktreeTree(), expectedTree: tree, repo }
+  }
+
+  test('vermelha_que_ja_existia_na_base_nao_impede_o_verde', async () => {
+    const { record, tree, expectedTree, repo } = await setup(true)
+    expect(record.verdict).toBe('green')
+    expect(tree).toBe(expectedTree)
+    removeRepo(repo.dir)
+  }, 120_000)
+
+  test('prova_nova_vermelha_continua_cobrada', async () => {
+    const { record, repo } = await setup(false)
+    expect(record.verdict).toBe('green_failed')
+    removeRepo(repo.dir)
+  }, 120_000)
 })

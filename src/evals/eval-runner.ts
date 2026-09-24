@@ -7,6 +7,9 @@ import { runContained } from '../gates/command.ts'
 import { EXTRACT_CAPS, safeId, writeRawArtifact } from '../gates/output.ts'
 import { classifyGreen, classifyRed, parseReporterJson, parseRunnerSummary } from './classify.ts'
 import { validateScenarioStrictness } from './strictness.ts'
+import { judgeSuite } from '../runner/baseline.ts'
+import { execSuite, findSuites, runSuites, type SpawnSuite } from '../runner/suites.ts'
+import { TestRunnerError, type TestResult } from '../runner/test-reports.ts'
 
 interface EvalDef {
   id: string
@@ -21,6 +24,7 @@ interface EvalDef {
 interface GitPort {
   worktreeDir: string
   worktreeTree: () => Promise<string>
+  restoreTree?: (tree: string, opts: { label: string }) => Promise<unknown>
 }
 
 interface EvalRecord {
@@ -229,6 +233,7 @@ interface CreateEvalRunnerOptions {
   step: (spec: any, effectFn: () => Promise<any>) => Promise<any>
   missionDir: string
   gitPort: GitPort
+  spawnSuite?: SpawnSuite
 }
 
 interface RunEvalOptions {
@@ -237,12 +242,14 @@ interface RunEvalOptions {
   tree: string
   unit: string
   scenario?: { id: string; evals: any[]} 
+  /** Árvore original da parte: com ela, o verde que falha é julgado prova a prova contra essa largada. */
+  baseTree?: string
 }
 
 /**
  * Cria o executor de evals duráveis.
  */
-export function createEvalRunner({ step, missionDir, gitPort }: CreateEvalRunnerOptions): { runEval: (options: RunEvalOptions) => Promise<EvalRecord> } {
+export function createEvalRunner({ step, missionDir, gitPort, spawnSuite = execSuite }: CreateEvalRunnerOptions): { runEval: (options: RunEvalOptions) => Promise<EvalRecord> } {
   if (typeof step !== 'function') {
     throw new TypeError('step precisa ser uma função')
   }
@@ -295,10 +302,40 @@ export function createEvalRunner({ step, missionDir, gitPort }: CreateEvalRunner
   /**
    * Executa a avaliação do eval.
    */
+  /**
+   * Suíte que falha no verde, julgada prova a prova contra a árvore original da parte (como os portões): vermelha que já
+   * estava lá (instável, fim de linha, dívida antiga) não conta; prova nova precisa passar. Sem suíte reconhecida ou
+   * sem relatório legível, devolve null e o verde segue falho.
+   */
+  async function judgeAgainstBase(evalDef: EvalDef, tree: string, baseTree: string): Promise<{ verdict: 'green' | 'green_failed'; warnings: string[] } | null> {
+    if (typeof gitPort.restoreTree !== 'function') return null
+    const cwd = gitPort.worktreeDir
+    const suites = findSuites(cwd)
+    if (!suites.length) return null
+    const timeoutMs = Math.max(evalDef.timeout_s, EVAL_TIMEOUT_FLOOR_S) * 1000
+    const label = 'eval-base-' + safeId(evalDef.id)
+    try {
+      await gitPort.restoreTree(baseTree, { label })
+      let baseline: TestResult[]
+      try {
+        baseline = await runSuites(cwd, suites, { spawn: spawnSuite, timeoutMs })
+      } finally {
+        await gitPort.restoreTree(tree, { label })
+      }
+      const verdict = await judgeSuite((testTimeoutMs) => runSuites(cwd, suites, { spawn: spawnSuite, timeoutMs: timeoutMs + (testTimeoutMs ?? 0), testTimeoutMs }), baseline)
+      return verdict.ok
+        ? { verdict: 'green', warnings: [`julgada contra a base: ${baseline.filter((t) => t.status === 'failed' || t.status === 'timeout').length} vermelhas já existiam${verdict.retried ? ' (repetida com limite folgado)' : ''}`] }
+        : { verdict: 'green_failed', warnings: verdict.reds.slice(0, 20).map((t) => `prova vermelha nova: ${t.id}`) }
+    } catch (err) {
+      if (!(err instanceof TestRunnerError)) throw err
+      return null
+    }
+  }
+
   async function runEval(options: RunEvalOptions): Promise<EvalRecord> {
     validateRunEvalOptions(options)
 
-    const { eval: evalDef, phase, tree, unit, scenario } = options
+    const { eval: evalDef, phase, tree, unit, scenario, baseTree } = options
     const strictnessMode = evalDef.strictness.mode
 
     /** @param warning */
@@ -346,7 +383,11 @@ export function createEvalRunner({ step, missionDir, gitPort }: CreateEvalRunner
             phase,
             safeEvalId
           )
-          const { verdict, warnings } = classifyGreen({ red_reason })
+          let { verdict, warnings } = classifyGreen({ red_reason })
+          if (verdict === 'green_failed' && baseTree) {
+            const judged = await judgeAgainstBase(evalDef, tree, baseTree)
+            if (judged) ({ verdict, warnings } = judged)
+          }
           const cap = excerptCap(evalDef)
 
           return buildEvalRecord({

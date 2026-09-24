@@ -35,6 +35,9 @@ export function selectTests(env) {
 export default /** @satisfies {import('vitest/config').ViteUserConfig} */ ({
   test: {
     ...selectTests(process.env),
+    // Muitas provas disparam git, node ou o próprio vitest como subprocesso: no Windows, com a suíte inteira em paralelo
+    // (ou o motor rodando ao lado), passam dos 5s padrão e a suíte ficava instável.
+    testTimeout: 30_000,
     minWorkers: process.env.ADE_PARITY === '1' ? 4 : undefined,
     maxWorkers: process.env.ADE_PARITY === '1' ? 4 : undefined,
     coverage: {

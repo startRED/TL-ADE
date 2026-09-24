@@ -1181,6 +1181,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         phase: 'green',
         tree: treeAfterContain,
         unit: storyId,
+        // árvore de largada da parte (antes das provas): vermelha que já existia ali não impede o verde
+        baseTree: findStoryStarted(readEvents(), storyId)?.tree_before,
       })
       if (evalRecord.verdict !== 'green') redEvals.push(evalId)
     }
