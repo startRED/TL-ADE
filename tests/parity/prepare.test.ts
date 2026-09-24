@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test, vi } from 'vitest'
@@ -25,9 +25,9 @@ afterEach(() => {
 vi.setConfig({ testTimeout: 30_000 })
 
 describe('prepare parity', () => {
-  // AC1: Dado um repositório base com arquivo modificado fora de .ade/, quando prepareStory roda,
-  // então devolve recusa com motivo de árvore suja, código de saída 2 e a lista dos caminhos sujos,
-  // sem criar worktree.
+  // AC1: A guarda de árvore suja é por worktree, não global (engine-durability §17): o operador edita o
+  // repositório base sem parar a missão. A parte nasce do HEAD commitado na própria worktree, sem levar
+  // nem tocar o arquivo sujo da base; a sujeira da própria unidade continua recusada (AC2 abaixo).
   test('dirty_worktree_before_story_stops', async () => {
     const repo = makeRepo()
     tmpDirs.push(repo.dir)
@@ -36,39 +36,22 @@ describe('prepare parity', () => {
     repo.git(['add', '-A'])
     repo.git(['commit', '-m', 'commit inicial'])
 
-    // Exemplo: a.txt modificado no repositório base -> {status:'refused', reason:'dirty_worktree', exitCode:2, paths:['a.txt']}
-    // e existsSync('<repo>/.ade/wt/s1') -> false
+    // Exemplo: a.txt não commitado e committed.txt editado na base -> ready; a worktree não vê nenhum dos dois
     writeFileSync(path.join(repo.dir, 'a.txt'), 'conteúdo sujo\n')
+    writeFileSync(path.join(repo.dir, 'committed.txt'), 'edição do operador\n')
 
-    const resDirty = await prepareStory({
+    const res = await prepareStory({
       repoDir: repo.dir,
       missionId: 'm1',
       storyId: 's1',
     })
 
-    expect(resDirty).toEqual({
-      status: 'refused',
-      reason: 'dirty_worktree',
-      exitCode: 2,
-      paths: ['a.txt'],
-    })
-
+    expect(res.status).toBe('ready')
     const wtDir = path.join(repo.dir, '.ade', 'wt', 's1')
-    expect(existsSync(wtDir)).toBe(false)
-
-    // Exemplo: arquivo sujo apenas em .ade/tmp.json -> resultado ready (o prefixo .ade/ é ignorado)
-    rmSync(path.join(repo.dir, 'a.txt'))
-    mkdirSync(path.join(repo.dir, '.ade'), { recursive: true })
-    writeFileSync(path.join(repo.dir, '.ade', 'tmp.json'), '{"temp": true}\n')
-
-    const resClean = await prepareStory({
-      repoDir: repo.dir,
-      missionId: 'm1',
-      storyId: 's1',
-    })
-
-    expect(resClean.status).toBe('ready')
-    expect(existsSync(wtDir)).toBe(true)
+    expect(existsSync(path.join(wtDir, 'a.txt'))).toBe(false)
+    expect(readFileSync(path.join(wtDir, 'committed.txt'), 'utf8')).toBe('conteúdo commitado\n')
+    expect(readFileSync(path.join(repo.dir, 'committed.txt'), 'utf8')).toBe('edição do operador\n')
+    expect(existsSync(path.join(repo.dir, 'a.txt'))).toBe(true)
   })
 
   // AC2: Dado um worktree da story já existente e com arquivo modificado dentro dele, quando prepareStory

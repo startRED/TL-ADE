@@ -564,6 +564,20 @@ describe('preflight integration', () => {
     expect(gitResult.reason).toBe('não foi possível verificar estado da worktree')
     expect(gitResult.reason).not.toMatch(/secret|token|stack/i)
 
+    // Base com edição do operador não bloqueia: a parte roda na própria worktree (guarda por worktree, §17)
+    const portsDirtyBase = createLocalPreflightPorts({
+      repoDir: '/dummy/repo',
+      story,
+      loaded,
+      capabilities: { probe_ok: true, probed_at: 0 },
+      gitPort: { dirtyPaths: async () => ['src/panel/server.ts', 'README.md'] },
+      execFile: vi.fn(),
+      statfs: () => ({ bavail: 1073741824n, bsize: 1n }),
+      now: () => 1,
+      env: { ANTHROPIC_API_KEY: 'secret-token' },
+    })
+    expect(await portsDirtyBase.worktree.check()).toEqual({ status: 'ready', reason: null })
+
     // Build que lança erro
     const portsBuildError = createLocalPreflightPorts({
       repoDir: '/dummy/repo',

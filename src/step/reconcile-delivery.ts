@@ -274,7 +274,33 @@ result?: { commit: string }
     }
   }
 
-  const ff = await gitPort.fastForward(baseRef, reviewedCommit)
+  let ff: { commit: string }
+  try {
+    ff = await gitPort.fastForward(baseRef, reviewedCommit)
+  } catch (error) {
+    // A base pode ter edição pendente do operador (a guarda de árvore suja é por worktree, §17): o git
+    // recusa o fast-forward que sobrescreveria esses arquivos. Com a base parada no mesmo commit, nada
+    // andou; a entrega fica parada com o commit preservado na branch da unidade, sem lançar.
+    const after = typeof gitPort.headInfo === 'function' ? await gitPort.headInfo() : { commit: null, branch: null }
+    if (after.commit !== baseBefore) throw error
+    return {
+      verdict: 'ambiguous',
+      reason: 'base_local_changes',
+      state: 'awaiting_operator',
+      handoff: 'awaiting_operator',
+      fast_forward_calls: 1,
+      evidence: {
+        base_ref: baseRef,
+        base_before: baseBefore,
+        base_current: baseCurrent,
+        reviewed_commit: reviewedCommit,
+        current_head: after.commit,
+        merge_head: null,
+        fast_forward_calls: 1,
+        state: 'awaiting_operator',
+      },
+    }
+  }
   const finalCommit = ff?.commit ?? reviewedCommit
 
   return {

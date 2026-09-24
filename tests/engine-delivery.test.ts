@@ -470,6 +470,32 @@ describe('engine delivery', () => {
     expect((storyDone?.data as any)?.reason).toBe('base_diverged')
   }, 60_000)
 
+  // Base com edição pendente do operador (guarda por worktree, §17): arquivo alheio à parte não impede a
+  // entrega e continua intacto; arquivo que a parte também escreve faz o git recusar o fast-forward, e a
+  // entrega fica parada com o commit preservado em vez de lançar ou sobrescrever a edição.
+  test('base_suja_entrega_sem_tocar_edicao_do_operador', async () => {
+    const fixture = setupStoryFixture()
+    fs.writeFileSync(path.join(fixture.repo.dir, 'operador.txt'), 'rascunho\n')
+
+    const result = await runStory(fixture.deps, fixture.input)
+
+    expect(result.status).toBe('delivered')
+    expect(fs.readFileSync(path.join(fixture.repo.dir, 'operador.txt'), 'utf8')).toBe('rascunho\n')
+  }, 60_000)
+
+  test('base_suja_no_mesmo_arquivo_nao_sobrescreve_e_nao_lanca', async () => {
+    const fixture = setupStoryFixture()
+    fs.mkdirSync(path.join(fixture.repo.dir, 'src'), { recursive: true })
+    fs.writeFileSync(path.join(fixture.repo.dir, 'src', 'hello.txt'), 'do operador\n')
+
+    const result = await runStory(fixture.deps, fixture.input)
+
+    expect(result.status).toBe('awaiting_operator')
+    expect(result.reason).toBe('base_local_changes')
+    expect(result.commit).toBeTruthy()
+    expect(fs.readFileSync(path.join(fixture.repo.dir, 'src', 'hello.txt'), 'utf8')).toBe('do operador\n')
+  }, 60_000)
+
   // CA4: interrupção após efeito reconcilia antes de repetir
   test('interrupcao_apos_efeito_reconcilia_antes_de_repetir', async () => {
     const fixture = setupStoryFixture()

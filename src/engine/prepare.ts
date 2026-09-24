@@ -49,7 +49,7 @@ interface PrepareReadyResult {
 
 interface PrepareRefusedResult {
   status: 'refused'
-  reason: 'dirty_worktree' | 'dirty_unit_branch'
+  reason: 'dirty_unit_branch'
   exitCode: number
   paths: string[]
 }
@@ -103,18 +103,9 @@ export async function prepareStory(options: PrepareStoryOptions): Promise<Prepar
     }
   }
 
-  // Ordem de precedência das guardas: dirty_worktree -> takeover_open -> dirty_unit_branch -> stale_branch -> branch_in_use
-  const dirty = (await basePort.dirtyPaths()).filter(
-    (p) => !p.startsWith('.ade/') && !p.startsWith('.ade\\') && p !== '.ade',
-  )
-  if (dirty.length > 0) {
-    return {
-      status: 'refused',
-      reason: 'dirty_worktree',
-      exitCode: 2,
-      paths: dirty,
-    }
-  }
+  // Ordem de precedência das guardas: takeover_open -> dirty_unit_branch -> stale_branch -> branch_in_use.
+  // A guarda de árvore suja é por worktree, não global (engine-durability §17): edição pendente do operador
+  // na base não para a missão, porque a unidade nasce do HEAD commitado na própria worktree.
 
   if (fs.existsSync(path.join(worktreeDir, '.ade', 'takeover.json'))) {
     return {

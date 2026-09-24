@@ -135,15 +135,13 @@ export function createLocalPreflightPorts(options: LocalPreflightOptions): Recor
           if (!gitPort || typeof gitPort.dirtyPaths !== 'function') {
             return { status: 'blocked', reason: 'não foi possível verificar estado da worktree' }
           }
+          // Só confere que o git responde: edição pendente do operador na base não bloqueia, porque a parte
+          // roda na própria worktree e a entrega `--ff-only` recusa sobrescrever arquivo não commitado (§17).
           const dirty = await gitPort.dirtyPaths()
-          // Artefatos do próprio motor em .ade/ não são alteração pendente do operador.
-          const pending = Array.isArray(dirty)
-            ? dirty.filter((p) => !String(p).replace(/\\/g, '/').startsWith('.ade/'))
-            : dirty
-          if (Array.isArray(pending) && pending.length === 0) {
-            return { status: 'ready', reason: null }
+          if (!Array.isArray(dirty)) {
+            return { status: 'blocked', reason: 'não foi possível verificar estado da worktree' }
           }
-          return { status: 'blocked', reason: 'worktree com alterações pendentes' }
+          return { status: 'ready', reason: null }
         } catch {
           return { status: 'blocked', reason: 'não foi possível verificar estado da worktree' }
         }

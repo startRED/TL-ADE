@@ -67,8 +67,7 @@ describe('prepare', () => {
       branch: 'ade/m1/s1',
     })
 
-    // Exemplo de precedência: repositório base sujo e worktree com takeover.json ao mesmo tempo
-    // -> vence a precedência: {status:'refused', reason:'dirty_worktree', exitCode:2, paths:['dirty.txt']}
+    // Base suja não para a missão (guarda por worktree): o takeover continua valendo.
     writeFileSync(path.join(repo.dir, 'dirty.txt'), 'conteúdo sujo\n')
 
     const third = await prepareStory({
@@ -77,12 +76,7 @@ describe('prepare', () => {
       storyId: 's1',
     })
 
-    expect(third).toEqual({
-      status: 'refused',
-      reason: 'dirty_worktree',
-      exitCode: 2,
-      paths: ['dirty.txt'],
-    })
+    expect(third).toMatchObject({ status: 'awaiting_operator', reason: 'takeover_open' })
   })
 
   // AC1: Dado repositório base e worktree com package-lock.json idênticos e node_modules
