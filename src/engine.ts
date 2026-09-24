@@ -1656,7 +1656,18 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       }
     }
 
-    if (reviewApproval.approved) {
+    // Conflito do plano que só um humano decidiria (intent_gap para "human"), repetido igual depois de uma rodada de
+    // correção: a TL-ADE é autônoma, então entrega a versão conservadora e registra o achado como adiado, em vez de
+    // girar rodadas sem saída (S2 da missão real: fonte exigida que a validação fora do escopo recusa).
+    const reviewedFindings = (reviewDoc.action_items ?? reviewDoc.findings ?? []).map(normalizeFinding)
+    const onlyIntentGaps = !reviewApproval.approved && reviewApproval.errors.length === 0 && reviewedFindings.length > 0
+      && reviewedFindings.every((f: any) => f.category === 'intent_gap' && f.target_role === 'human')
+    const deferIntentGap = onlyIntentGaps && previousFindingsDigest !== null && computeFindingsDigest(reviewedFindings) === previousFindingsDigest
+    if (deferIntentGap) {
+      await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'intent_gap_deferred', unit: storyId, round, findings: reviewedFindings.map((f: any) => ({ id: f.id, problem: f.problem, required_action: f.required_action })) } })
+    }
+
+    if (reviewApproval.approved || deferIntentGap) {
       maybeEngineFault('before_commit', env)
 
       const commitEvents = readEvents()

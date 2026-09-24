@@ -565,6 +565,30 @@ describe('engine', () => {
     expect(fs.readFileSync(path.join(fixture.repo.dir, 'src', 'hello.txt'), 'utf8')).toBe('ok v3\n')
   }, 180_000)
 
+  // 24/09, missão real (S2): o contrato pedia uma fonte que a validação fora do escopo recusa; o revisor aprovou o resto e
+  // repetiu, rodada após rodada, o mesmo intent_gap para "human". A TL-ADE é autônoma: com só esse tipo de achado e ele
+  // estagnado, a versão conservadora é entregue e o achado fica registrado como adiado.
+  test('conflito_de_plano_estagnado_entrega_versao_conservadora_e_registra', async () => {
+    const fixture = setupStoryFixture()
+    const makerFile = path.join(fixture.scenarioDir, 'maker.json')
+    const base = JSON.parse(fs.readFileSync(makerFile, 'utf8'))[0]
+    fs.writeFileSync(makerFile, JSON.stringify(['ok v1\n', 'ok v2\n'].map((c) => ({ ...base, files: { 'src/hello.txt': c } }))))
+    const gap = approvedReviewAction()
+    Object.assign(gap.result as any, {
+      verdict: 'changes_requested',
+      requested_action: 'rework',
+      action_items: [{ id: 'F3', severity: 'high', category: 'intent_gap', problem: 'o contrato pede cinco fontes', required_action: 'decidir', target_role: 'human', evidence_refs: ['eval:E1'], location: 'src/hello.txt' }],
+    })
+    ;(gap.result as any).handoff.next_action = 'rework'
+    fs.writeFileSync(path.join(fixture.scenarioDir, 'checker.json'), JSON.stringify([gap, gap]))
+
+    const result = await runStory(fixture.deps, fixture.input)
+    expect(result).toMatchObject({ status: 'delivered' })
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    const deferred = events.find((e) => e.kind === 'decision' && (e.data as any).decision === 'intent_gap_deferred')
+    expect((deferred?.data as any)?.findings?.[0]?.id).toBe('F3')
+  }, 180_000)
+
   // CA2: Dado um contrato com roles.maker.family 'codex', quando runStory roda, então
   // lança AdeError com code 'family_without_canary' e exit 4, e o journal não tem nenhum
   // step_intent com step_id terminando em ':maker'.
