@@ -22,8 +22,8 @@ const AUTONOMY: Array<[Autonomy, string]> = [
 ]
 const FLAGS: Array<[Flag, string, string]> = [
   ['fast_lane', 'Faixa rápida', 'Pedido curto de correção em projeto existente pula a entrevista.'],
-  ['visual_gate', 'Portão visual', 'Varre a interface atrás de cara de template e força uma rodada de retoque.'],
-  ['images', 'Imagens geradas por IA', 'Quando o plano pede fotos ou ilustrações, gera antes das partes começarem.'],
+  ['visual_gate', 'Portão visual', 'Varre a interface atrás de cara de template e força uma rodada de retoque. Ainda não ligado: fica gravado na missão, mas nada roda.'],
+  ['images', 'Imagens geradas por IA', 'Quando o plano pede fotos ou ilustrações, gera antes das partes começarem. Ainda não ligado: fica gravado na missão, mas nada roda.'],
   ['research', 'Pesquisa na internet', 'Só quando o plano depende de um fato de fora, como a versão de uma biblioteca.'],
 ]
 const CEILINGS: Array<[Ceiling, string, string]> = [

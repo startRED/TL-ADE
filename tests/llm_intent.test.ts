@@ -40,7 +40,7 @@ const PLAN = {
 }
 
 function fakeAsk(replies: Record<string, unknown>) {
-  const calls: Array<{ stepId: string; prompt: string; schema: object }> = []
+  const calls: Array<{ stepId: string; prompt: string; schema: object; web?: boolean }> = []
   const ask: Ask = async (call) => {
     calls.push(call)
     if (!(call.stepId in replies)) throw new Error(`etapa inesperada: ${call.stepId}`)
@@ -86,6 +86,17 @@ describe('cérebro do pedido com IA', () => {
     expect((res.plan as any).budget.max_model_calls).toBe(8)
     expect(contracts.map((c) => c.budget.max_model_calls)).toEqual([8, 8])
     expect(res.understanding).toMatchObject({ explanation: PLAN.explanation, decisions: PLAN.decisions })
+  })
+
+  test('com_pesquisar_fatos_ligado_as_chamadas_podem_usar_a_web_e_pedem_a_fonte', async () => {
+    const { ask, calls } = fakeAsk({ entender: INTENT })
+    await createLlmIntent({ askFor: () => ask }).compile({ request: 'Quero anexar imagens no pedido', repoDir: repo(), missionId: 'm1', options: { research: true } as any, eligibleSkills: [] })
+    expect(calls[0]).toMatchObject({ web: true })
+    expect(calls[0].prompt).toContain('Pesquisa na internet ligada')
+    const off = fakeAsk({ entender: INTENT })
+    await createLlmIntent({ askFor: () => off.ask }).compile({ request: 'Quero anexar imagens no pedido', repoDir: repo(), missionId: 'm1', options: { research: false } as any, eligibleSkills: [] })
+    expect(off.calls[0]).not.toHaveProperty('web')
+    expect(off.calls[0].prompt).not.toContain('Pesquisa na internet')
   })
 
   test('pedido grande vira briefing antes do plano', async () => {

@@ -284,8 +284,12 @@ function asPlan(raw: unknown): PlanAnswer {
  */
 export function createLlmIntent({ askFor = (repoDir: string) => refsModelCall(intentRefs(repoDir), 'intent', { repoDir }) }: { askFor?: (repoDir: string) => Ask } = {}): IntentPort {
   return {
-    async compile({ request, repoDir, missionId, answers, briefing, questions: stored, understanding: known }) {
-      const ask = askFor(repoDir)
+    async compile({ request, repoDir, missionId, options, answers, briefing, questions: stored, understanding: known }) {
+      // "Pesquisar fatos" ligado nas opções: entender, briefing e plano podem buscar na internet e dizem a fonte
+      const web = options?.research === true
+      const webNote = web ? '\n\nPesquisa na internet ligada: quando o pedido depender de fato de fora do projeto (API, versão, preço, regra), confirme na web antes de decidir e cite a fonte (URL) na decisão.' : ''
+      const ask0 = askFor(repoDir)
+      const ask: Ask = (call) => ask0({ ...call, prompt: call.prompt + webNote, ...(web ? { web } : {}) })
       let understanding = known
       let questions = stored ?? []
       if (!understanding) {

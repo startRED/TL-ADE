@@ -10,6 +10,7 @@ import { isAgyAvailable, setAgyAvailable } from '../adapters/agy/index.ts'
 import { parseAgyOutput } from '../adapters/agy/parse.ts'
 import { parseClaudeOutput } from '../adapters/claude/parse.ts'
 import { buildCodexArgs } from '../adapters/codex/argv.ts'
+import { dropNulls, strictSchema } from '../adapters/codex/strict-schema.ts'
 import { parseCodexOutput } from '../adapters/codex/parse.ts'
 import { checkCanary, plantCanary } from '../contain/canary.ts'
 import { AdeError } from '../journal/errors.ts'
@@ -47,7 +48,8 @@ const PLAN_CRITIC_SCHEMA = {
 export type ModelRef = { family: string; model_id: string; effort?: string }
 type CriticInput = { plan: any; contracts: any[]; epicAcceptance?: string[] }
 /** Chamada somente leitura de um papel: prompt e schema da resposta, na pasta da missão. */
-export type ModelCall = { missionId: string; stepId: string; prompt: string; schema: object; maxTurns?: number }
+/** `web`: a opção "Pesquisar fatos" da missão; o modelo pode buscar e ler páginas na internet. */
+export type ModelCall = { missionId: string; stepId: string; prompt: string; schema: object; maxTurns?: number; web?: boolean }
 type RunOpts = {
   repoDir: string
   env: Record<string, string | undefined>
@@ -83,9 +85,10 @@ async function codexCall(ref: ModelRef, call: ModelCall, missionDir: string, opt
   // Mesma missão, mesmo arquivo: resposta de um `ade plan` anterior não pode passar por nova.
   fs.rmSync(resultFile, { force: true })
   fs.mkdirSync(missionDir, { recursive: true })
-  fs.writeFileSync(schemaPath, JSON.stringify(call.schema))
+  // modo estrito da OpenAI: o schema original volta 400 antes de o modelo rodar (mesma cópia do adapter do Codex)
+  fs.writeFileSync(schemaPath, JSON.stringify(strictSchema(call.schema)))
   const resolved = opts.resolveBinaryImpl('codex')
-  const args = buildCodexArgs({ role: 'checker_plan', cwd: opts.repoDir, schemaPath, resultFile, model: ref.model_id, effort: ref.effort })
+  const args = [...buildCodexArgs({ role: 'checker_plan', cwd: opts.repoDir, schemaPath, resultFile, model: ref.model_id, effort: ref.effort }), ...(call.web ? ['-c', 'tools.web_search=true'] : [])]
   const res = await opts.runWorkerImpl({
     resolved,
     args,
@@ -100,7 +103,8 @@ async function codexCall(ref: ModelRef, call: ModelCall, missionDir: string, opt
   })
   const { envelope, error } = parseCodexOutput(res.stdout, resultFile)
   if (!envelope) throw new AdeError('codex_output_invalid', `codex saiu com código ${res.exitCode} sem resposta (${error})`, 2)
-  return envelope.structured_output ?? envelope
+  // opcional não preenchido volta null no modo estrito: sai antes de validar contra o schema original
+  return dropNulls(envelope.structured_output ?? envelope)
 }
 
 async function agyCall(ref: ModelRef, call: ModelCall, missionDir: string, opts: RunOpts): Promise<unknown> {
@@ -153,7 +157,7 @@ async function claudeCall(ref: ModelRef, call: ModelCall, missionDir: string, op
   const args = [
     '-p', '--output-format', 'json', '--json-schema', JSON.stringify(call.schema),
     '--safe-mode', '--no-session-persistence', '--max-turns', String(call.maxTurns ?? 8),
-    '--permission-mode', 'acceptEdits', '--tools', 'Read', 'Glob', 'Grep',
+    '--permission-mode', 'acceptEdits', '--tools', 'Read', 'Glob', 'Grep', ...(call.web ? ['WebSearch', 'WebFetch'] : []),
     '--model', ref.model_id, ...(ref.effort ? ['--effort', ref.effort] : []),
   ]
   const res = await opts.runWorkerImpl({
