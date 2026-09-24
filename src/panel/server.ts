@@ -14,7 +14,7 @@ import { createSessionManager } from './session.ts'
 import { createLocalQuotaPort } from '../adapters/local/quota.ts'
 import { refreshQuotaReceipts } from '../adapters/local/official-quota.ts'
 import { readModelsView, readUsage, setManualQuota, updateModelSettings, type QuotaPort } from './models-api.ts'
-import { createIntake, spawnMissionRun, type IntentPort, type RunMission } from './intake.ts'
+import { createIntake, missionControlOf, spawnMissionRun, type IntentPort, type RunMission } from './intake.ts'
 import { llmIntent } from '../intent/llm-intent.ts'
 import { pickFolder } from './folder-picker.ts'
 import { assertProjectPath, createOpenProjects } from './open-projects.ts'
@@ -109,8 +109,10 @@ export async function defaultOpenBrowser(url: string): Promise<void> {
  * Estado de um pedido já aprovado para a lista de Projetos, pelas partes projetadas: parte parada esperando o
  * operador vale "esperando você" (rodando ou com o processo já encerrado, saída 3), erro do painel vale falha.
  */
-export function activityOf(last: { mission_id: string; request: string; stage: string; error?: string; parts?: unknown[] }, stories: Array<{ status?: string | null }>) {
+export function activityOf(last: { mission_id: string; request: string; stage: string; error?: string; parts?: unknown[]; stopped?: boolean }, stories: Array<{ status?: string | null }>, control: string | null = null) {
   const base = { mission_id: last.mission_id, request: last.request }
+  // pausada pelo operador (e não parada de vez): espera o operador retomar
+  if (control === 'STOPPED' && !last.stopped && last.stage === 'concluida') return { kind: 'waiting', stage: 'paused', ...base }
   if (last.stage === 'concluida' && last.error) return { kind: 'failed', ...base, error: last.error }
   const progress = { done: stories.filter((st) => /done|conclu|pass|complete|merged/i.test(st.status ?? '')).length, total: stories.length || (last.parts?.length ?? 0) }
   if (stories.some((st) => st.status === 'awaiting_operator')) return { kind: 'waiting', stage: 'operator', ...base, ...progress }
@@ -232,7 +234,7 @@ export async function startServer({
     const needsStories = !(last.stage === 'concluida' && last.error)
     const snapshot = needsStories ? await readPanelSnapshot({ repoDir: p.path, indexPath: p.indexPath }).catch(() => null) : null
     const mission = snapshot?.missions.find((m: { id?: string }) => m.id === last.mission_id)
-    return activityOf(last, mission?.stories ?? [])
+    return activityOf(last, mission?.stories ?? [], missionControlOf(p.path, last.mission_id))
   }
 
   // 6. Servidor HTTP
@@ -403,14 +405,16 @@ export async function startServer({
                 return
               }
             }
-            const intakeMatch = pathname.match(/^\/api\/projects\/([^/]+)\/(requests|intake|intake\/interview|intake\/(?:briefing|plan)\/(?:approve|reject))$/)
+            const intakeMatch = pathname.match(/^\/api\/projects\/([^/]+)\/(requests|intake|intake\/interview|intake\/(?:briefing|plan)\/(?:approve|reject)|mission\/(?:pause|resume|stop))$/)
             if (intakeMatch) {
               const project = projects.get(decodeURIComponent(intakeMatch[1]))
               const action = intakeMatch[2]
               if (action === 'intake' && method === 'GET') {
                 // ?if_missing=null: o painel pergunta sem gerar 404 (erro no console) em projeto sem pedido.
                 const missingAsNull = parsedUrl.searchParams.get('if_missing') === 'null'
-                sendJson(res, 200, missingAsNull ? intake.find(project.path) : intake.read(project.path))
+                const found = missingAsNull ? intake.find(project.path) : intake.read(project.path)
+                // o estado de controle da missão (rodando, pausando, pausada) vai junto para os botões do painel
+                sendJson(res, 200, found && { ...found, control: missionControlOf(project.path, found.mission_id) })
                 return
               }
               if (action !== 'intake' && method === 'POST') {
@@ -423,6 +427,8 @@ export async function startServer({
                   sendJson(res, 200, await intake.approveBriefing(project.path, body?.digest))
                 } else if (action === 'intake/plan/approve') {
                   sendJson(res, 200, await intake.approvePlan(project, body?.digest))
+                } else if (action.startsWith('mission/')) {
+                  sendJson(res, 200, await intake[action.slice('mission/'.length) as 'pause' | 'resume' | 'stop'](project))
                 } else {
                   sendJson(res, 200, await intake.reject(project.path, action === 'intake/briefing/reject' ? 'briefing' : 'plan', body?.reason))
                 }

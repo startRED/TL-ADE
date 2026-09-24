@@ -345,7 +345,7 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 
 .hall[data-open='true'] .score { mask-image: linear-gradient(to right, #000 calc(100% - 4rem), transparent); }
 .cost-chart { margin-top: 2rem; max-width: 40rem; }
-.composer-dock { position: sticky; bottom: 0; z-index: 15; margin: 2.5rem calc(-1 * var(--gutter)) -6rem; padding: 1rem var(--gutter) 1.25rem; border-top: 1px solid var(--sage-line); background: color-mix(in srgb, var(--ground) 90%, transparent); backdrop-filter: blur(10px); }
+.composer-dock { position: sticky; bottom: 0; z-index: 15; margin: 2.5rem calc(-1 * var(--gutter)) 0; padding: 1rem var(--gutter) 1.25rem; border-top: 1px solid var(--sage-line); background: color-mix(in srgb, var(--ground) 90%, transparent); backdrop-filter: blur(10px); }
 .composer.compact { grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 1.5rem; }
 .composer.compact .field { resize: none; }
 .composer.compact .composer-row { justify-content: flex-end; }
@@ -860,3 +860,17 @@ h3.ui-heading, h4.ui-heading { font-size: 1.15rem; }
 .cell-mark .pulse { margin-right: 0; }
 .staff-label .dynamic { font: 400 11.5px/1.3 var(--mono); font-style: normal; color: var(--ink-faint); }
 .step .glyph { font: inherit; }
+
+/* ---------- controle da missão ---------- */
+.mission-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-bottom: .75rem; }
+.mission-controls .note-line { display: inline-flex; align-items: center; margin-right: auto; }
+
+/* ---------- histórico de missões ---------- */
+.history { margin-top: 4rem; display: grid; gap: 1rem; max-width: 62rem; }
+.history-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--sage-line); }
+.history-row { display: grid; grid-template-columns: 2.5rem minmax(0, 1fr) auto; align-items: center; gap: 1rem; padding: .8rem 0; border-bottom: 1px dotted var(--sage-line); }
+.history-row[aria-current='true'] .history-title { color: var(--baton-text); }
+.history-no { font: 500 13px/1 var(--mono); color: var(--ink-faint); }
+.history-title { font: 450 15px/1.35 var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-meta { font: 400 12px/1.4 var(--mono); color: var(--ink-faint); }
+.project-line .btn.small { margin-right: .75rem; }

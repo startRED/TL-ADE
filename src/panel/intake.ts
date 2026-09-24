@@ -12,6 +12,7 @@ import { AdeError } from '../journal/errors.ts'
 import { approveMission, getProjectDiscovery, recordMissionDecision, validateMissionPlan, writeJsonAtomic } from '../mission/plan-lifecycle.ts'
 import { writeMissionOptions, type MissionOptions } from '../mission/options.ts'
 import { refreshQuotaReceipts } from '../adapters/local/official-quota.ts'
+import { readMissionControl, requestMissionControl } from '../engine/control.ts'
 import type { ActivityKind } from './open-projects.ts'
 import { readProjectOptions, type SkillSummary } from './options.ts'
 
@@ -49,6 +50,15 @@ export interface Intake {
   reason?: string
   error?: string
   understanding?: Understanding
+  /** Parada pelo operador: a missão fica como está e não se oferece mais retomar. */
+  stopped?: boolean
+}
+
+/** Estado de controle da missão do pedido (pausa pedida vira DRAINING e depois STOPPED); null sem journal ainda. */
+export function missionControlOf(repoDir: string, missionId: string): 'RUNNING' | 'DRAINING' | 'STOPPED' | null {
+  const missionDir = path.join(missionsDir(repoDir), missionId)
+  if (!fs.existsSync(path.join(missionDir, 'journal.jsonl'))) return null
+  return readMissionControl({ missionDir }).state
 }
 
 export interface IntentPort {
@@ -197,6 +207,30 @@ export function createIntake({ intent, runMission, eligibleSkills, beginActivity
     return live
   }
 
+  /** Roda o motor para o pedido como atividade do projeto; ao sair, o pedido vira concluído (com o erro, se houver). */
+  function launch(project: { id: string; path: string }, intake: Intake): Intake {
+    const repoDir = project.path
+    const missionDir = path.join(missionsDir(repoDir), intake.mission_id)
+    const running = write(repoDir, { ...intake, stage: 'running' })
+    const release = beginActivity(project.id, 'mission')
+    // o que o operador fez enquanto rodava (parar) vale: relê o pedido antes de encerrar
+    const finish = (error?: string) => serialized(repoDir, async () => {
+      const current = readIntakes(repoDir).find((i) => i.mission_id === intake.mission_id) ?? running
+      write(repoDir, { ...current, stage: 'concluida', ...(error ? { error } : {}) })
+    })
+    runMission({ repoDir, missionId: intake.mission_id, planPath: path.join(missionDir, 'plan.json'), options: readProjectOptions(repoDir) })
+      .then(() => finish(), (err) => finish(err instanceof Error ? err.message : String(err)))
+      .catch((err) => onError(`ade serve: falha ao encerrar a missão ${intake.mission_id}: ${err instanceof Error ? err.message : String(err)}\n`))
+      .finally(release)
+    return running
+  }
+
+  /** Pedido de pausa ou retomada pelo digest do plano da missão (o mesmo controle do `ade` pela API). */
+  async function control(repoDir: string, intake: Intake, action: 'pause' | 'resume') {
+    const plan = JSON.parse(fs.readFileSync(path.join(missionsDir(repoDir), intake.mission_id, 'plan.json'), 'utf8'))
+    return requestMissionControl({ repoDir, missionId: intake.mission_id, action, expectedDigest: digest16(plan), source: 'panel' })
+  }
+
   const compile = (repoDir: string, intake: Intake, extra: { answers?: Answers; briefing?: ProductBriefing } = {}) =>
     intent.compile({ request: intake.request, repoDir, options: readProjectOptions(repoDir), eligibleSkills: eligibleSkills(repoDir), missionId: intake.mission_id, questions: intake.questions, understanding: intake.understanding, ...extra })
 
@@ -282,21 +316,43 @@ export function createIntake({ intent, runMission, eligibleSkills, beginActivity
         if (typeof digest !== 'string') throw new AdeError('digest_ausente', 'Informe o digest do plano.', 2)
         const approval = await approveMission({ repoDir, missionId: intake.mission_id, expectedDigest: digest, source: 'panel' })
         if (!approval.approved) throw new AdeError('aprovacao_recusada', approval.reason ?? 'O plano não pôde ser aprovado.', 5)
-        const missionDir = path.join(missionsDir(repoDir), intake.mission_id)
         // As opções de agora ficam fixadas na missão: mudar as do projeto depois não mexe nesta.
-        const options = readProjectOptions(repoDir)
-        writeMissionOptions(missionDir, options)
-        const running = write(repoDir, { ...intake, stage: 'running' })
+        writeMissionOptions(path.join(missionsDir(repoDir), intake.mission_id), readProjectOptions(repoDir))
+        return launch(project, intake)
+      })
+    },
 
-        const release = beginActivity(project.id, 'mission')
-        const finish = (error?: string) => serialized(repoDir, async () => {
-          write(repoDir, { ...running, stage: 'concluida', ...(error ? { error } : {}) })
-        })
-        runMission({ repoDir, missionId: intake.mission_id, planPath: path.join(missionDir, 'plan.json'), options })
-          .then(() => finish(), (err) => finish(err instanceof Error ? err.message : String(err)))
-          .catch((err) => onError(`ade serve: falha ao encerrar a missão ${intake.mission_id}: ${err instanceof Error ? err.message : String(err)}\n`))
-          .finally(release)
-        return running
+    /** Pausa a missão rodando: a parte em andamento termina e o motor para antes da próxima (pedido durável no journal). */
+    pause(project: { id: string; path: string }): Promise<Intake> {
+      return serialized(project.path, async () => {
+        const intake = liveAt(project.path, 'running')
+        await control(project.path, intake, 'pause')
+        return intake
+      })
+    },
+
+    /** Retoma a missão pausada: registra a retomada e roda o motor de novo, do ponto em que parou. */
+    resume(project: { id: string; path: string }): Promise<Intake> {
+      return serialized(project.path, async () => {
+        const last = readIntakes(project.path).at(-1)
+        if (!last || last.stage !== 'concluida' || last.stopped || missionControlOf(project.path, last.mission_id) !== 'STOPPED') {
+          throw new AdeError('etapa_errada', 'Nenhuma missão pausada para retomar neste projeto.', 5)
+        }
+        await control(project.path, last, 'resume')
+        const { error: _error, ...clean } = last
+        return launch(project, clean)
+      })
+    },
+
+    /** Para de vez: pausa se ainda roda e marca o pedido como parado; o que já foi entregue fica. */
+    stop(project: { id: string; path: string }): Promise<Intake> {
+      return serialized(project.path, async () => {
+        const last = readIntakes(project.path).at(-1)
+        if (!last || (last.stage !== 'running' && last.stage !== 'concluida') || last.stopped) {
+          throw new AdeError('etapa_errada', 'Nenhuma missão rodando ou pausada para parar neste projeto.', 5)
+        }
+        if (last.stage === 'running' && missionControlOf(project.path, last.mission_id) === 'RUNNING') await control(project.path, last, 'pause')
+        return write(project.path, { ...last, stopped: true })
       })
     },
   }

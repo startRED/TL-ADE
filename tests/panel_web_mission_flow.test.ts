@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test } from 'vitest'
 
 import { compileIntent } from '../src/intent/compiler.ts'
 import { digest16 } from '../src/journal/canonical.ts'
-import { readJournal } from '../src/journal/journal.ts'
+import { openJournal, readJournal } from '../src/journal/journal.ts'
 import { startServer } from '../src/panel/server.ts'
 import { ensureFreshProbe } from '../src/panel/intake.ts'
 import { makeRepo } from './helpers/git-repo.ts'
@@ -403,6 +403,46 @@ describe('pedido, entrevista, briefing, plano e aprovação no painel', () => {
     run.finish(new Error('ade run saiu com código 3'))
     await expect.poll(() => s.server.projects.hasActivity(s.projectId)).toBe(false)
     expect((await s.intake()).body).toMatchObject({ stage: 'concluida', error: 'ade run saiu com código 3' })
+  })
+
+  test('pausar_retomar_e_parar_pelo_painel_viram_pedidos_do_motor_e_relancam_a_execucao', async () => {
+    const run = runDouble()
+    const repo = gitFixture()
+    const s = await serve(repo, { intent: intentDouble({ large: false }).intent, runMission: run.runMission })
+    await s.request('Corrija o título')
+    await s.post('interview', { answers: {} })
+    const missionId = (await s.intake()).body.mission_id
+    await s.post('plan/approve', { digest: (await s.intake()).body.digest })
+    const mission = (a: string) => s.call('POST', `/api/projects/${encodeURIComponent(s.projectId)}/mission/${a}`, {})
+    const missionDir = path.join(repo, '.ade', 'missions', missionId)
+    const request = () => JSON.parse(readFileSync(path.join(missionDir, 'control-request.json'), 'utf8'))
+
+    // pausar grava o pedido que o motor consome; sem missão pausada não há o que retomar
+    expect((await mission('pause')).status).toBe(200)
+    expect(request()).toMatchObject({ action: 'pause', source: 'panel' })
+    expect((await mission('resume')).status).toBe(409)
+
+    // o motor drena, registra STOPPED e sai: o painel mostra pausada e oferece retomar
+    const journal = openJournal({ missionDir, runtimeStamp: '1:aaaaaaaa:bbbbbbbb' })
+    await journal.append({ kind: 'mission_control', data: { state: 'STOPPED', action: 'pause', request_id: request().request_id, reason: 'pause' } })
+    await journal.close()
+    run.finish()
+    await expect.poll(async () => (await s.intake()).body.stage).toBe('concluida')
+    expect((await s.intake()).body.control).toBe('STOPPED')
+    const activity = async () => ((await s.call('GET', '/api/projects')).body as any[]).find((p) => p.id === s.projectId).activity
+    expect(await activity()).toMatchObject({ kind: 'waiting', stage: 'paused' })
+
+    // retomar registra o pedido e roda o motor de novo sobre a mesma missão
+    expect((await mission('resume')).status).toBe(200)
+    expect(request()).toMatchObject({ action: 'resume' })
+    expect(run.calls.map((c) => c.missionId)).toEqual([missionId, missionId])
+    expect((await s.intake()).body.stage).toBe('running')
+
+    // parar marca o pedido: ao sair, não se oferece mais retomar
+    expect((await mission('stop')).status).toBe(200)
+    run.finish()
+    await expect.poll(async () => (await s.intake()).body).toMatchObject({ stage: 'concluida', stopped: true })
+    expect((await mission('resume')).status).toBe(409)
   })
 
   test('criterio_11_recusa_do_plano_registra_motivo_e_nao_executa', async () => {

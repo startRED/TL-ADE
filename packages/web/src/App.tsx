@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { apiFetch, postJson, subscribeEvents } from './api.ts'
 import ChatPanel from './Chat.tsx'
 import IntakeFlow from './Intake.tsx'
+import MissionScore from './Units.tsx'
 import ModelsPage from './Models.tsx'
 import OptionsPage from './Options.tsx'
 import SkillsPage from './Skills.tsx'
@@ -24,7 +25,7 @@ interface Project {
 /** O que acontece agora no projeto (só nos abertos): vem de GET /api/projects. */
 interface Activity {
   kind: 'waiting' | 'running' | 'done' | 'failed' | 'refused'
-  stage?: 'interview' | 'briefing' | 'plan' | 'operator'
+  stage?: 'interview' | 'briefing' | 'plan' | 'operator' | 'paused'
   mission_id: string
   request: string
   done?: number
@@ -32,7 +33,7 @@ interface Activity {
   error?: string
 }
 
-const STAGE_LABEL = { interview: 'entrevista', briefing: 'briefing', plan: 'plano', operator: 'uma parte parou' } as const
+const STAGE_LABEL = { interview: 'entrevista', briefing: 'briefing', plan: 'plano', operator: 'uma parte parou', paused: 'missão pausada' } as const
 
 /** Linha de estado de um projeto: verbo curto, sem jargão; a cor e o ponto vêm da classe. */
 function activityLine(a: Activity): string {
@@ -85,6 +86,8 @@ export default function App() {
   const [projects, setProjects] = useState<Project[] | null>(null)
   const [snapshot, setSnapshot] = useState<{ projectId: string; data: Snapshot } | null>(null)
   const [page, setPage] = useState<Page>('home')
+  // missão anterior aberta pelo histórico (null: a atual)
+  const [pastId, setPastId] = useState<string | null>(null)
   // trocar de página começa do topo, não da altura em que a outra estava
   useEffect(() => { window.scrollTo(0, 0) }, [page])
   const [error, setError] = useState<string | null>(null)
@@ -134,6 +137,9 @@ export default function App() {
   const openProjects = (projects ?? []).filter((p) => p.open)
   const active = openProjects.find((p) => p.active) ?? null
   const mission = active && snapshot?.projectId === active.id ? snapshot.data.selectedMission : null
+  const missions = active && snapshot?.projectId === active.id ? snapshot.data.missions : []
+  const past = pastId ? missions.find((m) => m.id === pastId && m.id !== mission?.id) ?? null : null
+  const openPast = (id: string | null) => { setPastId(id); window.scrollTo(0, 0) }
 
   return (
     <>
@@ -199,11 +205,22 @@ export default function App() {
               : page === 'projects'
               ? <ProjectsPage projects={projects ?? []} onOpen={(dir) => act(async () => { await postJson('/api/projects/open', { path: dir }); setPage('home') })} />
               : active
-                ? <IntakeFlow key={active.id} project={active} mission={mission} missionCount={snapshot?.projectId === active.id ? snapshot.data.missions.length : 0} snapshotLoaded={snapshot?.projectId === active.id} />
+                ? past
+                  ? <MissionScore
+                      key={past.id}
+                      projectId={active.id}
+                      mission={past}
+                      running={false}
+                      rehearsal={String(missions.length - missions.indexOf(past))}
+                      projectLine={<p className="project-line"><button className="btn small" onClick={() => openPast(null)}>Voltar à missão atual</button><span>Missão anterior: {past.id}</span></p>}
+                      composer={null}
+                    />
+                  : <IntakeFlow key={active.id} project={active} mission={mission} missionCount={missions.length} snapshotLoaded={snapshot?.projectId === active.id} />
                 : loaded ? <NoProject onOpen={() => setPage('projects')} /> : null}
           </motion.div>
         </AnimatePresence>
         {/* Conversa sobre o projeto: abaixo da missão, na cópia do projeto; o cartão de permissão decide o que entra. */}
+        {page === 'home' && active && missions.length > 1 && <MissionHistory missions={missions} current={mission?.id ?? null} viewing={past?.id ?? null} onOpen={openPast} />}
         {page === 'home' && active && <section className="conversation" aria-label="Conversa"><ChatPanel key={`chat:${active.id}`} projectId={active.id} /></section>}
       </main>
     </>
@@ -300,5 +317,36 @@ function ProjectRow({ project: p, onOpen }: { project: Project; onOpen: (dir: st
       </div>
       <button className={a?.kind === 'waiting' ? 'btn baton' : 'btn'} aria-label={`${verb} ${p.name}`} onClick={() => onOpen(p.path)}>{verb}</button>
     </li>
+  )
+}
+
+/** Pedidos anteriores do projeto, do mais recente ao mais antigo: abrir mostra a tabela daquela missão. */
+function MissionHistory({ missions, current, viewing, onOpen }: { missions: Mission[]; current: string | null; viewing: string | null; onOpen: (id: string | null) => void }) {
+  return (
+    <section className="history" aria-label="Missões anteriores">
+      <h2 className="caps">Missões deste projeto</h2>
+      <ol className="history-list">
+        {missions.map((m, i) => {
+          const stories = m.stories ?? []
+          const done = stories.filter((s) => /committed|delivered|done|approved/.test(s.status ?? '')).length
+          const isCurrent = m.id === current
+          const open = viewing ? m.id === viewing : isCurrent
+          return (
+            <li key={m.id} className="history-row" aria-current={open ? 'true' : undefined}>
+              <span className="mono history-no">{missions.length - i}</span>
+              <div className="history-body">
+                <p className="history-title">{m.title ?? m.intent ?? m.id}</p>
+                <p className="mono history-meta">
+                  {stories.length ? `${done} de ${stories.length} partes prontas` : 'sem partes'}
+                  {typeof m.consumed_usd === 'number' && m.consumed_usd > 0 ? ` · ${brl(m.consumed_usd)}` : ''}
+                  {isCurrent ? ' · atual' : ''}
+                </p>
+              </div>
+              {!open && <button className="btn small" onClick={() => onOpen(isCurrent ? null : m.id)}>{isCurrent ? 'Ver a atual' : 'Abrir'}</button>}
+            </li>
+          )
+        })}
+      </ol>
+    </section>
   )
 }

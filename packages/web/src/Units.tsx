@@ -73,6 +73,13 @@ const PARKED_PT: Record<string, string> = {
   preflight: 'A checagem antes de começar achou um problema no projeto.',
   context_limit_exceeded: 'Esta parte ficou grande demais para o modelo de uma vez.',
   no_change: 'O modelo terminou sem mudar o código.',
+  no_changes: 'O modelo terminou sem mudar o código.',
+  unverified_reference: 'A revisão citou um trecho que a TL-ADE não conseguiu conferir; a aprovação não foi aceita.',
+  stale_contract_revision: 'A revisão foi feita sobre outra versão do combinado; a aprovação não foi aceita.',
+  stale_input_revision: 'A revisão foi feita sobre outra versão do código; a aprovação não foi aceita.',
+  maker_no_change: 'Na rodada de correção o modelo não mudou nada.',
+  mission_stopped: 'A missão foi pausada.',
+  budget_usd_exceeded: 'O teto de gasto da missão acabou.',
   empty: 'O revisor de outra empresa não devolveu resposta: a ferramenta dele falhou antes de começar.',
   proof_out_of_scope: 'Quem escreve as provas mexeu fora dos arquivos de teste; a mudança foi desfeita.',
   proof_not_written: 'Quem escreve as provas terminou sem escrever nenhum teste.',
@@ -312,7 +319,7 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
         </div>
       </div>
 
-      <div className="composer-dock">{composer}</div>
+      {composer && <div className="composer-dock">{composer}</div>}
     </section>
   )
 }

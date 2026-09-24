@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { ArrowRight, Check, PaperPlaneRight, X } from '@phosphor-icons/react'
+import { ArrowRight, Check, Pause, PaperPlaneRight, Play, Stop, X } from '@phosphor-icons/react'
 import { motion } from 'motion/react'
-import { apiFetch, postJson } from './api.ts'
+import { apiFetch, postJson, subscribeEvents } from './api.ts'
 import type { Mission } from './App.tsx'
 import MissionScore from './Units.tsx'
 import { shortPath } from './format.ts'
@@ -42,6 +42,9 @@ interface Intake {
   digest?: string
   /** Da IA: o que entendeu do pedido e, no plano, o que o usuário vai ter e o que ela assumiu. */
   understanding?: { summary?: string; explanation?: string; decisions?: string[] }
+  /** Controle da missão: rodando, pausando (termina a parte atual) ou pausada; null antes de rodar. */
+  control?: 'RUNNING' | 'DRAINING' | 'STOPPED' | null
+  stopped?: boolean
 }
 
 interface ProjectRef { id: string; name: string; path: string }
@@ -55,6 +58,7 @@ const THINKING: Record<string, { label: string; hint: string }> = {
   '/intake/interview': { label: 'Montando o plano', hint: 'Divide o pedido em partes e escreve como provar cada uma. Costuma levar de 30 s a 1 min e meio.' },
   '/intake/briefing/approve': { label: 'Montando o plano', hint: 'Divide o briefing em partes e escreve como provar cada uma. Costuma levar de 30 s a 1 min e meio.' },
   '/intake/plan/approve': { label: 'Preparando a execução', hint: 'Confere o projeto e começa a primeira parte.' },
+  '/mission/resume': { label: 'Retomando a missão', hint: 'Confere o projeto e continua da parte em que parou.' },
 }
 
 /** Entrada em cascata: cada bloco assenta um pouco depois do anterior, uma vez só. */
@@ -80,6 +84,8 @@ export default function IntakeFlow({ project, mission, missionCount, snapshotLoa
     setIntake(undefined)
     load().catch((err) => setError(messageOf(err)))
   }, [load])
+  // o motor escreve no journal ao pausar, retomar e terminar: relê o pedido para os botões seguirem o estado real
+  useEffect(() => subscribeEvents(() => { load().catch(() => undefined) }), [load])
 
   // etapa nova começa do topo: a entrevista respondida no fim da página não deixa o plano aparecer pela metade
   const stage = intake?.stage
@@ -183,9 +189,12 @@ export default function IntakeFlow({ project, mission, missionCount, snapshotLoa
           running={running}
           rehearsal={String(Math.max(1, missionCount))}
           projectLine={projectLine}
-          composer={running
-            ? <p className="direction">O próximo pedido abre quando esta missão terminar.</p>
-            : <RequestBox last={intake} busy={busy} compact onSend={(text) => act('/requests', { text })} />}
+          composer={<>
+            <MissionControls intake={intake} busy={busy} onAct={(a) => act(`/mission/${a}`, {})} />
+            {running
+              ? <p className="direction">O próximo pedido abre quando esta missão terminar.</p>
+              : <RequestBox last={intake} busy={busy} compact onSend={(text) => act('/requests', { text })} />}
+          </>}
         />
       </>
     )
@@ -389,4 +398,32 @@ function Thinking({ label, hint }: { label: string; hint: string }) {
       <span className="thinking-bar" aria-hidden="true" />
     </motion.div>
   )
+}
+
+/** Pausar, retomar e parar a missão do pedido. Pausar deixa a parte em andamento terminar; parar mantém o que já foi entregue. */
+function MissionControls({ intake, busy, onAct }: { intake: Intake | null; busy: boolean; onAct: (action: 'pause' | 'resume' | 'stop') => void }) {
+  if (!intake || intake.stopped) return null
+  const running = intake.stage === 'running'
+  const paused = intake.stage === 'concluida' && intake.control === 'STOPPED'
+  if (running && intake.control === 'DRAINING') {
+    return <p className="mission-controls note-line"><span className="pulse waiting" aria-hidden="true" />Pausando: a parte em andamento termina e a missão para.</p>
+  }
+  if (running) {
+    return (
+      <div className="mission-controls">
+        <button className="btn small" disabled={busy} onClick={() => onAct('pause')}><Pause size={13} aria-hidden="true" /> Pausar</button>
+        <button className="btn small" disabled={busy} onClick={() => onAct('stop')}><Stop size={13} aria-hidden="true" /> Parar</button>
+      </div>
+    )
+  }
+  if (paused) {
+    return (
+      <div className="mission-controls">
+        <span className="note-line">Missão pausada. O que já foi entregue fica.</span>
+        <button className="btn baton small" disabled={busy} onClick={() => onAct('resume')}><Play size={13} aria-hidden="true" /> Retomar</button>
+        <button className="btn small" disabled={busy} onClick={() => onAct('stop')}><Stop size={13} aria-hidden="true" /> Parar de vez</button>
+      </div>
+    )
+  }
+  return null
 }
