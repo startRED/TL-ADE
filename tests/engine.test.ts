@@ -538,6 +538,33 @@ describe('engine', () => {
     expect(events.some((e) => e.kind === 'decision' && (e.data as any).decision === 'proof_written')).toBe(true)
   }, 120_000)
 
+  // 24/09, missão real (S2): depois de a correção esgotar, a nova tentativa refazia as rodadas antigas pelo cache sobre a
+  // worktree já no estado final (revisão obsoleta, modelo "sem mudança") e estacionava de novo. Agora começa rodada nova.
+  test('nova_tentativa_depois_de_correcao_esgotada_comeca_rodada_nova_e_entrega', async () => {
+    const fixture = setupStoryFixture()
+    const makerFile = path.join(fixture.scenarioDir, 'maker.json')
+    const base = JSON.parse(fs.readFileSync(makerFile, 'utf8'))[0]
+    fs.writeFileSync(makerFile, JSON.stringify(['ok v1\n', 'ok v2\n', 'ok v3\n'].map((c) => ({ ...base, files: { 'src/hello.txt': c } }))))
+    const changes = approvedReviewAction()
+    Object.assign(changes.result as any, {
+      verdict: 'changes_requested',
+      requested_action: 'rework',
+      action_items: [{ id: 'F1', severity: 'high', category: 'patch', problem: 'ainda falta', required_action: 'corrigir', target_role: 'maker', evidence_refs: ['eval:E1'], location: 'src/hello.txt' }],
+    })
+    ;(changes.result as any).handoff.next_action = 'rework'
+    fs.writeFileSync(path.join(fixture.scenarioDir, 'checker.json'), JSON.stringify([changes, changes, approvedReviewAction()]))
+
+    const first = await runStory(fixture.deps, fixture.input)
+    expect(first.status).toBe('awaiting_operator')
+    await fixture.deps.journal.append({ kind: 'decision', unit: 'ADE-T1', data: { decision: 'unit_retry', unit: 'ADE-T1', previous_reason: first.reason } })
+
+    const second = await runStory(fixture.deps, fixture.input)
+    expect(second).toMatchObject({ status: 'delivered' })
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    expect(events.some((e) => e.kind === 'decision' && (e.data as any).decision === 'retry_new_round')).toBe(true)
+    expect(fs.readFileSync(path.join(fixture.repo.dir, 'src', 'hello.txt'), 'utf8')).toBe('ok v3\n')
+  }, 180_000)
+
   // CA2: Dado um contrato com roles.maker.family 'codex', quando runStory roda, então
   // lança AdeError com code 'family_without_canary' e exit 4, e o journal não tem nenhum
   // step_intent com step_id terminando em ':maker'.

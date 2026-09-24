@@ -30,9 +30,13 @@ export function makeCheckerDouble(options: {
       contractRevision: options.contractRevision,
     })
 
+    // Cada chamada preenche a árvore dela a partir do cenário original: preencher todas na primeira deixava as revisões
+    // seguintes (outras rodadas) com a árvore velha.
     const checkerFile = path.join(options.scenarioDir, 'checker.json')
+    const pristineFile = path.join(options.scenarioDir, 'checker.pristine.json')
     if (fs.existsSync(checkerFile)) {
-      const actions = JSON.parse(fs.readFileSync(checkerFile, 'utf8'))
+      if (!fs.existsSync(pristineFile)) fs.copyFileSync(checkerFile, pristineFile)
+      const actions = JSON.parse(fs.readFileSync(pristineFile, 'utf8'))
       for (const action of actions) {
         const rev = action?.result?.input_revision
         if (!rev) continue

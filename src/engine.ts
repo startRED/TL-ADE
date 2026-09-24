@@ -725,7 +725,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   let round = 1
   let previousFindingsDigest = null
   let previousFindings = []
-  let openFindings = []
+  let openFindings: any[] = []
   // vermelhas cobráveis da última tentativa reprovada por portão ou eval
   let redTests: string[] = []
   // provas que o maker alegou erradas e as que o revisor liberou para edição
@@ -749,6 +749,28 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   let ladderState = startLadder(routed)
   let attempt = 0
   let treeBeforeAttempt = treeBefore
+
+  // Nova tentativa depois de correção esgotada: refazer as rodadas antigas pelo cache não fecha, porque a worktree já
+  // está no estado final (a revisão antiga fica obsoleta e o modelo antigo "não muda nada"). A parte começa uma rodada
+  // nova sobre a árvore atual, com os achados da última revisão (S2 da missão real, 24/09).
+  {
+    const events = readEvents()
+    const unitOf = (e: any) => e.unit ?? e.data?.unit
+    const lastDone = events.map((e, i) => [e, i] as const).filter(([e]) => e.kind === 'story_done' && unitOf(e) === storyId).at(-1)
+    const retriedAfter = lastDone && events.slice(lastDone[1]).some((e) => e.kind === 'decision' && e.data?.decision === 'unit_retry' && unitOf(e) === storyId)
+    const lastReview = [...events].reverse().find((e) => e.kind === 'review_result' && unitOf(e) === storyId && e.data?.result)
+    if (retriedAfter && lastReview && ['rework_exhausted', 'unresolved_blocking_findings', 'stagnation'].includes(String(lastDone[0].data?.reason))) {
+      const prefix = `${storyId}:r`
+      const rounds = events.map((e) => String(e.step_id ?? '')).filter((id) => id.startsWith(prefix)).map((id) => Number.parseInt(id.slice(prefix.length), 10)).filter(Number.isFinite)
+      round = Math.max(1, ...rounds) + 1
+      const doc = lastReview.data.result
+      previousFindings = (doc.action_items ?? doc.findings ?? []).map(normalizeFinding)
+      previousFindingsDigest = computeFindingsDigest(previousFindings)
+      openFindings = blockingReviewFindings({ findings: doc.action_items ?? doc.findings ?? [], request: { prior_findings: [] } as any, round: 1 })
+      treeBeforeRound = treeBeforeAttempt = await wtPort.worktreeTree()
+      await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'retry_new_round', unit: storyId, round, open_findings: openFindings.length } })
+    }
+  }
 
   // Aplica a decisão da escada; troca de degrau passa pela reserva de chamadas e, negada, estaciona.
   const climbLadder = async (outcome: MakerOutcome, rejectReason = 'rework_exhausted') => {

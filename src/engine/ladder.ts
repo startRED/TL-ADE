@@ -119,7 +119,7 @@ export function correctionRequest(opts: { redTests: string[]; preexistingReds?: 
 }
 
 // Paradas em que a correção se esgotou: pedir nova tentativa só adianta com rodadas novas.
-const EXHAUSTED_REASONS = new Set(['rework_exhausted', 'unresolved_blocking_findings', 'maker_no_change'])
+const EXHAUSTED_REASONS = new Set(['rework_exhausted', 'unresolved_blocking_findings', 'maker_no_change', 'stagnation'])
 
 /**
  * Lotes extras de rodadas por degrau: um por nova tentativa pedida para a parte parada por correção esgotada. Sem isso a
