@@ -82,6 +82,9 @@ describe('cérebro do pedido com IA', () => {
     expect(contracts[0].requirements[0].ears).toBe('WHEN o usuário arrasta uma imagem PNG THE SYSTEM SHALL a miniatura aparece com o nome do arquivo')
     expect(contracts[0].guardrails.scope_paths).toEqual(expect.arrayContaining(['packages/web/src/Intake.tsx', 'tests/panel_web_attach.test.ts']))
     expect(contracts[1].depends_on).toEqual(['S1'])
+    // teto de chamadas cresce com as partes (prova, código, troca de degrau): 3 fixos paravam a 2ª parte
+    expect((res.plan as any).budget.max_model_calls).toBe(8)
+    expect(contracts.map((c) => c.budget.max_model_calls)).toEqual([8, 8])
     expect(res.understanding).toMatchObject({ explanation: PLAN.explanation, decisions: PLAN.decisions })
   })
 

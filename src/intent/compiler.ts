@@ -493,6 +493,12 @@ export async function compileIntent({
     ...(decisions.length + aiDecisions.length > 0 ? { decisions: [...decisions, ...aiDecisions] } : {}),
   }
 
+  // Chamadas de modelo por parte: prova, código e uma troca de degrau (a revisão vai na reserva do código). O motor conta
+  // o teto contra as reservas da missão inteira, então o contrato leva o mesmo total do plano; 3 fixos paravam a 2ª parte.
+  // ponytail: teto por missão também no contrato; separar a contagem por parte quando o motor passar a contar assim.
+  const missionCalls = Math.max(3, contracts.length * 4)
+  for (const c of contracts) c.budget = { ...c.budget, max_model_calls: missionCalls }
+
   const reqHash = createHash('sha256').update(request).digest('hex')
 
   const plan = {
@@ -511,7 +517,7 @@ export async function compileIntent({
     },
     phases: [{ epics: [{ stories: contracts.map((c) => c.id) }] }],
     mission_budget: { max_usd: 10 },
-    budget: { max_model_calls: 3, max_rework_rounds: 1 },
+    budget: { max_model_calls: missionCalls, max_rework_rounds: 1 },
   }
 
   Object.defineProperty(plan.budget, 'research_cost_usd', { value: researchCostUsd, enumerable: false, writable: true })
