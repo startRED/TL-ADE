@@ -874,3 +874,12 @@ h3.ui-heading, h4.ui-heading { font-size: 1.15rem; }
 .history-title { font: 450 15px/1.35 var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-meta { font: 400 12px/1.4 var(--mono); color: var(--ink-faint); }
 .project-line .btn.small { margin-right: .75rem; }
+
+/* ---------- atividade completa ---------- */
+.activity-log { margin-top: 2rem; border-top: 1px solid var(--sage-line); padding-top: 1rem; }
+.activity-log summary { cursor: pointer; color: var(--ink-soft); list-style: none; }
+.activity-log summary::before { content: '+ '; font-family: var(--mono); color: var(--baton-text); }
+.activity-log[open] summary::before { content: '− '; }
+.log-lines { list-style: none; margin: 1rem 0 0; padding: 0; max-height: 26rem; overflow-y: auto; display: grid; gap: .15rem; }
+.log-lines li { display: grid; grid-template-columns: 5.5rem 5rem minmax(0, 1fr); gap: .75rem; padding: .3rem 0; border-bottom: 1px dotted var(--sage-line); font: 400 13px/1.45 var(--text); }
+.log-lines time, .log-unit { font-size: 11.5px; color: var(--ink-faint); }

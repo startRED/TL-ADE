@@ -287,6 +287,7 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
                 </div>
               )}
           {mission && units.length > 0 && <CostChart mission={mission} units={units} live={live} />}
+          {mission && <ActivityLog projectId={projectId} missionId={missionId} live={running || live >= 0} />}
         </div>
 
         <div className="margin-slot">
@@ -461,5 +462,51 @@ function TestList({ tests }: { tests: Detail['tests'] }) {
         </li>
       ))}
     </ul>
+  )
+}
+
+interface LogLine { seq: number; at: string | null; unit: string | null; text: string }
+
+/**
+ * Atividade completa da missão em frases, fechada por padrão. Aberta, lê só o que é novo (since) e, com a missão
+ * rodando, volta a ler a cada poucos segundos.
+ */
+function ActivityLog({ projectId, missionId, live }: { projectId: string; missionId: string; live: boolean }) {
+  const [open, setOpen] = useState(false)
+  const [lines, setLines] = useState<LogLine[]>([])
+  const url = `/api/projects/${encodeURIComponent(projectId)}/missions/${encodeURIComponent(missionId)}/log`
+  useEffect(() => {
+    setLines([])
+  }, [url])
+  useEffect(() => {
+    if (!open) return
+    let since = 0
+    let stop = false
+    const read = async () => {
+      const fresh = await apiFetch<LogLine[]>(`${url}?since=${since}`).catch(() => [])
+      if (stop || fresh.length === 0) return
+      since = fresh[fresh.length - 1].seq
+      setLines((prev) => [...prev, ...fresh])
+    }
+    setLines([])
+    read()
+    const id = live ? window.setInterval(read, 4000) : undefined
+    return () => { stop = true; if (id) window.clearInterval(id) }
+  }, [open, url, live])
+  return (
+    <details className="activity-log" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary className="caps">Atividade completa{live ? ' · ao vivo' : ''}</summary>
+      {open && (
+        <ol className="log-lines" aria-live="polite">
+          {lines.length === 0 ? <li className="note-line">Lendo o que a missão fez…</li> : lines.map((l) => (
+            <li key={l.seq}>
+              <time className="mono">{l.at ? hour(l.at) : ''}</time>
+              <span className="mono log-unit">{l.unit ?? ''}</span>
+              <span>{l.text}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </details>
   )
 }

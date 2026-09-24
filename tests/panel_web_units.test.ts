@@ -132,6 +132,16 @@ describe('painel: partes com passos, diff, provas e parecer', () => {
     expect(res.body[1].steps).toEqual([{ name: 'U2:r1:maker', state: 'running', at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) }])
   }, 120_000)
 
+  test('atividade_completa_em_frases_e_so_o_novo_depois_de_since', async () => {
+    const { get, units } = await serveFixture()
+    const log = units.replace(/units$/, 'log')
+    const all = (await get(log)).body as Array<{ seq: number; unit: string | null; text: string }>
+    expect(all.map((l) => l.text)).toContain('rodada 1: escrevendo o código…')
+    expect(all.some((l) => l.unit === 'U2')).toBe(true)
+    const last = all.at(-1)!.seq
+    expect((await get(`${log}?since=${last}`)).body).toEqual([])
+  }, 120_000)
+
   test('C2 o diff da parte é git diff do commit-base ao commit da parte', async () => {
     const { get, units, base, head } = await serveFixture()
     const res = await get(`${units}/U1`)

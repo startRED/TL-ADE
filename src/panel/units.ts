@@ -152,3 +152,67 @@ export async function readUnit(repoDir: string, missionId: string, unitId: strin
   }
   return { id: unitId, base_commit: base, head_commit: head, diff, tests: testsOf(events, unitId), review: reviewOf(events, unitId) }
 }
+
+export type LogLine = { seq: number; at: string | null; unit: string | null; text: string }
+
+/** O que cada passo do motor fez, numa frase; o id cru do passo fica de fora (a tabela já mostra os detalhes). */
+function stepPhrase(stepId: string, status: string | undefined): string {
+  const ok = status === 'ok' || status === undefined
+  const r = /:r(\d+)(?:t\d+)?:(maker|checker)/.exec(stepId)
+  if (r) return r[2] === 'maker' ? `rodada ${r[1]}: escreveu o código` : `rodada ${r[1]}: revisão de outra empresa terminou`
+  if (stepId.endsWith(':proof')) return 'escreveu as provas dos critérios'
+  if (/^eval:.*:red:/.test(stepId)) return 'rodou a prova antes do código'
+  if (/^eval:.*:green:/.test(stepId)) return 'rodou a prova depois do código'
+  if (stepId.endsWith(':prepare')) return 'preparou a cópia de trabalho'
+  if (stepId.endsWith(':contain')) return 'conferiu o que mudou e o escopo'
+  if (stepId.endsWith(':commit')) return 'fez o commit da parte'
+  if (stepId.endsWith(':deliver')) return ok ? 'entregou a parte no projeto' : 'não conseguiu entregar a parte'
+  return stepId
+}
+
+const VERDICT_PT: Record<string, string> = { eval_born_green: 'já passava antes do código', red_valid: 'falhou como devia', downgraded_additive: 'não falhou pelo motivo certo', green: 'passou', red: 'falhou' }
+const PHASE_PT: Record<string, string> = { implementation: 'escrever o código', proof: 'escrever as provas', rework: 'corrigir' }
+const DECISION_PT: Record<string, string> = { plan_approved: 'plano aprovado', proof_written: 'provas escritas', mission_replaced: 'missão replanejada' }
+
+function logText(ev: any): string | null {
+  const d = ev.data ?? {}
+  switch (ev.kind) {
+    // só as etapas demoradas (chamadas de modelo) avisam que começaram; as outras aparecem quando terminam
+    case 'step_intent': return /:(proof|r\d+(t\d+)?:(maker|checker))$/.test(String(ev.step_id)) ? `${stepPhrase(String(ev.step_id), undefined)}…`.replace('escreveu', 'escrevendo').replace('terminou', 'em andamento') : null
+    case 'step_result': return `${ev.status === 'ok' ? '✓' : '✗'} ${stepPhrase(String(ev.step_id), ev.status)}${VERDICT_PT[d.result?.verdict] ? `: ${VERDICT_PT[d.result.verdict]}` : ''}`
+    case 'story_started': return 'parte começou'
+    case 'story_done': return d.status === 'delivered' || d.status === 'committed' ? 'parte pronta e entregue' : `parte parou: ${d.reason ?? d.status}`
+    case 'review_result': return `revisão: ${d.verdict === 'approved' ? 'aprovou' : d.verdict === 'changes_requested' ? 'pediu mudanças' : d.verdict ?? 'sem veredito'}${d.approved ? ', aceita' : d.errors?.length ? `, recusada (${d.errors.map((e: any) => e.code).join(', ')})` : ''}`
+    case 'budget_reserved': return `reservou ${d.calls ?? 1} chamada de ${d.family ?? 'modelo'}${PHASE_PT[d.phase] ? ` para ${PHASE_PT[d.phase]}` : ''}`
+    case 'mission_control': return `controle da missão: ${d.state === 'STOPPED' ? 'pausada' : d.state === 'DRAINING' ? 'pausando' : 'rodando'}`
+    case 'mission_paused': return `pausa por cota até ${d.resume_at}`
+    case 'mission_resumed': return 'retomou depois da pausa'
+    case 'preflight_result': return `checagem antes de começar: ${d.ready === false ? 'bloqueada' : 'ok'}`
+    case 'batch_open': return 'missão começou'
+    case 'batch_close': return 'missão terminou'
+    case 'operational_block': return `bloqueio: ${d.reason}`
+    case 'decision': if (DECISION_PT[d.decision]) return DECISION_PT[d.decision]
+      return d.decision === 'maker_ladder' ? `escada de quem escreve: ${d.outcome} → ${d.next}` : `decisão: ${d.decision}`
+    case 'contain_result': return d.ok === false ? `contenção: ${d.reason}` : null
+    case 'gates_done': return 'portões de qualidade conferidos'
+    default: return null
+  }
+}
+
+/** Atividade completa da missão em frases, a partir de um seq (o painel pede só o que é novo). */
+export function missionLog(repoDir: string, missionId: string, since = 0): LogLine[] {
+  const { events } = loadMission(repoDir, missionId)
+  const lines: LogLine[] = []
+  // o resultado de um passo não repete a parte: vem do pedido do mesmo passo
+  const unitOfStep = new Map<string, string>()
+  for (const ev of events) {
+    const unit = ev.kind === 'step_intent' ? unitOf(ev) : undefined
+    if (unit) unitOfStep.set(ev.step_id, unit)
+  }
+  for (const ev of events) {
+    if ((ev.seq ?? 0) <= since) continue
+    const text = logText(ev)
+    if (text) lines.push({ seq: ev.seq ?? 0, at: ev.at ?? null, unit: (unitOf(ev) ?? unitOfStep.get(ev.step_id))?.split(':')[0] ?? null, text })
+  }
+  return lines
+}

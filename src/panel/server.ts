@@ -20,7 +20,7 @@ import { pickFolder } from './folder-picker.ts'
 import { assertProjectPath, createOpenProjects } from './open-projects.ts'
 import { eligibleSkills, listPlugins, listSkills, readProjectOptions, readSkill, saveProjectOptions, setPlugin } from './options.ts'
 import { listProjects, registerProject } from './projects.ts'
-import { listUnits, readUnit } from './units.ts'
+import { listUnits, missionLog, readUnit } from './units.ts'
 import { resolveCurrentBuild } from './web-build.ts'
 import { createWebSocketHandler } from './websocket.ts'
 import { checkNativeSqlite, readPanelSnapshot, rebuildProjection } from './sqlite-index.ts'
@@ -384,6 +384,12 @@ export async function startServer({
               sendJson(res, 200, unitsMatch[3]
                 ? await readUnit(project.path, missionId, decodeURIComponent(unitsMatch[3]))
                 : listUnits(project.path, missionId))
+              return
+            }
+            const logMatch = pathname.match(/^\/api\/projects\/([^/]+)\/missions\/([^/]+)\/log$/)
+            if (logMatch && method === 'GET') {
+              const project = projects.get(decodeURIComponent(logMatch[1]))
+              sendJson(res, 200, missionLog(project.path, decodeURIComponent(logMatch[2]), Number(parsedUrl.searchParams.get('since') ?? 0) || 0))
               return
             }
             const chatMatch = pathname.match(/^\/api\/projects\/([^/]+)\/chat(?:\/(approve|reject|clear))?$/)
