@@ -462,6 +462,30 @@ describe('engine', () => {
     expect(result).toMatchObject({ status: 'delivered', reason: null })
   }, 120_000)
 
+  // Queda depois do modelo (no verde): a retomada reaproveita a chamada e não grava a telemetria dela de novo; antes, cada
+  // retomada somava o gasto do modelo outra vez no painel.
+  test('retomada_depois_do_modelo_nao_duplica_a_telemetria_dele', async () => {
+    const fixture = setupStoryFixture()
+    const original = fixture.deps.createEvalRunner
+    let greens = 0
+    fixture.deps.createEvalRunner = (opts: any) => {
+      const runner = original(opts)
+      return {
+        ...runner,
+        runEval: async (args: any) => {
+          if (args.phase === 'green' && ++greens === 1) throw new Error('queda no verde')
+          return runner.runEval(args)
+        },
+      }
+    }
+    await expect(runStory(fixture.deps, fixture.input)).rejects.toThrow('queda no verde')
+    const result = await runStory(fixture.deps, fixture.input)
+    expect(result).toMatchObject({ status: 'delivered' })
+
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    expect(events.filter((e) => e.kind === 'telemetry' && (e.data as any).role === 'maker')).toHaveLength(1)
+  }, 120_000)
+
   // CA2: Dado um contrato com roles.maker.family 'codex', quando runStory roda, então
   // lança AdeError com code 'family_without_canary' e exit 4, e o journal não tem nenhum
   // step_intent com step_id terminando em ':maker'.

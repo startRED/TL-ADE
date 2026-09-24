@@ -880,13 +880,18 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
 
     let makerDurationMs = 0
     
-    const appendMakerTelemetry: (dispatch: any, outcome: 'ok' | 'rework' | 'park' | 'stop') => Promise<void> = (dispatch, outcome): Promise<void> => deps.journal.append({
+    // Retomada reaproveita a chamada do modelo já feita: a telemetria dela já está no journal e gravá-la de novo dobrava o
+    // gasto da parte no painel (e com duração de milissegundos).
+    const makerStepId = `${storyId}:${tag}:maker`
+    const appendMakerTelemetry: (dispatch: any, outcome: 'ok' | 'rework' | 'park' | 'stop') => Promise<void> = async (dispatch, outcome): Promise<void> => {
+      if (readEvents().some((e) => e.kind === 'telemetry' && e.data?.step_id === makerStepId)) return
+      await deps.journal.append({
       kind: 'telemetry',
       unit: storyId,
       data: buildModelTelemetry({
         mission_id: missionId,
         story_id: storyId,
-        step_id: `${storyId}:${tag}:maker`,
+        step_id: makerStepId,
         family: rung.family,
         role: 'maker',
         effort: rung.effort ?? 'default',
@@ -906,6 +911,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         tool_output_model_bytes: 0,
       }),
     })
+    }
 
     const dispatchMaker = dispatcherFor(rung.family)
     if (!dispatchMaker) throw new AdeError('invalid_ladder', `degrau da família ${rung.family} sem despachante`, 4)
