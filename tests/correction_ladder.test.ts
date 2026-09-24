@@ -301,3 +301,16 @@ test('CA6_engine_correction_round_carries_chargeable_reds_and_open_findings', as
   expect(correction.red_tests).toEqual(['tests/a.test.ts > nova'])
   expect(correction.handoff.open_findings).toEqual([])
 }, 30000)
+
+// 24/09, missão real (S2): o modelo foi cortado por turnos com o trabalho feito; a continuação terminou bem sem precisar
+// mudar mais nada e o motor, comparando só com a tentativa cortada, estacionou em maker_no_change. A continuação de um
+// corte compara com o começo da rodada.
+test('continuacao_de_corte_que_termina_sem_mudar_mais_nada_segue', async () => {
+  const subject = fixture([
+    { result: { subtype: 'error_max_turns', num_turns: 30 }, changes: true },
+    { result: { subtype: 'success', num_turns: 10 }, changes: false },
+  ])
+  const result = await subject.run()
+  expect(subject.dispatched).toHaveBeenCalledTimes(2)
+  expect(result.reason).not.toBe('maker_no_change')
+})

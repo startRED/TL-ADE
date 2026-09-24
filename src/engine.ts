@@ -647,7 +647,23 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     }
     return true
   }
-  let redValid = await redIsValid(treeBefore)
+  // Prova que é a suíte inteira do projeto (o script test, como o compilador monta a V1) já falha na base por vermelhas
+  // antigas: esse vermelho não prova nada da parte, e a etapa de provas roda do mesmo jeito (S2 da missão real).
+  const projectTest = (() => {
+    try {
+      const script = JSON.parse(fs.readFileSync(path.join(worktreeDir, 'package.json'), 'utf8'))?.scripts?.test
+      return typeof script === 'string' ? script.trim().split(/\s+/) : null
+    } catch {
+      return null
+    }
+  })()
+  const sameArgv = (a: string[], b: string[] | null) => !!b && a.length === b.length && a.every((x, i) => x === b[i])
+  // Genérica = roda a suíte inteira e não cita arquivo de teste como evidência (o compilador cita só o package.json);
+  // prova específica cita o teste dela e o vermelho da base vale.
+  const wholeSuite = story.evals.length > 0 && story.evals.every((e: any) =>
+    (sameArgv(e.argv ?? [], projectTest) || sameArgv(e.argv ?? [], ['node', 'node_modules/vitest/vitest.mjs', 'run']))
+    && (e.evidence ?? []).every((ev: string) => ev === 'package.json'))
+  let redValid = (await redIsValid(treeBefore)) && !(wholeSuite && !started)
   if (!redValid && !started) {
     const writer = await proofWriterFor()
     if (writer) {
@@ -1064,7 +1080,9 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         return await parkStory(parkReason)
       }
       await appendMakerTelemetry(dispatch, 'rework')
-      treeBeforeAttempt = tree
+      // Corte por turnos deixa trabalho pela metade que a continuação termina: ela compara com a árvore de antes do corte,
+      // senão terminar sem precisar mudar mais nada virava maker_no_change (S2 da missão real).
+      if (makerOutcome.kind !== 'max_turns') treeBeforeAttempt = tree
       if (decision.countsAsRound) {
         round++
         attempt = 0

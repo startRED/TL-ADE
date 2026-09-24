@@ -74,6 +74,8 @@ interface SetupFixtureOptions {
   storyMaxModelCalls?: number
   /** Pedido sem prova escrita: o eval passa na base até existir tests/proof.txt, que a etapa de prova escreve. */
   proof?: boolean
+  /** A prova é a suíte inteira do projeto (script test do package.json), e ela já falha na base. */
+  wholeSuite?: boolean
 }
 
 function setupStoryFixture(options: SetupFixtureOptions = {}) {
@@ -101,6 +103,7 @@ function setupStoryFixture(options: SetupFixtureOptions = {}) {
 
   fs.mkdirSync(path.join(repo.dir, 'tests'), { recursive: true })
   fs.writeFileSync(path.join(repo.dir, 'tests/check.mjs'), checkCode, 'utf8')
+  if (options.wholeSuite) fs.writeFileSync(path.join(repo.dir, 'package.json'), JSON.stringify({ scripts: { test: 'node tests/check.mjs' } }))
   repo.git(['add', '-A'])
   repo.git(['commit', '-m', 'commit inicial'])
 
@@ -157,7 +160,7 @@ function setupStoryFixture(options: SetupFixtureOptions = {}) {
       evidence: [],
     },
     guardrails: {
-      scope_paths: options.proof ? ['src/**', 'tests/**', 'tests/proof.txt'] : ['src/**', 'tests/**'],
+      scope_paths: options.wholeSuite ? ['src/**', 'tests/**', 'tests/proof.txt', 'package.json'] : options.proof ? ['src/**', 'tests/**', 'tests/proof.txt'] : ['src/**', 'tests/**'],
       do_not_touch: ['.ade/**'],
       autonomy: 'safe',
     },
@@ -176,7 +179,7 @@ function setupStoryFixture(options: SetupFixtureOptions = {}) {
         expect_exit: 0,
         timeout_s: 120,
         max_output_bytes: 65536,
-        evidence: ['tests/check.mjs'],
+        evidence: options.wholeSuite ? ['package.json'] : ['tests/check.mjs'],
         strictness: {
           mode: 'must_fail_before',
         },
@@ -191,7 +194,7 @@ function setupStoryFixture(options: SetupFixtureOptions = {}) {
         expect_exit: 0,
         timeout_s: 120,
         max_output_bytes: 65536,
-        evidence: ['tests/check.mjs'],
+        evidence: options.wholeSuite ? ['package.json'] : ['tests/check.mjs'],
         strictness: {
           mode: 'must_fail_before',
         },
@@ -245,7 +248,7 @@ function setupStoryFixture(options: SetupFixtureOptions = {}) {
   })
 
   const makerActions = [
-    ...(options.proof ? [{ files: { 'tests/proof.txt': 'hello.txt precisa dizer ok\n' }, result: { format_version: 1, story_id: 'ADE-T1', state: 'done', phase: 'red', round: 1, tree_before: '0123456789abcdef', tree_after: 'fedcba9876543210', eval_records: [], gate_records: [], passes: false, reason: 'provas escritas', sources: ['contract'] }, stdout: fakeStdout }] : []),
+    ...(options.proof || options.wholeSuite ? [{ files: { 'tests/proof.txt': 'hello.txt precisa dizer ok\n' }, result: { format_version: 1, story_id: 'ADE-T1', state: 'done', phase: 'red', round: 1, tree_before: '0123456789abcdef', tree_after: 'fedcba9876543210', eval_records: [], gate_records: [], passes: false, reason: 'provas escritas', sources: ['contract'] }, stdout: fakeStdout }] : []),
     {
       files: {
         'src/hello.txt': 'ok\n',
@@ -518,6 +521,17 @@ describe('engine', () => {
     const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
     expect(events.some((e) => e.kind === 'decision' && (e.data as any).decision === 'review_invalid_retry')).toBe(true)
     expect(events.some((e) => String(e.step_id ?? '').includes(':r2:'))).toBe(false)
+  }, 120_000)
+
+  // 24/09, missão real (S2): a V1 era a suíte inteira e já falhava na base por vermelhas antigas; o vermelho "valeu" e a
+  // etapa de provas não rodou (o modelo que escreve o código escreveu o próprio teste). Vermelho da suíte inteira antes
+  // das provas não prova nada da parte: a etapa de provas roda.
+  test('suite_inteira_ja_vermelha_na_base_ainda_passa_pela_etapa_de_provas', async () => {
+    const fixture = setupStoryFixture({ wholeSuite: true })
+    const result = await runStory(fixture.deps, fixture.input)
+    expect(result).toMatchObject({ status: 'delivered' })
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    expect(events.some((e) => e.kind === 'decision' && (e.data as any).decision === 'proof_written')).toBe(true)
   }, 120_000)
 
   // CA2: Dado um contrato com roles.maker.family 'codex', quando runStory roda, então
