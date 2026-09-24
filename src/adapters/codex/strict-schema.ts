@@ -48,3 +48,24 @@ export function dropNulls<T>(value: T): T {
   if (!value || typeof value !== 'object') return value
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null).map(([k, v]) => [k, dropNulls(v)])) as T
 }
+
+/**
+ * Ajusta a resposta do Codex ao schema original naquilo que o modo estrito escondeu dele (dependencies e maxLength), sem
+ * mudar o que ela diz: texto acima do limite é encurtado com reticências, e campo booleano false com dependências
+ * ausentes sai (false é o mesmo que ausente; `withdrawn: false` sem citação recusava a revisão inteira).
+ */
+export function fitToSchema<T>(value: T, schema: any, root: any = schema): T {
+  const node = typeof schema?.$ref === 'string' ? root?.definitions?.[schema.$ref.replace('#/definitions/', '')] : schema
+  if (!node || value === null || value === undefined) return value
+  if (typeof value === 'string' && typeof node.maxLength === 'number' && value.length > node.maxLength) {
+    return (value.slice(0, node.maxLength - 1) + '…') as T
+  }
+  if (Array.isArray(value)) return (node.items ? value.map((v) => fitToSchema(v, node.items, root)) : value) as T
+  if (typeof value !== 'object') return value
+  const out: Record<string, unknown> = { ...(value as Record<string, unknown>) }
+  for (const [key, sub] of Object.entries(node.properties ?? {})) if (key in out) out[key] = fitToSchema(out[key], sub, root)
+  for (const [key, deps] of Object.entries(node.dependencies ?? {})) {
+    if (out[key] === false && Array.isArray(deps) && deps.some((d) => !(d in out))) delete out[key]
+  }
+  return out as T
+}

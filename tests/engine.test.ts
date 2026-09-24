@@ -437,6 +437,11 @@ describe('engine', () => {
     expect(citable.length).toBeGreaterThan(0)
     expect(citable.filter((ref) => ref.startsWith('file:') && !/#L\d+-L\d+$/.test(ref))).toEqual([])
     expect(reviewPack).toContain('Copie contract_revision e input_revision')
+    // 24/09: o revisor (Codex na sandbox dele) tentou rodar a suíte, bateu em EPERM e reprovou por "V1 sem verde"; o
+    // resultado oficial das provas do motor vai no pacote e a política diz que ele vale.
+    expect(reviewPack).toContain('"proof_results"')
+    expect(reviewPack).toMatch(/"verdict": "green"/)
+    expect(reviewPack).toContain('proof_results é o resultado oficial')
   }, 90_000)
 
   // Queda depois de escrever as provas e antes do vermelho delas: a retomada partia da árvore de antes das provas

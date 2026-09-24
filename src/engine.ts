@@ -65,6 +65,7 @@ const REVIEW_POLICY = [
   '- Aprove só se o código e as provas cumprem os critérios do contrato; senão, liste os achados com severidade e ação.',
   '- Copie contract_revision e input_revision exatamente como estão em echo_exactly.',
   '- Em evidence, sources, evidence_refs e result_ref, cite só referências da lista citable_refs, escritas igual (arquivo sempre com intervalo de linhas).',
+  '- As provas já rodaram no motor, fora da sua sandbox: proof_results é o resultado oficial (verde julgado contra a largada conta como verde, e as vermelhas listadas nos avisos já existiam antes da parte). Não rode a suíte inteira nem reprove por não conseguir rodá-la; se precisar conferir, rode só as provas da parte.',
   '- Responda somente pelo schema.',
 ].join('\n')
 
@@ -1186,6 +1187,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     })
 
     const executedEvalRefs = []
+    const proofResults: Array<{ eval_id: string; verdict: string; warnings: string[] }> = []
     const redEvals: string[] = []
     for (let evalIdx = 0; evalIdx < story.evals.length; evalIdx++) {
       const evalDef = story.evals[evalIdx]
@@ -1199,6 +1201,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         // árvore de largada da parte (antes das provas): vermelha que já existia ali não impede o verde
         baseTree: findStoryStarted(readEvents(), storyId)?.tree_before,
       })
+      proofResults.push({ eval_id: evalId, verdict: evalRecord.verdict, warnings: evalRecord.warnings ?? [] })
       if (evalRecord.verdict !== 'green') redEvals.push(evalId)
     }
     if (redEvals.length > 0) {
@@ -1414,6 +1417,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
           ...JSON.parse(dedupStorySection(story).text),
           review_request: reviewRequest,
           echo_exactly: { contract_revision: expectedContractRevision, input_revision: { tree: treeAfterContain, digest: observedDigest } },
+          // resultado oficial das provas desta árvore, rodadas pelo motor (o revisor não precisa nem consegue rodar a suíte)
+          proof_results: proofResults,
           // só refs que também passam no padrão do schema: arquivo sem intervalo de linhas (file:x) é recusado na validação
           citable_refs: Array.from(verifiedRefs).filter((ref) => typeof ref === 'string' && (!ref.startsWith('file:') || /#L[1-9][0-9]*-L[1-9][0-9]*$/.test(ref))),
         }, null, 2),

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { AdeError } from '../../journal/errors.ts'
 import { buildCodexArgs } from './argv.ts'
 import { parseCodexOutput, parseCodexTokens, parseReviewResult } from './parse.ts'
-import { dropNulls, strictSchemaFile } from './strict-schema.ts'
+import { dropNulls, fitToSchema, strictSchemaFile } from './strict-schema.ts'
 import { runWorker } from '../../runner/spawn.ts'
 import { safeId } from '../../gates/output.ts'
 import { assertPaidAuthorization } from '../../engine/paid-call.ts'
@@ -13,6 +13,12 @@ import { assertPaidAuthorization } from '../../engine/paid-call.ts'
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url))
 const DEFAULT_REVIEW_SCHEMA = path.join(ROOT, 'schemas/review-result.schema.json')
 const UNIT_RESULT_SCHEMA = path.join(ROOT, 'schemas/unit-result.schema.json')
+
+/** O parecer vem em structured_output ou é o próprio envelope: ajusta ao schema original onde ele estiver. */
+function fitEnvelope(envelope: any, schema: any): any {
+  if (!envelope || typeof envelope !== 'object') return envelope
+  return envelope.structured_output ? { ...envelope, structured_output: fitToSchema(envelope.structured_output, schema) } : fitToSchema(envelope, schema)
+}
 
 /**
  * Despacha execução do modelo para o Codex via `step()` write-ahead.
@@ -149,7 +155,7 @@ export async function dispatchCodex(opts: {
     })
 
     const parsed = parseCodexOutput(result.stdout, resultFile)
-    const envelope = dropNulls(parsed.envelope)
+    const envelope = fitEnvelope(dropNulls(parsed.envelope), JSON.parse(fs.readFileSync(schemaPath, 'utf8')))
     const error = parsed.error
     const pr = parseReviewResult(envelope)
     const tokens = parseCodexTokens(envelope)
