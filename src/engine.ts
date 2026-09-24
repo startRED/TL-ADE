@@ -750,18 +750,18 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   let attempt = 0
   let treeBeforeAttempt = treeBefore
 
-  // Nova tentativa depois de correção esgotada: refazer as rodadas antigas pelo cache não fecha, porque a worktree já
-  // está no estado final (a revisão antiga fica obsoleta e o modelo antigo "não muda nada"). A parte começa uma rodada
-  // nova sobre a árvore atual, com os achados da última revisão (S2 da missão real, 24/09).
+  // Retomada de parte que já teve revisão reprovada (queda, pausa, checagem prévia, nova tentativa): refazer as rodadas
+  // antigas pelo cache não fecha, porque a worktree já está no estado final (a revisão antiga fica obsoleta e o modelo
+  // antigo "não muda nada"). A parte começa uma rodada nova sobre a árvore atual, com os achados da última revisão
+  // (S2 da missão real, 24/09). Parte aprovada ou já commitada segue o caminho de sempre até a entrega.
   {
     const events = readEvents()
     const unitOf = (e: any) => e.unit ?? e.data?.unit
-    const lastDone = events.map((e, i) => [e, i] as const).filter(([e]) => e.kind === 'story_done' && unitOf(e) === storyId).at(-1)
-    const retriedAfter = lastDone && events.slice(lastDone[1]).some((e) => e.kind === 'decision' && e.data?.decision === 'unit_retry' && unitOf(e) === storyId)
+    const committed = events.some((e) => e.kind === 'step_result' && e.step_id === `${storyId}:commit` && e.status === 'ok')
     // a revisão da maior rodada (a mais recente em empate): uma retomada antiga pode ter regravado revisões da rodada 1
     const lastReview = events.filter((e) => e.kind === 'review_result' && unitOf(e) === storyId && e.data?.result)
       .reduce<any>((best, e) => (!best || Number(e.data?.round ?? 0) >= Number(best.data?.round ?? 0) ? e : best), null)
-    if (retriedAfter && lastReview && ['rework_exhausted', 'unresolved_blocking_findings', 'stagnation'].includes(String(lastDone[0].data?.reason))) {
+    if (started && lastReview && !lastReview.data?.approved && !committed) {
       const prefix = `${storyId}:r`
       const rounds = events.map((e) => String(e.step_id ?? '')).filter((id) => id.startsWith(prefix)).map((id) => Number.parseInt(id.slice(prefix.length), 10)).filter(Number.isFinite)
       round = Math.max(1, ...rounds) + 1

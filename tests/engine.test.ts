@@ -589,6 +589,35 @@ describe('engine', () => {
     expect((deferred?.data as any)?.findings?.[0]?.id).toBe('F3')
   }, 180_000)
 
+  // Retomada depois de queda (sem nova tentativa) numa parte que já teve revisão reprovada também começa rodada nova: o
+  // replay das rodadas antigas sobre a worktree já no estado final deixava as revisões obsoletas (S2 da missão real).
+  test('retomada_depois_de_revisao_reprovada_comeca_rodada_nova', async () => {
+    const fixture = setupStoryFixture()
+    const makerFile = path.join(fixture.scenarioDir, 'maker.json')
+    const base = JSON.parse(fs.readFileSync(makerFile, 'utf8'))[0]
+    fs.writeFileSync(makerFile, JSON.stringify(['ok v1\n', 'ok v2\n'].map((c) => ({ ...base, files: { 'src/hello.txt': c } }))))
+    const changes = approvedReviewAction()
+    Object.assign(changes.result as any, {
+      verdict: 'changes_requested',
+      requested_action: 'rework',
+      action_items: [{ id: 'F1', severity: 'high', category: 'patch', problem: 'ainda falta', required_action: 'corrigir', target_role: 'maker', evidence_refs: ['eval:E1'], location: 'src/hello.txt' }],
+    })
+    ;(changes.result as any).handoff.next_action = 'rework'
+    fs.writeFileSync(path.join(fixture.scenarioDir, 'checker.json'), JSON.stringify([changes, approvedReviewAction()]))
+    const realDispatch = fixture.deps.dispatchClaude
+    let calls = 0
+    fixture.deps.dispatchClaude = async (opts: any) => {
+      if (++calls === 2) throw new Error('queda na rodada 2')
+      return realDispatch(opts)
+    }
+
+    await expect(runStory(fixture.deps, fixture.input)).rejects.toThrow('queda na rodada 2')
+    const result = await runStory(fixture.deps, fixture.input)
+    expect(result).toMatchObject({ status: 'delivered' })
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    expect(events.some((e) => e.kind === 'decision' && (e.data as any).decision === 'retry_new_round')).toBe(true)
+  }, 180_000)
+
   // CA2: Dado um contrato com roles.maker.family 'codex', quando runStory roda, então
   // lança AdeError com code 'family_without_canary' e exit 4, e o journal não tem nenhum
   // step_intent com step_id terminando em ':maker'.
