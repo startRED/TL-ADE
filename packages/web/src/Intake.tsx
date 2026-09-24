@@ -5,7 +5,7 @@ import { apiFetch, postJson, subscribeEvents } from './api.ts'
 import type { Mission } from './App.tsx'
 import MissionScore from './Units.tsx'
 import { shortPath } from './format.ts'
-import { EASE_OUT, reducedMotion } from './motion.ts'
+import { EASE_OUT, scrollToTop } from './motion.ts'
 import Plate from './Plate.tsx'
 
 interface Question {
@@ -91,7 +91,7 @@ export default function IntakeFlow({ project, mission, missionCount, snapshotLoa
   // etapa nova começa do topo: a entrevista respondida no fim da página não deixa o plano aparecer pela metade
   const stage = intake?.stage
   useEffect(() => {
-    if (stage) window.scrollTo({ top: 0, behavior: reducedMotion() ? 'auto' : 'smooth' })
+    if (stage) scrollToTop(true)
   }, [stage])
 
   async function act(path: string, body: unknown) {

@@ -805,7 +805,7 @@ h3.ui-heading, h4.ui-heading { font-size: 1.15rem; }
 .skill-body { white-space: pre-wrap; overflow-x: auto; max-height: 24rem; font: 400 12px/1.5 var(--mono); background: var(--ground); border: 1px solid var(--sage-line); padding: .6rem .75rem; margin: .35rem 0 0; }
 .push { margin-left: auto; }
 .model-field { width: 10rem; }
-.conversation { margin-top: 4rem; }
+.conversation { position: relative; z-index: 16; margin-top: 4rem; }
 .rail { display: flex; flex-direction: column; gap: .75rem; max-width: 62rem; padding: 1.25rem 1.5rem; border: 1px solid var(--sage-line); background: var(--ground-raised); }
 .rail-turns { max-height: 28rem; overflow-y: auto; display: flex; flex-direction: column; gap: .75rem; }
 .rail-empty { color: var(--ink-faint); }

@@ -9,7 +9,7 @@ import ModelsPage from './Models.tsx'
 import OptionsPage from './Options.tsx'
 import SkillsPage from './Skills.tsx'
 import Appearance, { LIGHT_PALETTES, PALETTES, type Palette } from './Appearance.tsx'
-import { EASE_OUT } from './motion.ts'
+import { EASE_OUT, scrollToTop } from './motion.ts'
 import { shortPath } from './format.ts'
 import { brl } from './format.ts'
 
@@ -89,7 +89,7 @@ export default function App() {
   // missão anterior aberta pelo histórico (null: a atual)
   const [pastId, setPastId] = useState<string | null>(null)
   // trocar de página começa do topo, não da altura em que a outra estava
-  useEffect(() => { window.scrollTo(0, 0) }, [page])
+  useEffect(() => { scrollToTop() }, [page])
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -140,7 +140,7 @@ export default function App() {
   const missions = active && snapshot?.projectId === active.id ? snapshot.data.missions : []
   // qualquer missão do histórico abre só para ver, inclusive a mais recente depois de fechada
   const past = pastId ? missions.find((m) => m.id === pastId) ?? null : null
-  const openPast = (id: string | null) => { setPastId(id); window.scrollTo(0, 0) }
+  const openPast = (id: string | null) => { setPastId(id); scrollToTop() }
 
   return (
     <>
