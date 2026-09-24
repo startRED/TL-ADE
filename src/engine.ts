@@ -1678,7 +1678,7 @@ ${formatProvenanceTrailers({ mission: missionId, story: storyId, round, ...maker
         data: {
           status: deliveryStatus,
           reason: delivery.delivered ? null : delivery.reason,
-          commit: commitSha,
+          commit: delivery.commit ?? deliverCommit,
           spec_revision: story.spec_revision,
           unit: storyId,
           verified_tree: treeAfterContain,
@@ -1690,7 +1690,7 @@ ${formatProvenanceTrailers({ mission: missionId, story: storyId, round, ...maker
         status: deliveryStatus,
         exitCode: delivery.delivered ? 0 : 3,
         reason: delivery.delivered ? null : delivery.reason,
-        commit: commitSha,
+        commit: delivery.commit ?? deliverCommit,
       }
     }
 

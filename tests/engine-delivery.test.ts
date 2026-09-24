@@ -449,6 +449,8 @@ describe('engine delivery', () => {
     const result = await runStory(fixture.deps, fixture.input)
 
     expect(result.status).toBe('delivered')
+    // o commit informado é o entregue (rebaseado), não o de antes do rebase
+    expect(result.commit).toBe(fixture.repo.git(['rev-parse', 'main']).trim())
     expect(fixture.repo.git(['log', '-1', '--format=%s', 'main~1']).trim()).toBe('commit concorrente na base')
     expect(fs.existsSync(path.join(fixture.repo.dir, 'outro.txt'))).toBe(true)
     expect(fs.readFileSync(path.join(fixture.repo.dir, 'src', 'hello.txt'), 'utf8')).toContain('ok')
