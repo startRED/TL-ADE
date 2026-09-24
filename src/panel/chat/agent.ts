@@ -5,12 +5,13 @@ import type { ChatAgent, ChatAgentInput } from './chat.ts'
 const MAX_OUTPUT = 16 * 1024 * 1024
 const TIMEOUT_MS = 15 * 60 * 1000
 
-function intro({ cwd, history, prompt }: ChatAgentInput): string {
+function intro({ cwd, history, prompt, context }: ChatAgentInput): string {
   const past = history.slice(-8).map((t) => `${t.role === 'user' ? 'Usuário' : 'Assistente'}: ${t.text.slice(0, 1500)}`).join('\n')
   return [
     'Você é o assistente de conversa da TL-ADE. Responda em português, direto e curto.',
     `Você está numa cópia isolada do projeto (${cwd}); pode criar e alterar arquivos dela, e suas mudanças viram uma proposta que a pessoa aprova ou recusa.`,
     'Não rode comandos que alterem o projeto (instalar pacote, git) e não faça commit. Ao mudar arquivos, comece a resposta com uma linha curta dizendo o que mudou.',
+    context,
     past && `Conversa até aqui:\n${past}`,
     `Pergunta: ${prompt}`,
   ].filter(Boolean).join('\n\n')

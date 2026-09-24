@@ -65,6 +65,7 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | [0038](0038-pasta-da-parte-e-medida-pela-largada.md) | Pasta de parte parada é liberada e a contenção mede contra a árvore de largada (emenda o ADR 0014) | Aceito (pedido de Erick, 2026-09-23) |
 | [0039](0039-catalogo-real-e-escolha-de-skills-pelo-plano.md) | Catálogo real de skills e escolha por parte pelo plano (emenda o ADR 0009) | Aceito (pedido de Erick, 2026-09-24) |
 | [0040](0040-ate-quatro-skills-por-parte.md) | Até quatro skills por parte, escolhidas conforme a parte (emenda os ADRs 0009 e 0039) | Aceito (pedido de Erick, 2026-09-24) |
+| [0041](0041-chat-com-memoria-skills-e-busca-ideias-do-hermes.md) | Chat com memória persistente, skills por pergunta e busca nas conversas (ideias do Hermes Agent) | Aceito (pedido de Erick, 2026-09-24) |
 
 ## Mapa decisão → onde ela aparece
 

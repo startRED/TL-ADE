@@ -3,7 +3,8 @@ import path from 'node:path'
 import { AdeError } from '../journal/errors.ts'
 import { writeJsonAtomic } from '../mission/plan-lifecycle.ts'
 import { DEFAULT_MISSION_OPTIONS, validateMissionOptions, type MissionOptions } from '../mission/options.ts'
-import { inspectCatalog, listCatalog } from '../skills/catalog.ts'
+import { inspectCatalog, listCatalog, loadApprovedSkills } from '../skills/catalog.ts'
+import { selectStorySkills } from '../skills/select.ts'
 
 export interface SkillSummary { id: string; domain: string | null; trust: string; source: string; summary: string }
 
@@ -73,6 +74,22 @@ export function setPlugin(catalogDir: string, repoDir: string, body: unknown): v
   if (enabled) off.delete(source)
   else off.add(source)
   writeJsonAtomic(pluginsPath(repoDir), { disabled: [...off].sort() })
+}
+
+/** Placar BM25 mínimo para uma skill entrar numa pergunta do chat; abaixo disso a pergunta vai sem skill. */
+export const CHAT_SKILL_MIN_SCORE = 4
+
+/**
+ * Skills de uma pergunta do chat (o "interceptador" determinístico): elegíveis no projeto, sem scripts,
+ * ranqueadas por BM25 contra a pergunta, no máximo 2, e lidas conferindo os bytes contra o índice.
+ */
+export function chatSkills(catalogDir: string, repoDir: string, prompt: string): Array<{ id: string; content: string }> {
+  const off = new Set(disabledSources(repoDir))
+  const candidates = readIndex(catalogDir).entries.filter((e) => e.trust !== 'quarantine' && !e.has_scripts && !off.has(e.source))
+  const picked = selectStorySkills({ story: { task: prompt }, candidates, budget: { maxSkills: 2, maxTotalTokens: 12000 } })
+    .filter((s) => s.score >= CHAT_SKILL_MIN_SCORE)
+  if (picked.length === 0) return []
+  return loadApprovedSkills({ catalogDir, approvedSkills: picked.map((s) => s.id) }).skills.map((s) => ({ id: s.id, content: s.content }))
 }
 
 /** Skills que o próximo pedido pode usar: fora da quarentena e de fonte ligada no projeto. */

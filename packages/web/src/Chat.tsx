@@ -10,7 +10,9 @@ interface Proposal {
   files: Array<{ file: string; lines: Array<{ kind: Kind; text: string }> }>
   blocked_reason?: string
 }
-interface Turn { id: string; role: 'user' | 'assistant'; text: string; at: string; proposal?: Proposal }
+interface Turn { id: string; role: 'user' | 'assistant'; text: string; at: string; proposal?: Proposal; skills?: string[]; memory?: string[] }
+interface Hit { project: string; conversation: string; turn: string; role: 'user' | 'assistant'; at: string; snippet: string }
+interface Memory { memoria: string[]; usuario: string[]; limites: { memoria: number; usuario: number } }
 interface ChatState { busy: boolean; turns: Turn[] }
 
 const FAMILIES = ['claude', 'codex', 'agy'] as const
@@ -75,10 +77,11 @@ export default function ChatPanel({ projectId }: { projectId: string }) {
           <Heading as="h2" size="4">Conversa</Heading>
         </Flex>
         <Button size="1" variant="ghost" color="gray" disabled={state.busy || state.turns.length === 0} onClick={() => act(() => postJson(`${base}/clear`, {}))}>
-          Limpar conversa
+          Nova conversa
         </Button>
       </Flex>
       <Text size="2" color="gray">O agente trabalha numa cópia do projeto; o que ele mudar só entra no projeto se você aprovar.</Text>
+      <ChatTools />
 
       <div className="rail-turns" ref={turnsRef}>
         {state.turns.length === 0 && !state.busy && <Text size="2" color="gray" className="rail-empty">Pergunte sobre o código ou peça uma mudança pequena.</Text>}
@@ -86,6 +89,8 @@ export default function ChatPanel({ projectId }: { projectId: string }) {
           <div key={t.id} className={`chat-turn ${t.role}`}>
             <Text as="p" size="1" color="gray">{t.role === 'user' ? 'Você' : 'Agente'}</Text>
             <Text as="p" size="2" className="chat-text">{t.text}</Text>
+            {t.skills && <Text as="p" size="1" color="gray">Skills usadas: {t.skills.join(', ')}</Text>}
+            {t.memory?.map((m) => <Text key={m} as="p" size="1" color="gray" className="chat-memory">{m}</Text>)}
             {t.proposal && <PermissionCard proposal={t.proposal} onDecide={(action) => act(() => postJson(`${base}/${action}`, { id: t.id }))} />}
           </div>
         ))}
@@ -154,5 +159,64 @@ function PermissionCard({ proposal, onDecide }: { proposal: Proposal; onDecide: 
         )
         : <Badge color={proposal.status === 'aprovada' ? 'green' : 'gray'}>{proposal.status}</Badge>}
     </section>
+  )
+}
+
+/** Busca nas conversas (atuais e arquivadas) e a memória que o agente guarda entre conversas. */
+function ChatTools() {
+  const [query, setQuery] = useState('')
+  const [hits, setHits] = useState<Hit[] | null>(null)
+  const [memory, setMemory] = useState<Memory | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function run(fn: () => Promise<void>) {
+    setError(null)
+    try {
+      await fn()
+    } catch (err) {
+      setError(messageOf(err))
+    }
+  }
+
+  const search = (e: FormEvent) => {
+    e.preventDefault()
+    run(async () => setHits(await apiFetch<Hit[]>(`/api/chat/search?q=${encodeURIComponent(query)}`)))
+  }
+  const remove = (target: 'memoria' | 'usuario', old: string) => run(async () => setMemory(await postJson<Memory>('/api/memory', { ops: [{ op: 'remove', target, old }] })))
+
+  return (
+    <Flex direction="column" gap="2">
+      <details className="activity-log">
+        <summary>Buscar nas conversas</summary>
+        <form onSubmit={search}>
+          <Flex gap="2" align="center">
+            <TextField.Root size="1" variant="soft" color="gray" aria-label="Buscar nas conversas" placeholder="palavras ou &quot;frase exata&quot;" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <Button type="submit" size="1" variant="soft" disabled={!query.trim()}>Buscar</Button>
+          </Flex>
+        </form>
+        {hits && hits.length === 0 && <Text as="p" size="1" color="gray">Nada encontrado.</Text>}
+        {hits?.map((h) => (
+          <Text key={`${h.conversation}/${h.turn}`} as="p" size="1" className="chat-hit">
+            <span className="mono">{h.project} · {h.conversation === 'atual' ? 'conversa atual' : 'arquivada'} · {h.role === 'user' ? 'você' : 'agente'}</span> {h.snippet}
+          </Text>
+        ))}
+      </details>
+      <details className="activity-log" onToggle={(e) => { if ((e.target as HTMLDetailsElement).open) run(async () => setMemory(await apiFetch<Memory>('/api/memory'))) }}>
+        <summary>Memória entre conversas</summary>
+        {memory && (['usuario', 'memoria'] as const).map((target) => (
+          <div key={target}>
+            <Text as="p" size="1" weight="bold">{target === 'usuario' ? 'Sobre você' : 'Sobre o trabalho'} ({memory[target].join('\n§\n').length}/{memory.limites[target]})</Text>
+            {memory[target].length === 0 && <Text as="p" size="1" color="gray">Vazia. O agente guarda aqui o que valer para as próximas conversas.</Text>}
+            {memory[target].map((entry) => (
+              <Flex key={entry} gap="2" align="center" justify="between">
+                <Text size="1">{entry}</Text>
+                <Button size="1" variant="ghost" color="gray" aria-label={`Apagar da memória: ${entry}`} onClick={() => remove(target, entry)}>Apagar</Button>
+              </Flex>
+            ))}
+          </div>
+        ))}
+      </details>
+      {error && <Text size="1" color="red" role="alert">{error}</Text>}
+    </Flex>
   )
 }

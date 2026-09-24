@@ -3,7 +3,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { AdeError } from '../../journal/errors.ts'
 import { writeJsonAtomic } from '../../mission/plan-lifecycle.ts'
+import { applyMemoryOps, describeMemoryOp, extractMemoryOps, memoryPromptBlock } from '../../memory/memory.ts'
 import { CATALOG, EFFORTS, FAMILIES, type Effort, type Family } from '../../models/catalog.ts'
+import { chatSkills } from '../options.ts'
 import type { ActivityKind } from '../open-projects.ts'
 import type { DiffFile } from '../units.ts'
 import { createChatGit, MESSAGES } from './copy.ts'
@@ -20,7 +22,7 @@ interface StoredProposal {
   discarded_ref?: string
 }
 
-interface StoredTurn { id: string; role: 'user' | 'assistant'; text: string; at: string; proposal?: StoredProposal }
+interface StoredTurn { id: string; role: 'user' | 'assistant'; text: string; at: string; proposal?: StoredProposal; skills?: string[]; memory?: string[] }
 
 export interface ChatTurnView {
   id: string
@@ -28,6 +30,10 @@ export interface ChatTurnView {
   text: string
   at: string
   proposal?: { status: ProposalStatus; summary: string; files: DiffFile[]; blocked_reason?: string }
+  /** Skills do catálogo que entraram na pergunta. */
+  skills?: string[]
+  /** O que a resposta guardou, trocou ou apagou na memória (ou por que não guardou). */
+  memory?: string[]
 }
 
 export interface ChatAgentInput {
@@ -36,6 +42,8 @@ export interface ChatAgentInput {
   effort?: Effort
   cwd: string
   prompt: string
+  /** Memória persistente e skills escolhidas para a pergunta, já montadas em texto. */
+  context?: string
   history: Array<{ role: 'user' | 'assistant'; text: string }>
 }
 
@@ -46,6 +54,9 @@ interface Project { id: string; path: string }
 
 const historyPath = (p: Project) => path.join(p.path, '.ade', 'chat', `${p.id}.json`)
 const copyPath = (p: Project) => path.join(p.path, '.ade', 'chat', 'wt', p.id)
+const archiveDir = (p: Project) => path.join(p.path, '.ade', 'chat', 'arquivo')
+/** A cada tantas perguntas a pessoa, o prompt lembra o modelo de revisar o que vale guardar (nudge do Hermes). */
+const MEMORY_NUDGE_EVERY = 10
 const conflict = (code: string, message: string) => new AdeError(code, message, 5)
 const invalid = (message: string) => new AdeError('chat_pergunta_invalida', message, 2)
 
@@ -72,8 +83,12 @@ function parseQuestion(body: any): Omit<ChatAgentInput, 'cwd' | 'history'> {
  * que muda arquivos vira proposta que o usuário aprova (commit no projeto) ou recusa (árvore guardada em ref).
  * O histórico é durável em .ade/chat/<id>.json; as operações de um projeto passam em fila.
  */
-export function createChat({ agent, beginActivity, missionRunning, onError }: {
+export function createChat({ agent, homeDir, catalogDir, beginActivity, missionRunning, onError }: {
   agent: ChatAgent
+  /** Pasta pessoal onde fica a memória (~/.ade/memory). */
+  homeDir: string
+  /** Catálogo de skills sincronizado. */
+  catalogDir: string
   beginActivity: (projectId: string, kind: ActivityKind) => () => void
   missionRunning: (projectId: string) => boolean
   onError: (message: string) => void
@@ -106,16 +121,50 @@ export function createChat({ agent, beginActivity, missionRunning, onError }: {
     return turn as StoredTurn & { proposal: StoredProposal }
   }
 
+  /** Memória, skills da pergunta e, de tempos em tempos, o lembrete de revisar a memória. */
+  function contextOf(p: Project, prompt: string, history: ChatAgentInput['history']): { context: string; skills: string[] } {
+    let skills: Array<{ id: string; content: string }> = []
+    try {
+      skills = chatSkills(catalogDir, p.path, prompt)
+    } catch (err) {
+      // Catálogo divergente ou inválido não derruba a conversa: a pergunta vai sem skill.
+      onError(`ade serve: skills do chat de ${p.id} indisponíveis: ${err instanceof Error ? err.message : String(err)}\n`)
+    }
+    const asked = history.filter((t) => t.role === 'user').length + 1
+    const parts = [memoryPromptBlock(homeDir)]
+    if (asked % MEMORY_NUDGE_EVERY === 0) {
+      parts.push('Antes de responder, revise a conversa: se a pessoa corrigiu seu jeito de trabalhar ou contou algo durável sobre ela ou o ambiente, guarde com a marca <memoria>.')
+    }
+    for (const s of skills) parts.push(`Skill "${s.id}" (escolhida para esta pergunta; siga o que servir):\n${s.content.trim()}`)
+    return { context: parts.join('\n\n'), skills: skills.map((s) => s.id) }
+  }
+
+  /** Aplica as marcas de memória da resposta; a falha vira aviso no turno, nunca derruba a resposta. */
+  function remember(answer: string): { text: string; memory?: string[] } {
+    const { text, ops } = extractMemoryOps(answer)
+    if (ops.length === 0) return { text }
+    try {
+      applyMemoryOps(homeDir, ops)
+      return { text, memory: ops.map(describeMemoryOp) }
+    } catch (err) {
+      return { text, memory: [`Não guardei na memória: ${err instanceof Error ? err.message : String(err)}`] }
+    }
+  }
+
   async function runTurn(p: Project, question: Omit<ChatAgentInput, 'cwd' | 'history'>, history: ChatAgentInput['history']) {
     const wt = copyPath(p)
     let head: string | undefined
     let reply: StoredTurn
     try {
       head = await git.prepare(p.path, wt)
-      const { text } = await agent({ ...question, cwd: wt, history })
-      if (typeof text !== 'string') throw new Error('o agente não devolveu texto')
+      const { context, skills } = contextOf(p, question.prompt, history)
+      const { text: raw } = await agent({ ...question, cwd: wt, history, context })
+      if (typeof raw !== 'string') throw new Error('o agente não devolveu texto')
       const collected = await git.collect(wt, head)
+      const { text, memory } = remember(raw)
       reply = { id: `T-${crypto.randomUUID()}`, role: 'assistant', text, at: new Date().toISOString() }
+      if (skills.length > 0) reply.skills = skills
+      if (memory) reply.memory = memory
       if (collected) reply.proposal = { status: 'pendente', summary: summaryOf(text, question.prompt), ...collected }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -131,8 +180,10 @@ export function createChat({ agent, beginActivity, missionRunning, onError }: {
     read: async (p: Project): Promise<{ busy: boolean; turns: ChatTurnView[] }> => {
       const turns = load(p)
       const view: ChatTurnView[] = []
-      for (const { id, role, text, at, proposal } of turns) {
+      for (const { id, role, text, at, proposal, skills, memory } of turns) {
         const turn: ChatTurnView = { id, role, text, at }
+        if (skills) turn.skills = skills
+        if (memory) turn.memory = memory
         if (proposal) {
           turn.proposal = { status: proposal.status, summary: proposal.summary, files: proposal.files }
           const reason = proposal.status === 'pendente' ? await git.blockedReason(p.path, proposal.head, missionRunning(p.id)) : null
@@ -194,11 +245,16 @@ export function createChat({ agent, beginActivity, missionRunning, onError }: {
       return { ok: true, ref }
     }),
 
-    /** Esvazia o histórico; a proposta pendente é guardada numa ref antes do descarte. */
+    /**
+     * Começa conversa nova: a atual vai para .ade/chat/arquivo (a busca continua achando) e a proposta
+     * pendente é guardada numa ref antes do descarte.
+     */
     clear: (p: Project) => serialized(p.path, async () => {
       if (busy.has(p.path)) throw conflict('chat_ocupado', MESSAGES.chatBusy)
-      const pending = pendingOf(load(p))?.proposal
+      const turns = load(p)
+      const pending = pendingOf(turns)?.proposal
       const ref = pending ? await git.discard(copyPath(p), pending.head) : null
+      if (turns.length > 0) writeJsonAtomic(path.join(archiveDir(p), `${p.id}-${Date.now()}.json`), { turns })
       save(p, [])
       return { ok: true, ref }
     }),

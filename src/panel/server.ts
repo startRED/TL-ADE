@@ -10,6 +10,8 @@ import { requestMissionControl } from '../engine/control.ts'
 import { createInterventionController } from './control.ts'
 import { defaultChatAgent } from './chat/agent.ts'
 import { createChat, type ChatAgent } from './chat/chat.ts'
+import { searchChats } from './chat/search.ts'
+import { applyMemoryOps, MEMORY_LIMITS, parseMemoryOps, readMemory } from '../memory/memory.ts'
 import { createSessionManager } from './session.ts'
 import { createLocalQuotaPort } from '../adapters/local/quota.ts'
 import { refreshQuotaReceipts } from '../adapters/local/official-quota.ts'
@@ -208,6 +210,8 @@ export async function startServer({
   })
   const chat = createChat({
     agent: deps.chatAgent ?? defaultChatAgent,
+    homeDir,
+    catalogDir,
     beginActivity: projects.beginActivity,
     missionRunning: (projectId) => projects.hasActivity(projectId, 'mission'),
     onError: stderrWrite,
@@ -318,8 +322,17 @@ export async function startServer({
           return
         }
 
-        if (pathname.startsWith('/api/projects') || pathname.startsWith('/api/models') || pathname === '/api/usage' || pathname.startsWith('/api/skills')) {
+        if (pathname.startsWith('/api/projects') || pathname.startsWith('/api/models') || pathname === '/api/usage' || pathname.startsWith('/api/skills') || pathname === '/api/chat/search' || pathname === '/api/memory') {
           try {
+            if (pathname === '/api/chat/search' && method === 'GET') {
+              sendJson(res, 200, searchChats(projects.list(), parsedUrl.searchParams.get('q') ?? ''))
+              return
+            }
+            if (pathname === '/api/memory' && (method === 'GET' || method === 'POST')) {
+              if (method === 'POST') applyMemoryOps(homeDir, parseMemoryOps(await readJsonBody(req)))
+              sendJson(res, 200, { memoria: readMemory(homeDir, 'memoria'), usuario: readMemory(homeDir, 'usuario'), limites: MEMORY_LIMITS })
+              return
+            }
             if (pathname === '/api/skills' && method === 'GET') {
               const filter = (k: string) => parsedUrl.searchParams.get(k) || undefined
               sendJson(res, 200, listSkills(catalogDir, { domain: filter('domain'), trust: filter('trust'), source: filter('source') }))

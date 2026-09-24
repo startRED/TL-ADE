@@ -786,7 +786,7 @@ E37 **não** são recalculados agora: a medição da semana 1 do slice 1 replane
 | 4d | **Arquiteto/editor em dois passos** (Aider `architect_coder`: reasoner forte esboça, editor barato aplica) — o **modo conselheiro** do item (24) da v0.2 é a forma mínima disto (forte só diagnostica na correção) e roda primeiro | só como A/B contra Maker forte direto em `feature`/`subsystem` — tokens, tempo, rework, defeitos escapados, CI de primeira; vira default só se vencer |
 | 5 | **4º provider (OpenCode)** | necessidade de modelo fora das 3 famílias **e** aceitação explícita de chave de API (hoje é princípio) |
 | 6 | **OTel export** | `gen_ai.*` sair de status Development com tipo de token de cache **ou** Erick querer dashboard fora do painel |
-| 7 | **Memória por usuário** | `ade report` mostrando a mesma preferência re-perguntada ≥3× em missões diferentes |
+| 7 | **Memória por usuário** — subiu em 2026-09-24 por pedido de Erick, no chat, na forma do [ADR 0041](adr/0041-chat-com-memoria-skills-e-busca-ideias-do-hermes.md) | `ade report` mostrando a mesma preferência re-perguntada ≥3× em missões diferentes |
 | 8 | **CI loop (`ci_query`/`ci_rerun` ativos)** | repositório alvo com CI que a ADE não controla e ≥1 merge bloqueado por CI por semana |
 | 9 | **Tauri (painel como app)** | painel usado diariamente por ≥1 mês e `ade serve` virando fricção |
 | 10 | **Graft** | consulta de contexto recuperado passando de 6k tokens com `rg` em repositório real |
