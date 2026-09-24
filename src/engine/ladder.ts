@@ -45,7 +45,7 @@ export function buildLadder(rungs: Array<{ model: string | null; family: string;
 
 const capTurns = (caps: LadderCaps, turns: number) => (caps.maxTurns ? Math.min(turns, caps.maxTurns) : turns)
 
-export function ladderStart(ladder: Rung[], perRung = roundsPerRung('normal'), caps: LadderCaps = {}): LadderState {
+export function ladderStart(ladder: Rung[], perRung: number = roundsPerRung('normal'), caps: LadderCaps = {}): LadderState {
   return { ladder, rung: 0, rounds: 0, perRung, maxTurns: capTurns(caps, ladder[0].maxTurns), reserveUsed: Boolean(ladder[0].reserve), extended: false, caps, spent: 0 }
 }
 
@@ -116,4 +116,16 @@ export function correctionRequest(opts: { redTests: string[]; preexistingReds?: 
     red_tests: opts.redTests.filter((name) => !old.has(name)),
     findings: opts.findings.map(normalizeFinding).filter(isBlockingFinding),
   }
+}
+
+// Paradas em que a correção se esgotou: pedir nova tentativa só adianta com rodadas novas.
+const EXHAUSTED_REASONS = new Set(['rework_exhausted', 'unresolved_blocking_findings', 'maker_no_change'])
+
+/**
+ * Lotes extras de rodadas por degrau: um por nova tentativa pedida para a parte parada por correção esgotada. Sem isso a
+ * retomada reproduzia as mesmas decisões do journal e estacionava no mesmo ponto (S2 da missão real, 24/09).
+ */
+export function retryRoundBonus(events: Array<Record<string, any>>, storyId: string): number {
+  return events.filter((e) => e?.kind === 'decision' && e.data?.decision === 'unit_retry'
+    && (e.unit ?? e.data?.unit) === storyId && EXHAUSTED_REASONS.has(String(e.data?.previous_reason))).length
 }

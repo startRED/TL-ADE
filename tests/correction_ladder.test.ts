@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, expect, test, vi } from 'vitest'
 import { runStory } from '../src/engine.ts'
-import { buildLadder, classifyMakerOutcome, correctionRequest, ladderStart, nextAttempt, reserveRung } from '../src/engine/ladder.ts'
+import { buildLadder, classifyMakerOutcome, correctionRequest, ladderStart, nextAttempt, reserveRung, retryRoundBonus } from '../src/engine/ladder.ts'
 import { deriveStoryStates, isCompleted } from '../src/engine/schedule.ts'
 import { openJournal, readJournal } from '../src/journal/journal.ts'
 import { makeRepo, removeRepo } from './helpers/git-repo.ts'
@@ -313,4 +313,19 @@ test('continuacao_de_corte_que_termina_sem_mudar_mais_nada_segue', async () => {
   const result = await subject.run()
   expect(subject.dispatched).toHaveBeenCalledTimes(2)
   expect(result.reason).not.toBe('maker_no_change')
+})
+
+// 24/09, missão real (S2): a correção esgotou com achados reais do revisor; "tentar de novo" reproduzia as mesmas
+// decisões do journal e estacionava no mesmo ponto. Cada nova tentativa de parte parada por correção esgotada dá mais
+// um lote de rodadas por degrau.
+test('nova_tentativa_depois_de_correcao_esgotada_da_mais_rodadas', () => {
+  const retry = (reason: string) => ({ kind: 'decision', unit: 'S2', data: { decision: 'unit_retry', unit: 'S2', previous_reason: reason } })
+  expect(retryRoundBonus([], 'S2')).toBe(0)
+  expect(retryRoundBonus([retry('rework_exhausted'), retry('base_diverged'), { kind: 'decision', data: { decision: 'unit_retry', unit: 'S1', previous_reason: 'rework_exhausted' } }], 'S2')).toBe(1)
+  expect(retryRoundBonus([retry('unresolved_blocking_findings'), retry('maker_no_change')], 'S2')).toBe(2)
+  // sem bônus a segunda reprovação já sobe de degrau; com um bônus ainda repete no mesmo
+  const plain = nextAttempt(ladderStart(LADDER, 2), { kind: 'rejected' }).state
+  expect(nextAttempt(plain, { kind: 'rejected' }).kind).not.toBe('repeat')
+  const bonus = nextAttempt(ladderStart(LADDER, 2 * (1 + retryRoundBonus([retry('rework_exhausted')], 'S2'))), { kind: 'rejected' }).state
+  expect(nextAttempt(bonus, { kind: 'rejected' }).kind).toBe('repeat')
 })

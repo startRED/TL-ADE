@@ -12,7 +12,7 @@ import { findStoryCommitted, findStoryStarted } from './engine/resume.ts'
 import { preserveInterruptedTree } from './engine/preserve.ts'
 import { writeProof } from './engine/proof.ts'
 import { classifyCallFailure, pauseForQuota, refreshChains, waitQuotaPause } from './engine/quota.ts'
-import { buildLadder, classifyMakerOutcome, correctionRequest, ladderStart, nextAttempt, reserveRung, roundsPerRung, type MakerOutcome } from './engine/ladder.ts'
+import { buildLadder, classifyMakerOutcome, correctionRequest, ladderStart, nextAttempt, reserveRung, retryRoundBonus, roundsPerRung, type MakerOutcome } from './engine/ladder.ts'
 import { readMissionOptionsBesidePlan } from './mission/options.ts'
 import { blockedInContract, cliModel } from './models/route.ts'
 import { readModelSettings } from './models/settings.ts'
@@ -743,7 +743,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       : (deps.makerLadder ?? [{ model: makerModel ?? null, family: makerFamily }])
     const orphan = rungs.find((rung: { family: string }) => !dispatcherFor(rung.family))
     if (orphan) throw new AdeError('invalid_ladder', `degrau da família ${orphan.family} sem despachante`, 4)
-    return ladderStart(buildLadder(rungs), route ? roundsPerRung(storyRisk(contract)) : undefined, caps)
+    const perRung = (route ? roundsPerRung(storyRisk(contract)) : roundsPerRung('normal')) * (1 + retryRoundBonus(readEvents(), storyId))
+    return ladderStart(buildLadder(rungs), perRung, caps)
   }
   let ladderState = startLadder(routed)
   let attempt = 0
