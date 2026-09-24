@@ -45,6 +45,7 @@ interface Intake {
   /** Controle da missão: rodando, pausando (termina a parte atual) ou pausada; null antes de rodar. */
   control?: 'RUNNING' | 'DRAINING' | 'STOPPED' | null
   stopped?: boolean
+  closed?: boolean
 }
 
 interface ProjectRef { id: string; name: string; path: string }
@@ -179,7 +180,10 @@ export default function IntakeFlow({ project, mission, missionCount, snapshotLoa
   }
 
   const running = intake?.stage === 'running'
-  if (mission || running) {
+  // Na tela fica a missão do pedido que rodou e não foi fechada; plano recusado ou missão fechada voltam ao começo.
+  // Sem pedido do painel (missão feita pela CLI), a última missão continua na tela.
+  const showMission = running || (intake ? intake.stage === 'concluida' && !intake.closed : Boolean(mission))
+  if (showMission) {
     return (
       <>{alert}
         <MissionScore
@@ -401,10 +405,13 @@ function Thinking({ label, hint }: { label: string; hint: string }) {
 }
 
 /** Pausar, retomar e parar a missão do pedido. Pausar deixa a parte em andamento terminar; parar mantém o que já foi entregue. */
-function MissionControls({ intake, busy, onAct }: { intake: Intake | null; busy: boolean; onAct: (action: 'pause' | 'resume' | 'stop') => void }) {
-  if (!intake || intake.stopped) return null
+function MissionControls({ intake, busy, onAct }: { intake: Intake | null; busy: boolean; onAct: (action: 'pause' | 'resume' | 'stop' | 'close') => void }) {
+  if (!intake) return null
   const running = intake.stage === 'running'
-  const paused = intake.stage === 'concluida' && intake.control === 'STOPPED'
+  const paused = !intake.stopped && intake.stage === 'concluida' && intake.control === 'STOPPED'
+  // fechar volta ao começo do projeto para um pedido novo; a missão continua no histórico
+  const close = <button className="btn small" disabled={busy} onClick={() => onAct('close')}><X size={13} aria-hidden="true" /> Fechar missão</button>
+  if (intake.stopped || (intake.stage === 'concluida' && !paused)) return <div className="mission-controls">{close}</div>
   if (running && intake.control === 'DRAINING') {
     return <p className="mission-controls note-line"><span className="pulse waiting" aria-hidden="true" />Pausando: a parte em andamento termina e a missão para.</p>
   }
@@ -422,6 +429,7 @@ function MissionControls({ intake, busy, onAct }: { intake: Intake | null; busy:
         <span className="note-line">Missão pausada. O que já foi entregue fica.</span>
         <button className="btn baton small" disabled={busy} onClick={() => onAct('resume')}><Play size={13} aria-hidden="true" /> Retomar</button>
         <button className="btn small" disabled={busy} onClick={() => onAct('stop')}><Stop size={13} aria-hidden="true" /> Parar de vez</button>
+        {close}
       </div>
     )
   }

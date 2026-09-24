@@ -867,6 +867,8 @@ h3.ui-heading, h4.ui-heading { font-size: 1.15rem; }
 
 /* ---------- histórico de missões ---------- */
 .history { margin-top: 4rem; display: grid; gap: 1rem; max-width: 62rem; }
+/* a abertura sangra 6rem para baixo (margin -6rem): o histórico logo abaixo dela começa depois */
+.stage:has(.overture) > .history { margin-top: 10rem; }
 .history-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--sage-line); }
 .history-row { display: grid; grid-template-columns: 2.5rem minmax(0, 1fr) auto; align-items: center; gap: 1rem; padding: .8rem 0; border-bottom: 1px dotted var(--sage-line); }
 .history-row[aria-current='true'] .history-title { color: var(--baton-text); }

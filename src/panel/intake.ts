@@ -52,6 +52,8 @@ export interface Intake {
   understanding?: Understanding
   /** Parada pelo operador: a missão fica como está e não se oferece mais retomar. */
   stopped?: boolean
+  /** Fechada pelo operador: a tela volta ao começo do projeto; a missão segue no histórico. */
+  closed?: boolean
 }
 
 /** Estado de controle da missão do pedido (pausa pedida vira DRAINING e depois STOPPED); null sem journal ainda. */
@@ -353,6 +355,18 @@ export function createIntake({ intent, runMission, eligibleSkills, beginActivity
         }
         if (last.stage === 'running' && missionControlOf(project.path, last.mission_id) === 'RUNNING') await control(project.path, last, 'pause')
         return write(project.path, { ...last, stopped: true })
+      })
+    },
+
+    /** Fecha a missão terminada, pausada ou parada: a tela volta ao começo do projeto. Rodando não fecha. */
+    close(project: { id: string; path: string }): Promise<Intake> {
+      return serialized(project.path, async () => {
+        const last = readIntakes(project.path).at(-1)
+        // concluida = o processo do motor já saiu (terminou, pausou ou parou); rodando não fecha
+        if (!last || last.stage !== 'concluida') {
+          throw new AdeError('etapa_errada', 'Só fecha missão que terminou, pausou ou parou.', 5)
+        }
+        return write(project.path, { ...last, closed: true })
       })
     },
   }

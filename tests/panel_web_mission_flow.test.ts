@@ -445,6 +445,24 @@ describe('pedido, entrevista, briefing, plano e aprovação no painel', () => {
     expect((await mission('resume')).status).toBe(409)
   })
 
+  test('fechar_a_missao_terminada_volta_ao_comeco_do_projeto_e_rodando_nao_fecha', async () => {
+    const run = runDouble()
+    const repo = gitFixture()
+    const s = await serve(repo, { intent: intentDouble({ large: false }).intent, runMission: run.runMission })
+    await s.request('Corrija o título')
+    await s.post('interview', { answers: {} })
+    await s.post('plan/approve', { digest: (await s.intake()).body.digest })
+    const close = () => s.call('POST', `/api/projects/${encodeURIComponent(s.projectId)}/mission/close`, {})
+
+    expect((await close()).status).toBe(409)
+    run.finish()
+    await expect.poll(async () => (await s.intake()).body.stage).toBe('concluida')
+    expect((await close()).status).toBe(200)
+    expect((await s.intake()).body).toMatchObject({ stage: 'concluida', closed: true })
+    // pedido novo depois de fechar abre outra missão
+    expect((await s.request('Pedido novo')).status).toBe(202)
+  })
+
   test('criterio_11_recusa_do_plano_registra_motivo_e_nao_executa', async () => {
     const repo = gitFixture()
     const run = runDouble()
@@ -575,6 +593,9 @@ describe('pedido, entrevista, briefing, plano e aprovação no painel', () => {
 
     await page.getByLabel('Pedido').waitFor()
     await page.getByText('O plano foi recusado: Faltou prova').waitFor()
+    // o plano recusado não vira a missão da tela: volta ao começo do projeto (depois de ler o estado do projeto)
+    await page.getByText(/Última missão/).waitFor()
+    await page.getByRole('heading', { name: /O que você quer construir/ }).waitFor({ timeout: 10_000 })
     expect(ui.consoleErrors).toEqual([])
   }, 180_000)
 

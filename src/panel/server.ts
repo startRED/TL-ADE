@@ -411,7 +411,7 @@ export async function startServer({
                 return
               }
             }
-            const intakeMatch = pathname.match(/^\/api\/projects\/([^/]+)\/(requests|intake|intake\/interview|intake\/(?:briefing|plan)\/(?:approve|reject)|mission\/(?:pause|resume|stop))$/)
+            const intakeMatch = pathname.match(/^\/api\/projects\/([^/]+)\/(requests|intake|intake\/interview|intake\/(?:briefing|plan)\/(?:approve|reject)|mission\/(?:pause|resume|stop|close))$/)
             if (intakeMatch) {
               const project = projects.get(decodeURIComponent(intakeMatch[1]))
               const action = intakeMatch[2]
@@ -434,7 +434,7 @@ export async function startServer({
                 } else if (action === 'intake/plan/approve') {
                   sendJson(res, 200, await intake.approvePlan(project, body?.digest))
                 } else if (action.startsWith('mission/')) {
-                  sendJson(res, 200, await intake[action.slice('mission/'.length) as 'pause' | 'resume' | 'stop'](project))
+                  sendJson(res, 200, await intake[action.slice('mission/'.length) as 'pause' | 'resume' | 'stop' | 'close'](project))
                 } else {
                   sendJson(res, 200, await intake.reject(project.path, action === 'intake/briefing/reject' ? 'briefing' : 'plan', body?.reason))
                 }
