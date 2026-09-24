@@ -433,6 +433,9 @@ describe('engine', () => {
     const reviewPack = fs.readFileSync(path.join(fixture.missionDir, 'artifacts', 'packs', 'ADE-T1_r1_review-pack', 'pack.md'), 'utf8')
     expect(reviewPack).toContain('echo_exactly')
     expect(reviewPack).toContain('citable_refs')
+    const citable = JSON.parse(/"citable_refs": (\[[^\]]*\])/.exec(reviewPack)![1]) as string[]
+    expect(citable.length).toBeGreaterThan(0)
+    expect(citable.filter((ref) => ref.startsWith('file:') && !/#L\d+-L\d+$/.test(ref))).toEqual([])
     expect(reviewPack).toContain('Copie contract_revision e input_revision')
   }, 90_000)
 

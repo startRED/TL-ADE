@@ -62,13 +62,14 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | [0035](0035-painel-com-sistema-visual-proprio-emenda-0030.md) | Painel com sistema visual próprio, sem Radix Themes (emenda o ADR 0030) | Aceito (pedido de Erick, 2026-09-23) |
 | [0036](0036-prova-escrita-antes-do-codigo-pelo-motor.md) | Prova escrita antes do código pelo próprio motor (emenda o ADR 0007) | Aceito (pedido de Erick, 2026-09-23) |
 | [0037](0037-tabela-da-missao-em-palavras-emenda-0035.md) | Tabela da missão em palavras, sem notação musical (emenda o ADR 0035) | Aceito (pedido de Erick, 2026-09-23) |
+| [0038](0038-pasta-da-parte-e-medida-pela-largada.md) | Pasta de parte parada é liberada e a contenção mede contra a árvore de largada (emenda o ADR 0014) | Aceito (pedido de Erick, 2026-09-23) |
 
 ## Mapa decisão → onde ela aparece
 
 | Tema | ADRs | Seção de `architecture.md` |
 | :--- | :--- | :--- |
 | Stack e repositório | 0001, 0022, 0023, 0027, 0030 | §2, §6, §11 E29 |
-| Durabilidade e recuperação | 0002, 0003, 0012, 0014, 0021, 0025, 0027, 0028, 0029, 0031 | §6, §11 E6, E7, E21, E25–E27 |
+| Durabilidade e recuperação | 0002, 0003, 0012, 0014, 0021, 0025, 0027, 0028, 0029, 0031, 0038 | §6, §11 E6, E7, E21, E25–E27 |
 | Modelos, transporte e papéis | 0004, 0005, 0006, 0015, 0028 | §7, §11 E10, E16, E23, E24 |
 | Intenção, contrato e prova | 0007, 0008, 0016, 0028, 0036 | §4, §5, §11 E1–E4, E12, E18–E20 |
 | Contexto, skills e qualidade | 0009, 0010, 0011, 0018, 0027, 0028, 0029 | §7, §10 A1, A7, A11, A13, A14, §11 E8, E9, E13–E15, E33, E35, E39 |

@@ -64,7 +64,7 @@ const REVIEW_POLICY = [
   'Você revisa esta parte e é de outra empresa, não de quem escreveu. Leia o contrato, o review_request e o código na worktree; não altere nada.',
   '- Aprove só se o código e as provas cumprem os critérios do contrato; senão, liste os achados com severidade e ação.',
   '- Copie contract_revision e input_revision exatamente como estão em echo_exactly.',
-  '- Em evidence, sources, evidence_refs e result_ref, cite só referências da lista citable_refs.',
+  '- Em evidence, sources, evidence_refs e result_ref, cite só referências da lista citable_refs, escritas igual (arquivo sempre com intervalo de linhas).',
   '- Responda somente pelo schema.',
 ].join('\n')
 
@@ -1392,7 +1392,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
           ...JSON.parse(dedupStorySection(story).text),
           review_request: reviewRequest,
           echo_exactly: { contract_revision: expectedContractRevision, input_revision: { tree: treeAfterContain, digest: observedDigest } },
-          citable_refs: Array.from(verifiedRefs),
+          // só refs que também passam no padrão do schema: arquivo sem intervalo de linhas (file:x) é recusado na validação
+          citable_refs: Array.from(verifiedRefs).filter((ref) => typeof ref === 'string' && (!ref.startsWith('file:') || /#L[1-9][0-9]*-L[1-9][0-9]*$/.test(ref))),
         }, null, 2),
       },
       missionDir,

@@ -563,7 +563,8 @@ describe('contain parity', () => {
       '--no-color',
       '--no-ext-diff',
       '--text',
-      'HEAD',
+      // contra a árvore de largada, não contra o HEAD: commit de quem escreve também entra (ADR 0038)
+      'e'.repeat(40),
       '--',
     ])
     expect(diffCalls[0].options.maxBuffer).toBe(2 ** 31)

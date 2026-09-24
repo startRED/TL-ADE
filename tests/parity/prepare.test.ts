@@ -3,7 +3,6 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { makeRepo, removeRepo } from '../helpers/git-repo.ts'
-import { UnexpectedTreeStateError } from '../../src/journal/errors.ts'
 // Importações dos módulos da story (a implementar na fase 2)
 import { prepareStory } from '../../src/engine/prepare.ts'
 
@@ -236,7 +235,7 @@ describe('prepare parity', () => {
   })
 
   // Prova para duas missões válidas com o mesmo storyId (revisão rodada 2)
-  test('two_valid_missions_with_same_story_id_are_refused_when_worktree_exists', async () => {
+  test('two_valid_missions_with_same_story_id_reclaim_the_worktree_of_the_other_mission', async () => {
     const repo = makeRepo()
     tmpDirs.push(repo.dir)
 
@@ -251,15 +250,11 @@ describe('prepare parity', () => {
     })
     expect(res1.status).toBe('ready')
 
-    // Worktree existente (.ade/wt/s1) pertence à branch ade/m1/s1;
-    // chamada para ade/m2/s1 deve recusar com UnexpectedTreeStateError
-    await expect(
-      prepareStory({
-        repoDir: repo.dir,
-        missionId: 'm2',
-        storyId: 's1',
-      })
-    ).rejects.toThrow(UnexpectedTreeStateError)
+    // Worktree existente (.ade/wt/s1) pertence à branch ade/m1/s1 (parte parada de outra missão): a missão m2 guarda a
+    // árvore dela em refs/ade/checkpoints e usa a pasta (ADR 0038); antes a missão nova caía com UnexpectedTreeStateError.
+    const res2 = await prepareStory({ repoDir: repo.dir, missionId: 'm2', storyId: 's1' })
+    expect(res2).toMatchObject({ status: 'ready', branch: 'ade/m2/s1' })
+    expect(repo.git(['branch', '--list', 'ade/m1/s1']).trim()).not.toBe('')
   })
 
   // AC2: Dado uma branch ade/<missão>/<story> com um commit que não está no HEAD base,
