@@ -955,6 +955,15 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
 
     maybeEngineFault('after_maker_effect', env)
 
+    // Chamada interrompida (processo morto) volta do journal `ambiguous` e sem resultado: foi cobrada, mas o trabalho dela
+    // não chegou. Seguir com a árvore sem mudança estacionava a parte; ela é refeita como nova tentativa.
+    if (dispatch?.status === 'ambiguous' && dispatch.exit_code == null && !dispatch.unit_result) {
+      await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'maker_call_lost', unit: storyId, step_id: `${storyId}:${tag}:maker`, next: 'retry' } })
+      if (attempt >= 3) return await parkStory('maker_call_lost')
+      attempt++
+      continue
+    }
+
     // Cota esgotada não gasta rodada nem anda a escada: registra a pausa e tenta a mesma chamada depois da renovação.
     const failure = classifyCallFailure(dispatch)
     if (failure.kind === 'quota') {

@@ -486,6 +486,19 @@ describe('engine', () => {
     expect(events.filter((e) => e.kind === 'telemetry' && (e.data as any).role === 'maker')).toHaveLength(1)
   }, 120_000)
 
+  // 24/09: chamada do modelo interrompida (processo morto) e reconciliada como cobrada volta do journal `ambiguous` e sem
+  // resultado. O motor seguia com a árvore sem mudança (e derrubava o adaptador); agora chama de novo como nova tentativa.
+  test('chamada_do_modelo_perdida_na_queda_e_refeita_como_nova_tentativa', async () => {
+    const fixture = setupStoryFixture()
+    await fixture.deps.journal.append({ kind: 'step_intent', step_id: 'ADE-T1:r1:maker', effect_class: 'model_call', input_digest: '0'.repeat(16), unit: 'ADE-T1' })
+    await fixture.deps.journal.append({ kind: 'step_result', step_id: 'ADE-T1:r1:maker', effect_class: 'model_call', input_digest: '0'.repeat(16), status: 'ambiguous', reason: 'call_consumed', data: { reason: 'call_consumed', result: null }, unit: 'ADE-T1' })
+
+    const result = await runStory(fixture.deps, fixture.input)
+    expect(result).toMatchObject({ status: 'delivered' })
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    expect(events.some((e) => e.kind === 'step_result' && e.step_id === 'ADE-T1:r1t1:maker' && e.status === 'ok')).toBe(true)
+  }, 120_000)
+
   // CA2: Dado um contrato com roles.maker.family 'codex', quando runStory roda, então
   // lança AdeError com code 'family_without_canary' e exit 4, e o journal não tem nenhum
   // step_intent com step_id terminando em ':maker'.

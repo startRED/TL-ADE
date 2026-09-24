@@ -170,7 +170,8 @@ export async function dispatchCodex(opts: {
     }
   })
 
-  const effectResult = (r.result)
+  // chamada reconciliada como cobrada volta do journal `ambiguous` e sem resultado
+  const effectResult = (r.result ?? {})
 
   return {
     step_id: r.step_id,

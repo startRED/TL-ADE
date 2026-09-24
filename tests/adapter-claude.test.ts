@@ -345,6 +345,31 @@ describe('claude adapter dispatch', () => {
     expect(result.session_ref).toBe(FIXED_UUID)
   })
 
+  // 24/09: chamada interrompida e reconciliada como cobrada volta do journal como `ambiguous` sem resultado; o adaptador
+  // lia session_ref de null e derrubava o ade run ao entrar na rodada seguinte.
+  test('dispatchClaude_reaproveitado_ambiguo_sem_resultado_nao_lanca', async () => {
+    const missionDir = makeMissionDir()
+    const step = async () => ({ step_id: 'S13:r2:maker', status: 'ambiguous', result: null, reused: true })
+    const { packPath, resultFile } = setupClaudeOkScenario(missionDir)
+    const result = await dispatchClaude({
+      step: step as any,
+      unit: 'S13',
+      stepId: 'S13:r2:maker',
+      packPath,
+      missionDir,
+      missionId: 'm1',
+      cwd: missionDir,
+      resultFile,
+      maxBudgetUsd: 0.25,
+      authorization: paidAuthorization(),
+      resolved: { exe: process.execPath, prefixArgs: [CLI_PATH] },
+      env: {},
+      randomUUID: () => FIXED_UUID,
+    })
+    expect(result.status).toBe('ambiguous')
+    expect(result.unit_result ?? null).toBeNull()
+  })
+
   // CA2: caso feliz completo com o transcript ok_with_structured_output -> status 'ok', unit_result
   // válido pelo schema e custo reportado (nunca inventado).
   test('dispatchClaude_resolves_ok_with_valid_unit_result_and_reported_usage', async () => {
