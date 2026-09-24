@@ -418,6 +418,10 @@ describe('eval runner phase red execution and strictness', () => {
     })
 
     expect(record.exit_code).toBe(0)
+    // A intenção grava a árvore: queda no meio da prova é reconciliável em vez de travar a missão.
+    const { events } = readJournal(path.join(missionDir, 'journal.jsonl'))
+    const intent = events.find((e) => e.kind === 'step_intent' && e.effect_class === 'eval_run')
+    expect(intent?.intent_context?.tree_before).toBe(tree)
     await journal.close()
   }, 30_000)
 

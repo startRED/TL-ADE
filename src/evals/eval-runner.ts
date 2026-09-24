@@ -336,6 +336,8 @@ export function createEvalRunner({ step, missionDir, gitPort }: CreateEvalRunner
           id: stepId,
           effect_class: 'eval_run',
           input: buildStepInput({ eval: evalDef, phase, tree, scenario }),
+          // Queda no meio da prova é reconciliada restaurando esta árvore; sem ela a missão travava para sempre.
+          intent_context: { tree_before: tree },
           worktree: gitPort.worktreeDir,
         },
         async () => {
@@ -402,6 +404,8 @@ export function createEvalRunner({ step, missionDir, gitPort }: CreateEvalRunner
           id: stepId,
           effect_class: 'eval_run',
           input: buildStepInput({ eval: evalDef, phase, tree, scenario }),
+          // Queda no meio da prova é reconciliada restaurando esta árvore; sem ela a missão travava para sempre.
+          intent_context: { tree_before: tree },
           worktree: gitPort.worktreeDir,
         },
         async () => record
@@ -424,6 +428,7 @@ export function createEvalRunner({ step, missionDir, gitPort }: CreateEvalRunner
         id: stepId,
         effect_class: 'eval_run',
         input: buildStepInput({ eval: evalDef, phase, tree, scenario }),
+        intent_context: { tree_before: tree },
         worktree: gitPort.worktreeDir,
       },
       async () => {
