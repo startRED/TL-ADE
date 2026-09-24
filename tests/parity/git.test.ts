@@ -393,3 +393,20 @@ describe('git port parity', () => {
   })
 })
 
+
+// 24/09: com a máquina sob carga o Windows falhou ao iniciar o git (0xC0000142, STATUS_DLL_INIT_FAILED) no meio do
+// julgamento do verde; o erro fatal deixou a worktree da parte na árvore da base e derrubou a missão.
+describe('git port em falha transitória do Windows ao iniciar processo', () => {
+  test('falha_ao_iniciar_o_git_repete_antes_de_desistir', async () => {
+    let calls = 0
+    const fakeExec = ((_cmd: string, _args: string[], _opts: unknown, cb: (e: unknown, out: Buffer, err: Buffer) => void) => {
+      calls++
+      if (calls === 1) cb(Object.assign(new Error('spawn'), { code: 3221225794 }), Buffer.alloc(0), Buffer.alloc(0))
+      else cb(null, Buffer.from('ok\n'), Buffer.alloc(0))
+    }) as any
+    const port = createGitPort({ worktreeDir: os.tmpdir(), execFile: fakeExec })
+    const res = await port.run(['status'])
+    expect(res.text).toBe('ok')
+    expect(calls).toBe(2)
+  })
+})

@@ -115,7 +115,12 @@ export type GitPort = {
  * está planejado para story posterior do engine de worktree para evitar alterar o contrato da interface v1.
  *
  */
-export function createGitPort(options: { worktreeDir: string }): GitPort {
+// 0xC0000142 (STATUS_DLL_INIT_FAILED): o Windows sob carga falha ao iniciar o processo; o git nem chegou a rodar.
+const SPAWN_INIT_FAILED = 3221225794
+const SPAWN_RETRIES = 3
+
+export function createGitPort(options: { worktreeDir: string; execFile?: typeof execFile }): GitPort {
+  const exec = options?.execFile ?? execFile
   const worktreeDir = options && options.worktreeDir
   if (typeof worktreeDir !== 'string' || worktreeDir.length === 0) {
     throw new TypeError('worktreeDir inválido')
@@ -123,10 +128,22 @@ export function createGitPort(options: { worktreeDir: string }): GitPort {
 
   const hooksDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ade-hooks-'))
 
-  function run(args: string[], options: RunOptions = {}): Promise<RunResult> {
+  async function run(args: string[], options: RunOptions = {}): Promise<RunResult> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await runOnce(args, options)
+      } catch (err) {
+        // Falha ao iniciar não executou nada: repetir é seguro para qualquer comando.
+        if (!(err instanceof GitError) || err.details?.code !== SPAWN_INIT_FAILED || attempt >= SPAWN_RETRIES) throw err
+        await new Promise((r) => setTimeout(r, 500 * attempt))
+      }
+    }
+  }
+
+  function runOnce(args: string[], options: RunOptions = {}): Promise<RunResult> {
     const { maxBuffer = DEFAULT_MAX_BUFFER, okCodes = [0], env: extraEnv = {} } = options
     return new Promise((resolve, reject) => {
-      execFile(
+      exec(
         'git',
         ['-C', worktreeDir, ...args],
         {
