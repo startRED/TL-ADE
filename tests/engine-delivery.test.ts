@@ -433,41 +433,51 @@ describe('engine delivery', () => {
     expect(deliveryStep?.data?.reason).toBe('fast_forward_merged')
   }, 60_000)
 
-  // CA3: base alterada preserva branch e explica intervenção
-  test('base_alterada_preserva_branch_e_explica_intervencao', async () => {
+  // CA3 (24/09, missão real): a base andou durante a parte (outro commit no main) e a entrega parava em base_diverged
+  // esperando o operador. Sem conflito, o commit revisado é rebaseado sobre a base nova na worktree da parte e entregue.
+  test('base_alterada_sem_conflito_rebaseia_e_entrega', async () => {
     const fixture = setupStoryFixture()
-    const baseCommitBefore = fixture.repo.git(['rev-parse', 'main']).trim()
-
-    // Intercepta prepareStory para introduzir alteração na base após o prepare
     const originalPrepare = fixture.deps.prepareStory
     fixture.deps.prepareStory = async (opts: any) => {
       const prep = await originalPrepare(opts)
-      // Commit externo altera a base no repositório antes da tentativa de entrega
-      fixture.repo.git(['commit', '--allow-empty', '-m', 'commit concorrente na base'])
+      fs.writeFileSync(path.join(fixture.repo.dir, 'outro.txt'), 'commit concorrente\n')
+      fixture.repo.git(['add', 'outro.txt'])
+      fixture.repo.git(['commit', '-m', 'commit concorrente na base'])
       return prep
     }
 
     const result = await runStory(fixture.deps, fixture.input)
 
+    expect(result.status).toBe('delivered')
+    expect(fixture.repo.git(['log', '-1', '--format=%s', 'main~1']).trim()).toBe('commit concorrente na base')
+    expect(fs.existsSync(path.join(fixture.repo.dir, 'outro.txt'))).toBe(true)
+    expect(fs.readFileSync(path.join(fixture.repo.dir, 'src', 'hello.txt'), 'utf8')).toContain('ok')
+  }, 60_000)
+
+  // Base que mexeu no mesmo arquivo da parte: o rebase conflita, é abortado, e a parte para com o commit preservado.
+  test('base_alterada_com_conflito_preserva_branch_e_explica_intervencao', async () => {
+    const fixture = setupStoryFixture()
+    const originalPrepare = fixture.deps.prepareStory
+    fixture.deps.prepareStory = async (opts: any) => {
+      const prep = await originalPrepare(opts)
+      fs.mkdirSync(path.join(fixture.repo.dir, 'src'), { recursive: true })
+      fs.writeFileSync(path.join(fixture.repo.dir, 'src', 'hello.txt'), 'da base\n')
+      fixture.repo.git(['add', 'src/hello.txt'])
+      fixture.repo.git(['commit', '-m', 'commit concorrente no mesmo arquivo'])
+      return prep
+    }
+    const baseAfterConcurrent = () => fixture.repo.git(['rev-parse', 'main']).trim()
+
+    const result = await runStory(fixture.deps, fixture.input)
+
     expect(result.status).toBe('awaiting_operator')
     expect(result.reason).toBe('base_diverged')
-    expect((result as any).delivered).toBe(false)
-
-    // Preserva a branch da story intacta apontando para o commit revisado
     const missionId = fixture.input.loaded.plan.mission_id
     const storyBranchCommit = fixture.repo.git(['rev-parse', `ade/${missionId}/ADE-T1`]).trim()
-    expect(storyBranchCommit).toBeTruthy()
-    expect(storyBranchCommit).not.toBe(baseCommitBefore)
-
-    // A base alterada não foi sobrescrita nem forçada
-    const currentBase = fixture.repo.git(['rev-parse', 'main']).trim()
-    expect(currentBase).not.toBe(storyBranchCommit)
-
-    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
-    const storyDone = events.find((e) => e.kind === 'story_done')
-    expect(storyDone).toBeDefined()
-    expect((storyDone?.data as any)?.status).toBe('awaiting_operator')
-    expect((storyDone?.data as any)?.reason).toBe('base_diverged')
+    expect(baseAfterConcurrent()).not.toBe(storyBranchCommit)
+    expect(fixture.repo.git(['log', '-1', '--format=%s', 'main']).trim()).toBe('commit concorrente no mesmo arquivo')
+    const wt = path.join(fixture.repo.dir, '.ade', 'wt', 'ADE-T1')
+    expect(fs.existsSync(path.join(wt, '.git')) && fixture.repo.git(['-C', wt, 'status', '--porcelain']).trim()).toBe('')
   }, 60_000)
 
   // Base com edição pendente do operador (guarda por worktree, §17): arquivo alheio à parte não impede a
@@ -591,4 +601,32 @@ describe('engine delivery', () => {
     // Entrega foi concluída localmente via local_merge
     expect(fixture.repo.git(['rev-parse', 'main']).trim()).toBe(result.commit)
   }, 60_000)
+})
+
+// Entrega anterior que parou sem mexer na base (base_diverged) era reaproveitada para sempre: a parte ficava parada mesmo
+// depois de o rebase ou o operador resolverem a divergência. Ela é refeita.
+describe('nova tentativa de entrega', () => {
+  test('entrega_anterior_sem_efeito_e_refeita', async () => {
+    const { deliverStory } = await import('../src/engine/deliver.ts')
+    const appended: any[] = []
+    const events = [
+      { kind: 'step_intent', step_id: 'S1:deliver', effect_class: 'local_merge' },
+      { kind: 'step_result', step_id: 'S1:deliver', effect_class: 'local_merge', status: 'ambiguous', data: { reason: 'base_diverged', result: null } },
+    ]
+    const gitPort: any = {
+      headInfo: async () => ({ commit: 'b'.repeat(40), branch: 'main' }),
+      readLocalRef: async (ref: string) => (ref === 'MERGE_HEAD' ? null : 'b'.repeat(40)),
+      fastForward: async () => ({ commit: 'c'.repeat(40) }),
+    }
+    const out = await deliverStory({
+      journal: { append: async (e: any) => (appended.push(e), e) },
+      events,
+      gitPort,
+      storyId: 'S1',
+      baseRef: 'main',
+      baseBefore: 'b'.repeat(40),
+      reviewedCommit: 'c'.repeat(40),
+    })
+    expect(out).toMatchObject({ delivered: true, commit: 'c'.repeat(40) })
+  })
 })

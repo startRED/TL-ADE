@@ -5,7 +5,7 @@ import path from 'node:path'
 import { AdeError } from './journal/errors.ts'
 import { readJournal } from './journal/journal.ts'
 import { assertCallBudget, authorizePaidCall, DEFAULT_CONTEXT_LIMIT_BYTES, observedUsd, reserveCalls, validateQuotaReceipt } from './engine/budget.ts'
-import { deliverStory, withDeliveryFlag } from './engine/deliver.ts'
+import { deliverStory, rebaseOntoMovedBase, withDeliveryFlag } from './engine/deliver.ts'
 import { authorizedStep } from './engine/paid-call.ts'
 import { maybeEngineFault } from './engine/faults.ts'
 import { findStoryCommitted, findStoryStarted } from './engine/resume.ts'
@@ -1651,14 +1651,24 @@ ${formatProvenanceTrailers({ mission: missionId, story: storyId, round, ...maker
         return { status: 'committed', exitCode: 0, reason: null, commit: commitSha }
       }
 
+      // Base que andou durante a parte: o commit revisado vai para cima dela na worktree da parte, sem conflito.
+      let deliverCommit = commitSha
+      let deliverBase = baseBefore
+      const rebased = await rebaseOntoMovedBase({ basePort, wtPort, baseRef, baseBefore, commit: commitSha })
+      if (rebased) {
+        await journal.append({ kind: 'decision', unit: storyId, data: { decision: 'delivery_rebased', unit: storyId, from: commitSha, commit: rebased.commit, onto: rebased.onto, base_before: baseBefore } })
+        deliverCommit = rebased.commit
+        deliverBase = rebased.onto
+      }
+
       const delivery = await deliverStory({
         journal,
         events: readEvents(),
         gitPort: basePort,
         storyId,
         baseRef,
-        baseBefore,
-        reviewedCommit: commitSha,
+        baseBefore: deliverBase,
+        reviewedCommit: deliverCommit,
       })
       const deliveryStatus = delivery.delivered ? 'delivered' : 'awaiting_operator'
 

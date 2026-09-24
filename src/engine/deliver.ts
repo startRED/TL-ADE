@@ -3,6 +3,34 @@ import { AdeError } from '../journal/errors.ts'
 import { reconcileLocalMerge } from '../step/reconcile-delivery.ts'
 import { priorStepResult } from '../step/step.ts'
 
+const NO_EFFECT_REASONS = new Set(['base_diverged', 'head_diverged', 'base_local_changes'])
+
+/**
+ * A base andou desde o começo da parte (outro commit no main durante a missão): rebaseia o commit revisado sobre ela
+ * na worktree da parte, que é do motor, para a entrega continuar fast-forward. Conflito aborta o rebase e devolve null,
+ * e a entrega segue parando em base_diverged. Base que voltou para trás (não descende da largada) também devolve null.
+ */
+export async function rebaseOntoMovedBase({ basePort, wtPort, baseRef, baseBefore, commit }: {
+  basePort: import('../git/gitport.ts').GitPort
+  wtPort: import('../git/gitport.ts').GitPort
+  baseRef: string | null
+  baseBefore: string | null
+  commit: string
+}): Promise<{ commit: string; onto: string } | null> {
+  if (!baseRef || !baseBefore) return null
+  const current = await basePort.readLocalRef(baseRef)
+  if (!current || current === baseBefore) return null
+  const descends = await basePort.run(['merge-base', '--is-ancestor', baseBefore, current], { okCodes: [0, 1] })
+  if (descends.code !== 0) return null
+  const rebase = await wtPort.run(['rebase', '--onto', current, baseBefore], { okCodes: [0, 1, 128] })
+  if (rebase.code !== 0) {
+    await wtPort.run(['rebase', '--abort'], { okCodes: [0, 1, 128] })
+    return null
+  }
+  const head = (await wtPort.run(['rev-parse', 'HEAD'])).text
+  return head && head !== commit ? { commit: head, onto: current } : null
+}
+
 /**
  * Entrega local do commit revisado: fast-forward da base quando ela não mudou.
  *
@@ -40,7 +68,10 @@ export async function deliverStory({
 
   const stepId = `${storyId}:deliver`
   const prior = priorStepResult(events, stepId)
-  if (prior) {
+  // Tentativa anterior que não mexeu na base (divergiu ou esbarrou em edição do operador) pode ser refeita: a base ou a
+  // parte mudou desde então. Reaproveitá-la deixava a parte parada para sempre.
+  const retryable = prior && prior.status !== 'ok' && NO_EFFECT_REASONS.has(String((prior.data as any)?.reason ?? ''))
+  if (prior && !retryable) {
     const priorData: Record<string, any> = prior.data ?? {}
     return {
       delivered: prior.status === 'ok',
@@ -49,7 +80,7 @@ export async function deliverStory({
     }
   }
 
-  const openIntent = [...events].reverse().find((event) =>
+  const openIntent = retryable ? undefined : [...events].reverse().find((event) =>
     event.kind === 'step_intent' && event.step_id === stepId,
   )
   if (openIntent) {
