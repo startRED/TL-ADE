@@ -758,7 +758,9 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     const unitOf = (e: any) => e.unit ?? e.data?.unit
     const lastDone = events.map((e, i) => [e, i] as const).filter(([e]) => e.kind === 'story_done' && unitOf(e) === storyId).at(-1)
     const retriedAfter = lastDone && events.slice(lastDone[1]).some((e) => e.kind === 'decision' && e.data?.decision === 'unit_retry' && unitOf(e) === storyId)
-    const lastReview = [...events].reverse().find((e) => e.kind === 'review_result' && unitOf(e) === storyId && e.data?.result)
+    // a revisão da maior rodada (a mais recente em empate): uma retomada antiga pode ter regravado revisões da rodada 1
+    const lastReview = events.filter((e) => e.kind === 'review_result' && unitOf(e) === storyId && e.data?.result)
+      .reduce<any>((best, e) => (!best || Number(e.data?.round ?? 0) >= Number(best.data?.round ?? 0) ? e : best), null)
     if (retriedAfter && lastReview && ['rework_exhausted', 'unresolved_blocking_findings', 'stagnation'].includes(String(lastDone[0].data?.reason))) {
       const prefix = `${storyId}:r`
       const rounds = events.map((e) => String(e.step_id ?? '')).filter((id) => id.startsWith(prefix)).map((id) => Number.parseInt(id.slice(prefix.length), 10)).filter(Number.isFinite)
