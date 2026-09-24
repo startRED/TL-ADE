@@ -710,6 +710,28 @@ describe('v0.3: Executar e retomar missão sequencial', { timeout: 80_000 }, () 
     expect(result3.reason).toBe('approval_missing')
   })
 
+  // Parada na checagem antes de começar não abriu worktree, não gastou chamada nem gerou commit: é condição do
+  // ambiente, então rodar a missão de novo refaz a checagem em vez de deixar a parte parada para sempre.
+  test('parte_parada_na_checagem_previa_roda_de_novo_ao_retomar', async () => {
+    const fixture = await setupThreeStoryFixture({
+      dependencies: { S1: [], S2: ['S1'], S3: ['S2'] },
+    })
+    await fixture.deps.journal.append({
+      kind: 'story_done',
+      unit: 'S1',
+      data: { unit: 'S1', status: 'awaiting_operator', reason: 'preflight', commit: null },
+    })
+
+    const result = await runSequentialMission(fixture.deps, {
+      loaded: fixture.loaded,
+      repoDir: fixture.repo.dir,
+      missionDir: fixture.missionDir,
+    })
+
+    expect(result.status).toBe('completed')
+    expect(result.completedStories).toEqual(['S1', 'S2', 'S3'])
+  })
+
   // Critério (6): Dado o cenário rápido trivial em repositório temporário, quando a missão completa é executada com CLIs falsas,
   // então a primeira edição ocorre dentro do limite contratado, não há perguntas e o número total de chamadas respeita o orçamento.
   test('test_criterio_6_cenario_rapido_trivial_com_clis_falsas_respeita_orcamento_e_limites', async () => {

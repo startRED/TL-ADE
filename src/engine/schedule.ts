@@ -115,7 +115,11 @@ export function deriveStoryStates(events: Array<Record<string, any>>, storiesByI
     }
     if (ev.kind === 'story_done') {
       const unit = ev.unit || ev.data?.unit
-      if (unit) {
+      // Parada na checagem antes de começar não abriu worktree nem gastou chamada: é condição do ambiente,
+      // e a próxima execução refaz a checagem em vez de manter a parte parada para sempre.
+      if (unit && ev.data?.status === 'awaiting_operator' && ev.data?.reason === 'preflight') {
+        delete states[unit]
+      } else if (unit) {
         states[unit] = {
           status: ev.data?.status,
           commit: ev.data?.commit ?? null,
