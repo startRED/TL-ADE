@@ -15,8 +15,10 @@ export function chargeableReds(baseline: TestResult[], after: TestResult[]): Tes
 }
 
 /**
- * Roda a suíte e julga contra a largada. Se o que sobra cobrado é só estouro de tempo, repete uma vez com limite folgado
- * por prova antes de abrir rodada. Vale para a parte e para a suíte de fim de épico (com a largada do épico).
+ * Roda a suíte e julga contra a largada. Com vermelha cobrada, repete uma vez com limite folgado por prova antes de abrir
+ * rodada, e só cobra a que falha nas duas execuções: prova instável sob carga (motor, modelo e suíte na mesma máquina)
+ * falhava numa e passava na outra e abria rodada sobre código que a parte nem tocou. Vale para a parte e para a suíte de
+ * fim de épico (com a largada do épico).
  */
 export async function judgeSuite(
   run: (testTimeoutMs?: number) => Promise<TestResult[]>,
@@ -24,10 +26,11 @@ export async function judgeSuite(
 ): Promise<{ ok: boolean; reds: TestResult[]; retried: boolean; results: TestResult[] }> {
   let results = await run()
   let reds = chargeableReds(baseline, results)
-  const retried = reds.length > 0 && reds.every((t) => t.status === 'timeout')
+  const retried = reds.length > 0
   if (retried) {
+    const first = new Set(reds.map((t) => t.id))
     results = await run(SLOW_TEST_MS)
-    reds = chargeableReds(baseline, results)
+    reds = chargeableReds(baseline, results).filter((t) => first.has(t.id))
   }
   return { ok: reds.length === 0, reds, retried, results }
 }

@@ -138,11 +138,19 @@ describe('portões por diagnóstico e vermelhas da largada', () => {
     expect(calls).toEqual([undefined, SLOW_TEST_MS])
     expect(verdict).toMatchObject({ ok: true, retried: true, reds: [] })
 
-    // vermelha de verdade não é repetida: vira rodada
-    const once: Array<number | undefined> = []
-    const real = await judgeSuite(async (ms) => (once.push(ms), [t('a.test.ts::lenta', 'failed')]), baseline)
-    expect(once).toEqual([undefined])
+    // vermelha que falha de novo na repetição é de verdade: vira rodada
+    const twice: Array<number | undefined> = []
+    const real = await judgeSuite(async (ms) => (twice.push(ms), [t('a.test.ts::lenta', 'failed')]), baseline)
+    expect(twice).toEqual([undefined, SLOW_TEST_MS])
     expect(real.ok).toBe(false)
+
+    // 24/09, missão real: provas instáveis sob carga (lease, crash) falhavam numa execução e passavam na outra e abriam
+    // rodada de correção sobre código que a parte nem tocou. Só é cobrada a vermelha que falha nas duas execuções.
+    let n = 0
+    const flaky = await judgeSuite(async () => (++n === 1
+      ? [t('a.test.ts::instavel', 'failed'), t('a.test.ts::lenta', 'passed')]
+      : [t('a.test.ts::instavel', 'passed'), t('a.test.ts::lenta', 'passed')]), baseline)
+    expect(flaky).toMatchObject({ ok: true, retried: true, reds: [] })
 
     // o limite folgado chega ao runner como limite POR PROVA
     const dir = mkdtempSync(path.join(tmpdir(), 'ade-baseline-s-'))

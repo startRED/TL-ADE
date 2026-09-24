@@ -208,11 +208,13 @@ export function buildEvalRecord(base: Partial<EvalRecord> & { eval_id: string; p
 /**
  * Constrói o input durável de step para runEval.
  */
-export function buildStepInput({ eval: evalDef, phase, tree, scenario }: { eval: EvalDef; phase: string; tree: string; scenario?: { id: string; evals: Array<{ kind?: string; strictness?: { mode?: string } }> } | null }): Record<string, any> {
+export function buildStepInput({ eval: evalDef, phase, tree, scenario, baseTree }: { eval: EvalDef; phase: string; tree: string; baseTree?: string; scenario?: { id: string; evals: Array<{ kind?: string; strictness?: { mode?: string } }> } | null }): Record<string, any> {
   return {
     argv: evalDef.argv,
     phase,
     tree,
+    // o verde julgado contra a largada depende dela (e do julgamento v2: vermelha só conta se falha nas duas execuções)
+    ...(baseTree ? { base_tree: baseTree, judge: 2 } : {}),
     expect_exit: evalDef.expect_exit,
     timeout_s: evalDef.timeout_s,
     max_output_bytes: evalDef.max_output_bytes,
@@ -372,7 +374,7 @@ export function createEvalRunner({ step, missionDir, gitPort, spawnSuite = execS
           unit,
           id: stepId,
           effect_class: 'eval_run',
-          input: buildStepInput({ eval: evalDef, phase, tree, scenario }),
+          input: buildStepInput({ eval: evalDef, phase, tree, scenario, baseTree }),
           // Queda no meio da prova é reconciliada restaurando esta árvore; sem ela a missão travava para sempre.
           intent_context: { tree_before: tree },
           worktree: gitPort.worktreeDir,
