@@ -180,7 +180,10 @@ export async function contain(input: ContainInput): Promise<ContainResult> {
     throw new UnexpectedTreeStateError('worktree sem HEAD', { unitId })
   }
 
-  const changedPaths = [...await git.dirtyPaths()].sort((a, b) => a.localeCompare(b))
+  // Mede contra a árvore de largada da parte, não contra o HEAD: quem escreve pode commitar no meio (o Claude fez isso e a
+  // parte estacionava como "sem mudanças", com o commit dele fora também da varredura de segredos).
+  const base = typeof input.treeBefore === 'string' && /^[0-9a-f]{40}$/.test(input.treeBefore) ? input.treeBefore : undefined
+  const changedPaths = [...await git.dirtyPaths(base)].sort((a, b) => a.localeCompare(b))
   if (changedPaths.length === 0) {
     return {
       ok: false,
@@ -213,7 +216,7 @@ export async function contain(input: ContainInput): Promise<ContainResult> {
 
   const diffMaxBuffer = input.diffMaxBuffer ?? DIFF_MAX_BUFFER
   const res = await git.run(
-    ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '--text', 'HEAD', '--'],
+    ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '--text', base ?? 'HEAD', '--'],
     { maxBuffer: diffMaxBuffer },
   )
   if (res.stdout.length >= diffMaxBuffer) {

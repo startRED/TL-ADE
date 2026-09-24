@@ -42,6 +42,23 @@ vi.setConfig({ testTimeout: 30_000 })
 describe('contain integrity', () => {
   // AC4: Dado um limite de buffer menor que a saída do git, quando contain roda,
   // então falha com estado inesperado em vez de varrer uma saída truncada.
+  test('mudanca_que_quem_escreve_commitou_no_meio_conta_e_passa_pela_varredura', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    writeFileSync(path.join(repo.dir, 'a.txt'), 'base\n')
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'base'])
+    const git = createGitPort({ worktreeDir: repo.dir })
+    const treeBefore = await git.worktreeTree()
+    mkdirSync(path.join(repo.dir, 'src'))
+    writeFileSync(path.join(repo.dir, 'src', 'novo.js'), 'export const x = 1\n')
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'ade(S1): quem escreve commitou sozinho'])
+    const res = await contain({ git, unitId: 'S1', treeBefore, scopePaths: ['src/**'], doNotTouch: [], sensitivePaths: [] } as any)
+    expect(res.changedPaths).toEqual(['src/novo.js'])
+    expect(res.reason).not.toBe('no_changes')
+  })
+
   test('contain_treats_maxbuffer_truncation_as_state_integrity', async () => {
     const repo = makeRepo()
     tmpDirs.push(repo.dir)

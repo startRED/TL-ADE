@@ -19,12 +19,14 @@ export function makeCheckerDouble(options: {
   contractRevision?: string
 }): (opts: any) => Promise<any> {
   return async (opts: any) => {
+    // Como o revisor real: copia a revisão de insumos que o motor pôs no pack (echo_exactly); pack sem ela, calcula.
+    const pack = typeof opts.packPath === 'string' && fs.existsSync(opts.packPath) ? fs.readFileSync(opts.packPath, 'utf8') : ''
+    const echoed = /"echo_exactly":[\s\S]*?"tree": "([0-9a-f]{40})",\s*"digest": "(sha256:[0-9a-f]{64})"/.exec(pack)
     const wtPort = createGitPort({ worktreeDir: opts.cwd })
-    const tree = await wtPort.worktreeTree()
-    const changedPaths = await wtPort.dirtyPaths()
-    const digest = computeObservedInputDigest({
+    const tree = echoed?.[1] ?? await wtPort.worktreeTree()
+    const digest = echoed?.[2] ?? computeObservedInputDigest({
       tree,
-      changedPaths,
+      changedPaths: await wtPort.dirtyPaths(),
       contractRevision: options.contractRevision,
     })
 

@@ -148,7 +148,7 @@ export async function writeProof(opts: {
     })
   }
 
-  const changed = (await opts.wtPort.dirtyPaths()).map((p) => p.replace(/\\/g, '/')).filter((p) => !p.startsWith('.ade/'))
+  const changed = (await opts.wtPort.dirtyPaths(opts.treeBefore)).map((p) => p.replace(/\\/g, '/')).filter((p) => !p.startsWith('.ade/'))
   const outside = changed.filter((p) => !targets.includes(p))
   if (outside.length > 0) {
     await opts.wtPort.restoreTree(opts.treeBefore, { label: `proof-out-of-scope/${storyId}` })
