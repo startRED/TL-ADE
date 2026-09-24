@@ -64,6 +64,7 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | [0037](0037-tabela-da-missao-em-palavras-emenda-0035.md) | Tabela da missão em palavras, sem notação musical (emenda o ADR 0035) | Aceito (pedido de Erick, 2026-09-23) |
 | [0038](0038-pasta-da-parte-e-medida-pela-largada.md) | Pasta de parte parada é liberada e a contenção mede contra a árvore de largada (emenda o ADR 0014) | Aceito (pedido de Erick, 2026-09-23) |
 | [0039](0039-catalogo-real-e-escolha-de-skills-pelo-plano.md) | Catálogo real de skills e escolha por parte pelo plano (emenda o ADR 0009) | Aceito (pedido de Erick, 2026-09-24) |
+| [0040](0040-ate-quatro-skills-por-parte.md) | Até quatro skills por parte, escolhidas conforme a parte (emenda os ADRs 0009 e 0039) | Aceito (pedido de Erick, 2026-09-24) |
 
 ## Mapa decisão → onde ela aparece
 
@@ -73,7 +74,7 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | Durabilidade e recuperação | 0002, 0003, 0012, 0014, 0021, 0025, 0027, 0028, 0029, 0031, 0038 | §6, §11 E6, E7, E21, E25–E27 |
 | Modelos, transporte e papéis | 0004, 0005, 0006, 0015, 0028 | §7, §11 E10, E16, E23, E24 |
 | Intenção, contrato e prova | 0007, 0008, 0016, 0028, 0036 | §4, §5, §11 E1–E4, E12, E18–E20 |
-| Contexto, skills e qualidade | 0009, 0010, 0011, 0018, 0027, 0028, 0029, 0039 | §7, §10 A1, A7, A11, A13, A14, §11 E8, E9, E13–E15, E33, E35, E39 |
+| Contexto, skills e qualidade | 0009, 0010, 0011, 0018, 0027, 0028, 0029, 0039, 0040 | §7, §10 A1, A7, A11, A13, A14, §11 E8, E9, E13–E15, E33, E35, E39 |
 | Observação e método | 0013, 0017, 0019, 0020, 0024, 0027, 0028, 0029, 0034, 0035, 0037 | §3, §8, §10 A10, A12, §11 E11, E17, E30, E34, E37 |
 | Orçamento e execução | 0026, 0028, 0029, 0032, 0033 | §7, §9.8, §11 E20, E24 |
 

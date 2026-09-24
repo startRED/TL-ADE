@@ -371,13 +371,13 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
     const recall = hits.length / mustInclude.length
     expect(recall).toBeGreaterThanOrEqual(0.85)
 
-    // 2. Seleção final (<= 3)
+    // 2. Seleção final (<= 4)
     const selected = selectStorySkills({
       story: fixture.story,
       candidates: catalog.entries,
     })
 
-    expect(selected.length).toBeLessThanOrEqual(3)
+    expect(selected.length).toBeLessThanOrEqual(4)
     const selectedIds = selected.map((s) => s.id)
 
     // Não inclui itens proibidos
@@ -466,7 +466,7 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
     )
 
     expect(contextResult.sections).toHaveProperty('skills')
-    expect(contextResult.selectedSkills.length).toBeLessThanOrEqual(3)
+    expect(contextResult.selectedSkills.length).toBeLessThanOrEqual(4)
     expect(contextResult.selectedSkills.map((s) => s.name)).toEqual(['ui-accessibility', 'ui-typography']) // ordem estável
     expect(contextResult.sections.skills).toContain('Critérios de acessibilidade WCAG AA')
     expect(contextResult.sections.skills).not.toContain('license: MIT') // frontmatter removido

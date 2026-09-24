@@ -210,7 +210,7 @@ export function planPrompt(request: string, repoDir: string, understanding: Unde
     '- acceptance: 2 a 6 critérios, cada um {given, when, then} ("Dado…, quando…, então…" sem essas palavras), de comportamento observável pelo usuário ou por uma prova automatizada sem rede, CLI ou serviço real (use dublês). Nunca fixe implementação: nome de variável, valor exato de estilo, estrutura interna.',
     '- scope_paths: arquivos que a parte pode criar ou mudar (caminhos reais do projeto ou novos). do_not_touch: o que não pode mudar. test_file: o arquivo de prova, num lugar que o comando de provas realmente roda.',
     skills.length > 0
-      ? ['- skills: até 3 ids desta lista que ajudam quem escreve a prova e o código daquela parte; [] se nenhuma serve.', ...skills.map((k) => `  - ${k.id}: ${k.summary}`)].join('\n')
+      ? ['- skills: de 0 a 4 ids desta lista, só as que ajudam de verdade quem escreve a prova e o código daquela parte (parte simples pede menos; [] se nenhuma serve).', ...skills.map((k) => `  - ${k.id}: ${k.summary}`)].join('\n')
       : '- skills: [] (o projeto não tem catálogo de skills).',
     '- Menor código que resolve: reuse o que já existe, depois a biblioteca padrão, depois a plataforma (CSS antes de JS, elemento nativo antes de componente). Nada de camada ou configuração que nenhuma parte usa.',
     '- Nenhuma parte manda commitar, dar push ou rodar a suíte inteira: o motor faz isso depois das provas e da revisão.',
@@ -263,7 +263,7 @@ function withStory(contract: any, story: PlanAnswer['stories'][number], index: n
       do_not_touch: uniq([...contract.guardrails.do_not_touch, ...story.do_not_touch]),
     },
     // skill que a IA inventou ou que saiu do catálogo não entra
-    skills: uniq(story.skills ?? []).filter((id) => catalog.has(id)).slice(0, 3),
+    skills: uniq(story.skills ?? []).filter((id) => catalog.has(id)).slice(0, 4),
     ...(deps.length > 0 ? { depends_on: deps } : {}),
   }
 }

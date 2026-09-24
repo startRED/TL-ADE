@@ -51,7 +51,7 @@ function isPathInScope(filePath: string, scopePaths: string[] = ['src/**'], doNo
 }
 
 /**
- * Seleciona determinísticamente até três skills aprovadas correspondentes ao domínio e linguagem da story.
+ * Seleciona determinísticamente até quatro skills aprovadas correspondentes ao domínio e linguagem da story.
  */
 export function selectEligibleSkills({ story, eligibleSkills = [], approvedSkills }: {
         story: any
@@ -103,8 +103,8 @@ export function selectEligibleSkills({ story, eligibleSkills = [], approvedSkill
   // Ordenação determinística por nome
   filtered.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
 
-  // No máximo 3 skills
-  return filtered.slice(0, 3).map((s) => s.name)
+  // No máximo 4 skills (o plano escolhe de 0 a 4)
+  return filtered.slice(0, 4).map((s) => s.name)
 }
 
 /**

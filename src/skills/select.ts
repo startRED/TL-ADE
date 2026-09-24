@@ -5,7 +5,7 @@ import { rankSkills } from './bm25.ts'
  * (0) Filtro duro (domínio, linguagem, família, licença, quarentena)
  * (1) Ranqueamento BM25 (top-8)
  * (2) Seletor (injetável ou fallback determinístico)
- * (3) Fecho determinístico sob os tetos (<= 3 skills, <= 7.5k tokens/skill, <= 20k tokens total).
+ * (3) Fecho determinístico sob os tetos (<= 4 skills, <= 7.5k tokens/skill, <= 20k tokens total).
  */
 export function selectStorySkills({ story = {}, candidates = [], selector, budget = {} }: {
         story: { id?: string; task?: string; domain?: string; domains?: string[]; language?: string; languages?: string[]; family?: string; maker_family?: string;[key: string]: any }
@@ -100,7 +100,7 @@ export function selectStorySkills({ story = {}, candidates = [], selector, budge
   }
 
   // (3) Fecho sob tetos
-  const maxSkills = budget.maxSkills ?? 3
+  const maxSkills = budget.maxSkills ?? 4
   const maxTokensPerSkill = budget.maxTokensPerSkill ?? 7500
   const maxTotalTokens = budget.maxTotalTokens ?? 20000
 

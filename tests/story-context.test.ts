@@ -188,8 +188,8 @@ describe('Montar contexto compacto por story', () => {
       approvedSkills,
     })
 
-    expect(selected.length).toBeLessThanOrEqual(3)
-    expect(selected.length).toBe(3)
+    expect(selected.length).toBeLessThanOrEqual(4)
+    expect(selected.length).toBe(4)
     expect(selected).not.toContain('skill-unapproved-malicious')
 
     // Contexto com metadados verificáveis de cada skill (E59)
@@ -206,7 +206,7 @@ describe('Montar contexto compacto por story', () => {
       },
     )
 
-    expect(contextResult.selectedSkills.length).toBeLessThanOrEqual(3)
+    expect(contextResult.selectedSkills.length).toBeLessThanOrEqual(4)
     for (const skill of contextResult.selectedSkills) {
       expect(skill).toHaveProperty('name')
       expect(skill).toHaveProperty('source')
