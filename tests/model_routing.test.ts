@@ -119,12 +119,12 @@ const PLANS = { claude: 'max20', codex: 'pro20' }
 test('CA1_writer_is_head_of_code_chain_with_model_and_effort_per_cli_and_real_telemetry', async () => {
   const subject = fixture({ models: { plans: PLANS } })
   await subject.run()
-  expect(subject.makers()[0]).toEqual({ family: 'claude', role: 'maker', model: 'claude-opus-5-5', effort: 'high' })
+  expect(subject.makers()[0]).toEqual({ family: 'codex', role: 'maker', model: 'gpt-6-astra', effort: 'medium' })
   const telemetry = subject.events().find((e) => e.kind === 'telemetry' && e.data?.role === 'maker')
   expect(telemetry?.data).toMatchObject({
-    family: 'claude',
-    effort: 'high',
-    models: [{ role: 'executor', model_id: 'claude-opus-5-5' }],
+    family: 'codex',
+    effort: 'medium',
+    models: [{ role: 'executor', model_id: 'gpt-6-astra' }],
     files_touched: 1,
     duration_ms: 5000,
   })
@@ -182,17 +182,17 @@ test('CA3_resume_after_quota_pause_rebuilds_chains_with_new_reading_before_next_
 }, 30000)
 
 test('CA4_checker_is_always_from_other_company_than_the_round_writer_even_on_reserve_and_parks_without_one', async () => {
-  // 4 rodadas reprovadas do Claude, a 5ª (reserva do ChatGPT) passa nos portões e vai à revisão
+  // 2 rodadas reprovadas do ChatGPT e 2 do Claude, a 5ª (Claude) passa nos portões e vai à revisão
   const red = ['tests/a.test.ts > nova']
   const subject = fixture({ models: { plans: PLANS }, gates: [red, red, red, red, null] })
   await subject.run()
-  expect(subject.makers().at(-1)).toMatchObject({ family: 'codex' })
+  expect(subject.makers().at(-1)).toMatchObject({ family: 'claude' })
   expect(subject.checkers()).toHaveLength(1)
-  expect(subject.checkers()[0].family).toBe('claude')
+  expect(subject.checkers()[0].family).toBe('codex')
 
   const first = fixture({ models: { plans: PLANS } })
   await first.run()
-  expect(first.checkers()[0]).toMatchObject({ family: 'codex' })
+  expect(first.checkers()[0]).toMatchObject({ family: 'claude' })
 
   // só uma empresa: não há revisor possível
   const lonely = fixture({ models: { plans: { claude: 'max20' } } })
@@ -216,23 +216,23 @@ test('CA5_ladder_rounds_per_rung_follow_risk_climb_in_intelligence_and_end_on_si
   const normal = fixture({ models: { plans: PLANS }, gates: red })
   expect(await normal.run()).toMatchObject({ status: 'awaiting_operator', reason: 'gate_failed' })
   expect(normal.makers().map(tag)).toEqual([
+    'codex:gpt-6-astra(medium)', 'codex:gpt-6-astra(medium)',
     'claude:claude-opus-5-5(high)', 'claude:claude-opus-5-5(high)',
     'claude:claude-opus-5-5(xhigh)', 'claude:claude-opus-5-5(xhigh)',
-    'codex:gpt-6-astra(medium)',
   ])
 
   const light = fixture({ models: { plans: PLANS }, gates: red })
   await light.run(light.storyOf('ADE-R1', { risk: { level: 'light', surfaces: [], evidence: [] } }))
   expect(light.makers().map(tag)).toEqual([
-    'claude:claude-opus-5-5(high)', 'claude:claude-opus-5-5(xhigh)', 'codex:gpt-6-astra(medium)',
+    'codex:gpt-6-astra(medium)', 'claude:claude-opus-5-5(high)', 'claude:claude-opus-5-5(xhigh)',
   ])
 
   const sensitive = fixture({ models: { plans: PLANS }, gates: red })
   await sensitive.run(sensitive.storyOf('ADE-R1', { title: 'login com senha' }))
   const calls = sensitive.makers().map(tag)
-  expect(calls).toHaveLength(7)
-  expect(calls.filter((c) => c.startsWith('codex:'))).toEqual(['codex:gpt-6-astra(medium)'])
-  expect(calls.at(-1)).toBe('codex:gpt-6-astra(medium)')
+  expect(calls).toHaveLength(9)
+  expect(calls.filter((c) => c.startsWith('codex:'))).toEqual(['codex:gpt-6-astra(medium)', 'codex:gpt-6-astra(medium)', 'codex:gpt-6-astra(medium)'])
+  expect(calls.at(-1)).toBe('claude:claude-opus-5-5(xhigh)')
 }, 90000)
 
 test('C1.2: com planos Max 20x e Pro 20x e testes falhando, o motor sobe a escada de correção até esgotar os degraus sem nunca chegar ao máximo e termina na reserva de outra empresa', async () => {
@@ -244,9 +244,9 @@ test('C1.2: com planos Max 20x e Pro 20x e testes falhando, o motor sobe a escad
   const calls = subject.makers()
   expect(calls.some((c) => c.effort === 'max')).toBe(false)
   expect(calls.map(tag)).toEqual([
-    'claude:claude-opus-5-5(high)', 'claude:claude-opus-5-5(xhigh)', 'codex:gpt-6-astra(medium)',
+    'codex:gpt-6-astra(medium)', 'claude:claude-opus-5-5(high)', 'claude:claude-opus-5-5(xhigh)',
   ])
-  expect(calls.at(-1)!.family).toBe('codex')
+  expect(calls.at(-1)!.family).toBe('claude')
 }, 60000)
 
 test('CA6_blocked_model_is_never_dispatched_with_plans_and_part_parks_when_no_writer_is_left', async () => {

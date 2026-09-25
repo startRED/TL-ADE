@@ -92,11 +92,11 @@ describe('catálogo, capacidade, qualidade e filas de modelos', () => {
     expect(chains.checker.slice(0, 2).every((s) => s.family !== writer)).toBe(true)
   })
 
-  test('CA4 exemplo: impl Opus 5.5 (high) → GPT-6 Astra (high) → um esforço por modelo', () => {
+  test('CA4 exemplo: impl GPT-6 Astra (high) → Opus 5.5 (medium) → um esforço por modelo', () => {
     // 10 chamadas medidas do Astra em high a 3 min cada: o tempo medido aqui vale mais que o do site
     const timed = Array.from({ length: 10 }, (_, i) => writerCall(`t${i}`, 'gpt-6-astra', { effort: 'high', duration_ms: 180_000 }))
     const { chains } = buildChains({ plans: { claude: 'max20', codex: 'pro20' }, measured: measureQuality(timed), now: NOW })
-    expect(chains.impl.slice(0, 2).map(tag)).toEqual(['claude-opus-5-5(high)', 'gpt-6-astra(high)'])
+    expect(chains.impl.slice(0, 2).map(tag)).toEqual(['gpt-6-astra(high)', 'claude-opus-5-5(medium)'])
     expect(new Set(chains.impl.map((s) => s.model)).size).toBe(chains.impl.length)
   })
 
