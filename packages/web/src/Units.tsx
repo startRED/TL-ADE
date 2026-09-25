@@ -16,7 +16,10 @@ interface Detail {
   diff: Array<{ file: string; lines: Array<{ kind: 'add' | 'del' | 'ctx'; text: string }> }>
   tests: Array<{ name: string; status: 'passed' | 'failed' | 'red_at_start'; baseline_red: boolean }>
   review: { verdict: string; model_id: string | null; findings: Array<{ id: string; severity: string; text: string; status: string; citation: string | null }> } | null
+  skills?: Array<{ role: string; model_id: string | null; family: string | null; skills: string[] }>
 }
+
+const ROLE_LABEL: Record<string, string> = { prova: 'Escreve a prova', 'código': 'Escreve o código', 'revisão': 'Revisa' }
 
 /**
  * Pautas por papel, não por empresa: o journal diz o papel de cada passo (maker, eval, review), e o modelo só é certo
@@ -408,6 +411,22 @@ function Leaf({ unit, detail, index, onClose }: { unit: Unit; detail: Detail; in
                 ))}
               </ul>
             </>
+          )}
+      </section>
+
+      <section>
+        <h3>Skills</h3>
+        {!detail.skills?.length
+          ? <p className="empty">Nenhum papel rodou ainda.</p>
+          : (
+            <ul className="findings">
+              {detail.skills.map((r) => (
+                <li key={r.role}>
+                  <span className="finding-meta">{ROLE_LABEL[r.role] ?? r.role} · <span className="mono">{r.model_id ?? r.family ?? 'modelo não registrado'}</span></span>
+                  <span>{r.skills.length > 0 ? r.skills.join(', ') : 'nenhuma skill'}</span>
+                </li>
+              ))}
+            </ul>
           )}
       </section>
 

@@ -19,6 +19,24 @@ export interface UnitDetail {
   diff: DiffFile[]
   tests: UnitTest[]
   review: { verdict: string; model_id: string | null; findings: UnitFinding[] } | null
+  /** Skills que cada papel recebeu na última chamada dele nesta parte, com o modelo que fez o papel. */
+  skills: UnitRoleSkills[]
+}
+export interface UnitRoleSkills { role: 'prova' | 'código' | 'revisão'; model_id: string | null; family: string | null; skills: string[] }
+
+const ROLE_PT: Record<string, UnitRoleSkills['role']> = { prova: 'prova', maker: 'código', checker_round: 'revisão' }
+
+/** Última chamada de cada papel na parte (telemetria): o modelo e as skills que foram no pacote dele. */
+function skillsOf(events: any[], unit: string): UnitRoleSkills[] {
+  const last = new Map<string, any>()
+  for (const ev of events) {
+    const role = ROLE_PT[ev.data?.role]
+    if (ev.kind === 'telemetry' && role && (ev.data?.story_id ?? unitOf(ev)) === unit) last.set(role, ev.data)
+  }
+  return (['prova', 'código', 'revisão'] as const).filter((role) => last.has(role)).map((role) => {
+    const d = last.get(role)
+    return { role, model_id: d.models?.find((m: any) => m.role === 'executor')?.model_id ?? null, family: d.family ?? null, skills: (d.skills_injected ?? []).map((k: any) => k.name) }
+  })
 }
 
 const notFound = (what: string) => new AdeError('unit_not_found', `${what} não encontrada.`, 2)
@@ -150,7 +168,7 @@ export async function readUnit(repoDir: string, missionId: string, unitId: strin
     })
     diff = parseDiff(stdout)
   }
-  return { id: unitId, base_commit: base, head_commit: head, diff, tests: testsOf(events, unitId), review: reviewOf(events, unitId) }
+  return { id: unitId, base_commit: base, head_commit: head, diff, tests: testsOf(events, unitId), review: reviewOf(events, unitId), skills: skillsOf(events, unitId) }
 }
 
 export type LogLine = { seq: number; at: string | null; unit: string | null; text: string }
@@ -160,7 +178,7 @@ function stepPhrase(stepId: string, status: string | undefined): string {
   const ok = status === 'ok' || status === undefined
   const r = /:r(\d+)(?:t\d+)?:(maker|checker)/.exec(stepId)
   if (r) return r[2] === 'maker' ? `rodada ${r[1]}: escreveu o código` : `rodada ${r[1]}: revisão de outra empresa terminou`
-  if (stepId.endsWith(':proof')) return 'escreveu as provas dos critérios'
+  if (/:proof(:|$)/.test(stepId)) return 'escreveu as provas dos critérios'
   if (/^eval:.*:red:/.test(stepId)) return 'rodou a prova antes do código'
   if (/^eval:.*:green:/.test(stepId)) return 'rodou a prova depois do código'
   if (stepId.endsWith(':prepare')) return 'preparou a cópia de trabalho'
@@ -178,7 +196,7 @@ function logText(ev: any): string | null {
   const d = ev.data ?? {}
   switch (ev.kind) {
     // só as etapas demoradas (chamadas de modelo) avisam que começaram; as outras aparecem quando terminam
-    case 'step_intent': return /:(proof|r\d+(t\d+)?:(maker|checker))$/.test(String(ev.step_id)) ? `${stepPhrase(String(ev.step_id), undefined)}…`.replace('escreveu', 'escrevendo').replace('terminou', 'em andamento') : null
+    case 'step_intent': return /:(proof(:[a-z0-9:]+)?|r\d+(t\d+)?:(maker|checker))$/.test(String(ev.step_id)) ? `${stepPhrase(String(ev.step_id), undefined)}…`.replace('escreveu', 'escrevendo').replace('terminou', 'em andamento') : null
     case 'step_result': return `${ev.status === 'ok' ? '✓' : '✗'} ${stepPhrase(String(ev.step_id), ev.status)}${VERDICT_PT[d.result?.verdict] ? `: ${VERDICT_PT[d.result.verdict]}` : ''}`
     case 'story_started': return 'parte começou'
     case 'story_done': return d.status === 'delivered' || d.status === 'committed' ? 'parte pronta e entregue' : `parte parou: ${d.reason ?? d.status}`

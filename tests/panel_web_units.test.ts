@@ -72,6 +72,8 @@ async function fixture() {
   await step('U1', 'eval:E1:green:t1', 'eval_run', { status: 'ok', result: { eval_id: 'E1', phase: 'green', verdict: 'green' } })
   await step('U1', 'eval:E2:green:t1', 'eval_run', { status: 'ok', result: { eval_id: 'E2', phase: 'green', verdict: 'red' } })
   await journal.append({ kind: 'gates_done', unit: 'U1', data: { results: [{ gate_id: 'test', status: 'failure', chargeable_reds: ['tests/app.test.js > soma'] }] } })
+  await journal.append({ kind: 'telemetry', unit: 'U1', data: { role: 'prova', family: 'agy', story_id: 'U1', models: [{ role: 'executor', model_id: 'gemini-3.8-flash' }], skills_injected: [{ name: 'test-driven-development' }] } })
+  await journal.append({ kind: 'telemetry', unit: 'U1', data: { role: 'maker', family: 'claude', story_id: 'U1', models: [{ role: 'executor', model_id: 'claude-opus-5-5' }], skills_injected: [{ name: 'ponytail' }, { name: 'test-driven-development' }] } })
   await journal.append({ kind: 'telemetry', unit: 'U1', data: { role: 'checker_round', story_id: 'U1', models: [{ role: 'executor', model_id: 'gpt-5.5' }] } })
   await journal.append({
     kind: 'review_result',
@@ -192,6 +194,12 @@ describe('painel: partes com passos, diff, provas e parecer', () => {
       ],
     })
     expect((await get(`${units}/U2`)).body.review).toBeNull()
+    // 25/09: o painel não dizia quais skills a missão usou; cada papel aparece com o modelo e as skills do pacote dele
+    expect(body.skills).toEqual([
+      { role: 'prova', model_id: 'gemini-3.8-flash', family: 'agy', skills: ['test-driven-development'] },
+      { role: 'código', model_id: 'claude-opus-5-5', family: 'claude', skills: ['ponytail', 'test-driven-development'] },
+      { role: 'revisão', model_id: 'gpt-5.5', family: null, skills: [] },
+    ])
   }, 120_000)
 
   test('C6 parte, missão ou id malformado inexistente responde 404', async () => {
@@ -215,8 +223,10 @@ describe('painel: partes com passos, diff, provas e parecer', () => {
     await expect(detail.locator('[data-kind="del"]').first().textContent()).resolves.toContain('const b = 2')
     await detail.getByText('tests/app.test.js > soma').waitFor()
     await detail.getByText('Vermelhas na largada').waitFor()
-    await detail.getByText('gpt-5.5').waitFor()
+    await detail.getByText('gpt-5.5').first().waitFor()
     await detail.getByText('Falta validar a data.').waitFor()
+    await detail.getByText('ponytail, test-driven-development').waitFor()
+    await detail.getByText(/Escreve o código/).waitFor()
     expect(consoleErrors).toEqual([])
   }, 180_000)
 
