@@ -30,10 +30,17 @@ export const postJson = <T>(path: string, body: unknown) => apiFetch<T>(path, { 
 export function subscribeEvents(onChange: () => void): () => void {
   const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const ws = new WebSocket(`${scheme}://${window.location.host}/api/events?session=${encodeURIComponent(sessionToken)}`)
-  ws.onmessage = () => onChange()
+  // Ao conectar, o servidor reenvia o journal inteiro: uma recarga por evento enfileirava ~60 consultas e travava as
+  // outras telas por mais de 15 s. Junta a rajada numa recarga só.
+  let timer: ReturnType<typeof setTimeout> | undefined
+  ws.onmessage = () => {
+    clearTimeout(timer)
+    timer = setTimeout(onChange, 250)
+  }
   // ponytail: sem reconexão; o painel recarrega o estado a cada ação do usuário.
   // Fechar ainda conectando vira erro no console: espera abrir para fechar.
   return () => {
+    clearTimeout(timer)
     if (ws.readyState === WebSocket.CONNECTING) ws.onopen = () => ws.close()
     else ws.close()
   }

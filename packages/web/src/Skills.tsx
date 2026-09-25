@@ -16,7 +16,7 @@ export default function SkillsPage({ projectId }: { projectId: string }) {
   const pluginsPath = `/api/projects/${encodeURIComponent(projectId)}/plugins`
   const [all, setAll] = useState<Skill[]>([])
   const [list, setList] = useState<Skill[]>([])
-  const [plugins, setPlugins] = useState<Plugin[]>([])
+  const [plugins, setPlugins] = useState<Plugin[] | null>(null)
   const [filters, setFilters] = useState<Record<Filter, string>>({ domain: '', trust: '', source: '' })
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState<{ id: string; body: string } | null>(null)
@@ -53,7 +53,7 @@ export default function SkillsPage({ projectId }: { projectId: string }) {
     }
   }
 
-  const off = new Set(plugins.filter((p) => !p.enabled).map((p) => p.source))
+  const off = new Set((plugins ?? []).filter((p) => !p.enabled).map((p) => p.source))
   const q = query.trim().toLowerCase()
   const shown = list.filter((s) => !q || `${s.id} ${s.summary}`.toLowerCase().includes(q))
   const options: Record<Filter, string[]> = { domain: uniq(all.map((s) => s.domain)), trust: uniq(all.map((s) => s.trust)), source: uniq(all.map((s) => s.source)) }
@@ -67,7 +67,9 @@ export default function SkillsPage({ projectId }: { projectId: string }) {
       <Card asChild>
         <section aria-label="Plugins">
           <Heading as="h2" size="4" mb="2">Plugins</Heading>
-          {plugins.length === 0
+          {plugins === null
+            ? <Text color="gray">Lendo o catálogo…</Text>
+            : plugins.length === 0
             ? <Text color="gray">Nenhuma fonte no catálogo. Sincronize com <span className="mono">ade catalog sync</span>.</Text>
             : (
               <Flex direction="column" gap="2">
