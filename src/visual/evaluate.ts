@@ -1,14 +1,11 @@
-import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { captureVisualSurface } from './browser.ts'
 import { runVisualGates } from './gates.ts'
 import { judgeVisual } from './judge.ts'
 import { createImpeccableDetector } from './impeccable.ts'
-import { startServe } from './browser.ts'
-import { promisify } from 'node:util'
-
-const execFileAsync = promisify(execFile)
+import { startServe, withServedApp } from './browser.ts'
+import { journeyFile, runJourneys, type JourneyResult } from './journey.ts'
 
 /**
  * Executa o ciclo completo do Frontend Quality Engine (FQE).
@@ -36,6 +33,7 @@ export async function runFrontendQuality({
             browser?: any
             detector?: any
             startServe?: typeof startServe
+            runJourneys?: typeof runJourneys
             dispatchJudge?: (pack: any) => Promise<any>
             checkerResolved?: { exe: string; prefixArgs: string[] } | null
             agyResolved?: { exe: string; prefixArgs: string[] } | null
@@ -46,7 +44,8 @@ export async function runFrontendQuality({
         }
     }): Promise<{
     status: 'pass' | 'rework' | 'awaiting_operator'
-    reason?: 'visual_degraded' | 'fqe_unavailable' | 'visual_cut_not_met'
+    reason?: 'visual_degraded' | 'fqe_unavailable' | 'visual_cut_not_met' | 'journey_failed'
+    journey?: JourneyResult
     evaluation?: any
     defects?: any[]
     captures?: any[]
@@ -64,18 +63,17 @@ export async function runFrontendQuality({
 
   const visualConfig = config.visual ?? {}
   if (visualConfig.enabled === false) {
-    return { status: 'awaiting_operator', reason: 'fqe_unavailable' }
+    return { status: 'awaiting_operator', reason: 'fqe_unavailable', journey: { status: 'skipped', reason: 'no_serve' } }
   }
 
   // (12) e (13): Verificação de ambiente e detector
   if (capabilities?.fqe_unavailable || capabilities?.impeccable?.engine_version_match === false) {
-    return { status: 'awaiting_operator', reason: 'fqe_unavailable' }
+    return { status: 'awaiting_operator', reason: 'fqe_unavailable', journey: { status: 'skipped', reason: 'browser_failed' } }
   }
 
-  const url = visualConfig.url || 'http://127.0.0.1:4173'
   const hasServe = Boolean(visualConfig.url || visualConfig.serve_command)
   if (!hasServe) {
-    return { status: 'awaiting_operator', reason: 'visual_degraded' }
+    return { status: 'awaiting_operator', reason: 'visual_degraded', journey: { status: 'skipped', reason: 'no_serve' } }
   }
 
   const captureFn = deps.captureSurface ?? captureVisualSurface
@@ -93,45 +91,46 @@ export async function runFrontendQuality({
       urlMode: capabilities?.impeccable?.url_mode || visualConfig.impeccable?.url_mode,
     })
 
-  let serve = null
-  // 1. Serve e captura com Playwright como biblioteca; cada página é inspecionada antes do contexto fechar.
-  let captures = []
+  // Evidências duráveis em artifacts/visual/<tree>/
+  const outDir = path.join(missionDir, 'artifacts', 'visual', tree)
+  // 1. Serve, jornada de usuário e captura com Playwright como biblioteca; cada página é inspecionada antes do contexto
+  // fechar. A jornada vem antes: não adianta medir nem julgar a beleza do que não funciona.
+  let captures: any[] = []
+  let journey: JourneyResult | undefined
   try {
-    // tela que precisa de build (o painel servido do dist) monta a versão da worktree antes de servir
-    if (Array.isArray(visualConfig.build_command) && visualConfig.build_command.length > 0) {
-      const [bin, ...args] = visualConfig.build_command
-      await execFileAsync(bin, args, { cwd: story.worktreeDir || missionDir, windowsHide: true, maxBuffer: 32 * 1024 * 1024, timeout: (visualConfig.build_timeout_s || 300) * 1000 })
-    }
-    if (visualConfig.serve_command) {
-      serve = await (deps.startServe ?? startServe)({
-        command: visualConfig.serve_command,
-        cwd: story.worktreeDir || missionDir,
+    await withServedApp(visualConfig, story.worktreeDir || missionDir, async (url) => {
+      journey = await (deps.runJourneys ?? runJourneys)({ file: journeyFile(missionDir, story.id), url, outDir, tag: `r${round}`, browser: deps.browser })
+      if (journey.status === 'fail') return
+      captures = await captureFn({
+        browser: deps.browser,
         url,
-        timeoutSeconds: visualConfig.ready_timeout_s || 30,
+        routes,
+        widths,
+        themes,
+        tree,
+        missionDir,
+        inspectPage: (evidence) => runGatesFn({ ...evidence, config, detector }),
       })
-    }
-    captures = await captureFn({
-      browser: deps.browser,
-      url,
-      routes,
-      widths,
-      themes,
-      tree,
-      missionDir,
-      inspectPage: (evidence) => runGatesFn({ ...evidence, config, detector }),
-    })
+    }, deps.startServe ?? startServe)
   } catch {
-    return { status: 'awaiting_operator', reason: 'visual_degraded' }
-  } finally {
-    await serve?.stop()
+    return { status: 'awaiting_operator', reason: 'visual_degraded', journey: journey ?? { status: 'skipped', reason: 'serve_failed' } }
+  }
+
+  if (journey?.status === 'fail') {
+    const f = journey.failure
+    return {
+      status: 'rework',
+      reason: 'journey_failed',
+      journey,
+      defects: [{ id: `journey-${f.criterio}`, severity: 'critical', criterion: 'journey', where: `${f.criterio} passo ${f.step_index}`, fix: `Fazer o fluxo do critério ${f.criterio} funcionar: ${f.error}` }],
+      captures: [],
+    }
   }
 
   if (!captures || captures.length === 0) {
-    return { status: 'awaiting_operator', reason: 'visual_degraded' }
+    return { status: 'awaiting_operator', reason: 'visual_degraded', journey }
   }
 
-  // Registra evidências duráveis em artifacts/visual/<tree>/
-  const outDir = path.join(missionDir, 'artifacts', 'visual', tree)
   fs.mkdirSync(outDir, { recursive: true })
   fs.writeFileSync(path.join(outDir, `captures-r${round}.json`), JSON.stringify(captures, null, 2), 'utf8')
 
@@ -155,6 +154,7 @@ export async function runFrontendQuality({
       status: 'rework',
       defects: uniqueDefects(gateRes.defects || []),
       gateResults: gateRes.results,
+      journey,
       captures,
     }
   }
@@ -195,7 +195,7 @@ export async function runFrontendQuality({
     },
     })
   } catch {
-    return { status: 'awaiting_operator', reason: 'fqe_unavailable', captures, gateResults: gateRes.results }
+    return { status: 'awaiting_operator', reason: 'fqe_unavailable', captures, gateResults: gateRes.results, journey }
   }
 
   fs.writeFileSync(path.join(outDir, `eval-r${round}.json`), JSON.stringify(evaluation, null, 2), 'utf8')
@@ -206,6 +206,7 @@ export async function runFrontendQuality({
       evaluation,
       captures,
       gateResults: gateRes.results,
+      journey,
     }
   }
 
@@ -217,6 +218,7 @@ export async function runFrontendQuality({
       defects: evaluation.defects,
       captures,
       gateResults: gateRes.results,
+      journey,
     }
   }
 
@@ -227,6 +229,7 @@ export async function runFrontendQuality({
     defects: evaluation.defects,
     captures,
     gateResults: gateRes.results,
+    journey,
   }
 }
 

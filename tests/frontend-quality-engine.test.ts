@@ -12,6 +12,7 @@ import { runVisualGates } from '../src/visual/gates.ts'
 import { judgeVisual, calculateRenormalizedFinal, evaluateCutoff } from '../src/visual/judge.ts'
 import { probeImpeccable, createImpeccableDetector, PINNED_ENGINE_VERSION } from '../src/visual/impeccable.ts'
 import { runFrontendQuality } from '../src/visual/evaluate.ts'
+import { runJourneys, validateJourney } from '../src/visual/journey.ts'
 import { compileIntent } from '../src/intent/compiler.ts'
 import { prepareStory } from '../src/engine/prepare.ts'
 import { renderVisualComparison } from '../src/cli/report.ts'
@@ -850,6 +851,135 @@ describe('defeitos dos portões sem repetição', () => {
         deps: { captureSurface: vi.fn().mockResolvedValue(captures) },
       })
       expect(res.defects?.map((d) => d.id)).toEqual(['D3-low-contrast', 'D6-horizontal-overflow'])
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+// Jornadas de usuário (26/09): prints parados não pegavam botão que não faz nada nem tela que quebra depois de enviar.
+// O roteiro da prova abre a rota, clica, digita e confere; roda antes dos portões e dos juízes.
+describe('jornada de usuário', () => {
+  const journeyDoc = {
+    journeys: [{
+      criterio: 'C1',
+      steps: [
+        { goto: '/' },
+        { fill: { label: 'Nome' }, value: 'Ana' },
+        { click: { role: 'button', name: 'Enviar' } },
+        { expect_text: 'Salvo, Ana' },
+      ],
+    }],
+  }
+
+  test('roteiro_valido_passa_e_verbo_ou_alvo_desconhecido_e_recusado', () => {
+    expect(validateJourney(journeyDoc)).toMatchObject({ ok: true })
+    expect(validateJourney({ journeys: [{ criterio: 'C2', needs_data: true, steps: [] }] })).toMatchObject({ ok: true })
+    const bad = validateJourney({ journeys: [{ criterio: 'C1', steps: [{ hover: { text: 'x' } }, { click: { css: '.x' } }, { fill: { label: 'Nome' } }] }] })
+    expect(bad.ok).toBe(false)
+    if (!bad.ok) expect(bad.errors.length).toBe(3)
+    expect(validateJourney({ journeys: [] }).ok).toBe(false)
+    expect(validateJourney({ journeys: [{ criterio: 'C1', steps: [] }] }).ok).toBe(false)
+  })
+
+  test('jornada_no_chromium_acha_o_botao_que_nao_faz_nada_e_passa_depois_de_consertado', async () => {
+    const http = await import('node:http')
+    let fixed = false
+    const page = () => `<!doctype html><html><body><main>
+      <label for="n">Nome</label><input id="n">
+      <button id="b">Enviar</button><p id="out"></p></main>
+      <script>
+        fetch('/api/salvar').catch(() => {})
+        document.getElementById('b').addEventListener('click', () => {
+          ${fixed ? "document.getElementById('out').textContent = 'Salvo, ' + document.getElementById('n').value" : "console.error('salvar quebrou')"}
+        })
+      </script></body></html>`
+    const server = http.createServer((req, res) => {
+      if (req.url === '/api/salvar') { res.writeHead(500); res.end('erro'); return }
+      res.writeHead(200, { 'content-type': 'text/html' }); res.end(page())
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+    const url = `http://127.0.0.1:${(server.address() as any).port}`
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ade-journey-'))
+    try {
+      const file = path.join(dir, 'S1.json')
+      fs.writeFileSync(file, JSON.stringify(journeyDoc))
+      const broken = await runJourneys({ file, url, outDir: dir, tag: 'r1', stepTimeoutMs: 1500 })
+      expect(broken.status).toBe('fail')
+      if (broken.status !== 'fail') return
+      expect(broken.failure).toMatchObject({ criterio: 'C1', step_index: 4, step: { expect_text: 'Salvo, Ana' } })
+      expect(broken.failure.console.join('\n')).toContain('salvar quebrou')
+      expect(broken.failure.failed_requests.join('\n')).toContain('500')
+      expect(broken.failure.dom).toContain('Enviar')
+      expect(fs.existsSync(broken.failure.screenshot)).toBe(true)
+      expect(fs.existsSync(broken.failure.trace)).toBe(true)
+      expect(JSON.parse(fs.readFileSync(path.join(dir, 'journey-r1.json'), 'utf8')).status).toBe('fail')
+
+      fixed = true
+      expect((await runJourneys({ file, url, outDir: dir, tag: 'r2', stepTimeoutMs: 1500 })).status).toBe('pass')
+    } finally {
+      server.close()
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
+
+  test('sem_roteiro_roteiro_invalido_ou_so_criterios_que_dependem_de_dados_nao_abrem_o_navegador', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ade-journey-skip-'))
+    try {
+      const url = 'http://127.0.0.1:9'
+      expect(await runJourneys({ file: path.join(dir, 'nada.json'), url, outDir: dir, tag: 'r1' })).toMatchObject({ status: 'skipped', reason: 'no_script' })
+      const invalid = path.join(dir, 'invalido.json')
+      fs.writeFileSync(invalid, '{"journeys":[{"criterio":"C1","steps":[{"hover":{}}]}]}')
+      expect(await runJourneys({ file: invalid, url, outDir: dir, tag: 'r1' })).toMatchObject({ status: 'skipped', reason: 'invalid_script' })
+      const data = path.join(dir, 'dados.json')
+      fs.writeFileSync(data, '{"journeys":[{"criterio":"C3","needs_data":true,"steps":[]}]}')
+      expect(await runJourneys({ file: data, url, outDir: dir, tag: 'r1' })).toMatchObject({ status: 'skipped', reason: 'needs_data', needs_data: ['C3'] })
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  const failure = {
+    criterio: 'C1', step_index: 3, step: { click: { role: 'button', name: 'Enviar' } }, error: 'locator.click: Timeout 1500ms exceeded.',
+    console: ['error: salvar quebrou'], failed_requests: ['500 GET /api/salvar'], dom: '<main>…</main>', screenshot: 'j.png', trace: 'j.zip', url: 'http://x/',
+  }
+
+  test('jornada_que_falha_reprova_antes_dos_portoes_e_dos_juizes', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ade-journey-fqe-'))
+    try {
+      const captureSurface = vi.fn()
+      const judge = vi.fn()
+      const runJourneysDouble = vi.fn().mockResolvedValue({ status: 'fail', failure, needs_data: [] })
+      const res = await runFrontendQuality({
+        story: { id: 'S1', contract: { needs_ui: true } }, tree: 't', missionDir: dir,
+        config: { visual: { url: 'http://127.0.0.1:4173' } },
+        deps: { captureSurface, judge, runJourneys: runJourneysDouble },
+      })
+      expect(res).toMatchObject({ status: 'rework', reason: 'journey_failed', journey: { status: 'fail', failure } })
+      expect(res.defects?.[0]).toMatchObject({ criterion: 'journey', severity: 'critical' })
+      expect(captureSurface).not.toHaveBeenCalled()
+      expect(judge).not.toHaveBeenCalled()
+      expect(runJourneysDouble.mock.calls[0][0]).toMatchObject({ file: path.join(dir, 'artifacts', 'journeys', 'S1.json'), url: 'http://127.0.0.1:4173', tag: 'r1' })
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('navegador_que_falha_na_jornada_segue_para_a_captura_e_sem_serve_a_jornada_e_pulada', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ade-journey-fqe-'))
+    try {
+      const captures = [{ route: '/', width: 1280, theme: 'light', path: 'x.png', sha256: 'x', inspection: { ok: false, results: {}, artifacts: {}, defects: [{ id: 'D6', severity: 'critical', criterion: 'hierarchy', where: '/', fix: 'caber' }] } }]
+      const captureSurface = vi.fn().mockResolvedValue(captures)
+      const res = await runFrontendQuality({
+        story: { id: 'S1', contract: { needs_ui: true } }, tree: 't', missionDir: dir,
+        config: { visual: { url: 'http://127.0.0.1:4173' } },
+        deps: { captureSurface, runJourneys: vi.fn().mockResolvedValue({ status: 'skipped', reason: 'browser_failed' }) },
+      })
+      expect(captureSurface).toHaveBeenCalledTimes(1)
+      expect(res).toMatchObject({ status: 'rework', journey: { status: 'skipped', reason: 'browser_failed' } })
+
+      const noServe = await runFrontendQuality({ story: { id: 'S1', contract: { needs_ui: true } }, tree: 't', missionDir: dir, config: {} })
+      expect(noServe.journey).toMatchObject({ status: 'skipped', reason: 'no_serve' })
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }

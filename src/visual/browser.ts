@@ -128,6 +128,36 @@ export async function startServe(options: {
   }
 }
 
+/** Chromium do Playwright como biblioteca (dependência de desenvolvimento, carregada só quando a tela é avaliada). */
+export async function launchChromium(): Promise<any> {
+  try {
+    const playwrightModule = 'playwright'
+    const playwright = await import(playwrightModule)
+    return await playwright.chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] })
+  } catch (err) {
+    throw new Error(`Playwright não disponível: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+/**
+ * Monta (build_command) e serve (serve_command) a tela da worktree, roda `fn` com a URL e derruba o serve no fim.
+ * Com só `url` na config, a tela já está no ar e nada é montado nem servido.
+ */
+export async function withServedApp<T>(visual: any, cwd: string, fn: (url: string) => Promise<T>, start: typeof startServe = startServe): Promise<T> {
+  const url = visual.url || 'http://127.0.0.1:4173'
+  // tela que precisa de build (o painel servido do dist) monta a versão da worktree antes de servir
+  if (Array.isArray(visual.build_command) && visual.build_command.length > 0) {
+    const [bin, ...args] = visual.build_command
+    await execFileAsync(bin, args, { cwd, windowsHide: true, maxBuffer: 32 * 1024 * 1024, timeout: (visual.build_timeout_s || 300) * 1000 })
+  }
+  const serve = visual.serve_command ? await start({ command: visual.serve_command, cwd, url, timeoutSeconds: visual.ready_timeout_s || 30 }) : null
+  try {
+    return await fn(url)
+  } finally {
+    await serve?.stop()
+  }
+}
+
 /**
  * Captura superfícies visuais via Playwright como biblioteca.
  */
@@ -164,17 +194,8 @@ export async function captureVisualSurface({
   let launchedLocally = false
 
   if (!playBrowser) {
-    try {
-      const playwrightModule = 'playwright'
-      const playwright = await import(playwrightModule)
-      playBrowser = await playwright.chromium.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      })
-      launchedLocally = true
-    } catch (err) {
-      throw new Error(`Playwright não disponível para captura: ${err instanceof Error ? err.message : String(err)}`)
-    }
+    playBrowser = await launchChromium()
+    launchedLocally = true
   }
 
   

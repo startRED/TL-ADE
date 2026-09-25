@@ -10,7 +10,7 @@ import { authorizedStep } from './engine/paid-call.ts'
 import { maybeEngineFault } from './engine/faults.ts'
 import { findStoryCommitted, findStoryStarted } from './engine/resume.ts'
 import { preserveInterruptedTree } from './engine/preserve.ts'
-import { writeProof } from './engine/proof.ts'
+import { rewriteJourney, writeProof } from './engine/proof.ts'
 import { classifyCallFailure, pauseForQuota, refreshChains, waitQuotaPause } from './engine/quota.ts'
 import { buildLadder, classifyMakerOutcome, correctionRequest, ladderStart, nextAttempt, reserveRung, retryRoundBonus, roundsPerRung, type MakerOutcome } from './engine/ladder.ts'
 import { readMissionOptionsBesidePlan } from './mission/options.ts'
@@ -24,6 +24,7 @@ import { dispatchClaude } from './adapters/claude/index.ts'
 import { dispatchCodex } from './adapters/codex/index.ts'
 import { dispatchAgyUnit } from './adapters/agy/index.ts'
 import { runFrontendQuality } from './visual/evaluate.ts'
+import { adoptJourney, runJourneyCheck, type JourneyFailure } from './visual/journey.ts'
 import { createDesignToolServer } from './visual/design-server.ts'
 export { nextReady, runSequentialMission } from './engine/schedule.ts'
 
@@ -45,7 +46,7 @@ import {
   detectUnresolvedFindings,
   normalizeFinding,
 } from './review/handoff.ts'
-import { blockingReviewFindings, buildReviewHandoff, testEditViolations, wrongTestClaims, wrongTestVerdict } from './review/contract.ts'
+import { blockingReviewFindings, buildReviewHandoff, journeyWrongClaim, testEditViolations, wrongTestClaims, wrongTestVerdict } from './review/contract.ts'
 import { isReviewApproved } from './review/validate.ts'
 import { buildModelTelemetry, modelsFromUsage } from './telemetry/telemetry.ts'
 import { commitLines, formatMeasureTrailers, formatProvenanceTrailers, makerCallOf, storyMeasure } from './telemetry/cost.ts'
@@ -646,6 +647,27 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     return judges
   }
 
+  // Roteiro de navegador que a prova escreveu (parte com tela): vira a cópia oficial fora da worktree e roda uma vez na
+  // árvore da prova, antes do código. Roteiro que já passa não prova a mudança nova, mas fica contra regressão.
+  // Sem roteiro, roteiro inválido ou sem serve, a parte segue e o motivo fica no journal.
+  const adoptJourneyScript = async () => {
+    const adopted = adoptJourney(worktreeDir, missionDir, storyId)
+    if (!adopted || 'errors' in adopted) {
+      await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'journey_skipped', unit: storyId, reason: adopted ? 'invalid_script' : 'no_script', errors: adopted?.errors ?? [] } })
+      return
+    }
+    const check: any = (await deps.step(
+      { unit: storyId, id: `${storyId}:journey:red`, effect_class: 'none', input: { tree: treeBefore } },
+      () => (deps.runJourneyCheck ?? runJourneyCheck)({ file: adopted.file, config: projectConfig, cwd: worktreeDir, outDir: path.join(missionDir, 'artifacts', 'visual', treeBefore) }),
+    )).result
+    const decision = check.status === 'pass' ? 'journey_not_red' : check.status === 'fail' ? 'journey_red' : 'journey_red_unchecked'
+    await deps.journal.append({
+      kind: 'decision',
+      unit: storyId,
+      data: { decision, unit: storyId, file: adopted.file, counts_as_proof: check.status === 'fail', reason: check.reason ?? null, needs_data: check.needs_data ?? [] },
+    })
+  }
+
   const redGitPort = started
     ? {
         ...wtPort,
@@ -730,6 +752,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       if (proof.kind === 'written') {
         treeBefore = proof.tree
         redValid = await redIsValid(treeBefore)
+        if (contract.needs_ui) await adoptJourneyScript()
       }
       break
     }
@@ -767,6 +790,13 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   // a avaliação anterior vai aos juízes (sem ela eles se contradiziam entre passadas) e mede o ganho da passada
   let lastVisualEval: any = null
   let visualStalls = 0
+  // Jornada: o mesmo passo quebrando do mesmo jeito em duas passadas seguidas pode ser roteiro errado. O maker pode
+  // responder ROTEIRO ERRADO e a prova reescreve o roteiro uma única vez na parte.
+  let lastJourneyKey: string | null = null
+  let lastJourneyFailure: JourneyFailure | null = null
+  let journeySuspect = false
+  let journeyClaim: string | null = null
+  const journeyRewriteUsed = () => readEvents().some((e) => e.kind === 'decision' && ['journey_rewritten', 'journey_rewrite_failed'].includes(e.data?.decision) && (e.unit ?? e.data?.unit) === storyId)
   let previousFindingsDigest = null
   let previousFindings = []
   let openFindings: any[] = []
@@ -1173,6 +1203,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
 
     // Prova alegada errada só pode ser editada depois do veredito favorável do revisor; antes, reprova a rodada.
     claimedWrongTests = [...new Set([...claimedWrongTests, ...wrongTestClaims(dispatch?.result_text ?? '')])]
+    journeyClaim = journeyWrongClaim(dispatch?.result_text ?? '')
     const testViolations = testEditViolations({ changedPaths, claimed: claimedWrongTests, allowedPaths: allowedWrongTests })
     if (testViolations.length > 0) {
       await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'wrong_test_edit_rejected', paths: testViolations } })
@@ -1315,6 +1346,39 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
 
     // Portão do Frontend Quality Engine (FQE) entre gates/evals e Checker
     if (contract.needs_ui && visualEvals < maxVisualEvals) {
+      // o maker disse que o roteiro contradiz o critério depois do aviso de roteiro suspeito: a prova reescreve uma vez
+      if (journeyClaim && journeySuspect && lastJourneyFailure && !journeyRewriteUsed()) {
+        const writer = (await proofWritersFor())[0]
+        const rewritten = writer
+          ? await rewriteJourney({
+              storyId, missionId, missionDir, worktreeDir, wtPort, contract, writer,
+              treeBefore: treeAfterContain,
+              step: deps.step,
+              journal: deps.journal,
+              events: readEvents,
+              compilePack: deps.compilePack,
+              maxModelCalls: effectiveMaxCalls,
+              usd: authorizedReservation.usd,
+              quotaReceipt: writer.receipt,
+              contextBytes,
+              weeklyCap: loaded.missionBudget.max_subscription_weekly_percent ?? 50,
+              workerEnv: deps.workerEnv,
+              skills: roleSkillsSection('proof', contract?.skills, deps.eligibleSkills),
+              now: () => deps.now?.() ?? Date.now(),
+              failure: lastJourneyFailure,
+              claim: journeyClaim,
+            })
+          : { kind: 'park' as const, reason: 'no_proof_writer' }
+        const adopted = rewritten.kind === 'written' ? adoptJourney(worktreeDir, missionDir, storyId) : null
+        const ok = !!adopted && 'file' in adopted
+        await deps.journal.append({
+          kind: 'decision',
+          unit: storyId,
+          data: { decision: ok ? 'journey_rewritten' : 'journey_rewrite_failed', unit: storyId, round, claim: journeyClaim, reason: rewritten.kind === 'park' ? rewritten.reason : ok ? null : 'invalid_script' },
+        })
+        lastJourneyKey = null
+        journeySuspect = false
+      }
       const judges = await visualJudges()
       const fqeStepResult = await deps.step(
         {
@@ -1352,8 +1416,49 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
           reason: fqeRes.reason,
           evaluation: fqeRes.evaluation,
           defects: fqeRes.defects,
+          journey: fqeRes.journey?.status ?? null,
         },
       })
+
+      // Jornada de usuário: pulada fica no journal com o motivo; quebrada vira achado com o passo e a evidência
+      const journey = fqeRes.journey
+      if (journey?.status === 'skipped' || journey?.needs_data?.length) {
+        await deps.journal.append({
+          kind: 'decision',
+          unit: storyId,
+          data: { decision: 'journey_skipped', unit: storyId, round, reason: journey.status === 'skipped' ? journey.reason : 'needs_data', errors: journey.errors ?? [], needs_data: journey.needs_data ?? [] },
+        })
+      }
+      let journeyFinding: any = null
+      if (journey?.status === 'fail') {
+        const f: JourneyFailure = journey.failure
+        const key = `${f.criterio}|${f.step_index}|${f.error}`
+        journeySuspect = key === lastJourneyKey && !journeyRewriteUsed()
+        lastJourneyKey = key
+        lastJourneyFailure = f
+        journeyFinding = {
+          id: `journey-${f.criterio}`,
+          severity: 'high',
+          category: 'patch',
+          target_role: 'maker',
+          location: 'unknown',
+          problem: `Jornada do critério ${f.criterio} quebrou no passo ${f.step_index} (${JSON.stringify(f.step)}): ${f.error}`,
+          // a evidência vai na ação: o pedido de correção corta o problema em 220 caracteres e não leva evidence_refs
+          required_action: [
+            `Faça o fluxo do critério ${f.criterio} funcionar como o critério pede. Olhe o print e o trace do Playwright do momento da falha antes de mudar.`
+              + (journeySuspect ? ' O mesmo passo falhou do mesmo jeito na passada anterior: o roteiro pode estar errado. Se ele contradiz o critério, escreva no relatório uma linha "ROTEIRO ERRADO: <motivo>" e a prova reescreve o roteiro uma vez.' : ''),
+            `Página: ${f.url}`,
+            f.console.length > 0 ? `Console: ${f.console.slice(0, 8).join(' | ')}` : '',
+            f.failed_requests.length > 0 ? `Requisições com erro: ${f.failed_requests.slice(0, 8).join(' | ')}` : '',
+            `DOM no momento da falha: ${f.dom.slice(0, 1500)}`,
+            `Print: ${f.screenshot}. Trace: ${f.trace}.`,
+          ].filter(Boolean).join('\n'),
+          evidence_refs: [f.screenshot, f.trace],
+        }
+      } else {
+        lastJourneyKey = null
+        journeySuspect = false
+      }
 
       // Sempre autônoma: visual indisponível, sem veredito ou sem passada sobrando não estaciona; a parte segue para o
       // revisor e o veredito visual fica no journal
@@ -1369,7 +1474,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         // no formato do achado de revisão: com `message`/`path` o normalizador zerava problema e ação e o maker
         // recebia o retrabalho vazio (25/09). Os prints vão como evidência para o maker olhar a tela.
         const shots = (fqeRes.captures || []).map((c: any) => path.resolve(String(c.path)))
-        const visualFindings = (fqeRes.defects || []).map((d: any, i: number) => ({
+        const visualFindings = journeyFinding ? [journeyFinding] : (fqeRes.defects || []).map((d: any, i: number) => ({
           id: `visual-${d.id ?? i + 1}`,
           // minor vira medium: com low o pedido de correção descartava o achado e o caminho até 7,5 nunca chegava ao maker
           severity: d.severity === 'major' ? 'high' : d.severity === 'minor' ? 'medium' : 'critical',
@@ -1391,6 +1496,11 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       }
       if (visualNext !== 'checker') {
         await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'visual_continue', unit: storyId, round, status: fqeRes.status, reason: fqeRes.reason ?? null, next: visualNext, visual_evals: visualEvals } })
+      }
+      // jornada ainda quebrada sem passada sobrando nunca some calada: vai ao revisor como achado bloqueante e ele decide
+      if (journeyFinding) {
+        previousFindings = [journeyFinding]
+        await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'journey_unresolved', unit: storyId, round, finding: journeyFinding.id } })
       }
     }
 

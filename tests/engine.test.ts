@@ -1088,6 +1088,89 @@ describe('S18 telemetria honesta', () => {
   }, 60_000)
 })
 
+// Jornadas de usuário (26/09): a prova de parte com tela escreve também o roteiro de navegador, que o motor guarda fora
+// da worktree (o maker não afrouxa) e roda antes dos portões e dos juízes.
+describe('jornada de usuário no motor', () => {
+  const JOURNEY = { journeys: [{ criterio: 'C1', steps: [{ goto: '/' }, { click: { role: 'button', name: 'Enviar' } }, { expect_text: 'Salvo' }] }] }
+  const failure = (tag: string) => ({
+    criterio: 'C1', step_index: 2, step: { click: { role: 'button', name: 'Enviar' } }, error: 'locator.click: Timeout 5000ms exceeded.',
+    console: ['error: salvar quebrou'], failed_requests: ['500 GET /api/salvar'], dom: '<main><button>Mandar</button></main>',
+    screenshot: `/m/journey-${tag}.png`, trace: `/m/journey-${tag}-trace.zip`, url: 'http://127.0.0.1:4173/',
+  })
+  const journeyFail = (tag: string) => ({ status: 'rework', reason: 'journey_failed', journey: { status: 'fail', failure: failure(tag), needs_data: [] }, defects: [{ id: 'journey-C1', severity: 'critical', criterion: 'journey', where: 'C1 passo 2', fix: 'x' }] })
+  const packTexts = (dir: string) => fs.readdirSync(dir, { recursive: true }).map(String).map((p) => path.join(dir, p))
+    .filter((p) => fs.statSync(p).isFile() && p.endsWith('.md')).map((p) => fs.readFileSync(p, 'utf8'))
+
+  function uiProofFixture(extra: Array<Record<string, unknown>> = []) {
+    const fixture = setupStoryFixture({ proof: true })
+    fixture.input.story.contract.needs_ui = true
+    const makerFile = path.join(fixture.scenarioDir, 'maker.json')
+    const actions = JSON.parse(fs.readFileSync(makerFile, 'utf8'))
+    actions[0].files['.ade/journey.json'] = JSON.stringify(JOURNEY)
+    fs.writeFileSync(makerFile, JSON.stringify([...actions, ...extra.map((e) => ({ ...actions[1], ...e }))]))
+    return { fixture, base: actions[1] }
+  }
+
+  test('prova_de_parte_com_tela_grava_o_roteiro_oficial_e_roteiro_que_ja_passa_fica_como_regressao', async () => {
+    const { fixture } = uiProofFixture()
+    const runJourneyCheck = vi.fn().mockResolvedValue({ status: 'pass', needs_data: [] })
+    const result = await runStory({ ...fixture.deps, runFrontendQuality: vi.fn().mockResolvedValue({ status: 'pass' }), runJourneyCheck } as any, fixture.input)
+    expect(result.status).toBe('delivered')
+    const official = path.join(fixture.missionDir, 'artifacts', 'journeys', 'ADE-T1.json')
+    expect(JSON.parse(fs.readFileSync(official, 'utf8'))).toEqual(JOURNEY)
+    expect(runJourneyCheck.mock.calls[0][0]).toMatchObject({ file: official })
+    // a prova recebe o pedido e o formato do roteiro
+    const proofPack = fs.readFileSync(path.join(fixture.missionDir, 'artifacts', 'packs', 'ADE-T1_proof_pack', 'pack.md'), 'utf8')
+    expect(proofPack).toContain('roteiro de navegador (.ade/journey.json)')
+    expect(proofPack).toContain('needs_data')
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    expect(events.find((e) => e.kind === 'decision' && (e.data as any).decision === 'journey_not_red')?.data).toMatchObject({ counts_as_proof: false })
+  }, 90_000)
+
+  test('mesmo_passo_quebrando_duas_vezes_avisa_que_o_roteiro_pode_estar_errado_e_a_prova_reescreve_uma_vez', async () => {
+    const { fixture, base } = uiProofFixture()
+    const stdout = JSON.parse(base.stdout)
+    const makerFile = path.join(fixture.scenarioDir, 'maker.json')
+    const actions = JSON.parse(fs.readFileSync(makerFile, 'utf8'))
+    actions.push(
+      { ...base, files: { 'src/hello.txt': 'ok v2\n' } },
+      { ...base, files: { 'src/hello.txt': 'ok v3\n' }, stdout: JSON.stringify({ ...stdout, result: 'ROTEIRO ERRADO: o critério não pede o botão Enviar' }) },
+      { ...base, files: { '.ade/journey.json': JSON.stringify({ journeys: [{ ...JOURNEY.journeys[0], steps: [{ goto: '/' }, { expect_text: 'Salvo' }] }] }) } },
+    )
+    fs.writeFileSync(makerFile, JSON.stringify(actions))
+    const fqe = vi.fn().mockResolvedValueOnce(journeyFail('r1')).mockResolvedValueOnce(journeyFail('r2')).mockResolvedValue({ status: 'pass' })
+    const result = await runStory({ ...fixture.deps, runFrontendQuality: fqe } as any, fixture.input)
+    expect(result.status).toBe('delivered')
+    expect(fqe).toHaveBeenCalledTimes(3)
+    const texts = packTexts(fixture.missionDir)
+    // o maker recebe o passo, o console, as requisições com erro, o DOM e o print/trace
+    expect(texts.some((t) => t.includes('Jornada do critério C1 quebrou no passo 2') && t.includes('salvar quebrou') && t.includes('500 GET /api/salvar') && t.includes('Mandar') && t.includes('journey-r1-trace.zip'))).toBe(true)
+    expect(texts.some((t) => t.includes('o roteiro pode estar errado') && t.includes('ROTEIRO ERRADO'))).toBe(true)
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    const decisions = events.filter((e) => e.kind === 'decision').map((e) => (e.data as any).decision)
+    // sem serve na config o vermelho do roteiro não é conferido, e a missão segue
+    expect(decisions).toContain('journey_red_unchecked')
+    expect(decisions.filter((d) => d === 'journey_rewritten')).toHaveLength(1)
+    const official = JSON.parse(fs.readFileSync(path.join(fixture.missionDir, 'artifacts', 'journeys', 'ADE-T1.json'), 'utf8'))
+    expect(official.journeys[0].steps).toHaveLength(2)
+  }, 120_000)
+
+  test('jornada_ainda_falhando_no_fim_das_passadas_vai_ao_revisor_como_achado_bloqueante', async () => {
+    const { fixture } = uiProofFixture()
+    fs.writeFileSync(path.join(fixture.repo.dir, '.ade', 'config.json'), JSON.stringify({ visual: { max_rounds: 1 } }))
+    const fqe = vi.fn().mockResolvedValue(journeyFail('r1'))
+    const result = await runStory({ ...fixture.deps, runFrontendQuality: fqe } as any, fixture.input)
+    expect(result.status).toBe('delivered')
+    const reviewPack = fs.readFileSync(path.join(fixture.missionDir, 'artifacts', 'packs', 'ADE-T1_r1_review-pack', 'pack.md'), 'utf8')
+    const prior = JSON.parse(/"prior_findings": (\[[\s\S]*?\n {4}\])/.exec(reviewPack)![1])
+    expect(prior[0]).toMatchObject({ severity: 'high' })
+    expect(prior[0].problem).toContain('Jornada do critério C1 quebrou no passo 2')
+    expect(prior[0].evidence_refs).toContain('/m/journey-r1.png')
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    expect(events.some((e) => e.kind === 'decision' && (e.data as any).decision === 'journey_unresolved')).toBe(true)
+  }, 90_000)
+})
+
 
 describe('modelo do maker vem do contrato', () => {
   // O contrato grava roles.maker.model_id, mas o engine não repassava ao adapter: o maker rodava no

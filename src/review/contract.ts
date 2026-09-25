@@ -39,6 +39,11 @@ export function wrongTestClaims(makerResponse: string): string[] {
   return [...makerResponse.matchAll(/^\s*PROVA ERRADA:\s*(\S+)/gm)].map((match) => match[1])
 }
 
+/** Motivo da linha `ROTEIRO ERRADO: <motivo>` do maker (o roteiro de navegador contradiz o critério), ou `null`. */
+export function journeyWrongClaim(makerResponse: string): string | null {
+  return /^\s*ROTEIRO ERRADO:\s*(.+)$/m.exec(makerResponse)?.[1].trim() ?? null
+}
+
 /** Monta o pedido ao revisor com o contrato do maker, os achados anteriores, a resposta do maker e o diff. */
 export function buildReviewHandoff(opts: {
   contract: ReviewContract
