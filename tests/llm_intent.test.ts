@@ -126,7 +126,7 @@ describe('cérebro do pedido com IA', () => {
     const res = await intent.compile({ request: 'Quero anexar imagens no pedido', repoDir: dir, missionId: 'm1', options: {} as any, eligibleSkills, questions: first.questions, understanding: first.understanding, answers: {} })
     expect((res.contracts as any[])[0].skills).toEqual(['ponytail', 'ponytail-review', ...ids])
     expect((res.contracts as any[])[1].skills).toEqual(['a'])
-    expect(calls[1].prompt).toContain('sem número fixo')
+    expect(calls[1].prompt).toContain('Sem número fixo')
   })
 
   test('pedido grande vira briefing antes do plano', async () => {

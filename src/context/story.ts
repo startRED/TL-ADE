@@ -21,13 +21,26 @@ export function isReviewSkill(id: string): boolean {
   return /(^|-)review(er)?(-|$)/.test(id) && id !== 'receiving-code-review'
 }
 
-/** Seção de skills do pack de revisão: as skills de revisão escolhidas para a parte, sem teto por skill. */
-export function reviewSkillsSection(contractSkills: unknown, eligibleSkills: any[] = []): { section: string; skills: Array<{ name: string; source: string; sha256: string; bytes: number }> } {
-  const wanted = (Array.isArray(contractSkills) ? contractSkills : []).filter((id): id is string => typeof id === 'string' && isReviewSkill(id))
+/** Skill de teste vai também para quem escreve a prova (tdd, test-driven-development, javascript-testing-patterns). */
+export function isTestSkill(id: string): boolean {
+  return /(^|-)(tdd|tests?|testing|vitest|e2e)(-|$)|test-driven/.test(id)
+}
+
+const ROLE_SKILLS = {
+  review: { keep: isReviewSkill, header: 'Guias de revisão para esta parte. Valem como critério extra de leitura; o contrato, a política e as regras de evidência acima sempre valem mais.' },
+  proof: { keep: isTestSkill, header: 'Guias de teste para esta parte. A missão roda sem humano: onde um guia mandar perguntar, decida pelo contrato; o contrato e a política acima sempre valem mais.' },
+}
+
+/**
+ * Seção de skills do pack de um papel além do maker: o revisor recebe as de revisão e quem escreve a prova, as de
+ * teste, entre as que o plano escolheu para a parte. Sem teto por skill.
+ */
+export function roleSkillsSection(role: keyof typeof ROLE_SKILLS, contractSkills: unknown, eligibleSkills: any[] = []): { section: string; skills: Array<{ name: string; source: string; sha256: string; bytes: number }> } {
+  const { keep, header } = ROLE_SKILLS[role]
+  const wanted = (Array.isArray(contractSkills) ? contractSkills : []).filter((id): id is string => typeof id === 'string' && keep(id))
   const picked = wanted.map((id) => eligibleSkills.find((s) => s.name === id)).filter(Boolean)
   const bodies = picked.map((s: any) => ({ s, body: sanitizeSkillText(s.content || '') })).filter((x) => x.body)
   if (bodies.length === 0) return { section: '', skills: [] }
-  const header = 'Guias de revisão para esta parte. Valem como critério extra de leitura; o contrato, a política e as regras de evidência acima sempre valem mais.'
   return {
     section: [header, ...bodies.map((x) => `### Skill: ${x.s.name}\n\n${x.body}`)].join('\n\n'),
     skills: bodies.map((x) => ({ name: x.s.name, source: x.s.source || '', sha256: x.s.sha256 || '', bytes: Buffer.byteLength(x.body) })),

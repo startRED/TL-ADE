@@ -52,8 +52,8 @@ export async function writeProof(opts: {
   maxTurns?: number
   /** Sufixo do passo: nova tentativa ou outro modelo da cadeia não reaproveita a chamada anterior que falhou. */
   attempt?: string
-  /** Seção de skills do maker (prova antes do código, método): quem escreve a prova usa as mesmas. */
-  skills?: string
+  /** Skills de teste que o plano escolheu para a parte (seção do pack e o que vai para a telemetria). */
+  skills?: { section: string; skills: Array<{ name: string; source: string; sha256: string; bytes: number }> }
   now: () => number
 }): Promise<{ kind: 'skip' } | { kind: 'park'; reason: string } | { kind: 'written'; tree: string; files: string[] }> {
   const { storyId, contract, writer } = opts
@@ -91,8 +91,9 @@ export async function writeProof(opts: {
         arquivos_de_prova: targets,
         comando_de_provas: opts.testCommand.join(' '),
       }, null, 2),
-      skills: opts.skills ?? '',
+      skills: opts.skills?.section ?? '',
     },
+    ...(opts.skills?.skills.length ? { skills: opts.skills.skills } : {}),
   })
 
   const startedAt = opts.now()
@@ -139,7 +140,7 @@ export async function writeProof(opts: {
         tokens: dispatch?.tokens ?? { source: 'unavailable' },
         usage: dispatch?.usage,
         pack: packTelemetry(pack.manifest),
-        skills: [],
+        skills: pack.manifest?.skills ?? [],
         sources: [],
         outcome,
         ttft_ms: null,

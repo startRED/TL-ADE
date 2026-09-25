@@ -19,7 +19,7 @@ import { readModelSettings } from './models/settings.ts'
 import { storyRisk } from './intent/risk.ts'
 import { dedupStorySection } from './pack/dedup.ts'
 import { measurePackBytes, packTelemetry } from './pack/pack.ts'
-import { buildStoryContext, guardStoryContext, reviewSkillsSection } from './context/story.ts'
+import { buildStoryContext, guardStoryContext, roleSkillsSection } from './context/story.ts'
 import { dispatchClaude } from './adapters/claude/index.ts'
 import { dispatchCodex } from './adapters/codex/index.ts'
 import { dispatchAgyUnit } from './adapters/agy/index.ts'
@@ -697,7 +697,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         weeklyCap: loaded.missionBudget.max_subscription_weekly_percent ?? 50,
         workerEnv: deps.workerEnv,
         ...(attempt ? { attempt } : {}),
-        skills: storyContext.sections?.skills || '',
+        skills: roleSkillsSection('proof', contract?.skills, deps.eligibleSkills),
         now: () => deps.now?.() ?? Date.now(),
       })
       if (proof.kind === 'park' && proof.reason === 'proof_writer_error' && index < writers.length - 1) continue
@@ -1481,7 +1481,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
           // só refs que também passam no padrão do schema: arquivo sem intervalo de linhas (file:x) é recusado na validação
           citable_refs: Array.from(verifiedRefs).filter((ref) => typeof ref === 'string' && (!ref.startsWith('file:') || /#L[1-9][0-9]*-L[1-9][0-9]*$/.test(ref))),
         }, null, 2)
-    const reviewSkills = reviewSkillsSection(contract?.skills, deps.eligibleSkills)
+    const reviewSkills = roleSkillsSection('review', contract?.skills, deps.eligibleSkills)
     const reviewPack = deps.compilePack({
       sections: { contract: JSON.stringify(contract), policy: REVIEW_POLICY, story: reviewStory, ...(reviewSkills.section ? { skills: reviewSkills.section } : {}) },
       missionDir,
