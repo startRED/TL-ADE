@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { REQUEST_BODY_LIMIT } from './attachments.ts'
 import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
@@ -51,9 +52,23 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
 }
 
 /** Lê o corpo JSON; corpo malformado é erro de entrada (400), não objeto vazio. */
-async function readJsonBody(req: http.IncomingMessage): Promise<any> {
-  let text = ''
-  for await (const chunk of req) text += chunk
+async function readJsonBody(req: http.IncomingMessage, maxBytes?: number): Promise<any> {
+  // sem for-await: sair do laço destruiria o socket; passado o teto, o resto é drenado e descartado
+  const chunks = await new Promise<Buffer[]>((resolve, reject) => {
+    const parts: Buffer[] = []
+    let size = 0
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length
+      if (maxBytes === undefined || size <= maxBytes) parts.push(chunk)
+      else if (size - chunk.length <= maxBytes) {
+        parts.length = 0
+        reject(new AdeError('corpo_grande', 'O corpo do pedido passa do limite de tamanho aceito.', 2))
+      }
+    })
+    req.on('end', () => resolve(parts))
+    req.on('error', reject)
+  })
+  const text = Buffer.concat(chunks).toString('utf8')
   try {
     return JSON.parse(text)
   } catch {
@@ -442,9 +457,9 @@ export async function startServer({
                 return
               }
               if (action !== 'intake' && method === 'POST') {
-                const body = await readJsonBody(req)
+                const body = await readJsonBody(req, action === 'requests' ? REQUEST_BODY_LIMIT : undefined)
                 if (action === 'requests') {
-                  sendJson(res, 202, { mission_id: (await intake.submit(project.path, body?.text)).mission_id })
+                  sendJson(res, 202, { mission_id: (await intake.submit(project.path, body?.text, body?.attachments)).mission_id })
                 } else if (action === 'intake/interview') {
                   sendJson(res, 200, await intake.answer(project.path, body?.answers))
                 } else if (action === 'intake/briefing/approve') {
@@ -488,7 +503,7 @@ export async function startServer({
             }
           } catch (err) {
             if (!(err instanceof AdeError)) throw err
-            const status = err.code === 'project_not_found' || err.code === 'intake_not_found' || err.code === 'unit_not_found' || err.code === 'chat_proposal_not_found' || err.code === 'skill_not_found' ? 404 : err.exitCode === 5 ? 409 : 400
+            const status = err.code === 'project_not_found' || err.code === 'intake_not_found' || err.code === 'unit_not_found' || err.code === 'chat_proposal_not_found' || err.code === 'skill_not_found' ? 404 : err.exitCode === 5 ? 409 : err.code === 'corpo_grande' ? 413 : 400
             sendJson(res, status, { error: err.code, message: err.message })
             return
           }
@@ -592,7 +607,7 @@ export async function startServer({
             res.end(JSON.stringify(result))
           } catch (err) {
             if (!(err instanceof AdeError)) throw err
-            res.writeHead(err.exitCode === 5 ? 409 : 400, { 'Content-Type': 'application/json' })
+            res.writeHead(err.exitCode === 5 ? 409 : err.code === 'corpo_grande' ? 413 : 400, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ error: err.code, message: err.message }))
           }
           return

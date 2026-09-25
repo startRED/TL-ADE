@@ -13,6 +13,7 @@ import { approveMission, getProjectDiscovery, recordMissionDecision, validateMis
 import { writeMissionOptions, type MissionOptions } from '../mission/options.ts'
 import { refreshQuotaReceipts } from '../adapters/local/official-quota.ts'
 import { readMissionControl, requestMissionControl } from '../engine/control.ts'
+import { parseAttachments, saveAttachments, type AttachmentRecord } from './attachments.ts'
 import type { ActivityKind } from './open-projects.ts'
 import { readProjectOptions, type SkillSummary } from './options.ts'
 
@@ -38,6 +39,7 @@ export interface Intake {
   seq: number
   created_at: string
   request: string
+  attachments?: AttachmentRecord[]
   stage: IntakeStage
   questions?: any[]
   answers?: Answers
@@ -275,8 +277,9 @@ export function createIntake({ intent, runMission, eligibleSkills, beginActivity
       return last
     },
 
-    submit(repoDir: string, text: unknown): Promise<Intake> {
+    submit(repoDir: string, text: unknown, attachments?: unknown): Promise<Intake> {
       if (typeof text !== 'string' || !text.trim()) throw new AdeError('pedido_vazio', 'Escreva o pedido antes de enviar.', 2)
+      const files = parseAttachments(attachments)
       return serialized(repoDir, async () => {
         const intakes = readIntakes(repoDir)
         const live = liveOf(intakes)
@@ -290,6 +293,7 @@ export function createIntake({ intent, runMission, eligibleSkills, beginActivity
           stage: 'interview',
         }
         applyResult(repoDir, intake, await compile(repoDir, intake), ['questions', 'briefing', 'plan'])
+        if (files.length) intake.attachments = saveAttachments(path.dirname(intakePath(repoDir, intake.mission_id)), files)
         return write(repoDir, intake)
       })
     },
