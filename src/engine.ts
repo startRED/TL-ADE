@@ -666,8 +666,10 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   const wholeSuite = story.evals.length > 0 && story.evals.every((e: any) =>
     (sameArgv(e.argv ?? [], projectTest) || sameArgv(e.argv ?? [], ['node', 'node_modules/vitest/vitest.mjs', 'run']))
     && (e.evidence ?? []).every((ev: string) => ev === 'package.json'))
-  let redValid = (await redIsValid(treeBefore)) && !(wholeSuite && !started)
-  if (!redValid && !started) {
+  // "ainda sem provas escritas", não "parte não começou": retomada antes da etapa de provas também precisa dela (S3)
+  const proofDone = readEvents().some((e) => e.kind === 'decision' && e.data?.decision === 'proof_written' && (e.unit ?? e.data?.unit) === storyId)
+  let redValid = (await redIsValid(treeBefore)) && !(wholeSuite && !proofDone)
+  if (!redValid && !proofDone) {
     const writer = await proofWriterFor()
     if (writer) {
       const proof = await writeProof({

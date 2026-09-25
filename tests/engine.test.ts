@@ -654,6 +654,26 @@ describe('engine', () => {
     expect(result).toMatchObject({ status: 'delivered' })
   }, 180_000)
 
+  // 25/09, missão real (S3): a parte começou, caiu no vermelho inicial e, na retomada, a etapa de provas foi pulada porque
+  // a regra olhava "parte começou" em vez de "provas ainda não escritas".
+  test('retomada_antes_das_provas_com_suite_inteira_ainda_passa_pela_etapa_de_provas', async () => {
+    const fixture = setupStoryFixture({ wholeSuite: true })
+    const original = fixture.deps.createEvalRunner
+    let reds = 0
+    fixture.deps.createEvalRunner = (opts: any) => {
+      const runner = original(opts)
+      return { ...runner, runEval: async (args: any) => {
+        if (args.phase === 'red' && ++reds === 1) throw new Error('queda no vermelho inicial')
+        return runner.runEval(args)
+      } }
+    }
+    await expect(runStory(fixture.deps, fixture.input)).rejects.toThrow('queda no vermelho inicial')
+    const result = await runStory(fixture.deps, fixture.input)
+    expect(result).toMatchObject({ status: 'delivered' })
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    expect(events.some((e) => e.kind === 'decision' && (e.data as any).decision === 'proof_written')).toBe(true)
+  }, 120_000)
+
   // Revisão aprovada com itens adiados (requisito impossível dentro do escopo): o motor registra os adiados para o
   // relatório, e a parte entra sem rodada extra.
   test('aprovacao_com_itens_adiados_registra_os_adiados', async () => {
