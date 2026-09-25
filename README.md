@@ -66,3 +66,12 @@ Os 66 invariantes de durabilidade estão catalogados em `docs/research/runtime-p
 A v1 está ativa como marco final da TL-ADE (ADR 0029): noite desatendida com precondições duras (`ade run --unattended`), suíte de dogfood hermética (runs: 3, pass^3) em Vitest, calibração determinística de corte visual e tetos de contexto pela telemetria medida, e documentação consolidada de operações, segurança e evals. A v0.5 está entregue: pesquisa externa controlada, telemetria auditável, drenagem cooperativa RUNNING -> DRAINING -> STOPPED, pausa, retomada com revalidação e intervenção por takeover com terminal PTY no painel (ADR 0028; provas em `tests/research-v05.test.ts`, `tests/telemetry-v05.test.ts`, `tests/mission-control-v05.test.ts` e `tests/panel-intervention-v05.test.ts`; operação em [docs/specs/operator-surface.md](docs/specs/operator-surface.md) §5.1).
 
 Antes disso, conferir as lacunas da matriz e responder à consulta única registrada em [docs/plans/v02-local-aprovacao.md](docs/plans/v02-local-aprovacao.md): os US$ 0,28 do dogfood não medem percentual da assinatura. A regra de metade da cota depende da fonte oficial, da janela semanal, do consumo externo e do tratamento de ausência; o valor observado permanece documentado em [docs/operations/dogfood-d1.md](docs/operations/dogfood-d1.md).
+
+## Contato e licença
+
+- Bugs e pedidos: [issues](https://github.com/startRED/TL-ADE/issues).
+- Dúvidas e ideias: [discussions](https://github.com/startRED/TL-ADE/discussions).
+- Falha de segurança: siga o [SECURITY.md](SECURITY.md).
+- Outros assuntos: pzza.net@gmail.com.
+
+Licença FSL-1.1-ALv2 ([LICENSE](LICENSE)); para contribuir, leia o [CONTRIBUTING.md](CONTRIBUTING.md).
