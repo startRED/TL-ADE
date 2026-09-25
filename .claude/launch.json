@@ -4,9 +4,28 @@
     {
       "name": "proto-ui",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["vite", "--port", "5173", "--strictPort"],
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "5173",
+        "--strictPort"
+      ],
       "cwd": "proto",
       "port": 5173
+    },
+    {
+      "name": "ade-panel",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "bin/ade.js",
+        "serve",
+        "--repo",
+        "E:/Documentos/ProjetosIA/TL-ADE",
+        "--port",
+        "4173",
+        "--no-open"
+      ],
+      "port": 4173
     }
   ]
 }
