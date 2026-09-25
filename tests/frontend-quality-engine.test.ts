@@ -832,3 +832,26 @@ describe('D6 no chromium', () => {
     }
   }, 60_000)
 })
+
+// 25/09: a regex que tira a largura e o tema de "where" saiu corrompida (/ [d+px]/) e o maker recebia o mesmo defeito
+// uma vez por captura
+describe('defeitos dos portões sem repetição', () => {
+  test('mesmo_defeito_em_larguras_e_temas_chega_uma_vez', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ade-dedupe-'))
+    try {
+      const defect = (width: number, theme: string) => ({ id: 'D3-low-contrast', severity: 'critical', criterion: 'color', where: `/ [${width}px ${theme}] (p.hint)`, fix: 'contraste' })
+      const captures = [[1280, 'light'], [1280, 'dark'], [390, 'light']].map(([width, theme]) => ({
+        route: '/', width, theme, path: 'x.png', sha256: 'x',
+        inspection: { ok: false, results: {}, artifacts: {}, defects: [defect(width as number, theme as string), { ...defect(width as number, theme as string), id: 'D6-horizontal-overflow', where: `/ [${width}px] (textarea)` }] },
+      }))
+      const res = await runFrontendQuality({
+        story: { id: 'S1', contract: { needs_ui: true } }, tree: 't', missionDir: dir,
+        config: { visual: { url: 'http://127.0.0.1:4173' } },
+        deps: { captureSurface: vi.fn().mockResolvedValue(captures) },
+      })
+      expect(res.defects?.map((d) => d.id)).toEqual(['D3-low-contrast', 'D6-horizontal-overflow'])
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})

@@ -145,12 +145,17 @@ export async function runVisualGates(params: {
         const totalNodes = violations.reduce((acc: number,  v: any) => acc + (v.nodes?.length || 0), 0)
         results.D3.message = `Axe encontrou ${totalNodes} nós com contraste insuficiente (WCAG AA)`
         results.D3.details = violations
+        // cada nó com as cores e a razão medidas: com a frase genérica o maker adivinhava qual texto e perdia a passada
+        const measured = violations.flatMap((v: any) => v.nodes || []).slice(0, 5).map((n: any) => {
+          const d = n.any?.[0]?.data || {}
+          return `${n.target?.[0] || 'elemento'}: ${d.fgColor ?? '?'} sobre ${d.bgColor ?? '?'} = ${d.contrastRatio ?? '?'}:1 (precisa ${d.expectedContrastRatio ?? '4.5:1'})`
+        })
         defects.push({
           id: 'D3-low-contrast',
           severity: 'critical',
           criterion: 'color',
-          where: `${route} (${violations[0].nodes?.[0]?.target?.[0] || 'elemento'})`,
-          fix: 'Ajustar proporção de contraste para no mínimo 4.5:1 em texto comum ou 3.0:1 em texto grande',
+          where: `${route} [${width}px ${theme}] (${violations[0].nodes?.[0]?.target?.[0] || 'elemento'})`,
+          fix: `Subir o contraste para no mínimo 4.5:1 em texto comum ou 3.0:1 em texto grande. Medido pelo axe: ${measured.join('; ')}`,
         })
       }
     } catch (err) {

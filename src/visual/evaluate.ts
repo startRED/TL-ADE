@@ -234,7 +234,7 @@ export async function runFrontendQuality({
 function uniqueDefects(defects: any[]): any[] {
   const seen = new Set<string>()
   return defects.filter((d) => {
-    const key = `${d.id} ${String(d.where).replace(/ [d+px]/, '')}`
+    const key = `${d.id} ${String(d.where).replace(/ \[\d+px[^\]]*\]/, '')}`
     if (seen.has(key)) return false
     seen.add(key)
     return true
