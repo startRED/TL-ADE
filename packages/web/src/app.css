@@ -716,7 +716,10 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 .term-tabs li { padding: .6rem .9rem; font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); border-right: 1px dotted var(--sage-line); }
 .term-tabs li[aria-current='step'] { color: var(--ink); background: color-mix(in srgb, var(--ink) 8%, transparent); }
 .terminal .prompt, .composer.compact .prompt { font: 500 18px/1 var(--mono); color: var(--baton-text); }
-.terminal .prompt { position: absolute; top: 3.05rem; left: 1rem; }
+.terminal .prompt { position: absolute; top: .95rem; left: 1rem; }
+.field-wrap { position: relative; display: grid; }
+.composer.compact .field-wrap { display: contents; }
+.terminal > .note-line { padding: .7rem 1rem; border-bottom: 1px dotted var(--sage-line); }
 .terminal { position: relative; }
 .terminal .field { font: 400 15px/1.55 var(--mono); padding: .9rem 1rem .9rem 2.4rem; border-bottom: 1px dotted var(--sage-line); }
 .terminal .composer-row { padding: .7rem .7rem .7rem 1rem; }

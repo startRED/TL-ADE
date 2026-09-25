@@ -97,6 +97,25 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v ===
 const missionsDir = (repoDir: string) => path.join(repoDir, '.ade', 'missions')
 const intakePath = (repoDir: string, missionId: string) => path.join(missionsDir(repoDir), missionId, 'intake.json')
 
+/** Toda parte do plano com a última story_done entregue (ou só com commit): a missão chegou ao fim. */
+function missionDelivered(repoDir: string, missionId: string): boolean {
+  const dir = path.join(missionsDir(repoDir), missionId)
+  try {
+    const plan = JSON.parse(fs.readFileSync(path.join(dir, 'plan.json'), 'utf8'))
+    const stories: string[] = (plan.phases ?? []).flatMap((ph: any) => (ph.epics ?? []).flatMap((ep: any) => ep.stories ?? []))
+    if (stories.length === 0) return false
+    const last = new Map<string, string>()
+    for (const line of fs.readFileSync(path.join(dir, 'journal.jsonl'), 'utf8').split(/\r?\n/)) {
+      if (!line.includes('"story_done"')) continue
+      const ev = JSON.parse(line)
+      if (ev.kind === 'story_done') last.set(ev.data?.unit ?? ev.unit, ev.data?.status)
+    }
+    return stories.every((id) => last.get(id) === 'delivered' || last.get(id) === 'committed')
+  } catch {
+    return false
+  }
+}
+
 /** Todos os intakes gravados, religados pelo id da pasta: intake de outra missão é estado corrompido. */
 function readIntakes(repoDir: string): Intake[] {
   const dir = missionsDir(repoDir)
@@ -107,6 +126,12 @@ function readIntakes(repoDir: string): Intake[] {
       const intake = JSON.parse(fs.readFileSync(intakePath(repoDir, name), 'utf8')) as Intake
       if (intake.mission_id !== name) {
         throw new AdeError('intake_corrompido', `O intake da pasta ${name} diz ser da missão ${intake.mission_id}.`, 2)
+      }
+      // erro de uma execução que parou, mas a missão foi terminada depois (outra execução entregou todas as partes):
+      // o aviso velho não fica na tela como se a missão tivesse parado (25/09)
+      if (intake.error && missionDelivered(repoDir, name)) {
+        const { error: _stale, ...rest } = intake
+        return rest
       }
       return intake
     })

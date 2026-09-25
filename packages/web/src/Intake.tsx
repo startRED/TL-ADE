@@ -265,6 +265,8 @@ function RequestBox({ last, busy, compact, onSend }: { last: Intake | null; busy
       )}
       {last?.stage === 'recusada' && <p className="note-line warn">{what} foi recusado: {last.reason}</p>}
       {last?.stage === 'concluida' && last.error && <p className="note-line warn">A missão {last.mission_id} parou com erro: {last.error}</p>}
+      {/* o › fica preso ao campo: aviso acima dele não o deixa por cima do texto */}
+      <div className="field-wrap">
       <span className="prompt" aria-hidden="true">›</span>
       <textarea
         className="field"
@@ -275,6 +277,7 @@ function RequestBox({ last, busy, compact, onSend }: { last: Intake | null; busy
         placeholder={compact ? 'Peça a próxima mudança' : 'Descreva o que você quer construir ou mudar'}
         rows={compact ? 1 : 3}
       />
+      </div>
       <div className="composer-row">
         {!compact && <span className="note-line">Ctrl + Enter também envia.</span>}
         <button className="btn baton" type="submit" disabled={busy || !text.trim()}>

@@ -405,6 +405,29 @@ describe('pedido, entrevista, briefing, plano e aprovação no painel', () => {
     expect((await s.intake()).body).toMatchObject({ stage: 'concluida', error: 'ade run saiu com código 3' })
   })
 
+  // 25/09: a execução lançada pelo painel parou (código 2), outra execução terminou a missão e o aviso de erro
+  // continuava na tela. Com todas as partes entregues depois, o aviso velho some.
+  test('erro_de_execucao_some_quando_a_missao_e_terminada_depois', async () => {
+    const run = runDouble()
+    const repo = gitFixture()
+    const s = await serve(repo, { intent: intentDouble({ large: false }).intent, runMission: run.runMission })
+    await s.request('Corrija o título')
+    await s.post('interview', { answers: {} })
+    await s.post('plan/approve', { digest: (await s.intake()).body.digest })
+    run.finish(new Error('ade run saiu com código 2'))
+    await expect.poll(() => s.server.projects.hasActivity(s.projectId)).toBe(false)
+    const missionId = (await s.intake()).body.mission_id
+    const missionDir = path.join(repo, '.ade', 'missions', missionId)
+    const plan = JSON.parse(readFileSync(path.join(missionDir, 'plan.json'), 'utf8'))
+    const stories: string[] = plan.phases.flatMap((ph: any) => ph.epics.flatMap((ep: any) => ep.stories))
+    const journal = openJournal({ missionDir, runtimeStamp: '1:aaaaaaaa:bbbbbbbb' })
+    for (const unit of stories) await journal.append({ kind: 'story_done', unit, data: { unit, status: 'delivered', delivered: true, reason: null, commit: 'abc' } })
+    await journal.close()
+    const body = (await s.intake()).body
+    expect(body.stage).toBe('concluida')
+    expect(body.error).toBeUndefined()
+  })
+
   test('pausar_retomar_e_parar_pelo_painel_viram_pedidos_do_motor_e_relancam_a_execucao', async () => {
     const run = runDouble()
     const repo = gitFixture()
