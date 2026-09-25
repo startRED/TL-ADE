@@ -35,6 +35,8 @@ const ROOT_ALLOWLIST = new Set([
   'index.html',
   'packages',
   'ade.bat',
+  'LICENSE',
+  'CONTRIBUTING.md',
   // Locais ignorados (7)
   '.git',
   '.claude',
