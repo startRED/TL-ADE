@@ -1,4 +1,4 @@
-// O servidor abre o painel com ?session=<token>; toda chamada à API leva o token no cabeçalho.
+// O token chega por cookie HttpOnly que o navegador manda sozinho; ?session=<token> na URL continua valendo.
 const sessionToken = new URLSearchParams(window.location.search).get('session') ?? ''
 
 export class ApiError extends Error {

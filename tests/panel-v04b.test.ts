@@ -420,8 +420,10 @@ describe('v0.4b Acceptance Tests', () => {
 
     expect(token1).not.toBe(token2)
     expect(token1.length).toBeGreaterThan(16)
-    expect(out1).toContain(token1)
-    expect(out2).toContain(token2)
+    // O link impresso é só host e porta; o token vai por cookie
+    expect(out1).toContain('http://127.0.0.1:4192/')
+    expect(out1).not.toContain(token1)
+    expect(out2).not.toContain(token2)
 
     // Não persistida no projeto nem no índice
     const indexBytes = readFileSync(path.join(repoDir, '.ade', 'index.sqlite'), 'utf8')
@@ -459,6 +461,24 @@ describe('v0.4b Acceptance Tests', () => {
       headers: { Origin: 'http://malicious.example.com' },
     })
     expect(resBadOrigin.status).toBe(403)
+
+    // 4. A página entrega o token por cookie HttpOnly e a API aceita o cookie
+    const page = await fetch('http://127.0.0.1:4194/')
+    const setCookie = page.headers.get('set-cookie') ?? ''
+    expect(setCookie).toContain(`ade_session_4194=${server.sessionToken}`)
+    expect(setCookie).toContain('HttpOnly')
+    expect(setCookie).toContain('SameSite=Strict')
+    const resCookie = await fetch('http://127.0.0.1:4194/api/snapshot', { headers: { Cookie: `ade_session_4194=${server.sessionToken}` } })
+    expect(resCookie.status).toBe(200)
+
+    // 5. Host estranho (DNS rebinding) não recebe o cookie
+    const rebound = await new Promise<string>((resolve, reject) => {
+      http.get({ host: '127.0.0.1', port: 4194, path: '/', headers: { Host: 'evil.example.com:4194' } }, (r) => {
+        r.resume()
+        resolve(String(r.headers['set-cookie'] ?? ''))
+      }).on('error', reject)
+    })
+    expect(rebound).toBe('')
   })
 
   // Critério 9: Dada uma configuração ou argumento que tente expor o painel fora da máquina local, quando o
@@ -756,7 +776,7 @@ describe('v0.4b Acceptance Tests', () => {
       },
     })
     activeServers.push(server)
-    expect(openedUrl).toContain('http://127.0.0.1:4201/?session=')
+    expect(openedUrl).toBe('http://127.0.0.1:4201/')
 
     // 4. Projeção (GET snapshot)
     const snapRes = await fetch(`http://127.0.0.1:4201/api/snapshot?session=${server.sessionToken}`, {

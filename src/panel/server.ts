@@ -158,7 +158,10 @@ export async function startServer({
             catalogDir?: string
         } & import('./control.ts').TerminalDeps
     } = {}) {
-  const sessionManager = createSessionManager({ allowedOrigins: [`http://${host}:${port}`] })
+  const sessionManager = createSessionManager({
+    allowedOrigins: [`http://127.0.0.1:${port}`, `http://localhost:${port}`],
+    cookieName: `ade_session_${port}`,
+  })
 
   // 1. Validação estrita do host de ligação (critério 9)
   if (!sessionManager.validateBindHost(host)) {
@@ -284,6 +287,7 @@ export async function startServer({
 
       // Build promovido servido como SPA; sem ele, o index.html da raiz (ponteiro relido a cada pedido).
       if (!pathname.startsWith('/api/') && method === 'GET') {
+        if (sessionManager.validateHost(req.headers.host)) res.setHeader('Set-Cookie', sessionManager.cookie)
         const buildDir = resolveCurrentBuild(distRoot)
         if (!buildDir) {
           if (pathname === '/' || pathname === '/index.html') {
@@ -307,7 +311,8 @@ export async function startServer({
         const tokenCandidate =
           parsedUrl.searchParams.get('session') ||
           (Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader) ||
-          req.headers.authorization?.replace(/^Bearer\s+/i, '')
+          req.headers.authorization?.replace(/^Bearer\s+/i, '') ||
+          sessionManager.tokenFromCookie(req.headers.cookie)
 
         if (!sessionManager.validateToken(tokenCandidate)) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
@@ -624,7 +629,8 @@ export async function startServer({
     })
   })
 
-  const serverUrl = `http://${host}:${port}/?session=${sessionManager.token}`
+  // O token chega à página por cookie; o link fica só host e porta.
+  const serverUrl = `http://${host}:${port}/`
 
   const stdoutWrite =
     typeof deps.stdout === 'function'

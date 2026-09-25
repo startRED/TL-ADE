@@ -101,7 +101,11 @@ type TerminalEntry = {
  * Cria o manipulador do canal unidirecional de eventos WebSocket (/api/events).
  */
 export function createWebSocketHandler({ sessionManager, repoDir, onJournalChanged = async () => {}, onError = () => {}, findTerminal = () => null }: {
-        sessionManager: { validateToken: (t: string | null) => boolean; validateOrigin: (o: string | null | undefined) => boolean }
+        sessionManager: {
+          validateToken: (t: string | null) => boolean
+          validateOrigin: (o: string | null | undefined) => boolean
+          tokenFromCookie: (c: string | undefined) => string | null
+        }
         repoDir: string
         onJournalChanged?: () => Promise<unknown>
         onError?: (error: unknown) => void
@@ -224,7 +228,7 @@ export function createWebSocketHandler({ sessionManager, repoDir, onJournalChang
       return
     }
 
-    const token = url.searchParams.get('session')
+    const token = url.searchParams.get('session') || sessionManager.tokenFromCookie(req.headers.cookie)
     const origin = req.headers.origin
 
     if (!sessionManager.validateToken(token)) {
