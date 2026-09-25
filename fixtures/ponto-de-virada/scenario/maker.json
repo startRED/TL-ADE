@@ -1,0 +1,24 @@
+[
+  {
+    "files": {
+      "src/nomes.mjs": "/** Saudação curta para um nome. */\nexport function saudar(nome) {\n  return `Olá, ${nome}!`\n}\n\n/** Primeira letra maiúscula de cada palavra do nome. */\nexport function iniciais(nome) {\n  return nome.split(' ').filter(Boolean).map((p) => p[0].toUpperCase()).join('')\n}\n"
+    },
+    "result": {
+      "format_version": 1,
+      "story_id": "PV-1",
+      "state": "done",
+      "phase": "green",
+      "round": 1,
+      "tree_before": "0123456789abcdef",
+      "tree_after": "fedcba9876543210",
+      "eval_records": [],
+      "gate_records": [],
+      "passes": true,
+      "reason": "ok",
+      "sources": [
+        "contract"
+      ]
+    },
+    "stdout": "{\"total_cost_usd\":0.02,\"structured_output\":{\"format_version\":1,\"story_id\":\"PV-1\",\"state\":\"done\",\"phase\":\"green\",\"round\":1,\"tree_before\":\"0123456789abcdef\",\"tree_after\":\"fedcba9876543210\",\"eval_records\":[],\"gate_records\":[],\"passes\":true,\"reason\":\"ok\",\"sources\":[\"contract\"]}}"
+  }
+]

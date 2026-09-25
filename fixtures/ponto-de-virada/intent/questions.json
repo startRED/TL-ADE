@@ -1,0 +1,12 @@
+[
+  {
+    "id": "Q1",
+    "unknown_ref": "U1",
+    "kind": "product_choice",
+    "text": "Como tratar espaços repetidos entre as palavras?",
+    "options": [
+      { "id": "ignorar", "label": "Ignorar espaços extras", "recommended": true, "why": "a prova do exemplo já cobre esse caso" },
+      { "id": "erro", "label": "Recusar com erro" }
+    ]
+  }
+]

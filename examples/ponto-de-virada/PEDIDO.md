@@ -1,0 +1,1 @@
+Acrescente em src/nomes.mjs a função iniciais(nome), que devolve a primeira letra maiúscula de cada palavra do nome, ignorando espaços extras (iniciais('ada lovelace') === 'AL'). A prova test/nomes.test.mjs já descreve o comportamento e hoje está vermelha.

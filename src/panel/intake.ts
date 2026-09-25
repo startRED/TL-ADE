@@ -81,6 +81,8 @@ export interface IntentPort {
 }
 
 export type RunMission = (args: { repoDir: string; missionId: string; planPath: string; options: MissionOptions }) => Promise<void>
+/** Ambiente do filho por parâmetro (padrão: o do servidor), para o dogfood trocar a fronteira de modelo sem mexer em process.env. */
+type SpawnMissionRun = (args: Parameters<RunMission>[0] & { env?: NodeJS.ProcessEnv }) => Promise<void>
 
 const ADE_BIN = fileURLToPath(new URL('../../bin/ade.js', import.meta.url))
 
@@ -432,26 +434,29 @@ export async function ensureFreshProbe({ homeDir = os.homedir(), now = Date.now(
 }
 
 /** Roda um comando do `ade` sem shell, com a saída no arquivo aberto. */
-function runAde(args: string[], cwd: string, fd: number, what: string, okCodes: number[] = [0]): Promise<void> {
+function runAde(args: string[], cwd: string, fd: number, what: string, okCodes: number[] = [0], env: NodeJS.ProcessEnv = process.env): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    const child = spawn(process.execPath, [ADE_BIN, ...args], { cwd, shell: false, stdio: ['ignore', fd, fd] })
+    const child = spawn(process.execPath, [ADE_BIN, ...args], { cwd, env, shell: false, stdio: ['ignore', fd, fd] })
     child.once('error', reject)
     child.once('exit', (code) => (code !== null && okCodes.includes(code) ? resolve() : reject(new Error(`${what} saiu com código ${code}`))))
   })
 }
 
 /** Porta padrão de execução: renova a sonda se venceu e roda `ade run --plan` sem shell, com a saída em run.log. */
-export const spawnMissionRun: RunMission = async ({ repoDir, missionId, planPath }) => {
+export const spawnMissionRun: SpawnMissionRun = async ({ repoDir, missionId, planPath, env }) => {
   const logPath = path.join(path.dirname(planPath), 'run.log')
   const fd = fs.openSync(logPath, 'a')
   try {
-    await ensureFreshProbe({ runDoctor: () => runAde(['doctor'], repoDir, fd, 'ade doctor') })
-    // O motor só gasta plano com recibo oficial de cota: lê a do Claude e a do Codex agora.
-    const receipts = await refreshQuotaReceipts()
-    fs.writeSync(fd, `cota oficial: ${receipts.map((r) => `${r.family} ${r.used_percent}% da semana`).join(', ') || 'nenhuma leitura'}
+    // Ambiente próprio é o dogfood com dublê: a casa dele já traz sonda e cota, e não se gasta chamada real aqui.
+    if (!env) {
+      await ensureFreshProbe({ runDoctor: () => runAde(['doctor'], repoDir, fd, 'ade doctor') })
+      // O motor só gasta plano com recibo oficial de cota: lê a do Claude, a do Codex e a do Google agora.
+      const receipts = await refreshQuotaReceipts()
+      fs.writeSync(fd, `cota oficial: ${receipts.map((r) => `${r.family} ${r.used_percent}% da semana`).join(', ') || 'nenhuma leitura'}
 `)
+    }
     // saída 3 é parte parada esperando você (o motivo fica no journal e aparece na partitura), não erro do painel
-    await runAde(['run', '--plan', planPath, '--repo', repoDir], repoDir, fd, `ade run da missão ${missionId}`, [0, 3])
+    await runAde(['run', '--plan', planPath, '--repo', repoDir], repoDir, fd, `ade run da missão ${missionId}`, [0, 3], env ?? process.env)
   } catch (err) {
     throw new Error(`${err instanceof Error ? err.message : String(err)}; saída em ${logPath}`)
   } finally {

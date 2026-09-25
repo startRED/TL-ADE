@@ -37,4 +37,12 @@ local numa branch própria. Não planeja, não revisa, não empurra.
 | `scope` | contain | diff fora de `scope_paths` ou dentro de `do_not_touch`; árvore restaurada, repete → parked |
 | `no_changes` | contain | o Maker terminou sem alterar arquivo algum |
 
+## Ponto de virada (`ade dogfood`)
+
+```bash
+node bin/ade.js dogfood --example examples/ponto-de-virada --out docs/operations/ponto-de-virada.md
+```
+
+O comando copia o exemplo para uma pasta temporária com `git init` e sem remoto. Depois sobe o painel real sobre a cópia, envia o `PEDIDO.md`, responde cada pergunta com a primeira opção (a recomendada), aprova briefing e plano pelas rotas do painel e deixa `ade run --plan` executar. As filas vêm dos planos configurados na página Modelos da TL-ADE; sem planos de duas empresas, ele sai com código 4 antes de qualquer chamada. O registro sai só do journal, do `intake.json`, de `/api/models` e do snapshot, e o dólar é apenas informativo. Os códigos de saída são 0 quando entrega, 3 quando para (o registro traz `resultado: parada` e o motivo), 2 quando o painel falha e 4 quando é recusado. `--double` usa a CLI falsa e as respostas de `fixtures/ponto-de-virada/`, sem rede.
+
 Medições da primeira execução real: [`dogfood-d1.md`](dogfood-d1.md).

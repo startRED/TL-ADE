@@ -1,0 +1,10 @@
+{
+  "title": "Iniciais de nomes",
+  "goal": "Obter as iniciais maiúsculas de um nome completo.",
+  "users": "Quem usa a biblioteca de nomes do exemplo.",
+  "in_scope": ["função iniciais em src/nomes.mjs"],
+  "out_of_scope": ["interface gráfica"],
+  "done_means": ["a prova do exemplo passa"],
+  "constraints": [],
+  "versions": [{ "name": "v1", "goal": "Iniciais", "includes": ["função iniciais em src/nomes.mjs"] }]
+}

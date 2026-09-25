@@ -1,0 +1,8 @@
+{
+  "name": "ponto-de-virada",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test/run.mjs"
+  }
+}

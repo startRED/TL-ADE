@@ -18,8 +18,9 @@ import { main as serveMain } from './serve.ts'
 import { main as indexMain } from './index-command.ts'
 import { main as evalMain } from './eval.ts'
 import { main as modelsMain } from './models.ts'
+import { main as dogfoodMain } from './dogfood.ts'
 
-const USAGE = 'uso: ade <run|status|journal|report|show|doctor|docs|gc|plan|validate|approve|catalog|init|serve|index|eval|models> ...\n'
+const USAGE = 'uso: ade <run|status|journal|report|show|doctor|docs|gc|plan|validate|approve|catalog|init|serve|index|eval|models|dogfood> ...\n'
 
 /**
  * Ponto de entrada e dispatch de subcomandos da CLI.
@@ -53,7 +54,7 @@ export async function main(argv: string[], deps: {
       return 0
     }
 
-    if (!command || !['run', 'status', 'journal', 'report', 'show', 'doctor', 'docs', 'gc', 'plan', 'validate', 'approve', 'catalog', 'init', 'serve', 'index', 'eval', 'models'].includes(command)) {
+    if (!command || !['run', 'status', 'journal', 'report', 'show', 'doctor', 'docs', 'gc', 'plan', 'validate', 'approve', 'catalog', 'init', 'serve', 'index', 'eval', 'models', 'dogfood'].includes(command)) {
       stderr.write(USAGE)
       return 4
     }
@@ -145,6 +146,10 @@ export async function main(argv: string[], deps: {
 
     if (command === 'models') {
       return await modelsMain(commandArgv, delegatedDeps)
+    }
+
+    if (command === 'dogfood') {
+      return await dogfoodMain(commandArgv, { stdout })
     }
 
     if (command === 'index') {
