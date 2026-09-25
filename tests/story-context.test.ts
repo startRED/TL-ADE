@@ -567,3 +567,17 @@ describe('Montar contexto compacto por story', () => {
     expect(agentStarted).toBe(false)
   })
 })
+
+// 25/09: skill de revisão (ponytail-review, code-review-and-quality) vai só para o revisor; o maker recebe as outras,
+// sem número fixo e sem teto por skill (impeccable e as de taste são pesadas e entram inteiras).
+test('skills_de_revisao_vao_para_o_revisor_e_o_maker_recebe_as_outras_sem_numero_fixo', async () => {
+  const { selectEligibleSkills, reviewSkillsSection } = await import('../src/context/story.ts')
+  const heavy = 'regra de interface. '.repeat(3000)
+  const skills = ['ponytail', 'ponytail-review', 'impeccable', 'minimalist-ui', 'gpt-taste', 'code-review-and-quality', 'receiving-code-review']
+    .map((name) => ({ name, source: 'local', sha256: name, content: name === 'impeccable' ? heavy : `corpo ${name}` }))
+  const maker = selectEligibleSkills({ story: {}, eligibleSkills: skills, approvedSkills: skills.map((s) => s.name) })
+  expect(maker).toEqual(['gpt-taste', 'impeccable', 'minimalist-ui', 'ponytail', 'receiving-code-review'])
+  const review = reviewSkillsSection(skills.map((s) => s.name), skills)
+  expect(review.skills.map((s) => s.name)).toEqual(['ponytail-review', 'code-review-and-quality'])
+  expect(review.section).toContain('### Skill: ponytail-review')
+})

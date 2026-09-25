@@ -20,10 +20,11 @@ export const SECTION_CAPS: Readonly<Record<string,number>> = Object.freeze({
   policy: 8000,
   story: 24000,
   retrieved: 6000,
-  skills: 80000,
+  // skills pesadas (impeccable, taste) entram inteiras: decisão de Erick 2026-09-25, sem teto por skill
+  skills: 320000,
 })
 
-const DEFAULT_MAX_PACK_BYTES = 120000
+const DEFAULT_MAX_PACK_BYTES = 400000
 
 function isPlainObject(value: unknown): value is Record<string,unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

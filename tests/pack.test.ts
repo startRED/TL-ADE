@@ -45,7 +45,7 @@ describe('compilePack', () => {
       policy: 8000,
       story: 24000,
       retrieved: 6000,
-      skills: 80000,
+      skills: 320000,
     })
   })
 

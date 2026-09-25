@@ -154,7 +154,7 @@ export function evaluateModelPromotion({ events, candidate, components, config }
 const CALIBRATION_WINDOW = 20
 const ESCAPED_MAX_RATE = 0.1
 /** Limites de fábrica quando `.ade/config.json` não os fixa (ADR 0010, ADR 0011, master-spec §limits). */
-export const CALIBRATION_DEFAULTS = Object.freeze({ max_pack_bytes: 120000, review_max_diff_bytes: 60000, visual_cut: 7.5 })
+export const CALIBRATION_DEFAULTS = Object.freeze({ max_pack_bytes: 400000, review_max_diff_bytes: 60000, visual_cut: 7.5 })
 
 /** @param e */
 const unitOf = (e: any) => e?.unit ?? e?.data?.unit

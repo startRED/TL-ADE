@@ -19,7 +19,7 @@ import { readModelSettings } from './models/settings.ts'
 import { storyRisk } from './intent/risk.ts'
 import { dedupStorySection } from './pack/dedup.ts'
 import { measurePackBytes, packTelemetry } from './pack/pack.ts'
-import { buildStoryContext, guardStoryContext } from './context/story.ts'
+import { buildStoryContext, guardStoryContext, reviewSkillsSection } from './context/story.ts'
 import { dispatchClaude } from './adapters/claude/index.ts'
 import { dispatchCodex } from './adapters/codex/index.ts'
 import { dispatchAgyUnit } from './adapters/agy/index.ts'
@@ -1473,10 +1473,12 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
           // só refs que também passam no padrão do schema: arquivo sem intervalo de linhas (file:x) é recusado na validação
           citable_refs: Array.from(verifiedRefs).filter((ref) => typeof ref === 'string' && (!ref.startsWith('file:') || /#L[1-9][0-9]*-L[1-9][0-9]*$/.test(ref))),
         }, null, 2)
+    const reviewSkills = reviewSkillsSection(contract?.skills, deps.eligibleSkills)
     const reviewPack = deps.compilePack({
-      sections: { contract: JSON.stringify(contract), policy: REVIEW_POLICY, story: reviewStory },
+      sections: { contract: JSON.stringify(contract), policy: REVIEW_POLICY, story: reviewStory, ...(reviewSkills.section ? { skills: reviewSkills.section } : {}) },
       missionDir,
       stepId: `${storyId}:r${round}:review-pack`,
+      ...(reviewSkills.skills.length > 0 ? { skills: reviewSkills.skills } : {}),
     })
 
     const checkerResultFile = path.join(missionDir, `checker-result-r${round}.json`)

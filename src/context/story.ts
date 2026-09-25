@@ -9,10 +9,30 @@ import { codeMap, symbolExcerpts } from './code-map.ts'
 import { resolveScopeOwners } from './scope-owners.ts'
 import { GitWorkspace } from '../workspace/git.ts'
 import { FolderWorkspace } from '../workspace/folder.ts'
-import { measurePackBytes } from '../pack/pack.ts'
+import { measurePackBytes, SECTION_CAPS } from '../pack/pack.ts'
 export { compileDomainContext } from './domain.ts'
 
 const EXECUTABLE_REFERENCE = /(?:^|[\\/])(?:scripts?|hooks?)(?:[\\/]|$)|(?:^|[\\/])install\.(?:sh|bash|py|js|mjs|bat|cmd|ps1)\b|\.(?:sh|bash|py|js|mjs|exe|bat|cmd|ps1)\b/i
+// total de tokens de skills que cabe na seção skills do pack (4 bytes por token, com folga para cabeçalho)
+const SKILL_TOKENS_TOTAL = Math.floor((SECTION_CAPS.skills as number) / 4) - 2000
+
+/** Skill de revisão vai para o revisor, não para o maker (ponytail-review, code-review-and-quality, security-review). */
+export function isReviewSkill(id: string): boolean {
+  return /(^|-)review(er)?(-|$)/.test(id) && id !== 'receiving-code-review'
+}
+
+/** Seção de skills do pack de revisão: as skills de revisão escolhidas para a parte, sem teto por skill. */
+export function reviewSkillsSection(contractSkills: unknown, eligibleSkills: any[] = []): { section: string; skills: Array<{ name: string; source: string; sha256: string; bytes: number }> } {
+  const wanted = (Array.isArray(contractSkills) ? contractSkills : []).filter((id): id is string => typeof id === 'string' && isReviewSkill(id))
+  const picked = wanted.map((id) => eligibleSkills.find((s) => s.name === id)).filter(Boolean)
+  const bodies = picked.map((s: any) => ({ s, body: sanitizeSkillText(s.content || '') })).filter((x) => x.body)
+  if (bodies.length === 0) return { section: '', skills: [] }
+  const header = 'Guias de revisão para esta parte. Valem como critério extra de leitura; o contrato, a política e as regras de evidência acima sempre valem mais.'
+  return {
+    section: [header, ...bodies.map((x) => `### Skill: ${x.s.name}\n\n${x.body}`)].join('\n\n'),
+    skills: bodies.map((x) => ({ name: x.s.name, source: x.s.source || '', sha256: x.s.sha256 || '', bytes: Buffer.byteLength(x.body) })),
+  }
+}
 
 function sanitizeSkillText(text: string) {
   let body = String(text || '').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '')
@@ -72,8 +92,8 @@ export function selectEligibleSkills({ story, eligibleSkills = [], approvedSkill
   const scopePaths =  ((story?.guardrails?.scope_paths || []) as unknown[]).map((p) => String(p).toLowerCase())
 
   const filtered = eligibleSkills.filter((skill) => {
-    // Nenhuma skill fora do conjunto aprovado entra
-    if (!approvedList.includes(skill.name)) {
+    // Nenhuma skill fora do conjunto aprovado entra; a de revisão vai para o revisor
+    if (!approvedList.includes(skill.name) || isReviewSkill(skill.name)) {
       return false
     }
 
@@ -103,8 +123,8 @@ export function selectEligibleSkills({ story, eligibleSkills = [], approvedSkill
   // Ordenação determinística por nome
   filtered.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
 
-  // No máximo 4 skills (o plano escolhe de 0 a 4)
-  return filtered.slice(0, 4).map((s) => s.name)
+  // Sem número fixo: o plano escolhe quantas a parte pede; o teto é o espaço da seção de skills do pack.
+  return filtered.map((s) => s.name)
 }
 
 /**
@@ -315,11 +335,11 @@ export async function buildStoryContext(input: {
       const cleanReference = sanitizeSkillText(reference.content || '')
       if (!cleanReference) continue
       const candidate = `${content}\n\n#### Referência: ${reference.path}\n\n${cleanReference}`.trim()
-      const candidateTokens = Math.ceil(candidate.length / 4)
-      if (candidateTokens <= 7500 && skillTokens + candidateTokens <= 20000) content = candidate
+      if (skillTokens + Math.ceil(candidate.length / 4) <= SKILL_TOKENS_TOTAL) content = candidate
     }
+    // Sem teto por skill (as boas são pesadas); só o total precisa caber na seção de skills do pack.
     const tokens = Math.ceil(content.length / 4)
-    if (tokens > 7500 || skillTokens + tokens > 20000) {
+    if (skillTokens + tokens > SKILL_TOKENS_TOTAL) {
       throw new AdeError('skill_budget_exceeded', `Habilidade '${skill.name}' excede o orçamento de contexto`, 4)
     }
     skill.content = content
@@ -404,7 +424,7 @@ export async function buildStoryContext(input: {
     ? [await symbolExcerpts(worktreeDir, scopeFiles, interfaceNames), await codeMap(worktreeDir, scopeFiles)].filter(Boolean).join('\n\n')
     : ''
 
-  const maxPackBytes = deps.limits?.max_pack_bytes ?? 120000
+  const maxPackBytes = deps.limits?.max_pack_bytes ?? 400000
 
   // Função auxiliar para renderizar a seção story
   const renderStorySection = (symbolsCount: number) => {

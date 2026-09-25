@@ -194,6 +194,14 @@ export function briefPrompt(request: string, repoDir: string, understanding: Und
   ].filter(Boolean).join('\n')
 }
 
+/** Skills que toda parte de código recebe: a do maker (solução mínima) e a do revisor (caça ao excesso). */
+const ALWAYS_FOR_CODE = ['ponytail', 'ponytail-review']
+
+/** Parte de código: algum caminho do escopo não é só documentação. */
+export function isCodePart(scopePaths: unknown): boolean {
+  return (Array.isArray(scopePaths) ? scopePaths : []).some((p) => typeof p === 'string' && !p.startsWith('docs/') && !/\.(md|txt)$/i.test(p))
+}
+
 export function planPrompt(request: string, repoDir: string, understanding: Understanding, answers: string, briefingBlock: string, skills: Array<{ id: string; summary: string }> = []): string {
   return [
     'Você é o Intent Compiler da TL-ADE. Transforme o pedido do usuário em um plano executável por outra IA, em português, no JSON exigido.',
@@ -210,7 +218,7 @@ export function planPrompt(request: string, repoDir: string, understanding: Unde
     '- acceptance: 2 a 6 critérios, cada um {given, when, then} ("Dado…, quando…, então…" sem essas palavras), de comportamento observável pelo usuário ou por uma prova automatizada sem rede, CLI ou serviço real (use dublês). Nunca fixe implementação: nome de variável, valor exato de estilo, estrutura interna.',
     '- scope_paths: arquivos que a parte pode criar ou mudar (caminhos reais do projeto ou novos). do_not_touch: o que não pode mudar. test_file: o arquivo de prova, num lugar que o comando de provas realmente roda.',
     skills.length > 0
-      ? ['- skills: de 0 a 4 ids desta lista, só as que ajudam de verdade quem escreve a prova e o código daquela parte (parte simples pede menos; [] se nenhuma serve).', ...skills.map((k) => `  - ${k.id}: ${k.summary}`)].join('\n')
+      ? ['- skills: ids desta lista com a melhor combinação para aquela parte, sem número fixo: parte grande ou de várias frentes leva vários guias, parte simples leva um ou nenhum ([]). Os guias devem se completar (o do tipo de trabalho, como interface, API, banco ou documentação, e um de método, como prova antes do código ou verificação), nunca dois que dizem a mesma coisa. Parte de interface leva os guias de qualidade visual que servirem. Guias com review no id vão para o revisor da parte; os outros, para quem escreve a prova e o código. ponytail e ponytail-review entram sozinhos em toda parte de código.', ...skills.map((k) => `  - ${k.id}: ${k.summary}`)].join('\n')
       : '- skills: [] (o projeto não tem catálogo de skills).',
     '- Menor código que resolve: reuse o que já existe, depois a biblioteca padrão, depois a plataforma (CSS antes de JS, elemento nativo antes de componente). Nada de camada ou configuração que nenhuma parte usa.',
     '- Nenhuma parte manda commitar, dar push ou rodar a suíte inteira: o motor faz isso depois das provas e da revisão.',
@@ -262,8 +270,9 @@ function withStory(contract: any, story: PlanAnswer['stories'][number], index: n
       scope_paths: uniq([...story.scope_paths, story.test_file, ...evidence]).length > 0 ? uniq([...story.scope_paths, story.test_file, ...evidence]) : contract.guardrails.scope_paths,
       do_not_touch: uniq([...contract.guardrails.do_not_touch, ...story.do_not_touch]),
     },
-    // skill que a IA inventou ou que saiu do catálogo não entra
-    skills: uniq(story.skills ?? []).filter((id) => catalog.has(id)).slice(0, 4),
+    // skill que a IA inventou ou que saiu do catálogo não entra; parte de código sempre leva ponytail (maker) e
+    // ponytail-review (revisor), decisão de Erick 2026-09-25. O teto de 12 é só trava: o espaço do pack decide.
+    skills: uniq([...(isCodePart(story.scope_paths) ? ALWAYS_FOR_CODE : []), ...(story.skills ?? [])]).filter((id) => catalog.has(id)).slice(0, 12),
     ...(deps.length > 0 ? { depends_on: deps } : {}),
   }
 }

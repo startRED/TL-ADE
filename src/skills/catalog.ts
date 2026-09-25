@@ -154,6 +154,23 @@ const skillRel = (entry: { dir?: string; id: string }) => entry.dir ?? path.join
 /**
  * Coleta recursivamente todos os arquivos sob um diretório.
  */
+/**
+ * Arquivos .md da fonte local, relativos à raiz. A pasta de skills do operador costuma ter atalhos (link simbólico)
+ * para outra pasta (~/.agents/skills): o atalho de primeiro nível é seguido; scripts nunca entram.
+ */
+function localMarkdownFiles(root: string): string[] {
+  const out: string[] = []
+  for (const item of fs.readdirSync(root, { withFileTypes: true })) {
+    const full = path.join(root, item.name)
+    if (!(item.isDirectory() || (item.isSymbolicLink() && fs.statSync(full, { throwIfNoEntry: false })?.isDirectory()))) continue
+    const real = fs.realpathSync(full)
+    for (const f of walkDir(real)) {
+      if (f.toLowerCase().endsWith('.md')) out.push([item.name, ...path.relative(real, f).split(path.sep)].join('/'))
+    }
+  }
+  return out
+}
+
 function walkDir(dir: string): string[] {
   
   const results: string[] = []
@@ -174,7 +191,7 @@ function walkDir(dir: string): string[] {
  * Sincroniza fontes declaradas no catálogo local ~/.ade/catalog.
  */
 export async function syncCatalog({ config = {}, catalogDir }: {
-        config: { sources?: Array<{ name: string; repo: string; commit?: string; paths?: string[]; license?: string; reason?: string; community_signal?: string }>; trust_default?: string;[key: string]: any }
+        config: { sources?: Array<{ name: string; repo: string; commit?: string; local?: boolean; paths?: string[]; license?: string; reason?: string; community_signal?: string }>; trust_default?: string;[key: string]: any }
         catalogDir: string
         git?: any
         validator?: any
@@ -198,14 +215,16 @@ export async function syncCatalog({ config = {}, catalogDir }: {
   }
 
   try {
-    const allEntries = []
+    const allEntries: any[] = []
 
     for (const source of config.sources) {
       // Fase 0: resolve
       if (!source || typeof source !== 'object') {
         throw new AdeError('catalog_source_not_allowlisted', 'Fonte do catálogo deve ser um objeto allowlisted', 4)
       }
-      if (!source.name || !source.commit) {
+      // Fonte local: pasta de skills do próprio operador (~/.claude/skills), sem upstream nem commit a fixar.
+      const isLocal = source.local === true
+      if (!source.name || (!isLocal && !source.commit)) {
         throw new AdeError(
           'catalog_source_not_pinned',
           `Fonte '${source.name || 'desconhecida'}' sem commit fixado`,
@@ -220,7 +239,7 @@ export async function syncCatalog({ config = {}, catalogDir }: {
       ) {
         throw new AdeError('catalog_source_not_allowlisted', `Nome de fonte inseguro: '${source.name}'`, 4)
       }
-      if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(source.commit)) {
+      if (!isLocal && !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(String(source.commit))) {
         throw new AdeError('catalog_source_not_pinned', `Fonte '${source.name}' sem hash completo de commit`, 4)
       }
       if (source.paths !== undefined && (!Array.isArray(source.paths) || source.paths.some((item) => typeof item !== 'string'))) {
@@ -236,7 +255,9 @@ export async function syncCatalog({ config = {}, catalogDir }: {
       }
 
       // Fase 2: checkout em sources/<name>@<commit>
-      const sourceDir = path.join(catalogDir, 'sources', `${source.name}@${source.commit}`)
+      const sourceDir = path.join(catalogDir, 'sources', `${source.name}@${isLocal ? 'local' : source.commit}`)
+      // a cópia local é refeita a cada sync: skill apagada ou editada na pasta do operador não fica velha no catálogo
+      if (isLocal) fs.rmSync(sourceDir, { recursive: true, force: true })
       fs.mkdirSync(sourceDir, { recursive: true })
       const sourceRoot = path.resolve(sourceDir)
 
@@ -244,14 +265,14 @@ export async function syncCatalog({ config = {}, catalogDir }: {
         throw new AdeError('catalog_repo_not_found', `Repositório '${source.repo}' não encontrado`, 4)
       }
 
-      // Lista todos os arquivos da árvore do commit via Git
-      const lsTreeOut = execFileSync('git', ['ls-tree', '-r', '--name-only', source.commit], {
-        cwd: source.repo,
-        encoding: 'utf8',
-        maxBuffer: 16 * 1024 * 1024,
-      })
-
-      const filesInCommit = lsTreeOut.split(/\r?\n/).filter(Boolean)
+      // Lista todos os arquivos da árvore do commit via Git; da fonte local entram só os .md (instrução, nunca script)
+      const filesInCommit = isLocal
+        ? localMarkdownFiles(source.repo)
+        : execFileSync('git', ['ls-tree', '-r', '--name-only', String(source.commit)], {
+          cwd: source.repo,
+          encoding: 'utf8',
+          maxBuffer: 16 * 1024 * 1024,
+        }).split(/\r?\n/).filter(Boolean)
       const declaredPaths = source.paths || ['skills/**']
 
       for (const file of filesInCommit) {
@@ -266,10 +287,12 @@ export async function syncCatalog({ config = {}, catalogDir }: {
         }
         fs.mkdirSync(path.dirname(destPath), { recursive: true })
 
-        const fileContent = execFileSync('git', ['show', `${source.commit}:${file}`], {
-          cwd: source.repo,
-          maxBuffer: 16 * 1024 * 1024,
-        })
+        const fileContent = isLocal
+          ? fs.readFileSync(fs.realpathSync(path.join(source.repo, file)))
+          : execFileSync('git', ['show', `${source.commit}:${file}`], {
+            cwd: source.repo,
+            maxBuffer: 16 * 1024 * 1024,
+          })
         fs.writeFileSync(destPath, fileContent)
       }
 
@@ -316,9 +339,10 @@ export async function syncCatalog({ config = {}, catalogDir }: {
           const fileHashes = Object.fromEntries(Object.entries(scanResult.hashes).sort(([a], [b]) => a.localeCompare(b)))
           const bytes = Object.values(filesMap).reduce((total, value) => total + Buffer.byteLength(value), 0)
 
-          let trust = config.trust_default || 'allowlisted'
+          let trust = isLocal ? 'local' : config.trust_default || 'allowlisted'
           let quarantineReason = undefined
-          if (!scanResult.ok || scanResult.hasScripts) {
+          // a fonte local é do próprio operador (E59): o achado do SkillGuard fica registrado, sem quarentena
+          if (!isLocal && (!scanResult.ok || scanResult.hasScripts)) {
             trust = 'quarantine'
             quarantineReason = scanResult.hasScripts ? 'has_scripts' : scanResult.findings.join(', ')
           }
@@ -334,7 +358,7 @@ export async function syncCatalog({ config = {}, catalogDir }: {
             name: fm.name,
             source: source.name,
             dir: path.relative(sourceDir, skillDir).split(path.sep).join('/'),
-            commit: source.commit,
+            commit: isLocal ? 'local' : source.commit,
             sha256: scanResult.hashes['SKILL.md'] || createHash('sha256').update(rawContent).digest('hex'),
             file_hashes: fileHashes,
             bytes,
@@ -364,6 +388,8 @@ export async function syncCatalog({ config = {}, catalogDir }: {
             entry.community_signal = source.community_signal.trim()
           }
 
+          // mesmo id em duas fontes: vale a que vem antes na lista (a local fica primeiro e tem precedência, E59)
+          if (allEntries.some((e) => e.id === entry.id)) continue
           allEntries.push(entry)
         }
       }

@@ -698,3 +698,39 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
     expect(readme).toContain('0024')
   })
 })
+
+// 25/09: as skills do próprio operador (impeccable, taste) moram em ~/.claude/skills, sem upstream. Entram como fonte
+// local: só os .md são copiados (scripts ficam de fora), a confiança é "local" e, no mesmo id, a fonte que vem antes
+// na lista vence.
+test('fonte_local_entra_sem_scripts_com_confianca_local_e_precedencia', async () => {
+  const { syncCatalog } = await import('../src/skills/catalog.ts')
+  const catalogDir = makeTmpDir('ade-catalog-')
+  const localDir = makeTmpDir('ade-local-skills-')
+  tmpDirs.push(catalogDir, localDir)
+  fs.mkdirSync(path.join(localDir, 'impeccable', 'scripts'), { recursive: true })
+  fs.writeFileSync(path.join(localDir, 'impeccable', 'SKILL.md'), '---\nname: impeccable\nlicense: Apache 2.0\n---\nCorpo local', 'utf8')
+  fs.writeFileSync(path.join(localDir, 'impeccable', 'scripts', 'run.sh'), 'echo x', 'utf8')
+  // skill de taste mora em outra pasta e entra por atalho; comentário HTML no corpo não a manda para a quarentena
+  const agentsDir = makeTmpDir('ade-agents-skills-')
+  tmpDirs.push(agentsDir)
+  fs.mkdirSync(path.join(agentsDir, 'minimalist-ui'))
+  fs.writeFileSync(path.join(agentsDir, 'minimalist-ui', 'SKILL.md'), '---\nname: minimalist-ui\n---\n<!-- nota -->Corpo', 'utf8')
+  fs.symlinkSync(path.join(agentsDir, 'minimalist-ui'), path.join(localDir, 'minimalist-ui'), 'junction')
+
+  const upstream = makeRepo()
+  tmpDirs.push(upstream.dir)
+  fs.mkdirSync(path.join(upstream.dir, 'skills', 'impeccable'), { recursive: true })
+  fs.writeFileSync(path.join(upstream.dir, 'skills', 'impeccable', 'SKILL.md'), '---\nname: impeccable\nlicense: MIT\n---\nCorpo remoto', 'utf8')
+  upstream.git(['add', '-A'])
+  upstream.git(['commit', '-m', 'feat: skill'])
+  const commit = upstream.git(['rev-parse', 'HEAD']).trim()
+
+  const { entries } = await syncCatalog({
+    config: { sources: [{ name: 'local', repo: localDir, local: true, license: 'MIT', paths: ['impeccable/**', 'minimalist-ui/**'] }, { name: 'remota', repo: upstream.dir, commit, paths: ['skills/**'] }] },
+    catalogDir,
+  })
+  expect(entries.map((e) => e.id)).toEqual(['impeccable', 'minimalist-ui'])
+  expect(entries[0]).toMatchObject({ id: 'impeccable', source: 'local', trust: 'local', commit: 'local', has_scripts: false })
+  expect(entries[1]).toMatchObject({ source: 'local', trust: 'local' })
+  expect(fs.existsSync(path.join(catalogDir, 'sources', 'local@local', 'impeccable', 'scripts'))).toBe(false)
+})

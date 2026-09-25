@@ -113,16 +113,20 @@ describe('cérebro do pedido com IA', () => {
     expect((res.plan as any).authorization.eligible_skills).toEqual(['tdd'])
   })
 
-  test('cada_parte_leva_no_maximo_quatro_skills_e_o_prompt_deixa_escolher_menos', async () => {
+  // 25/09, decisão de Erick: sem número fixo de skills por parte (a tarefa decide, de nenhuma a várias) e parte de
+  // código sempre leva ponytail (maker) e ponytail-review (revisor); parte só de documentação não leva.
+  test('skills_sem_numero_fixo_e_parte_de_codigo_leva_ponytail', async () => {
     const ids = ['a', 'b', 'c', 'd', 'e']
-    const eligibleSkills = ids.map((id) => ({ id, domain: null, trust: 'allowlisted', source: 's', summary: `skill ${id}` }))
-    const { ask, calls } = fakeAsk({ entender: INTENT, planejar: { ...PLAN, stories: [{ ...PLAN.stories[0], skills: ids }] } })
+    const eligibleSkills = [...ids, 'ponytail', 'ponytail-review'].map((id) => ({ id, domain: null, trust: 'allowlisted', source: 's', summary: `skill ${id}` }))
+    const docs = { ...PLAN.stories[1], scope_paths: ['docs/guia.md'], skills: ['a'] }
+    const { ask, calls } = fakeAsk({ entender: INTENT, planejar: { ...PLAN, stories: [{ ...PLAN.stories[0], skills: ids }, docs] } })
     const intent = createLlmIntent({ askFor: () => ask })
     const dir = repo()
     const first = await intent.compile({ request: 'Quero anexar imagens no pedido', repoDir: dir, missionId: 'm1', options: {} as any, eligibleSkills })
     const res = await intent.compile({ request: 'Quero anexar imagens no pedido', repoDir: dir, missionId: 'm1', options: {} as any, eligibleSkills, questions: first.questions, understanding: first.understanding, answers: {} })
-    expect((res.contracts as any[])[0].skills).toEqual(['a', 'b', 'c', 'd'])
-    expect(calls[1].prompt).toContain('de 0 a 4')
+    expect((res.contracts as any[])[0].skills).toEqual(['ponytail', 'ponytail-review', ...ids])
+    expect((res.contracts as any[])[1].skills).toEqual(['a'])
+    expect(calls[1].prompt).toContain('sem número fixo')
   })
 
   test('pedido grande vira briefing antes do plano', async () => {
