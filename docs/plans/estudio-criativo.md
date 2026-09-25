@@ -70,14 +70,18 @@ O TL-ADE vai ao público no GitHub. Regras que valem para toda parte deste plano
 5. **Aceleração escolhida pelo PC, com opção de trocar.** O doctor detecta o hardware e a opção "Aceleração" (em Opções)
    começa em **automática**; o usuário pode fixar outra. A missão mostra o tempo estimado antes de começar.
 
-   | PC | Transcrição (whisper.cpp) | Vídeo (ffmpeg) | Imagem local (opcional) |
-   | :--- | :--- | :--- | :--- |
-   | NVIDIA (ex.: RTX 5060, geração Blackwell: exige CUDA 12.8+) | CUDA, modelo grande | NVENC | ComfyUI em CUDA |
-   | Mac Apple Silicon (M1 em diante) | Metal / Core ML, modelo grande | VideoToolbox | ComfyUI em MPS, mais lento que NVIDIA |
-   | AMD ou Intel com GPU | Vulkan | AMF / QSV | ComfyUI só se houver suporte |
-   | Mac Intel ou PC sem GPU | CPU, modelo pequeno ou médio | CPU | usar geração pela assinatura (Codex, Nano Banana) |
+   A aceleração vale só para o que roda **no PC**: transcrição e processamento de vídeo.
 
-   Sem aceleração local boa, a geração de imagem vai pela assinatura, que não depende do PC.
+   | PC | Transcrição (whisper.cpp) | Vídeo (ffmpeg) |
+   | :--- | :--- | :--- |
+   | NVIDIA (ex.: RTX 5060, geração Blackwell: exige CUDA 12.8+) | CUDA, modelo grande | NVENC |
+   | Mac Apple Silicon (M1 em diante) | Metal / Core ML, modelo grande | VideoToolbox |
+   | AMD ou Intel com GPU | Vulkan | AMF / QSV |
+   | Mac Intel ou PC sem GPU | CPU, modelo pequeno ou médio | CPU |
+
+   **Imagem e design são gerados sempre pela assinatura**, em qualquer PC: Codex `$imagegen` (plano ChatGPT) e
+   Nano Banana pelo agy (plano Google), chamados pelas CLIs oficiais como o resto da TL-ADE. Geração local (ComfyUI,
+   sd.cpp) fica como extra opcional para quem quiser, nunca como caminho padrão.
 6. **Funciona com qualquer combinação de planos** (Claude, ChatGPT, Google). Função que depende de um plano — imagem pelo
    Codex, imagem pelo Nano Banana do Google — aparece desligada com o motivo quando o plano não existe; a aba Modelos já
    sabe quais planos o usuário tem.
