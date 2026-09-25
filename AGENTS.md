@@ -14,6 +14,7 @@ npm run lint
 ```
 
 Nunca use `npx`: `spawn('npx.cmd')` sem shell falha com EINVAL no Windows (ADR 0022). Os três saem 0 antes de qualquer commit.
+Mudança pronta e provada vira commit na hora, um commit por mudança ou grupo coerente.
 
 ## Convenções
 
@@ -37,7 +38,7 @@ Nunca use `npx`: `spawn('npx.cmd')` sem shell falha com EINVAL no Windows (ADR 0
 - Editar ADR aceito (abrir um novo que emenda).
 - Alterar o formato dos 9 `schemas/*.schema.json` sem story própria.
 - Criar item novo na raiz fora da allowlist de `tests/meta.test.ts`.
-- `git push`.
+- `git push` feito por papel de missão (maker, revisor, prova). A sessão que conduz pode dar `git push origin main` depois dos três comandos de prova.
 - Pôr em `src/` item da lista "fora do recorte ativo da v0.4b" do charter.
 
 ## Leia antes
