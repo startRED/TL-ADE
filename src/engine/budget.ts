@@ -234,23 +234,28 @@ export function checkMissionBudget({ events = [], budget = {}, now = Date.now(),
       : undefined)
 
   if (maxWallClockMs !== undefined && maxWallClockMs !== null) {
-    let firstAt = null
-    for (const event of evts) {
-      if (!event || typeof event !== 'object') continue
-      const rawAt = event.at ?? event.ts ?? event.timestamp ?? event.time
-      if (rawAt !== undefined && rawAt !== null) {
-        const atVal = typeof rawAt === 'number' ? rawAt : new Date(rawAt).getTime()
-        if (Number.isFinite(atVal)) {
-          if (firstAt === null || atVal < firstAt) {
-            firstAt = atVal
-          }
-        }
-      }
-    }
-
-    if (firstAt !== null) {
+    // Tempo ativo, não calendário: intervalo que começa numa parada à espera do operador (parte estacionada, missão
+    // pausada ou encerrada) não conta. Contar desde o primeiro evento estacionou a S2 da missão real depois de uma
+    // noite parada.
+    const timed = evts
+      .map((event) => {
+        const rawAt = event?.at ?? event?.ts ?? event?.timestamp ?? event?.time
+        const atVal = typeof rawAt === 'number' ? rawAt : rawAt ? new Date(rawAt).getTime() : Number.NaN
+        return { event, at: atVal }
+      })
+      .filter((x) => Number.isFinite(x.at))
+      .sort((a, b) => a.at - b.at)
+    const waiting = (event: any) =>
+      (event?.kind === 'story_done' && event.data?.status === 'awaiting_operator')
+      || (event?.kind === 'mission_control' && event.data?.state === 'STOPPED')
+      || (event?.kind === 'telemetry' && event.data?.scope === 'mission_summary')
+    if (timed.length > 0) {
       const nowVal = typeof now === 'number' ? now : new Date(now).getTime()
-      const elapsed = nowVal - firstAt
+      let elapsed = 0
+      for (let i = 0; i < timed.length; i++) {
+        const next = i + 1 < timed.length ? timed[i + 1].at : nowVal
+        if (!waiting(timed[i].event)) elapsed += Math.max(0, next - timed[i].at)
+      }
       if (elapsed >= maxWallClockMs) {
         return { allowed: false, reason: 'wall_clock_exhausted' }
       }

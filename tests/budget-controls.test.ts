@@ -5,6 +5,7 @@ import {
   ABSOLUTE_USD_CAP,
   PHASE_TURN_LIMITS,
   authorizePaidCall,
+  checkMissionBudget,
   observedUsd,
   validateQuotaReceipt,
 } from '../src/engine/budget.ts'
@@ -420,4 +421,23 @@ describe('budget controls', () => {
       expect(err.exitCode).toBe(4)
     }
   })
+})
+
+// 24–25/09, missão real: o teto de 8h contava desde o primeiro evento, inclusive a noite em que a missão ficou parada
+// esperando o operador, e a S2 estacionou em wall_clock_exhausted. Conta só o tempo ativo.
+test('teto_de_tempo_nao_conta_o_tempo_parado_esperando_o_operador', () => {
+  const h = 3600 * 1000
+  const t0 = Date.parse('2026-09-24T17:00:00Z')
+  const at = (ms: number) => new Date(t0 + ms).toISOString()
+  const events = [
+    { kind: 'batch_open', at: at(0) },
+    { kind: 'step_result', at: at(1 * h) },
+    { kind: 'story_done', at: at(2 * h), data: { status: 'awaiting_operator', unit: 'S2' } },
+    // 10h parada esperando o operador
+    { kind: 'decision', at: at(12 * h), data: { decision: 'unit_retry', unit: 'S2' } },
+    { kind: 'step_result', at: at(13 * h) },
+  ]
+  const budget = { max_wall_clock_seconds: 8 * 3600 }
+  expect(checkMissionBudget({ events, budget, now: t0 + 14 * h })).toMatchObject({ allowed: true })
+  expect(checkMissionBudget({ events, budget, now: t0 + 19 * h })).toMatchObject({ allowed: false, reason: 'wall_clock_exhausted' })
 })
