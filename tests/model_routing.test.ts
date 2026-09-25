@@ -181,6 +181,19 @@ test('CA3_resume_after_quota_pause_rebuilds_chains_with_new_reading_before_next_
   expect(kinds.lastIndexOf('model_chains')).toBeGreaterThan(resumed)
 }, 30000)
 
+// 25/09, missão real de anexos: o revisor do Codex caiu com 401 (token renovado no meio da chamada) e a parte estacionou
+// esperando o operador. Revisor que cai sem revisão passa a vez ao seguinte da fila, sempre de outra empresa.
+test('revisor_que_cai_sem_revisao_passa_a_vez_ao_seguinte_da_fila', async () => {
+  const subject = fixture({ models: { plans: { claude: 'max20', codex: 'pro20', agy: 'ultra1000' } } })
+  await subject.run()
+  const writer = subject.makers()[0].family
+  const checkers = subject.checkers()
+  expect(checkers.length).toBeGreaterThan(1)
+  expect(checkers.every((c) => c.family !== writer)).toBe(true)
+  const fallback = subject.events().find((e) => e.kind === 'decision' && e.data?.decision === 'checker_fallback')
+  expect(fallback?.data).toMatchObject({ from: checkers[0].family, to: checkers[1].family })
+}, 30000)
+
 test('CA4_checker_is_always_from_other_company_than_the_round_writer_even_on_reserve_and_parks_without_one', async () => {
   // 2 rodadas reprovadas do ChatGPT e 2 do Claude, a 5ª (Claude) passa nos portões e vai à revisão
   const red = ['tests/a.test.ts > nova']

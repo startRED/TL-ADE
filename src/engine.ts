@@ -1545,15 +1545,18 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       }
     }
 
-    const checker = checkerSlot
+    let checker = checkerSlot
       ? { family: checkerSlot.family as string, model: cliModel(checkerSlot), effort: checkerSlot.effort as string | null }
       : { family: checkerRole.family as string, model: checkerRole.model_id as string | undefined, effort: null }
-    const checkerDispatchFn = dispatcherFor(checker.family)
+    let checkerDispatchFn = dispatcherFor(checker.family)
 
     // O Checker roda em outra família: usa o binário dela. Quem não fia `checkerResolved`
     // (provas com dublê) fica com o resolvido do Maker; `null` explícito significa que a
     // fiação tentou resolver e não achou, e aí não há revisão independente possível.
-    const checkerResolved = binaryFor(checker.family)
+    let checkerResolved = binaryFor(checker.family)
+    // Revisor que cai sem devolver revisão passa a vez ao seguinte da fila (empresa diferente de quem escreveu): o 401 de
+    // um token do Codex renovado no meio da chamada estacionava a parte (missão real de anexos, 25/09)
+    const checkerBackups = routed ? routed.chains.checker.filter((slot) => slot.family !== rung.family && slot !== checkerSlot) : []
 
     if (!checkerDispatchFn || !checkerResolved) {
       await deps.journal.append({
@@ -1699,7 +1702,9 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
 
     const dispatchChecker = async (stepId: string, packPath: string = reviewPack.pack_path) => {
       await deps.journal.append({ kind: 'model_started', unit: storyId, data: { unit: storyId, role: 'checker', step_id: stepId, family: checker.family, model_id: checker.model ?? null, effort: checker.effort ?? null } })
-      return checkerDispatchFn({
+      const dispatchFn = checkerDispatchFn
+      if (!dispatchFn) throw new AdeError('invalid_ladder', `revisor da família ${checker.family} sem despachante`, 4)
+      return dispatchFn({
         step: authorizedStep(
           deps.step,
           paidAuthorization,
@@ -1724,11 +1729,34 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     }
 
     let checkerDispatch
-    try {
-      checkerDispatch = await dispatchChecker(checkerStepId)
-    } catch (err) {
+    let checkerStepNow = checkerStepId
+    let dispatchFailure: unknown = null
+    for (;;) {
+      dispatchFailure = null
+      try {
+        checkerDispatch = await dispatchChecker(checkerStepNow)
+      } catch (err) {
+        dispatchFailure = err
+        checkerDispatch = undefined
+      }
+      const answered = !dispatchFailure && (checkerDispatch?.review_result || (fs.existsSync(checkerResultFile) && !checkerDispatch?.is_error))
+      if (answered) break
+      const next = checkerBackups.shift()
+      const nextFn = next ? dispatcherFor(next.family) : null
+      const nextBin = next ? binaryFor(next.family) : null
+      if (!next || !nextFn || !nextBin) break
+      await appendCheckerTelemetry(checkerDispatch, 'park', checkerStepNow)
+      await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'checker_fallback', unit: storyId, round, from: checker.family, to: next.family, reason: dispatchFailure instanceof Error ? dispatchFailure.message.slice(0, 200) : checkerDispatch?.envelope_error ?? 'no_review_result' } })
+      checker = { family: next.family as string, model: cliModel(next), effort: next.effort as string | null }
+      checkerDispatchFn = nextFn
+      checkerResolved = nextBin
+      checkerStepNow = `${checkerStepId}:c${checker.family}`
+      fs.rmSync(checkerResultFile, { force: true })
+    }
+    if (dispatchFailure) {
+      const err = dispatchFailure
       const dispatchErrorReason = err instanceof AdeError ? err.code : 'checker_dispatch_failed'
-      await appendCheckerTelemetry(undefined, 'park')
+      await appendCheckerTelemetry(undefined, 'park', checkerStepNow)
       await deps.journal.append({
         kind: 'story_done',
         unit: storyId,
@@ -1765,7 +1793,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       }
     }
 
-    await appendCheckerTelemetry(checkerDispatch, !reviewDoc ? 'park' : isReviewApproved(reviewDoc).approved ? 'ok' : 'rework')
+    await appendCheckerTelemetry(checkerDispatch, !reviewDoc ? 'park' : isReviewApproved(reviewDoc).approved ? 'ok' : 'rework', checkerStepNow)
 
     if (!reviewDoc) {
       const failReason = checkerDispatch?.envelope_error ?? 'no_review_result'
