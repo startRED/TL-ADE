@@ -38,6 +38,27 @@ const PRICE_PER_MTOK: Record<string, { input: number; output: number; cache_read
   'claude-opus-5': { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
   'claude-sonnet-5': { input: 2, output: 10, cache_read: 0.2, cache_write: 2.5 },
   'claude-haiku-4-5': { input: 1, output: 5, cache_read: 0.1, cache_write: 1.25 },
+  // Codex: tabela da Artificial Analysis colada por Erick em 25/09/2026 (entrada, saída, cache lido e escrito)
+  'gpt-6-sol': { input: 2, output: 10, cache_read: 0.2, cache_write: 2.5 },
+  'gpt-6-astra': { input: 10, output: 50, cache_read: 1, cache_write: 12.5 },
+  // Gemini: preço de lista em 25/09/2026 (3.8 Flash no preço de lançamento até 31/12/2026, depois 1,50/7,50)
+  'gemini-3.8-flash': { input: 0.75, output: 3.75, cache_read: 0.075, cache_write: 0 },
+  'gemini-3.1-pro': { input: 2, output: 12, cache_read: 0.2, cache_write: 0 },
+}
+
+/** Preço do modelo; o agy manda o esforço no nome (gemini-3.8-flash-medium) e o preço é o mesmo. */
+export function priceOf(model: string) {
+  return PRICE_PER_MTOK[model] ?? PRICE_PER_MTOK[model.replace(/-(low|medium|high|xhigh|max)$/, '')]
+}
+
+/**
+ * Custo equivalente de API pelos tokens: sem entrada e saída é desconhecido; contador de cache ausente conta zero
+ * (o codex não informa cache escrito). Serve às chamadas que não trazem US$ próprio (Codex e Gemini).
+ */
+export function listPriceUsd(model: string, t: { input: number | null; output: number | null; cache_read?: number | null; cache_write?: number | null }): number | null {
+  const price = priceOf(model)
+  if (!price || t.input === null || t.output === null) return null
+  return (t.input * price.input + t.output * price.output + (t.cache_read ?? 0) * price.cache_read + (t.cache_write ?? 0) * price.cache_write) / 1_000_000
 }
 
 /**
@@ -66,10 +87,7 @@ export function callCost({ model, usage, durationMs }: { model: string; usage: R
   const cacheWrite = reported(usage, 'cache_write')
   const input = reported(usage, 'input')
   const output = reported(usage, 'output')
-  const price = PRICE_PER_MTOK[model]
-  const listed = price && input !== null && output !== null && cacheRead !== null && cacheWrite !== null
-    ? (input * price.input + output * price.output + cacheRead * price.cache_read + cacheWrite * price.cache_write) / 1_000_000
-    : null
+  const listed = listPriceUsd(model, { input, output, cache_read: cacheRead, cache_write: cacheWrite })
   return {
     usd_equiv: typeof usd === 'number' ? usd : listed,
     tokens_in: input,

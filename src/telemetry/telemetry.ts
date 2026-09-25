@@ -111,7 +111,8 @@ export function buildModelTelemetry(input: Record<string,any>): Record<string,an
     tokens_cache: cost.tokens_cache,
     minutes: cost.minutes,
     cost_usd: cost.usd_equiv,
-    cost_source: usd === null ? 'unknown' : 'reported',
+    // sem US$ do próprio CLI, o preço de lista pelos tokens vale como estimativa (Codex e Gemini)
+    cost_source: usd !== null ? 'reported' : cost.usd_equiv !== null ? 'estimated' : 'unknown',
     cost_basis: basis,
     pack_bytes: pack.bytes,
     pack_sections: packSections,

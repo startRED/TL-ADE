@@ -4,7 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AdeError } from '../../journal/errors.ts'
 import { buildCodexArgs } from './argv.ts'
-import { parseCodexOutput, parseCodexTokens, parseReviewResult } from './parse.ts'
+import { parseCodexOutput, parseCodexStreamUsage, parseCodexTokens, parseReviewResult } from './parse.ts'
 import { dropNulls, fitToSchema, strictSchemaFile } from './strict-schema.ts'
 import { runWorker } from '../../runner/spawn.ts'
 import { safeId } from '../../gates/output.ts'
@@ -158,7 +158,7 @@ export async function dispatchCodex(opts: {
     const envelope = fitEnvelope(dropNulls(parsed.envelope), JSON.parse(fs.readFileSync(schemaPath, 'utf8')))
     const error = parsed.error
     const pr = parseReviewResult(envelope)
-    const tokens = parseCodexTokens(envelope)
+    const tokens = parseCodexStreamUsage(result.stdout) ?? parseCodexTokens(envelope)
     const failed = result.exitCode !== 0
 
     return {

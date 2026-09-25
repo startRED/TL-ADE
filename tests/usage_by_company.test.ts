@@ -209,6 +209,14 @@ describe('relatório de uso por empresa', () => {
     expect(text).not.toContain('por mil linhas')
   })
 
+  // 25/09: Codex e Gemini não informam dólar; a soma estima pelos tokens e o preço de lista, inclusive nas chamadas
+  // gravadas antes do preço existir (só tokens, cost_usd nulo).
+  test('chamada_antiga_do_gemini_so_com_tokens_entra_pelo_preco_de_lista', () => {
+    const old = { seq: 900, at: AT, kind: 'telemetry', unit: 'P11', data: { ...call('P11', 'agy', 'maker', null, 60_000).data, tokens_in: 1_000_000, tokens_out: 0, cache_read: 0, cache_write: 0, models: [{ role: 'executor', model_id: 'gemini-3.8-flash-medium' }] } }
+    const [agy] = usageByCompany([old], NOW, {})
+    expect(agy).toMatchObject({ calls: 1, unknown_cost_calls: 0, usd: 0.75 })
+  })
+
   test('criterio_6_medida_da_parte_traz_linhas_adicionadas_e_removidas_contra_o_commit_base_sem_mudar_os_rodapes', async () => {
     const repo = makeRepo()
     try {

@@ -2,6 +2,7 @@
 // equivalente (só informativo, ADR 0032) e minutos por chamada. As linhas vão para a empresa de quem escreveu a rodada
 // aprovada; as chamadas contam para a empresa de cada chamada.
 import { AdeError } from '../journal/errors.ts'
+import { listPriceUsd } from '../telemetry/cost.ts'
 import { isModelCallTelemetry } from '../telemetry/telemetry.ts'
 import { FAMILIES, tierOf } from './catalog.ts'
 import type { Family } from './catalog.ts'
@@ -72,7 +73,9 @@ export function usageByCompany(events: Array<Record<string, any>>, now: number, 
       if (!(FAMILIES as string[]).includes(family)) continue
       const r = row(family as Family)
       r.calls++
-      if (typeof e.data.cost_usd === 'number') r.usd += e.data.cost_usd
+      // chamada gravada antes do preço de lista do Codex e do Gemini (25/09) tem os tokens: estima pelo preço agora
+      const usd = typeof e.data.cost_usd === 'number' ? e.data.cost_usd : listPriceUsd(String(e.data.models?.find((m: any) => m.role === 'executor')?.model_id ?? ''), { input: e.data.tokens_in ?? null, output: e.data.tokens_out ?? null, cache_read: e.data.cache_read, cache_write: e.data.cache_write })
+      if (usd !== null) r.usd += usd
       else r.unknown_cost_calls++
       if (typeof e.data.duration_ms === 'number') {
         r.timed++

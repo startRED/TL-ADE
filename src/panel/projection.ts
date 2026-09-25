@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { listPriceUsd } from '../telemetry/cost.ts'
 import path from 'node:path'
 import { activeTakeover } from '../engine/control.ts'
 import { digest16 } from '../journal/canonical.ts'
@@ -158,9 +159,13 @@ export function projectMissionFromSources({ missionDir }: { missionDir: string }
       // O motor grava o gasto de cada chamada (prova, código, revisão) na telemetria; model_call é o formato antigo.
       totalCalls++
       if (targetStory) targetStory.calls++
-      const cost = Number(ev.data?.cost_usd ?? ev.data?.cost ?? 0)
+      // Codex e Gemini não informam dólar: vale o preço de lista pelos tokens (também nas chamadas gravadas antes dele)
+      const listed = ev.data?.cost_usd == null && ev.data?.cost == null
+        ? listPriceUsd(String(ev.data?.models?.find((m: any) => m.role === 'executor')?.model_id ?? ''), { input: ev.data?.tokens_in ?? null, output: ev.data?.tokens_out ?? null, cache_read: ev.data?.cache_read, cache_write: ev.data?.cache_write })
+        : null
+      const cost = Number(ev.data?.cost_usd ?? ev.data?.cost ?? listed ?? 0)
       totalCostUsd += cost
-      if (targetStory && (ev.data?.cost_usd != null || ev.data?.cost != null)) {
+      if (targetStory && (ev.data?.cost_usd != null || ev.data?.cost != null || listed !== null)) {
         targetStory.cost = (targetStory.cost ?? 0) + cost
       }
     }

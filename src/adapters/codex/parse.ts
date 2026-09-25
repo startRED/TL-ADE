@@ -87,6 +87,27 @@ export function parseReviewResult(envelope: Record<string, unknown> | null): {
 }
 
 /**
+ * Tokens da última volta na saída --json do codex (turn.completed). O resultado estruturado vem do arquivo de
+ * resultado e não traz uso; sem isto a revisão do Codex ficava sem tokens e sem custo (25/09). input_tokens já inclui
+ * o cache lido: a entrada nova é a diferença.
+ */
+export function parseCodexStreamUsage(stdout: string): { input: number; output: number; cache_read: number; cache_write: number; usd: null; source: 'reported' } | null {
+  let last: any = null
+  for (const line of String(stdout || '').split(/\r?\n/)) {
+    if (!line.includes('"turn.completed"')) continue
+    try {
+      const ev = JSON.parse(line)
+      if (ev?.type === 'turn.completed' && ev.usage) last = ev.usage
+    } catch {
+      // linha partida: fica a anterior
+    }
+  }
+  if (!last || typeof last.input_tokens !== 'number' || typeof last.output_tokens !== 'number') return null
+  const cached = typeof last.cached_input_tokens === 'number' ? last.cached_input_tokens : 0
+  return { input: Math.max(0, last.input_tokens - cached), output: last.output_tokens, cache_read: cached, cache_write: typeof last.cache_write_input_tokens === 'number' ? last.cache_write_input_tokens : 0, usd: null, source: 'reported' }
+}
+
+/**
  * Extrai tokens e contadores de uso de um envelope Codex.
  */
 export function parseCodexTokens(envelope: Record<string, unknown> | null | undefined): {
