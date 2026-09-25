@@ -65,6 +65,19 @@ describe('cérebro do pedido com IA', () => {
     expect(q.options[2].free_text).toBe(true)
   })
 
+  // 26/09, missão real de anexos: a tela da missão ia só para a primeira parte (o servidor) e a parte da tela ficava sem
+  // jornada, D7 e juízes. Agora cada parte diz se tem tela.
+  test('needs_ui_vem_de_cada_parte_e_so_a_parte_da_tela_ganha_briefing_de_design', async () => {
+    const plan = { ...PLAN, stories: [{ ...PLAN.stories[1], id: 'A', depends_on: [], needs_ui: false }, { ...PLAN.stories[0], id: 'B', depends_on: ['A'], needs_ui: true }] }
+    const { ask } = fakeAsk({ entender: INTENT, planejar: plan })
+    const intent = createLlmIntent({ askFor: () => ask })
+    const dir = repo()
+    const first = await intent.compile({ request: 'Quero anexar imagens no pedido', repoDir: dir, missionId: 'm1', options: {} as any, eligibleSkills: [] })
+    const res = await intent.compile({ request: 'Quero anexar imagens no pedido', repoDir: dir, missionId: 'm1', options: {} as any, eligibleSkills: [], questions: first.questions, understanding: first.understanding, answers: { q1: 'Até 5' } })
+    expect((res.contracts as any[]).map((c) => [c.title, c.needs_ui])).toEqual([['Guardar as imagens na missão', false], ['Anexar na caixa de pedido', true]])
+    expect(Object.keys((res.plan as any).briefing.design_briefs ?? {})).toEqual(['S2'])
+  })
+
   test('com as respostas, planeja sem refazer a entrevista e as partes levam os critérios da IA', async () => {
     const { ask, calls } = fakeAsk({ entender: INTENT, planejar: PLAN })
     const intent = createLlmIntent({ askFor: () => ask })

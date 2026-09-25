@@ -98,8 +98,9 @@ export const PLAN_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['id', 'title', 'request', 'acceptance', 'scope_paths', 'do_not_touch', 'depends_on', 'test_file', 'skills'],
+        required: ['id', 'title', 'request', 'acceptance', 'scope_paths', 'do_not_touch', 'depends_on', 'test_file', 'skills', 'needs_ui'],
         properties: {
+          needs_ui: { type: 'boolean' },
           id: str,
           title: str,
           request: str,
@@ -116,7 +117,7 @@ export const PLAN_SCHEMA = {
 }
 
 type IntentAnswer = { title: string; summary: string; complexity: string; difficulty: string; domains: string[]; needs_ui: boolean; questions: Array<{ id: string; question: string; why: string; allow_other: boolean; options: Array<{ label: string; hint: string }> }> }
-type PlanAnswer = { title: string; summary: string; explanation: string; decisions: string[]; stories: Array<{ id: string; title: string; request: string; acceptance: Array<{ given: string; when: string; then: string }>; scope_paths: string[]; do_not_touch: string[]; depends_on: string[]; test_file: string; skills?: string[] }> }
+type PlanAnswer = { title: string; summary: string; explanation: string; decisions: string[]; stories: Array<{ id: string; title: string; request: string; acceptance: Array<{ given: string; when: string; then: string }>; scope_paths: string[]; do_not_touch: string[]; depends_on: string[]; test_file: string; skills?: string[]; needs_ui?: boolean }> }
 
 function readConfig(repoDir: string): any {
   const p = path.join(repoDir, '.ade', 'config.json')
@@ -214,7 +215,7 @@ export function planPrompt(request: string, repoDir: string, understanding: Unde
     '- title (≤8 palavras) e summary (2 frases: o que será entregue).',
     '- explanation: 3 a 6 linhas curtas para um usuário leigo, sem termos técnicos: o que ele vai ter no fim, o que cada parte entrega em uma frase e o que você assumiu por conta própria.',
     '- decisions: cada uma "X, porque Y"; quando havia alternativa real, "; descartado: Z".',
-    '- stories: partes pequenas, na ordem de construção (trivial ou bounded: 1 a 3; feature: 2 a 6). Cada uma com id (S1, S2…), title (≤8 palavras), request (o que fazer, 1 a 3 frases, para quem implementa), acceptance, scope_paths, do_not_touch, depends_on (ids de partes ANTERIORES), test_file e skills.',
+    '- stories: partes pequenas, na ordem de construção (trivial ou bounded: 1 a 3; feature: 2 a 6). Cada uma com id (S1, S2…), title (≤8 palavras), request (o que fazer, 1 a 3 frases, para quem implementa), acceptance, scope_paths, do_not_touch, depends_on (ids de partes ANTERIORES), test_file, skills e needs_ui (true só se a parte muda o que o usuário vê ou usa na tela; servidor, dados e IA sem tela = false).',
     '- acceptance: 2 a 6 critérios, cada um {given, when, then} ("Dado…, quando…, então…" sem essas palavras), de comportamento observável pelo usuário ou por uma prova automatizada sem rede, CLI ou serviço real (use dublês). Nunca fixe implementação: nome de variável, valor exato de estilo, estrutura interna.',
     '- scope_paths: arquivos que a parte pode criar ou mudar (caminhos reais do projeto ou novos). do_not_touch: o que não pode mudar. test_file: o arquivo de prova, num lugar que o comando de provas realmente roda.',
     skills.length > 0
@@ -338,6 +339,7 @@ export function createLlmIntent({ askFor = (repoDir: string) => refsModelCall(in
         decisions,
         classification: { complexity: understanding.complexity, domains: understanding.domains, confidence: 1, rationale: understanding.summary } as any,
         deliverables,
+        uiDeliverables: stories.map((s) => s.needs_ui === true),
         adeConfig: readConfig(repoDir),
       })
       const catalog = new Set((eligibleSkills ?? []).map((k) => k.id))

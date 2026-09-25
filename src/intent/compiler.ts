@@ -201,6 +201,7 @@ export async function compileIntent({
   decisions = [],
   classification: givenClassification,
   deliverables: givenDeliverables,
+  uiDeliverables,
 }: {
         request: string
         discovery?: any
@@ -220,6 +221,8 @@ export async function compileIntent({
         classification?: Awaited<ReturnType<typeof classifyIntent>>
         /** Entregas da versão do briefing de produto aprovado: substituem a divisão do pedido. */
         deliverables?: string[]
+        /** Qual entrega tem tela, decidido pelo planejamento por parte. Sem isto, a tela da missão vai só para a primeira. */
+        uiDeliverables?: boolean[]
     }): Promise<{ briefing: any; plan: any; contracts: any[]; stories: PlanStory[]; questions: any[]; refusedQuestions: any[] }> {
   if (typeof request !== 'string' || request.trim() === '') {
     throw new TypeError('compileIntent: request é obrigatório')
@@ -446,7 +449,8 @@ export async function compileIntent({
       title: deliverable,
       task: taskOf(deliverable),
       complexity: classification.complexity,
-      needsUi: index === 0 ? needsUi : false,
+      // 26/09: com "só a primeira", a parte do servidor ganhava a avaliação visual e a da tela ficava sem
+      needsUi: uiDeliverables ? uiDeliverables[index] === true : index === 0 ? needsUi : false,
       risk,
       guardrails,
       verifiers,
