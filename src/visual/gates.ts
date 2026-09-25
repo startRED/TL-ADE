@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { crawlPage } from './crawl.ts'
 
 const AXE_PATH = new URL('./vendor/axe.min.js', import.meta.url)
 
@@ -19,7 +20,7 @@ interface VisualDefect {
 }
 
 /**
- * Executa os portões determinísticos D1–D6 sobre a página renderizada no Playwright.
+ * Executa os portões determinísticos D1–D7 sobre a página renderizada no Playwright.
  */
 export async function runVisualGates(params: {
         page: any
@@ -33,7 +34,7 @@ export async function runVisualGates(params: {
         stateSnapshots?: Record<string, string>
     }): Promise<{
     ok: boolean
-    results: Record<'D1' | 'D2' | 'D3' | 'D4' | 'D5' | 'D6', GateResult>
+    results: Record<'D1' | 'D2' | 'D3' | 'D4' | 'D5' | 'D6' | 'D7', GateResult>
     artifacts: Record<string, any>
     defects: VisualDefect[]
 }> {
@@ -52,16 +53,17 @@ export async function runVisualGates(params: {
   const visualConfig = config.visual ?? {}
   const consoleAllowlist = ((visualConfig.console_allowlist || []) as string[]).map((p) => new RegExp(p))
   const networkAllowlist = ((visualConfig.network_allowlist || []) as string[]).map((p) => new RegExp(p))
-  const activeGates = new Set(visualConfig.gates || ['D1', 'D2', 'D3', 'D4', 'D5', 'D6'])
+  const activeGates = new Set(visualConfig.gates || ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7'])
 
   
-  const results: Record<'D1' | 'D2' | 'D3' | 'D4' | 'D5' | 'D6', GateResult> = {
+  const results: Record<'D1' | 'D2' | 'D3' | 'D4' | 'D5' | 'D6' | 'D7', GateResult> = {
     D1: { pass: true, severity: 'critical' },
     D2: { pass: true, severity: 'critical' },
     D3: { pass: true, severity: 'critical' },
     D4: { pass: true, severity: 'major' },
     D5: { pass: true, severity: 'major' },
     D6: { pass: true, severity: 'critical' },
+    D7: { pass: true, severity: 'critical' },
   }
 
   
@@ -313,6 +315,27 @@ export async function runVisualGates(params: {
       }
     } catch {
       // Se falhar a checagem no dublê sem evaluate
+    }
+  }
+
+  // D7: varredura de interação, por último porque mexe na página. O tema escuro repete o comportamento do claro e fica
+  // de fora quando o claro também é capturado. Falha do próprio crawl fica registrada e não reprova a tela.
+  const themes: string[] = visualConfig.themes || ['light', 'dark']
+  if (activeGates.has('D7') && !(theme === 'dark' && themes.includes('light'))) {
+    const crawlConfig = visualConfig.crawl ?? {}
+    const crawl = await crawlPage({
+      page, route, width, networkAllowlist, consoleAllowlist,
+      maxActions: crawlConfig.max_actions ?? 40,
+      maxMs: crawlConfig.max_ms ?? 20_000,
+      skip: crawlConfig.skip,
+    })
+    artifacts.crawl = { actions: crawl.actions, ...(crawl.truncated ? { truncated: crawl.truncated } : {}), ...(crawl.skipped ? { skipped: crawl.skipped } : {}) }
+    if (crawl.skipped) results.D7.message = `Varredura não rodou: ${crawl.skipped}`
+    if (crawl.defects.length > 0) {
+      results.D7.pass = false
+      results.D7.message = `Interação quebrou ${crawl.defects.length} vez(es): ${crawl.defects[0].fix}`
+      results.D7.details = crawl.defects
+      defects.push(...crawl.defects)
     }
   }
 

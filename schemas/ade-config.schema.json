@@ -155,7 +155,16 @@
         },
         "gates": {
           "type": "array",
-          "items": { "enum": ["D1", "D2", "D3", "D4", "D5", "D6"] }
+          "items": { "enum": ["D1", "D2", "D3", "D4", "D5", "D6", "D7"] }
+        },
+        "crawl": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_actions": { "type": "integer", "minimum": 1 },
+            "max_ms": { "type": "integer", "minimum": 1 },
+            "skip": { "type": "string" }
+          }
         },
         "imagegen": { "type": "boolean" },
         "max_rounds": { "type": "integer" },
