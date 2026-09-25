@@ -1429,9 +1429,19 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
           data: { decision: 'journey_skipped', unit: storyId, round, reason: journey.status === 'skipped' ? journey.reason : 'needs_data', errors: journey.errors ?? [], needs_data: journey.needs_data ?? [] },
         })
       }
+      // os prints ficam na pasta da missão, fora do alcance do maker; a cópia em .ade/ da worktree (fora do commit)
+      // é o que ele consegue abrir
+      const evidenceDir = path.join(worktreeDir, '.ade', 'evidence', `r${round}`)
+      const toWorktree = (files: string[]) => files.filter((p) => p && fs.existsSync(p)).map((p) => {
+        fs.mkdirSync(evidenceDir, { recursive: true })
+        const dest = path.join(evidenceDir, path.basename(p))
+        fs.copyFileSync(p, dest)
+        return path.relative(worktreeDir, dest).split(path.sep).join('/')
+      })
       let journeyFinding: any = null
       if (journey?.status === 'fail') {
         const f: JourneyFailure = journey.failure
+        const [shot, trace] = [toWorktree([f.screenshot])[0] ?? f.screenshot, toWorktree([f.trace])[0] ?? f.trace]
         const key = `${f.criterio}|${f.step_index}|${f.error}`
         journeySuspect = key === lastJourneyKey && !journeyRewriteUsed()
         lastJourneyKey = key
@@ -1443,7 +1453,6 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
           target_role: 'maker',
           location: 'unknown',
           problem: `Jornada do critério ${f.criterio} quebrou no passo ${f.step_index} (${JSON.stringify(f.step)}): ${f.error}`,
-          // a evidência vai na ação: o pedido de correção corta o problema em 220 caracteres e não leva evidence_refs
           required_action: [
             `Faça o fluxo do critério ${f.criterio} funcionar como o critério pede. Olhe o print e o trace do Playwright do momento da falha antes de mudar.`
               + (journeySuspect ? ' O mesmo passo falhou do mesmo jeito na passada anterior: o roteiro pode estar errado. Se ele contradiz o critério, escreva no relatório uma linha "ROTEIRO ERRADO: <motivo>" e a prova reescreve o roteiro uma vez.' : ''),
@@ -1451,9 +1460,9 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
             f.console.length > 0 ? `Console: ${f.console.slice(0, 8).join(' | ')}` : '',
             f.failed_requests.length > 0 ? `Requisições com erro: ${f.failed_requests.slice(0, 8).join(' | ')}` : '',
             `DOM no momento da falha: ${f.dom.slice(0, 1500)}`,
-            `Print: ${f.screenshot}. Trace: ${f.trace}.`,
+            `Print: ${shot}. Trace: ${trace}.`,
           ].filter(Boolean).join('\n'),
-          evidence_refs: [f.screenshot, f.trace],
+          evidence_refs: [shot, trace],
         }
       } else {
         lastJourneyKey = null
@@ -1473,7 +1482,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       if (fqeRes.status === 'rework' && visualEvals < maxVisualEvals && !stalled) {
         // no formato do achado de revisão: com `message`/`path` o normalizador zerava problema e ação e o maker
         // recebia o retrabalho vazio (25/09). Os prints vão como evidência para o maker olhar a tela.
-        const shots = (fqeRes.captures || []).map((c: any) => path.resolve(String(c.path)))
+        const shots = journeyFinding ? [] : toWorktree((fqeRes.captures || []).map((c: any) => path.resolve(String(c.path))))
         const visualFindings = journeyFinding ? [journeyFinding] : (fqeRes.defects || []).map((d: any, i: number) => ({
           id: `visual-${d.id ?? i + 1}`,
           // minor vira medium: com low o pedido de correção descartava o achado e o caminho até 7,5 nunca chegava ao maker
@@ -1483,7 +1492,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
           // onde na tela, não arquivo: com a posição aqui a checagem de achado resolvido procurava um arquivo "/ [390px]"
           location: 'unknown',
           problem: `Avaliação visual (${d.criterion}) reprovou a tela em ${d.where}`,
-          required_action: `${d.fix}. Olhe as capturas da tela antes de mudar.`,
+          required_action: `${d.fix}. Olhe as capturas da tela antes de mudar${shots.length ? `: ${shots.join(', ')}` : ''}.`,
           evidence_refs: shots,
         }))
         openFindings = visualFindings

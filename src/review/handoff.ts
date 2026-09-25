@@ -165,8 +165,10 @@ export function buildReworkHandoff(opts: {
       location: f.location,
       severity: f.severity,
       state: f.state ?? 'open',
-      problem: f.problem.slice(0, 220),
+      // o revisor já limita o problema a 220; achado do motor (jornada, visual) é mais longo e chegava cortado
+      problem: f.problem.slice(0, 1000),
       required_action: f.required_action,
+      ...(f.evidence_refs?.length ? { evidence_refs: f.evidence_refs } : {}),
     })),
     deltas,
     next_action: openFindings.length > 0 ? 'rework' : 'verify',

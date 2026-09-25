@@ -1042,6 +1042,32 @@ describe('S18 telemetria honesta', () => {
     expect(events.find((e) => e.kind === 'decision' && (e.data as any).decision === 'visual_continue')?.data).toMatchObject({ next: 'checker_no_visual_gain' })
   }, 60_000)
 
+  // 26/09: o pedido de correção cortava o problema em 220 caracteres e descartava evidence_refs; os prints ficavam na pasta
+  // da missão, fora do alcance do maker. Agora vão copiados para .ade/evidence da worktree e o problema chega inteiro.
+  test('engine_fqe_prints_e_problema_longo_chegam_ao_maker', async () => {
+    const fixture = setupStoryFixture()
+    fixture.input.story.contract.needs_ui = true
+    const makerFile = path.join(fixture.scenarioDir, 'maker.json')
+    const base = JSON.parse(fs.readFileSync(makerFile, 'utf8'))[0]
+    fs.writeFileSync(makerFile, JSON.stringify([1, 2].map((i) => ({ ...base, files: { 'src/hello.txt': `ok v${i}\n` } }))))
+    const shot = path.join(fixture.missionDir, 'tela-390-dark.png')
+    fs.writeFileSync(shot, 'png')
+    const longWhere = `topo ${'x'.repeat(300)} FIM-DO-ONDE`
+    const mockRunFQE = vi.fn()
+      .mockResolvedValueOnce({ status: 'rework', evaluation: { final: 5, verdict: 'rework', criteria: [] }, captures: [{ path: shot }], defects: [{ id: 'x', severity: 'major', criterion: 'hierarchy', where: longWhere, fix: 'Enviar como única ação preenchida' }] })
+      .mockResolvedValue({ status: 'pass', evaluation: { final: 7.8, verdict: 'pass', criteria: [] } })
+    const depsWithFQE = { ...fixture.deps, runFrontendQuality: mockRunFQE }
+    const result = await runStory(depsWithFQE, fixture.input)
+    expect(result).toMatchObject({ status: 'delivered' })
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    const worktreeDir = events.map((e) => (e.data as any)?.worktree_dir).find(Boolean)
+    expect(fs.existsSync(path.join(worktreeDir, '.ade', 'evidence', 'r1', 'tela-390-dark.png'))).toBe(true)
+    const packs = fs.readdirSync(fixture.missionDir, { recursive: true }).map(String).map((p) => path.join(fixture.missionDir, p)).filter((p) => fs.statSync(p).isFile())
+    const rework = packs.map((p) => fs.readFileSync(p, 'utf8')).find((t) => t.includes('Enviar como única ação preenchida') && t.includes('open_findings'))
+    expect(rework).toContain('FIM-DO-ONDE')
+    expect(rework).toContain('.ade/evidence/r1/tela-390-dark.png')
+  }, 60_000)
+
   // 25/09, pedido do operador: passadas conforme necessário. Subindo a cada passada, passa das 3 rodadas de correção da
   // parte (não passa pela escada nem troca de modelo) e cada juiz recebe a avaliação anterior
   test('engine_fqe_passadas_flexiveis_seguem_enquanto_a_nota_sobe', async () => {
