@@ -868,6 +868,8 @@ describe('D7 varredura de interação', () => {
     <button id="envia">Enviar missão</button>
     <input id="nome" placeholder="nome">
     <div id="saida"></div>
+    <form id="pedido" action="/api/missao" method="post"><input id="pedido-texto" name="t"><button>Enviar missão</button></form>
+    <form id="busca" action="/api/busca"><input id="busca-q" name="q"></form>
     <script>
       quebra.onclick = () => { throw new Error('botão quebrado') }
       salva.onclick = () => fetch('/api/salvar', { method: 'POST' })
@@ -884,6 +886,8 @@ describe('D7 varredura de interação', () => {
     const server = http.createServer((req, res) => {
       hits.push(req.url || '')
       if (req.url === '/api/salvar') { res.writeHead(500); res.end('erro'); return }
+      // envio vazio é recusado com 400: validação correta, não defeito
+      if (req.url === '/api/busca?q=') { res.writeHead(400); res.end('vazio'); return }
       if (req.url?.startsWith('/api/')) { res.writeHead(200); res.end('ok'); return }
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
       res.end(FIXTURE)
@@ -906,6 +910,10 @@ describe('D7 varredura de interação', () => {
       // destrutiva padrão e crawl.skip nunca são clicadas
       expect(hits).not.toContain('/api/excluir')
       expect(hits).not.toContain('/api/enviar')
+      // Enter no campo de um form cujo envio está no crawl.skip não dispara a missão
+      expect(hits).not.toContain('/api/missao')
+      expect(hits).toContain('/api/busca?q=')
+      expect(res.defects.some((d) => d.fix.includes('/api/busca'))).toBe(false)
       expect(page.url()).toBe('http://127.0.0.1:4211/')
     } finally {
       await browser.close()

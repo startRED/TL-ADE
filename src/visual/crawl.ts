@@ -10,6 +10,8 @@ interface Target {
     selector: string
     kind: 'click' | 'fill' | 'select'
     label: string
+    // Enter só em input cujo envio não passa por botão barrado (destrutivo ou crawl.skip)
+    enter?: boolean
 }
 
 // Nunca clicados: ação destrutiva de texto óbvio. crawl.skip soma a esta lista.
@@ -41,6 +43,7 @@ export async function crawlPage(params: {
   const defects: CrawlDefect[] = []
   const seenErrors = new Set<string>()
   let current = ''
+  let filling = false
   const report = (id: string, message: string, severity: CrawlDefect['severity'] = 'critical') => {
     // o mesmo erro disparado por ações diferentes chega uma vez, com a primeira ação que o causou
     const key = `${id} ${message.replace(/\d+/g, '#')}`
@@ -57,9 +60,16 @@ export async function crawlPage(params: {
     if (msg.type() !== 'error' || /Failed to load resource/.test(text) || consoleAllowlist.some((re) => re.test(text))) return
     report('D7-console-error', `erro no console: ${text}`)
   }
+  // 4xx depois de preencher com valor estranho é validação correta; 5xx e falha de rede são defeito em qualquer ação
   const onResponse = (res: any) => {
     const status = res.status()
-    if (status >= 400 && !networkAllowlist.some((re) => re.test(res.url()))) report('D7-network-error', `${res.url()} respondeu ${status}`)
+    if ((status >= 500 || (status >= 400 && !filling)) && !networkAllowlist.some((re) => re.test(res.url()))) report('D7-network-error', `${res.url()} respondeu ${status}`)
+  }
+  const onRequestFailed = (req: any) => {
+    const reason = req.failure()?.errorText || 'falha de rede'
+    // navegação cancelada pela volta à URL original não é defeito
+    if (/ERR_ABORTED/.test(reason) || networkAllowlist.some((re) => re.test(req.url()))) return
+    report('D7-network-error', `${req.url()} falhou: ${reason}`)
   }
   const onDialog = (dialog: any) => {
     if (dialog.message().includes(XSS_MARK)) report('D7-xss', 'o valor digitado executou script (XSS)')
@@ -75,6 +85,7 @@ export async function crawlPage(params: {
   page.on('pageerror', onPageError)
   page.on('console', onConsole)
   page.on('response', onResponse)
+  page.on('requestfailed', onRequestFailed)
   page.on('dialog', onDialog)
   page.context?.().on?.('page', onPopup)
   try {
@@ -82,7 +93,7 @@ export async function crawlPage(params: {
     const queue: Target[] = []
     const seen = new Set<string>()
     const enqueue = async () => {
-      for (const t of await listTargets(page, origin)) {
+      for (const t of await listTargets(page, origin, [DESTRUCTIVE.source, params.skip].filter(Boolean) as string[])) {
         if (seen.has(t.selector)) continue
         seen.add(t.selector)
         if (DESTRUCTIVE.test(t.label) || skipRe?.test(t.label)) continue
@@ -97,6 +108,7 @@ export async function crawlPage(params: {
         if (actions >= maxActions) { truncated = `limite de ${maxActions} ações`; break }
         if (Date.now() > deadline) { truncated = `limite de ${maxMs} ms`; break }
         actions++
+        filling = target.kind !== 'click'
         current = value === null ? `${target.selector} clicar "${target.label.slice(0, 40)}"` : `${target.selector} preencher "${value.slice(0, 60)}${value.length > 60 ? `…(${value.length})` : ''}"`
         const el = page.locator(target.selector).first()
         try {
@@ -104,7 +116,7 @@ export async function crawlPage(params: {
           else if (target.kind === 'select') await el.selectOption({ index: 0 }, { timeout: ACTION_TIMEOUT_MS })
           else {
             await el.fill(value as string, { timeout: ACTION_TIMEOUT_MS })
-            await el.press('Enter', { timeout: ACTION_TIMEOUT_MS })
+            if (target.enter) await el.press('Enter', { timeout: ACTION_TIMEOUT_MS })
           }
         } catch {
           // alvo sumiu ou ficou coberto depois de outra ação: não é defeito da tela
@@ -126,6 +138,7 @@ export async function crawlPage(params: {
     page.off?.('pageerror', onPageError)
     page.off?.('console', onConsole)
     page.off?.('response', onResponse)
+    page.off?.('requestfailed', onRequestFailed)
     page.off?.('dialog', onDialog)
     page.context?.().off?.('page', onPopup)
     // o crawl muda o DOM; quem vem depois recebe a página como foi carregada
@@ -143,8 +156,8 @@ async function isBlank(page: any): Promise<boolean> {
 }
 
 /** Alvos visíveis e habilitados, com seletor estável: id, data-testid ou caminho nth-of-type. */
-async function listTargets(page: any, origin: string): Promise<Target[]> {
-  return page.evaluate((pageOrigin: string) => {
+async function listTargets(page: any, origin: string, blockedSources: string[]): Promise<Target[]> {
+  return page.evaluate(({ pageOrigin, blockedSources }: { pageOrigin: string; blockedSources: string[] }) => {
     const selectorOf = (el: Element): string => {
       if (el.id) return `#${CSS.escape(el.id)}`
       const testId = el.getAttribute('data-testid')
@@ -164,11 +177,23 @@ async function listTargets(page: any, origin: string): Promise<Target[]> {
       const s = getComputedStyle(el)
       return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'
     }
-    const out: Array<{ selector: string; kind: string; label: string }> = []
+    const labelOf = (el: Element) => [el.textContent, el.getAttribute('aria-label'), el.getAttribute('title'), (el as HTMLInputElement).value].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
+    const blocked = blockedSources.map((src) => new RegExp(src, 'i'))
+    const isBlocked = (el: Element) => blocked.some((re) => re.test(labelOf(el)))
+    // botões que o Enter do campo pode acionar: os de envio do form ou, sem form, os do contêiner mais próximo que tem botão
+    const submittersOf = (input: HTMLInputElement): Element[] => {
+      if (input.form) return Array.from(input.form.elements).filter((c) => (c.tagName === 'BUTTON' && (c as HTMLButtonElement).type === 'submit') || (c.tagName === 'INPUT' && ['submit', 'image'].includes((c as HTMLInputElement).type)))
+      for (let node = input.parentElement; node; node = node.parentElement) {
+        const buttons = node.querySelectorAll('button, input[type=submit], input[type=button], [role=button]')
+        if (buttons.length > 0) return Array.from(buttons)
+      }
+      return []
+    }
+    const out: Array<{ selector: string; kind: string; label: string; enter?: boolean }> = []
     const all = document.querySelectorAll('button, [role=button], [role=menuitem], [role=tab], [aria-haspopup], summary, a[href], input, textarea, select')
     for (const el of Array.from(all)) {
       if (!visible(el) || (el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true') continue
-      const label = [el.textContent, el.getAttribute('aria-label'), el.getAttribute('title'), (el as HTMLInputElement).value].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
+      const label = labelOf(el)
       const tag = el.tagName
       if (tag === 'A') {
         const a = el as HTMLAnchorElement
@@ -185,8 +210,9 @@ async function listTargets(page: any, origin: string): Promise<Target[]> {
         if (['hidden', 'file', 'image', 'reset', 'color', 'range', 'date', 'datetime-local', 'month', 'time', 'week'].includes(type)) continue
         kind = ['checkbox', 'radio', 'button', 'submit'].includes(type) ? 'click' : 'fill'
       }
-      out.push({ selector: selectorOf(el), kind, label })
+      const enter = tag === 'INPUT' && kind === 'fill' && !submittersOf(el as HTMLInputElement).some(isBlocked)
+      out.push({ selector: selectorOf(el), kind, label, ...(enter ? { enter } : {}) })
     }
     return out
-  }, origin)
+  }, { pageOrigin: origin, blockedSources })
 }
