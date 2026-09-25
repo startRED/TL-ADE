@@ -317,12 +317,21 @@ export function createEvalRunner({ step, missionDir, gitPort, spawnSuite = execS
     const timeoutMs = Math.max(evalDef.timeout_s, EVAL_TIMEOUT_FLOOR_S) * 1000
     const label = 'eval-base-' + safeId(evalDef.id)
     try {
-      await gitPort.restoreTree(baseTree, { label })
+      // A largada não muda dentro da parte: fica guardada pela árvore e roda uma vez só (cada rodada da S2 da missão real
+      // pagava de novo os ~5 min da suíte inteira).
+      const cacheFile = path.join(missionDir, 'artifacts', 'baselines', `${baseTree}.json`)
       let baseline: TestResult[]
-      try {
-        baseline = await runSuites(cwd, suites, { spawn: spawnSuite, timeoutMs })
-      } finally {
-        await gitPort.restoreTree(tree, { label })
+      if (fs.existsSync(cacheFile)) {
+        baseline = JSON.parse(fs.readFileSync(cacheFile, 'utf8'))
+      } else {
+        await gitPort.restoreTree(baseTree, { label })
+        try {
+          baseline = await runSuites(cwd, suites, { spawn: spawnSuite, timeoutMs })
+        } finally {
+          await gitPort.restoreTree(tree, { label })
+        }
+        fs.mkdirSync(path.dirname(cacheFile), { recursive: true })
+        fs.writeFileSync(cacheFile, JSON.stringify(baseline))
       }
       const verdict = await judgeSuite((testTimeoutMs) => runSuites(cwd, suites, { spawn: spawnSuite, timeoutMs: timeoutMs + (testTimeoutMs ?? 0), testTimeoutMs }), baseline)
       return verdict.ok

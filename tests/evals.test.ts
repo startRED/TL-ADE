@@ -1661,6 +1661,34 @@ describe('verde da suíte julgado contra a base', () => {
     removeRepo(repo.dir)
   }, 120_000)
 
+  // A largada não muda dentro da parte: rodá-la de novo a cada rodada custava uns 5 min da suíte inteira (S2 da missão
+  // real, 7 rodadas). O resultado fica guardado na missão pela árvore da largada.
+  test('largada_do_julgamento_e_rodada_uma_vez_por_arvore', async () => {
+    const repo = makeRepo()
+    const missionDir = mkdtempSync(path.join(os.tmpdir(), 'eval-mission-'))
+    writeFileSync(path.join(repo.dir, 'package.json'), JSON.stringify({ scripts: { test: 'node --test' } }))
+    writeFileSync(path.join(repo.dir, 'old.test.mjs'), "import test from 'node:test'\nimport assert from 'node:assert'\ntest('antiga', () => assert.equal(1, 2))\n")
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'base'])
+    const real = createGitPort({ worktreeDir: repo.dir })
+    const baseTree = await real.worktreeTree()
+    const restores: string[] = []
+    const gitPort = { ...real, restoreTree: async (t: string, o: any) => (restores.push(t), real.restoreTree(t, o)) }
+    const journal = openJournal({ missionDir, runtimeStamp: '1:aaaaaaaa:bbbbbbbb' })
+    const { step } = createStepRunner({ journal, missionDir, gitPort: gitPort as any, env: {} })
+    const runner = createEvalRunner({ step, missionDir, gitPort: gitPort as any })
+    const green = async (n: number) => {
+      writeFileSync(path.join(repo.dir, 'new.test.mjs'), `import test from 'node:test'\ntest('nova ${n}', () => {})\n`)
+      const tree = await real.worktreeTree()
+      return runner.runEval({ eval: { id: 'V1', argv: ['node', '--test'], kind: 'script', expect_exit: 0, timeout_s: 120, max_output_bytes: 1024, strictness: { mode: 'must_fail_before' as const } }, phase: 'green', tree, unit: 'S1', baseTree })
+    }
+    expect((await green(1)).verdict).toBe('green')
+    expect((await green(2)).verdict).toBe('green')
+    expect(restores.filter((t) => t === baseTree)).toHaveLength(1)
+    await journal.close()
+    removeRepo(repo.dir)
+  }, 180_000)
+
   test('prova_nova_vermelha_continua_cobrada', async () => {
     const { record, repo } = await setup(false)
     expect(record.verdict).toBe('green_failed')
