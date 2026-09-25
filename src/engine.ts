@@ -623,28 +623,27 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     return writers
   }
 
-  // Juízes visuais: uma empresa por vez na ordem da fila de revisão (a melhor com cota primeiro), nunca a que escreveu a
-  // tela; quem falhar passa a vez ao próximo. Sem planos, o revisor do contrato; sem ele, o Codex padrão do FQE.
-  const visualJudgesFor = async (writer: string) => {
+  // Juízes visuais: o melhor modelo de cada empresa com cota e binário, na ordem da fila de revisão. Julgar a imagem não é
+  // revisar o próprio código, então quem escreveu a tela também julga; o FQE cruza as opiniões (25/09).
+  const visualJudges = async () => {
     const now = deps.now?.() ?? Date.now()
     const cap = loaded.missionBudget.max_subscription_weekly_percent ?? 50
     const slots: Array<{ family: string; model_id: string; effort?: string | null }> = routed
       ? [...routed.chains.checker, ...routed.chains.fix].map((slot) => ({ family: slot.family, model_id: cliModel(slot), effort: slot.effort ?? null }))
-      : checkerRole ? [{ family: checkerRole.family as string, model_id: checkerRole.model_id as string }] : []
+      : [
+          ...(checkerRole ? [{ family: checkerRole.family as string, model_id: checkerRole.model_id as string }] : []),
+          { family: makerFamily as string, model_id: makerModel as string },
+        ]
     const judges: Array<{ family: string; model_id: string; effort?: string | null; resolved: { exe: string; prefixArgs: string[] } }> = []
-    const seen = new Set([writer])
     for (const slot of slots) {
-      if (seen.has(slot.family)) continue
+      if (judges.some((j) => j.family === slot.family)) continue
       const resolved = binaryFor(slot.family)
       if (!resolved) continue
       const receipt = routed ? routed.receipts[slot.family as keyof typeof routed.receipts] ?? null : await deps.quotaPort.readReceipt({ family: slot.family, now })
       if (!validateQuotaReceipt(receipt, { family: slot.family, max_percent: cap, now }).ok) continue
-      seen.add(slot.family)
       judges.push({ ...slot, resolved })
     }
-    // teste de 25/09 com as mesmas telas: o Claude achou mais defeitos reais e deu correções mais executáveis; o Codex é
-    // o segundo (mais constante, mas deixa passar coisa). A cota e quem escreveu já filtraram a fila acima.
-    return judges.sort((a, b) => Number(b.family === 'claude') - Number(a.family === 'claude'))
+    return judges
   }
 
   const redGitPort = started
@@ -761,9 +760,13 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   })
 
   let round = 1
-  // avaliações visuais feitas; a última que reprova já não pede retrabalho e a parte segue para o revisor
+  // Passadas visuais flexíveis: até visual.max_rounds (padrão 6) avaliações, cada uma com o maker corrigindo o que os
+  // juízes pediram. Não passam pela escada: polir a tela não é falha, não troca de modelo nem gasta rodadas de correção.
   let visualEvals = 0
-  const maxVisualEvals = Math.max(1, Number(projectConfig?.visual?.max_rounds) || 3)
+  const maxVisualEvals = Math.max(1, Number(projectConfig?.visual?.max_rounds) || 6)
+  // a avaliação anterior vai aos juízes (sem ela eles se contradiziam entre passadas) e mede o ganho da passada
+  let lastVisualEval: any = null
+  let visualStalls = 0
   let previousFindingsDigest = null
   let previousFindings = []
   let openFindings: any[] = []
@@ -1312,9 +1315,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
 
     // Portão do Frontend Quality Engine (FQE) entre gates/evals e Checker
     if (contract.needs_ui && visualEvals < maxVisualEvals) {
-      visualEvals++
-      const makerOfRound = ladderState.ladder[ladderState.rung].family
-      const visualJudges = await visualJudgesFor(makerOfRound)
+      const judges = await visualJudges()
       const fqeStepResult = await deps.step(
         {
           unit: storyId,
@@ -1326,21 +1327,22 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
           (deps.runFrontendQuality ?? runFrontendQuality)({
             story: {
               ...story,
-              // quem escreveu esta rodada, não o maker do contrato: o juiz tem de ser de outra empresa
-              contract: { ...contract, roles: { ...contract.roles, maker: { ...contract.roles?.maker, family: makerOfRound } } },
               worktreeDir,
               design_brief: loaded.plan?.briefing?.design_briefs?.[storyId],
+              previous_visual_eval: lastVisualEval,
             },
             tree: treeAfterContain,
             config: projectConfig,
             capabilities: deps.capabilities ?? {},
             round: (round),
             missionDir,
-            deps: { ...deps, visualJudges },
+            deps: { ...deps, visualJudges: judges },
           }),
       )
 
       const fqeRes = (fqeStepResult.result)
+      // toda passada conta no teto, inclusive a que só reprova nos portões automáticos: sem isso não havia limite
+      visualEvals++
       await deps.journal.append({
         kind: 'visual_eval_done',
         unit: storyId,
@@ -1356,31 +1358,36 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       // Sempre autônoma: visual indisponível, sem veredito ou sem passada sobrando não estaciona; a parte segue para o
       // revisor e o veredito visual fica no journal
       let visualNext = fqeRes.status === 'pass' ? 'checker' : 'checker_without_visual_pass'
-      if (fqeRes.status === 'rework' && visualEvals < maxVisualEvals) {
-        const { parkReason } = await climbLadder({ kind: 'rejected' })
-        if (!parkReason) {
-          // no formato do achado de revisão: com `message`/`path` o normalizador zerava problema e ação e o maker
-          // recebia o retrabalho vazio (25/09). Os prints vão como evidência para o maker olhar a tela.
-          const shots = (fqeRes.captures || []).map((c: any) => path.resolve(String(c.path)))
-          const visualFindings = (fqeRes.defects || []).map((d: any, i: number) => ({
-            id: `visual-${d.id ?? i + 1}`,
-            severity: d.severity === 'major' ? 'high' : d.severity === 'minor' ? 'low' : 'critical',
-            category: 'patch',
-            target_role: 'maker',
-            // onde na tela, não arquivo: com a posição aqui a checagem de achado resolvido procurava um arquivo "/ [390px]"
-            location: 'unknown',
-            problem: `Avaliação visual (${d.criterion}) reprovou a tela em ${d.where}`,
-            required_action: `${d.fix}. Olhe as capturas da tela antes de mudar.`,
-            evidence_refs: shots,
-          }))
-          openFindings = visualFindings
-          previousFindings = visualFindings
-          treeBeforeAttempt = treeAfterContain
-          round++
-          attempt = 0
-          continue
-        }
-        visualNext = 'checker_rework_exhausted'
+      const visualFinal = typeof fqeRes.evaluation?.final === 'number' ? fqeRes.evaluation.final : null
+      // insistir sem ganho só queima cota. Os juízes variam uns 0,3 de uma vez para outra, então só duas passadas seguidas
+      // subindo menos que isso encerram as passadas
+      if (visualFinal !== null && typeof lastVisualEval?.final === 'number') visualStalls = visualFinal < lastVisualEval.final + 0.3 ? visualStalls + 1 : 0
+      if (fqeRes.evaluation) lastVisualEval = fqeRes.evaluation
+      const stalled = fqeRes.status === 'rework' && visualStalls >= 2
+      if (stalled) visualNext = 'checker_no_visual_gain'
+      if (fqeRes.status === 'rework' && visualEvals < maxVisualEvals && !stalled) {
+        // no formato do achado de revisão: com `message`/`path` o normalizador zerava problema e ação e o maker
+        // recebia o retrabalho vazio (25/09). Os prints vão como evidência para o maker olhar a tela.
+        const shots = (fqeRes.captures || []).map((c: any) => path.resolve(String(c.path)))
+        const visualFindings = (fqeRes.defects || []).map((d: any, i: number) => ({
+          id: `visual-${d.id ?? i + 1}`,
+          // minor vira medium: com low o pedido de correção descartava o achado e o caminho até 7,5 nunca chegava ao maker
+          severity: d.severity === 'major' ? 'high' : d.severity === 'minor' ? 'medium' : 'critical',
+          category: 'patch',
+          target_role: 'maker',
+          // onde na tela, não arquivo: com a posição aqui a checagem de achado resolvido procurava um arquivo "/ [390px]"
+          location: 'unknown',
+          problem: `Avaliação visual (${d.criterion}) reprovou a tela em ${d.where}`,
+          required_action: `${d.fix}. Olhe as capturas da tela antes de mudar.`,
+          evidence_refs: shots,
+        }))
+        openFindings = visualFindings
+        previousFindings = visualFindings
+        treeBeforeAttempt = treeAfterContain
+        await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'visual_rework', unit: storyId, round, visual_evals: visualEvals, final: visualFinal, defects: visualFindings.length } })
+        round++
+        attempt = 0
+        continue
       }
       if (visualNext !== 'checker') {
         await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'visual_continue', unit: storyId, round, status: fqeRes.status, reason: fqeRes.reason ?? null, next: visualNext, visual_evals: visualEvals } })

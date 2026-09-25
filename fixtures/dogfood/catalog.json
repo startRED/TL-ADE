@@ -92,13 +92,13 @@
       ]
     },
     {
-      "id": "DF-visual-corte-refaz-especificidade-baixa",
+      "id": "DF-visual-corte-refaz-criterio-abaixo-de-5",
       "grupo": "visual",
       "runs": 3,
       "argv": [
         "node",
         "fixtures/dogfood/checks/visual.mjs",
-        "corte-refaz-especificidade-baixa"
+        "corte-refaz-criterio-abaixo-de-5"
       ]
     },
     {

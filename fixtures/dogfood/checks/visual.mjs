@@ -10,8 +10,9 @@ await runCase({
     const c = criteria({ specificity: 8, hierarchy: 8, typography: 8, color: 8 })
     assert.equal(evaluateCutoff(c, calculateRenormalizedFinal(c), []), 'pass')
   },
-  async 'corte-refaz-especificidade-baixa'() {
-    const c = criteria({ specificity: 6.5, hierarchy: 9, typography: 9, color: 9 })
+  async 'corte-refaz-criterio-abaixo-de-5'() {
+    // rubrica v2: especificidade não tem corte próprio; qualquer critério abaixo de 5 é problema real e refaz
+    const c = criteria({ specificity: 4.5, hierarchy: 9.5, typography: 9.5, color: 9.5 })
     assert.equal(evaluateCutoff(c, calculateRenormalizedFinal(c), []), 'rework')
   },
   async 'corte-refaz-defeito-critico'() {

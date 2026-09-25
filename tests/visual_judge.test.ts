@@ -32,12 +32,12 @@ function setup() {
 
 describe('juiz visual de qualquer empresa', () => {
   // 25/09: o juiz só podia ser Codex; sem Codex (cota, binário) a avaliação visual não tinha veredito
-  test('codex_falha_e_o_claude_julga_lendo_as_capturas', async () => {
+  test('codex_falha_e_vale_a_opiniao_do_claude_lendo_as_capturas', async () => {
     const { dir, captures, deps } = setup()
     const codex = fakeCli(dir, 'codex', 'process.stderr.write("usage limit"); process.exit(1)')
     const claude = fakeCli(dir, 'claude', `process.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: ${JSON.stringify(RESULT)} }))`)
     const evaluation = await judgeVisual({
-      captures, task: 't', designBrief: {}, makerFamily: 'agy', deps,
+      captures, task: 't', designBrief: {}, deps,
       judges: [{ family: 'codex', model_id: 'gpt-6-sol', resolved: codex }, { family: 'claude', model_id: 'claude-opus-5-5', resolved: claude }],
     })
     expect(evaluation.verdict).toBe('pass')
@@ -50,22 +50,40 @@ describe('juiz visual de qualquer empresa', () => {
     const { dir, captures, deps } = setup()
     // o resultado vai no arquivo de -o, como no codex real
     const codex = fakeCli(dir, 'codex', `const a = process.argv.slice(2); fs.writeFileSync(a[a.indexOf('-o') + 1], JSON.stringify(${JSON.stringify(RESULT)}))`)
-    const evaluation = await judgeVisual({ captures, task: 't', designBrief: {}, makerFamily: 'claude', deps, judges: [{ family: 'codex', model_id: 'gpt-6-sol', resolved: codex }] })
+    const evaluation = await judgeVisual({ captures, task: 't', designBrief: {}, deps, judges: [{ family: 'codex', model_id: 'gpt-6-sol', resolved: codex }] })
     expect(evaluation.verdict).toBe('pass')
     const args = JSON.parse(fs.readFileSync(path.join(dir, 'codex.args.json'), 'utf8'))
     expect(args).toContain(`--image=${path.resolve(captures[0].path)}`)
   })
 
-  // o Gemini saiu da fila de juízes (assinatura cancelada em outubro)
-  test('empresa_que_escreveu_a_tela_e_gemini_nunca_julgam_e_todos_falhando_da_sem_veredito', async () => {
+  // Julgar imagem não é revisar o próprio código: os dois juízes olham a mesma tela e as opiniões se cruzam
+  test('dois_juizes_cruzam_media_por_criterio_e_juntam_defeitos', async () => {
+    const { dir, captures, deps } = setup()
+    const withScore = (score: number, defects: any[]) => ({ criteria: RESULT.criteria.map((c) => ({ ...c, score: c.score === null ? null : score })), defects })
+    const codex = fakeCli(dir, 'codex', `const a = process.argv.slice(2); fs.writeFileSync(a[a.indexOf('-o') + 1], JSON.stringify(${JSON.stringify(withScore(8, [{ id: 'd1', severity: 'minor', criterion: 'typography', where: 'x', fix: 'fonte 15px' }]))}))`)
+    const claude = fakeCli(dir, 'claude', `process.stdout.write(JSON.stringify({ is_error: false, structured_output: ${JSON.stringify(withScore(6, [{ id: 'd1', severity: 'major', criterion: 'typography', where: 'x', fix: 'fonte 16px' }, { id: 'd2', severity: 'critical', criterion: 'color', where: 'y', fix: 'tema escuro' }]))} }))`)
+    const evaluation = await judgeVisual({
+      captures, task: 't', designBrief: {}, deps,
+      judges: [{ family: 'claude', model_id: 'claude-opus-5-5', resolved: claude }, { family: 'codex', model_id: 'gpt-6-sol', resolved: codex }],
+    })
+    expect(evaluation.judge).toEqual({ family: 'claude+codex', model_id: 'claude-opus-5-5+gpt-6-sol' })
+    expect(evaluation.criteria.find((c) => c.id === 'hierarchy')!.score).toBe(7)
+    expect(evaluation.criteria.find((c) => c.id === 'hierarchy')!.note).toContain('(notas claude 6, codex 8)')
+    // o que os dois viram no mesmo critério vem primeiro; cada defeito diz quem apontou
+    expect(evaluation.defects.map((d) => d.id)).toEqual(['claude:d1', 'codex:d1', 'claude:d2'])
+    expect(evaluation.verdict).toBe('rework')
+  })
+
+  // um juiz fora do ar não tira o veredito; os dois fora dão "sem veredito" com o motivo de cada um. O Gemini não julga.
+  test('gemini_nunca_julga_e_todos_falhando_da_sem_veredito', async () => {
     const { dir, captures, deps } = setup()
     const fail = fakeCli(dir, 'codex', 'process.exit(2)')
-    const claude = fakeCli(dir, 'claude', 'process.exit(0)')
+    const gemini = fakeCli(dir, 'agy', 'process.exit(0)')
     const evaluation = await judgeVisual({
-      captures, task: 't', designBrief: {}, makerFamily: 'claude', deps,
-      judges: [{ family: 'claude', model_id: 'claude-opus-5-5', resolved: claude }, { family: 'agy', model_id: 'gemini-3.1-pro', resolved: claude }, { family: 'codex', model_id: 'gpt-6-sol', resolved: fail }],
+      captures, task: 't', designBrief: {}, deps,
+      judges: [{ family: 'agy', model_id: 'gemini-3.1-pro', resolved: gemini }, { family: 'codex', model_id: 'gpt-6-sol', resolved: fail }],
     })
-    expect(fs.existsSync(path.join(dir, 'claude.args.json'))).toBe(false)
+    expect(fs.existsSync(path.join(dir, 'agy.args.json'))).toBe(false)
     expect(evaluation.verdict).toBe('unknown')
     expect(evaluation.defects[0].fix).toMatch(/^Nenhum juiz respondeu: codex: juiz visual encerrou com 2/)
   })
@@ -80,7 +98,7 @@ describe('juiz visual de qualquer empresa', () => {
       defects: [],
     }
     const claude = fakeCli(dir, 'claude', `process.stdout.write(JSON.stringify({ is_error: false, structured_output: ${JSON.stringify(raw)} }))`)
-    const evaluation = await judgeVisual({ captures, task: 't', designBrief: {}, makerFamily: 'codex', deps, judges: [{ family: 'claude', model_id: 'claude-opus-5-5', effort: 'high', resolved: claude }] })
+    const evaluation = await judgeVisual({ captures, task: 't', designBrief: {}, deps, judges: [{ family: 'claude', model_id: 'claude-opus-5-5', effort: 'high', resolved: claude }] })
     const typography = evaluation.criteria.find((c) => c.id === 'typography')!
     expect(typography.score).toBe(5.5)
     expect(typography.note).toContain('+1.5 escala com 3 tamanhos bem separados; -1 ajuda com 12px em 390px')

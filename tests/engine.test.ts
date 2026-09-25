@@ -1023,6 +1023,48 @@ describe('S18 telemetria honesta', () => {
     expect(events.find((e) => e.kind === 'decision' && (e.data as any).decision === 'visual_continue')?.data).toMatchObject({ next: 'checker_without_visual_pass' })
   }, 60_000)
 
+  // Os juízes variam uns 0,3 de uma vez para outra: uma passada sem ganho não para; duas seguidas (6 → 6,1 → 6,2) encerram
+  // as passadas antes do teto e a parte segue para o revisor
+  test('engine_fqe_duas_passadas_sem_ganho_param_e_seguem_para_o_revisor', async () => {
+    const fixture = setupStoryFixture()
+    fixture.input.story.contract.needs_ui = true
+    const makerFile = path.join(fixture.scenarioDir, 'maker.json')
+    const base = JSON.parse(fs.readFileSync(makerFile, 'utf8'))[0]
+    fs.writeFileSync(makerFile, JSON.stringify(Array.from({ length: 3 }, (_, i) => ({ ...base, files: { 'src/hello.txt': `ok v${i + 1}\n` } }))))
+    const defect = { id: 'x', severity: 'major', criterion: 'hierarchy', where: 'topo', fix: 'Enviar como única ação preenchida' }
+    const mockRunFQE = vi.fn()
+    for (const final of [6, 6.1, 6.2]) mockRunFQE.mockResolvedValueOnce({ status: 'rework', evaluation: { final, verdict: 'rework', criteria: [] }, defects: [defect] })
+    const depsWithFQE = { ...fixture.deps, runFrontendQuality: mockRunFQE }
+    const result = await runStory(depsWithFQE, fixture.input)
+    expect(result).toMatchObject({ status: 'delivered' })
+    expect(mockRunFQE).toHaveBeenCalledTimes(3)
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    expect(events.find((e) => e.kind === 'decision' && (e.data as any).decision === 'visual_continue')?.data).toMatchObject({ next: 'checker_no_visual_gain' })
+  }, 60_000)
+
+  // 25/09, pedido do operador: passadas conforme necessário. Subindo a cada passada, passa das 3 rodadas de correção da
+  // parte (não passa pela escada nem troca de modelo) e cada juiz recebe a avaliação anterior
+  test('engine_fqe_passadas_flexiveis_seguem_enquanto_a_nota_sobe', async () => {
+    const fixture = setupStoryFixture()
+    fixture.input.story.contract.needs_ui = true
+    const makerFile = path.join(fixture.scenarioDir, 'maker.json')
+    const base = JSON.parse(fs.readFileSync(makerFile, 'utf8'))[0]
+    fs.writeFileSync(makerFile, JSON.stringify(Array.from({ length: 6 }, (_, i) => ({ ...base, files: { 'src/hello.txt': `ok v${i + 1}\n` } }))))
+    const defect = { id: 'x', severity: 'minor', criterion: 'typography', where: 'dica', fix: 'dica em 15px' }
+    const mockRunFQE = vi.fn()
+    for (const final of [5, 5.5, 6, 6.6, 7.2]) mockRunFQE.mockResolvedValueOnce({ status: 'rework', evaluation: { final, verdict: 'rework', criteria: [] }, defects: [defect] })
+    mockRunFQE.mockResolvedValue({ status: 'pass', evaluation: { final: 7.8, verdict: 'pass', criteria: [] } })
+    const depsWithFQE = { ...fixture.deps, runFrontendQuality: mockRunFQE }
+    const result = await runStory(depsWithFQE, fixture.input)
+    expect(result).toMatchObject({ status: 'delivered' })
+    expect(mockRunFQE).toHaveBeenCalledTimes(6)
+    expect(mockRunFQE.mock.calls[0][0].story.previous_visual_eval).toBeNull()
+    expect(mockRunFQE.mock.calls[5][0].story.previous_visual_eval).toMatchObject({ final: 7.2 })
+    // o passo minor do caminho até 7,5 chega ao maker (antes virava low e o pedido de correção o descartava)
+    const packs = fs.readdirSync(fixture.missionDir, { recursive: true }).map(String).map((p) => path.join(fixture.missionDir, p)).filter((p) => fs.statSync(p).isFile())
+    expect(packs.some((p) => fs.readFileSync(p, 'utf8').includes('dica em 15px'))).toBe(true)
+  }, 120_000)
+
   // Múltiplas passadas: reprovação visual volta ao maker com os defeitos; a passada seguinte aprova e a parte entrega
   test('engine_fqe_reprovado_volta_ao_maker_e_segunda_passada_aprova', async () => {
     const fixture = setupStoryFixture()

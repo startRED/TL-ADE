@@ -176,6 +176,7 @@ export async function runFrontendQuality({
     designBrief,
     judge: judgeRole,
     judges,
+    previous: story.previous_visual_eval ?? null,
     // chegou ao juiz com os portões verdes: se o D3 rodou, o contraste já está medido
     contrastMeasured: (visualConfig.gates || ['D3']).includes('D3') && inspected.length > 0,
     round,
@@ -184,7 +185,6 @@ export async function runFrontendQuality({
       engine_version: visualConfig.impeccable?.engine_version || '0.1.5',
       url_mode: capabilities?.impeccable?.url_mode || 'ok',
     },
-    makerFamily: contract.roles?.maker?.family,
     deps: {
       dispatchJudge: deps.dispatchJudge,
       resolved: deps.checkerResolved ?? deps.resolved,

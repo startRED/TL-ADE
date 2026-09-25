@@ -24,7 +24,7 @@ interface VisualEval {
     verdict: 'pass' | 'rework' | 'unknown'
 }
 
-export const RUBRIC_VERSION = '2026-09-25-v2'
+export const RUBRIC_VERSION = '2026-09-25-v6'
 
 export const MODE_WEIGHTS = {
   persuade: { specificity: 3.0, hierarchy: 2.0, typography: 2.0, color: 1.5, states: 1.0, motion: 0.5 },
@@ -52,30 +52,20 @@ export function calculateRenormalizedFinal(criteria: VisualEvalCriteria[]): numb
   return Math.round(final * 100) / 100
 }
 
+/** Nota final que aprova sozinha; polir além disso é pedido do operador. */
+export const PASS_FINAL = 7.5
+/** Abaixo disso o critério tem problema real (5 = funcional e genérico na escala da rubrica). */
+export const PASS_CRITERION_MIN = 5
+
 /**
  * Avalia o veredito composto com base nas notas e defeitos.
- * Corte: final >= 7.5, specificity >= 7.0, nenhum critério aplicável < 6.0, zero defeito crítico.
+ * Corte (rubrica v2, 25/09): final >= 7,5, nenhum critério aplicável abaixo de 5 e zero defeito crítico. A exigência
+ * de especificidade >= 7 saiu: em tela de ferramenta ela é gosto, não problema.
  */
 export function evaluateCutoff(criteria: VisualEvalCriteria[], final: number, defects: any[] = []): 'pass' | 'rework' {
-  const hasCriticalDefect = defects.some((d) => d.severity === 'critical')
-  if (hasCriticalDefect) return 'rework'
-
-  const specificity = criteria.find((c) => c.id === 'specificity')
-  const specificityScore = specificity?.score ?? 0
-
-  if (final < 7.5 || specificityScore < 7.0) {
-    return 'rework'
-  }
-
-  for (const c of criteria) {
-    if (c.score !== null && typeof c.score === 'number') {
-      if (c.score < 6.0) {
-        return 'rework'
-      }
-    }
-  }
-
-  return 'pass'
+  if (defects.some((d) => d.severity === 'critical')) return 'rework'
+  if (final < PASS_FINAL) return 'rework'
+  return criteria.some((c) => typeof c.score === 'number' && c.score < PASS_CRITERION_MIN) ? 'rework' : 'pass'
 }
 
 /**
@@ -89,10 +79,10 @@ export async function judgeVisual({
   judge = { family: 'codex', model_id: 'gpt-5.6-terra' },
   judges,
   contrastMeasured = false,
+  previous = null,
   round = 1,
   storyId = 'ADE-S1',
   detectorInfo = { engine_version: '0.1.5', url_mode: 'ok' },
-  makerFamily,
   deps = {},
 }: {
         captures: any[]
@@ -104,10 +94,11 @@ export async function judgeVisual({
         judges?: Array<{ family: string; model_id: string; effort?: string | null; resolved?: { exe: string; prefixArgs: string[] } | null }>
         // o portão D3 (axe-core) mediu o contraste antes do juiz e passou
         contrastMeasured?: boolean
+        // avaliação da passada anterior da mesma tela
+        previous?: any
         round?: number
         storyId?: string
         detectorInfo?: { engine_version: string; url_mode: 'ok' | 'unsupported' }
-        makerFamily?: string
         deps?: {
             dispatchJudge?: (pack: any) => Promise<any>
             resolved?: { exe: string; prefixArgs: string[] }
@@ -145,11 +136,14 @@ export async function judgeVisual({
     verdict: ('unknown' as const),
   })
 
-  // Codex ou Claude julgam, nunca a mesma empresa que escreveu a tela
-  const candidates = (judges ?? [{ ...judge, resolved: deps.resolved }])
-    .filter((j) => JUDGE_FAMILIES.includes(j.family) && j.family !== makerFamily)
-  if (candidates.length === 0) {
-    return unknown('judge-family-invalid', 'Configurar juiz de empresa diferente da que escreveu a tela')
+  // Julgar imagem não é revisar o próprio código: quem escreveu a tela também julga. Um juiz por empresa (Codex e
+  // Claude), em paralelo, e as duas opiniões se cruzam (25/09, pedido do operador).
+  const panel: NonNullable<typeof judges> = []
+  for (const j of judges ?? [{ ...judge, resolved: deps.resolved }]) {
+    if (JUDGE_FAMILIES.includes(j.family) && !panel.some((p) => p.family === j.family)) panel.push(j)
+  }
+  if (panel.length === 0) {
+    return unknown('judge-family-invalid', 'Configurar um juiz Codex ou Claude')
   }
 
   // Protocolo anti-ancoragem: monta o pack estritamente sem diff nem achados do detector
@@ -163,6 +157,7 @@ export async function judgeVisual({
     })),
     task,
     ...(contrastMeasured ? { contrast_measured: true } : {}),
+    ...(previous?.criteria ? { previous_round: { final: previous.final, scores: Object.fromEntries(previous.criteria.map((c: any) => [c.id, c.score])), asked_fixes: (previous.defects ?? []).map((d: any) => d.fix) } } : {}),
     design_brief: designBrief,
     rubric: rubric || { version: RUBRIC_VERSION, weights },
   }
@@ -170,62 +165,60 @@ export async function judgeVisual({
   const ids = (['specificity', 'hierarchy', 'typography', 'color', 'states', 'motion'] as VisualEvalCriteria['id'][])
   const complete = (raw: any) => Array.isArray(raw?.criteria) && ids.every((id) => raw.criteria.some((criterion: any) => criterion?.id === id))
   // Se houver despachante injetado (ex: dublê de modelo nos testes)
-  let rawResult
-  let used = candidates[0]
+  const opinions: Array<{ family: string; model_id: string; raw: any }> = []
   const failures: string[] = []
   if (deps.dispatchJudge) {
-    rawResult = await deps.dispatchJudge(judgePack)
+    opinions.push({ ...panel[0], raw: await deps.dispatchJudge(judgePack) })
   } else if (deps.cwd && deps.missionDir) {
-    for (const candidate of candidates) {
-      if (!candidate.resolved) continue
+    const results = await Promise.all(panel.map(async (member) => {
+      if (!member.resolved) return null
       try {
-        const raw = await dispatchIsolatedJudge(judgePack, candidate, round, { ...deps, resolved: candidate.resolved })
-        if (complete(raw)) {
-          rawResult = raw
-          used = candidate
-          break
-        }
-        failures.push(`${candidate.family}: resultado incompleto`)
+        const raw = await dispatchIsolatedJudge(judgePack, member, round, { ...deps, resolved: member.resolved })
+        if (complete(raw)) return { family: member.family, model_id: member.model_id, raw }
+        failures.push(`${member.family}: resultado incompleto`)
       } catch (err) {
-        failures.push(`${candidate.family}: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`)
+        failures.push(`${member.family}: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`)
       }
-    }
+      return null
+    }))
+    for (const r of results) if (r) opinions.push(r)
   }
 
-  if (!rawResult && failures.length > 0) {
+  if (opinions.length === 0 && failures.length > 0) {
     return unknown('judge-unavailable', `Nenhum juiz respondeu: ${failures.join(' | ')}`)
   }
 
-  if (rawResult) {
-    judge = { family: used.family, model_id: used.model_id }
-    if (!complete(rawResult)) {
+  if (opinions.length > 0) {
+    if (!opinions.every((o) => complete(o.raw))) {
       return unknown('judge-result-invalid', 'Repetir o julgamento com VisualEval completo')
     }
-    const rawCriteria = (rawResult.criteria as any[])
-    
+    judge = { family: opinions.map((o) => o.family).join('+'), model_id: opinions.map((o) => o.model_id).join('+') }
+    // sem briefing que diga o tipo de tela, vale o que o juiz viu (o padrão "persuade" pesava identidade em painel)
+    const surface = (designBrief?.surface_mode || opinions.map((o) => o.raw.surface).find((m) => m in MODE_WEIGHTS) || mode) as keyof typeof MODE_WEIGHTS
+    const surfaceWeights = MODE_WEIGHTS[surface]
+    const scored = opinions.map((o) => ({ family: o.family, criteria: scoreCriteria(o.raw, ids, surfaceWeights) }))
+    const tag = (family: string, text: string) => (opinions.length > 1 ? `${family}: ${text}` : text)
+    // cruzamento: média por critério entre quem deu nota; as notas de cada juiz ficam no texto
     const criteria: VisualEvalCriteria[] = ids.map((id) => {
-      const criterion = rawCriteria.find((item) => item.id === id)
-      const note = typeof criterion.note === 'string' ? criterion.note : ''
-      // rubrica v2: a nota é a base mais os ajustes observados, não um número solto do juiz
-      if (criterion.score !== null && Array.isArray(criterion.adjustments)) {
-        const adjustments = (criterion.adjustments as any[]).filter((a) => typeof a?.delta === 'number' && Number.isFinite(a.delta))
-        const score = Math.min(10, Math.max(0, Math.round((RUBRIC_BASE + adjustments.reduce((sum, a) => sum + a.delta, 0)) * 10) / 10))
-        const detail = adjustments.map((a) => `${a.delta > 0 ? '+' : ''}${a.delta} ${String(a.observation ?? '')}`).join('; ')
-        return { id, score, weight: weights[id], note: detail ? `${note} [base ${RUBRIC_BASE}; ${detail}]` : note }
-      }
-      const score = criterion.score
-      if (score !== null && (typeof score !== 'number' || !Number.isFinite(score) || score < 0 || score > 10)) {
-        throw new TypeError(`nota inválida do juiz para ${id}`)
-      }
-      return { id, score, weight: weights[id], note }
+      const own = scored.map((j) => ({ family: j.family, c: j.criteria.find((c) => c.id === id)! }))
+      const given = own.filter((o) => o.c.score !== null)
+      const score = given.length === 0 ? null : Math.round((given.reduce((sum, o) => sum + (o.c.score as number), 0) / given.length) * 10) / 10
+      const spread = given.length > 1 ? ` (notas ${given.map((o) => `${o.family} ${o.c.score}`).join(', ')})` : ''
+      return { id, score, weight: surfaceWeights[id], note: own.map((o) => tag(o.family, o.c.note)).join(' || ') + spread }
     })
-    const defects = Array.isArray(rawResult.defects)
-      ? (rawResult.defects as any[]).filter((defect) => defect && ['critical', 'major', 'minor'].includes(defect.severity))
-      : []
+    // defeitos: a união dos dois, cada um com quem apontou; o que os dois viram no mesmo critério vem primeiro
+    const all = opinions.flatMap((o) => (Array.isArray(o.raw.defects) ? o.raw.defects : [])
+      .filter((defect: any) => defect && ['critical', 'major', 'minor'].includes(defect.severity))
+      .map((defect: any) => ({ ...defect, id: opinions.length > 1 ? `${o.family}:${defect.id}` : defect.id, _family: o.family })))
+    const bothSaw = (d: any) => all.some((other: any) => other._family !== d._family && other.criterion === d.criterion)
+    const rank = { critical: 0, major: 1, minor: 2 } as Record<string, number>
+    const defects = all
+      .sort((x: any, y: any) => Number(bothSaw(y)) - Number(bothSaw(x)) || rank[x.severity] - rank[y.severity])
+      .map(({ _family, ...d }: any) => d)
     const final = calculateRenormalizedFinal(criteria)
     return {
       story_id: storyId, round, rubric_version: RUBRIC_VERSION, judge, detector: detectorInfo,
-      surface_mode: mode, captures: judgePack.captures, criteria, final, defects,
+      surface_mode: surface, captures: judgePack.captures, criteria, final, defects,
       verdict: evaluateCutoff(criteria, final, defects),
     }
   }
@@ -329,6 +322,8 @@ const JUDGE_INSTRUCTIONS = [
   '',
   `COMO PONTUAR: cada critério começa em ${RUBRIC_BASE}. Em "adjustments" liste cada ponto que sobe ou desce a nota: delta entre -3 e +3 (passos de 0,5) e a observação concreta (o quê, onde, em qual largura/tema). Sem observação visível, sem ajuste. O mesmo problema desconta num critério só. "score" é ${RUBRIC_BASE} mais a soma dos deltas.`,
   '',
+  'TIPO DE TELA: diga em "surface" o que ela é e julgue pelo que uma tela boa desse tipo precisa: operate (ferramenta, painel, formulário, app de trabalho: clareza, densidade, ação óbvia), persuade (página de venda ou apresentação: identidade, impacto, chamada), read (documento, artigo, docs: leitura longa confortável), experience (jogo, peça interativa: atmosfera, resposta visual).',
+  '',
   'CRITÉRIOS (o que olhar):',
   '- specificity: a tela tem identidade própria que combina com a tarefa, ou parece modelo pronto/gerado por IA (card branco centralizado, botão pílula roxo, gradiente decorativo, ícone genérico, emoji como ícone)? Sobe: marca, voz e decisões visuais coerentes com o produto. Desce: clichês de IA, elementos intercambiáveis com qualquer app.',
   '- hierarchy: a ação principal é óbvia em um segundo? Ordem de leitura, agrupamento por proximidade, ritmo de espaçamento consistente, uso do espaço da tela nas duas larguras. Desce: duas ações com o mesmo peso, área vazia dominante sem propósito, elementos colados na borda em 390 px.',
@@ -338,6 +333,12 @@ const JUDGE_INSTRUCTIONS = [
   '- motion: null, a menos que a captura mostre indício de movimento.',
   '',
   'DEFEITOS: todo ajuste negativo de -1 ou pior vira um defeito. severity: critical = impede ou quebra o uso (cortado, sobreposto, ilegível, contraste abaixo de 3:1 em texto); major = o usuário nota e a tarefa piora; minor = polimento. "where": elemento e largura/tema. "fix": ação executável com elemento, propriedade e valor-alvo (ex.: "texto de ajuda .hint: font-size 13px -> 15px e cor #a1a1aa -> #52525b"; "botão Anexar: estilo secundário com borda 1px e fundo transparente, Enviar fica o único preenchido"). Nada de "melhorar a identidade" sem dizer como.',
+  '',
+  'PROIBIDO SUGERIR (o detector Impeccable reprova sozinho e a passada se perde; teste de 25/09): rótulo, kicker ou eyebrow acima do título; texto em degradê; paleta de IA (degradê roxo/violeta, ciano ou turquesa neon sobre fundo escuro); borda colorida lateral acima de 1px em card ou aviso; sombra dura deslocada sem desfoque; vidro ou blur decorativo; emoji ou glifo no lugar de ícone; monoespaçada como fantasia de técnico; cards iguais de ícone + título + texto como estrutura; números de seção 01/02/03 sem função. Identidade vem de tipografia, espaçamento, cor própria contida e voz do produto.',
+  '',
+  'CAMINHO ATÉ 7,5: só apontar o que está errado deixa a tela em 5 (correta e genérica). Para cada critério com nota abaixo de 7,5, ponha também em "defects" a mudança concreta que o levaria a 7,5, pensando no que uma tela boa desse tipo teria (severity major se o critério está abaixo de 6, minor entre 6 e 7,5). Diga o que construir ou trocar, com elemento e valor, nunca só "melhorar".',
+  '',
+  'PASSADA ANTERIOR: com "previous_round" no pacote, esta tela já foi julgada e o desenvolvedor recebeu "asked_fixes". Confira nas capturas o que foi feito: correção feita e boa conta a favor no critério; não peça o contrário de uma correção pedida antes, a menos que ela tenha piorado a tela (diga por quê); repita só o que continua faltando. Não ancore a nota na anterior: julgue a tela de agora.',
   '',
   'Responda só o JSON do schema.',
 ]
@@ -355,8 +356,27 @@ const JUDGE_SCHEMA = (() => {
     type: 'object', additionalProperties: false, required: ['id', 'severity', 'criterion', 'where', 'fix'],
     properties: { id: { type: 'string' }, severity: { enum: ['critical', 'major', 'minor'] }, criterion: { type: 'string' }, where: { type: 'string' }, fix: { type: 'string' } },
   }
-  return { type: 'object', additionalProperties: false, required: ['criteria', 'defects'], properties: { criteria: { type: 'array', minItems: 6, maxItems: 6, items: criterion }, defects: { type: 'array', items: defect } } }
+  return { type: 'object', additionalProperties: false, required: ['surface', 'criteria', 'defects'], properties: { surface: { enum: ['operate', 'persuade', 'read', 'experience'] }, criteria: { type: 'array', minItems: 6, maxItems: 6, items: criterion }, defects: { type: 'array', items: defect } } }
 })()
+
+/** Notas de um juiz: na rubrica v2 a nota é a base mais os ajustes observados, não um número solto. */
+function scoreCriteria(raw: any, ids: VisualEvalCriteria['id'][], weights: Record<string, number>): VisualEvalCriteria[] {
+  return ids.map((id) => {
+    const criterion = raw.criteria.find((item: any) => item.id === id)
+    const note = typeof criterion.note === 'string' ? criterion.note : ''
+    if (criterion.score !== null && Array.isArray(criterion.adjustments)) {
+      const adjustments = (criterion.adjustments as any[]).filter((a) => typeof a?.delta === 'number' && Number.isFinite(a.delta))
+      const score = Math.min(10, Math.max(0, Math.round((RUBRIC_BASE + adjustments.reduce((sum, a) => sum + a.delta, 0)) * 10) / 10))
+      const detail = adjustments.map((a) => `${a.delta > 0 ? '+' : ''}${a.delta} ${String(a.observation ?? '')}`).join('; ')
+      return { id, score, weight: weights[id], note: detail ? `${note} [base ${RUBRIC_BASE}; ${detail}]` : note }
+    }
+    const score = criterion.score
+    if (score !== null && (typeof score !== 'number' || !Number.isFinite(score) || score < 0 || score > 10)) {
+      throw new TypeError(`nota inválida do juiz para ${id}`)
+    }
+    return { id, score, weight: weights[id], note }
+  })
+}
 
 /** Roda um processo com stdin opcional; rejeita em saída diferente de 0 ou no teto de tempo. */
 function runJudgeProcess(exe: string, args: string[], opts: { cwd: string; env?: Record<string, string>; input?: string; timeoutMs: number }): Promise<string> {

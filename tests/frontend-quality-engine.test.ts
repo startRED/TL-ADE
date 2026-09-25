@@ -506,8 +506,8 @@ describe('v0.4a Frontend Quality Engine (FQE) Acceptance Tests', () => {
     expect(capturedPack.prompt).toBeUndefined()
   })
 
-  // Critério 9: Notas do juiz com corte 7,5, especificidade 7, critérios >= 6 e renormalização
-  test('criterio_9_notas_do_juiz_corte_7_5_especificidade_7_criterios_minimo_6_e_renormalizacao', () => {
+  // Critério 9 (rubrica v2, 25/09): corte 7,5, nenhum critério abaixo de 5, sem exigência própria de especificidade
+  test('criterio_9_notas_do_juiz_corte_7_5_criterios_minimo_5_e_renormalizacao', () => {
     // Caso com critério nulo (ex: motion não aplicável em tela puramente estática)
     const criteriaWithNull = [
       { id: 'specificity' as const, score: 7.5, weight: 3.0, note: 'ok' },
@@ -524,18 +524,21 @@ describe('v0.4a Frontend Quality Engine (FQE) Acceptance Tests', () => {
     const verdict = evaluateCutoff(criteriaWithNull, finalRenormalized, [])
     expect(verdict).toBe('pass')
 
-    // Se qualquer critério ficar abaixo de 6.0, reprova
+    // Se qualquer critério ficar abaixo de 5 (problema real), reprova mesmo com a média alta
     const failingCriterion = structuredClone(criteriaWithNull)
-    failingCriterion[3].score = 5.5
+    failingCriterion[3].score = 4.5
+    failingCriterion[2].score = 10
     const finalFail = calculateRenormalizedFinal(failingCriterion)
     expect(evaluateCutoff(failingCriterion, finalFail, [])).toBe('rework')
 
-    // Se especificidade ficar abaixo de 7.0, reprova mesmo com nota final alta
-    const failingSpecificity = structuredClone(criteriaWithNull)
-    failingSpecificity[0].score = 6.8
-    failingSpecificity[1].score = 9.0
-    const finalSpec = calculateRenormalizedFinal(failingSpecificity)
-    expect(evaluateCutoff(failingSpecificity, finalSpec, [])).toBe('rework')
+    // Especificidade 6,8 com o resto alto passa: identidade não tem mais corte próprio
+    const modestSpecificity = structuredClone(criteriaWithNull)
+    modestSpecificity[0].score = 6.8
+    modestSpecificity[1].score = 9.0
+    modestSpecificity[2].score = 9.0
+    const finalSpec = calculateRenormalizedFinal(modestSpecificity)
+    expect(finalSpec).toBeGreaterThanOrEqual(7.5)
+    expect(evaluateCutoff(modestSpecificity, finalSpec, [])).toBe('pass')
   })
 
   // Critério 10: Reprovação na primeira rodada envia defeitos em lote único para rework

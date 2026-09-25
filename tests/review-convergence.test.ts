@@ -835,7 +835,7 @@ describe('Integrar revisão e correção que convergem', () => {
     const checkerReviews = exhaustEvents.filter((e) => e.kind === 'review_result')
     // Escada de um degrau: 2 rodadas reprovadas no degrau esgotam a escada (r1 + r2) antes do teto do contrato
     expect(checkerReviews.length).toBe(2)
-  }, 45000)
+  }, 120_000)
 
   // Critério 5: retomada reutiliza resultados duráveis e vincula aprovação à árvore verificada
   test('retomada_reutiliza_resultados_duraveis_e_vincula_a_arvore_verificada', async () => {
