@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { captureVisualSurface } from './browser.ts'
@@ -5,6 +6,9 @@ import { runVisualGates } from './gates.ts'
 import { judgeVisual } from './judge.ts'
 import { createImpeccableDetector } from './impeccable.ts'
 import { startServe } from './browser.ts'
+import { promisify } from 'node:util'
+
+const execFileAsync = promisify(execFile)
 
 /**
  * Executa o ciclo completo do Frontend Quality Engine (FQE).
@@ -22,7 +26,7 @@ export async function runFrontendQuality({
         tree: string
         config?: any
         capabilities?: any
-        round?: 1 | 2
+        round?: number
         missionDir?: string
         deps?: {
             captureSurface?: typeof captureVisualSurface
@@ -90,6 +94,11 @@ export async function runFrontendQuality({
   // 1. Serve e captura com Playwright como biblioteca; cada página é inspecionada antes do contexto fechar.
   let captures = []
   try {
+    // tela que precisa de build (o painel servido do dist) monta a versão da worktree antes de servir
+    if (Array.isArray(visualConfig.build_command) && visualConfig.build_command.length > 0) {
+      const [bin, ...args] = visualConfig.build_command
+      await execFileAsync(bin, args, { cwd: story.worktreeDir || missionDir, windowsHide: true, maxBuffer: 32 * 1024 * 1024, timeout: (visualConfig.build_timeout_s || 300) * 1000 })
+    }
     if (visualConfig.serve_command) {
       serve = await (deps.startServe ?? startServe)({
         command: visualConfig.serve_command,
@@ -137,21 +146,11 @@ export async function runFrontendQuality({
 
   fs.writeFileSync(path.join(outDir, `gates-r${round}.json`), JSON.stringify(gateRes, null, 2), 'utf8')
 
-  // (5): Se portões determinísticos reprovam, o juiz NÃO é chamado
+  // (5): Se portões determinísticos reprovam, o juiz NÃO é chamado. Quantas passadas cabem é o motor que decide.
   if (!gateRes.ok) {
-    const defects = gateRes.defects || []
-    if (round === 1) {
-      return {
-        status: 'rework',
-        defects,
-        gateResults: gateRes.results,
-        captures,
-      }
-    }
     return {
-      status: 'awaiting_operator',
-      reason: 'visual_cut_not_met',
-      defects,
+      status: 'rework',
+      defects: uniqueDefects(gateRes.defects || []),
       gateResults: gateRes.results,
       captures,
     }
@@ -199,7 +198,7 @@ export async function runFrontendQuality({
     }
   }
 
-  if (evaluation.verdict === 'unknown' || round >= 2) {
+  if (evaluation.verdict === 'unknown') {
     return {
       status: 'awaiting_operator',
       reason: 'visual_cut_not_met',
@@ -210,7 +209,7 @@ export async function runFrontendQuality({
     }
   }
 
-  // Round 1 reprovado no juiz: envia defeitos em lote para rework
+  // Reprovado no juiz: envia defeitos em lote para rework
   return {
     status: 'rework',
     evaluation,
@@ -218,4 +217,15 @@ export async function runFrontendQuality({
     captures,
     gateResults: gateRes.results,
   }
+}
+
+/** O mesmo defeito aparece em cada largura e tema capturados; o maker recebe cada um uma vez. */
+function uniqueDefects(defects: any[]): any[] {
+  const seen = new Set<string>()
+  return defects.filter((d) => {
+    const key = `${d.id} ${String(d.where).replace(/ [d+px]/, '')}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }

@@ -598,11 +598,11 @@ describe('v0.4a Frontend Quality Engine (FQE) Acceptance Tests', () => {
   })
 
   // Critério 11: Segunda reprovação para em awaiting_operator com visual_cut_not_met e capturas lado a lado
-  test('criterio_11_segunda_reprovacao_para_em_awaiting_operator_visual_cut_not_met_com_capturas_lado_a_lado', async () => {
+  test('criterio_11_segunda_reprovacao_volta_rework_e_o_motor_decide_as_passadas_com_capturas_lado_a_lado', async () => {
     const round2 = await runFrontendQuality({
       story: { id: 'S1', contract: { needs_ui: true } },
       tree: 'tree-r2',
-      round: 2, // Limite máximo de 2 rodadas
+      round: 2, // o limite de passadas é do motor (visual.max_rounds)
       missionDir: tempMissionDir,
       config: { visual: { enabled: true, url: 'http://127.0.0.1:4173' } },
       deps: {
@@ -617,8 +617,8 @@ describe('v0.4a Frontend Quality Engine (FQE) Acceptance Tests', () => {
       },
     })
 
-    expect(round2.status).toBe('awaiting_operator')
-    expect(round2.reason).toBe('visual_cut_not_met')
+    expect(round2.status).toBe('rework')
+    expect(round2.defects).toEqual([{ id: 'low-score', severity: 'major', criterion: 'specificity', where: 'root', fix: 'Refazer' }])
 
     // Renderização do relatório com as duas rodadas lado a lado
     const mockEvents = [

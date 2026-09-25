@@ -110,6 +110,8 @@ export async function runStory(deps: { journal: { append: (event: Record<string,
 
 async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed' | 'delivered' | 'awaiting_operator'; exitCode: 0 | 3; reason: string | null; commit: string | null }> {
   const { loaded, story, repoDir, missionDir } = input
+  // config do projeto (.ade/config.json): o run.ts só a lia para o digest e o FQE recebia {} e nunca servia a tela (25/09)
+  const projectConfig = loaded.config ?? readProjectConfig(repoDir)
   const journal = deps.journal
   const missionId = loaded.plan.mission_id
   const storyId = story.id
@@ -735,6 +737,9 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   })
 
   let round = 1
+  // avaliações visuais feitas; a última que reprova já não pede retrabalho e a parte segue para o revisor
+  let visualEvals = 0
+  const maxVisualEvals = Math.max(1, Number(projectConfig?.visual?.max_rounds) || 3)
   let previousFindingsDigest = null
   let previousFindings = []
   let openFindings: any[] = []
@@ -930,8 +935,10 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
           data: designServer.manifest,
         })
       } catch (err) {
-        await deps.journal.append({ kind: 'story_done', unit: storyId, data: { status: 'awaiting_operator', reason: 'fqe_unavailable', error: err instanceof Error ? err.message : String(err) } })
-        return { status: 'awaiting_operator', exitCode: 3, reason: 'fqe_unavailable', commit: null }
+        // sem as ferramentas de design o maker ainda escreve a tela; parar esperando o operador não ajuda ninguém
+        designServer = null
+        mcpConfigPath = undefined
+        await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'design_tools_unavailable', unit: storyId, error: err instanceof Error ? err.message : String(err) } })
       }
     }
 
@@ -1280,7 +1287,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     redTests = []
 
     // Portão do Frontend Quality Engine (FQE) entre gates/evals e Checker
-    if (contract.needs_ui) {
+    if (contract.needs_ui && visualEvals < maxVisualEvals) {
+      visualEvals++
       const fqeStepResult = await deps.step(
         {
           unit: storyId,
@@ -1296,7 +1304,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
               design_brief: loaded.plan?.briefing?.design_briefs?.[storyId],
             },
             tree: treeAfterContain,
-            config: loaded.config ?? {},
+            config: projectConfig,
             capabilities: deps.capabilities ?? {},
             round: (round),
             missionDir,
@@ -1317,44 +1325,37 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         },
       })
 
-      if (fqeRes.status === 'awaiting_operator') {
-        await deps.journal.append({
-          kind: 'story_done',
-          unit: storyId,
-          data: {
-            status: 'awaiting_operator',
-            reason: fqeRes.reason ?? 'visual_cut_not_met',
-            unit: storyId,
-            commit: null,
-            evaluation: fqeRes.evaluation,
-          },
-        })
-        return {
-          status: 'awaiting_operator',
-          exitCode: 3,
-          reason: fqeRes.reason ?? 'visual_cut_not_met',
-          commit: null,
-        }
-      }
-
-      if (fqeRes.status === 'rework') {
-        const visualFindings = (fqeRes.defects || []).map((d: any) => ({
-          severity: d.severity,
-          message: `${d.criterion}: ${d.fix} (${d.where})`,
-          path: d.where,
-        }))
-        if (round >= 2) {
-          await deps.journal.append({ kind: 'story_done', unit: storyId, data: { status: 'awaiting_operator', reason: 'visual_cut_not_met', unit: storyId, commit: null } })
-          return { status: 'awaiting_operator', exitCode: 3, reason: 'visual_cut_not_met', commit: null }
-        }
+      // Sempre autônoma: visual indisponível, sem veredito ou sem passada sobrando não estaciona; a parte segue para o
+      // revisor e o veredito visual fica no journal
+      let visualNext = fqeRes.status === 'pass' ? 'checker' : 'checker_without_visual_pass'
+      if (fqeRes.status === 'rework' && visualEvals < maxVisualEvals) {
         const { parkReason } = await climbLadder({ kind: 'rejected' })
-        if (parkReason) return await parkStory(parkReason)
-        openFindings = visualFindings
-        previousFindings = visualFindings
-        treeBeforeAttempt = treeAfterContain
-        round++
-        attempt = 0
-        continue
+        if (!parkReason) {
+          // no formato do achado de revisão: com `message`/`path` o normalizador zerava problema e ação e o maker
+          // recebia o retrabalho vazio (25/09). Os prints vão como evidência para o maker olhar a tela.
+          const shots = (fqeRes.captures || []).map((c: any) => path.resolve(String(c.path)))
+          const visualFindings = (fqeRes.defects || []).map((d: any, i: number) => ({
+            id: `visual-${d.id ?? i + 1}`,
+            severity: d.severity === 'major' ? 'high' : d.severity === 'minor' ? 'low' : 'critical',
+            category: 'patch',
+            target_role: 'maker',
+            // onde na tela, não arquivo: com a posição aqui a checagem de achado resolvido procurava um arquivo "/ [390px]"
+            location: 'unknown',
+            problem: `Avaliação visual (${d.criterion}) reprovou a tela em ${d.where}`,
+            required_action: `${d.fix}. Olhe as capturas da tela antes de mudar.`,
+            evidence_refs: shots,
+          }))
+          openFindings = visualFindings
+          previousFindings = visualFindings
+          treeBeforeAttempt = treeAfterContain
+          round++
+          attempt = 0
+          continue
+        }
+        visualNext = 'checker_rework_exhausted'
+      }
+      if (visualNext !== 'checker') {
+        await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'visual_continue', unit: storyId, round, status: fqeRes.status, reason: fqeRes.reason ?? null, next: visualNext, visual_evals: visualEvals } })
       }
     }
 
@@ -1824,5 +1825,14 @@ ${formatProvenanceTrailers({ mission: missionId, story: storyId, round, ...maker
     treeBeforeAttempt = treeAfterContain
     round++
     attempt = 0
+  }
+}
+
+/** Config do projeto em .ade/config.json; ausente ou ilegível vale {}. */
+function readProjectConfig(repoDir: string): Record<string, any> {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(repoDir, '.ade', 'config.json'), 'utf8'))
+  } catch {
+    return {}
   }
 }

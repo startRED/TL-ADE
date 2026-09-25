@@ -206,13 +206,18 @@ export async function runVisualGates(params: {
           results.D5.pass = false
           results.D5.message = `Detector estético acusou ${blockingIssues.length} problemas: ${blockingIssues[0].rule || blockingIssues[0].message}`
           results.D5.details = blockingIssues
-          defects.push({
-            id: `D5-${blockingIssues[0].rule || 'slop'}`,
-            severity: 'major',
-            criterion: 'specificity',
-            where: `${route}`,
-            fix: `Remover defeito estético detectado: ${blockingIssues[0].message || blockingIssues[0].rule}`,
-          })
+          // um defeito por regra: com só o primeiro, o maker corrigia um tique de IA por rodada
+          const byRule = new Map<string, any>()
+          for (const iss of blockingIssues) if (!byRule.has(iss.rule || 'slop')) byRule.set(iss.rule || 'slop', iss)
+          for (const [rule, iss] of byRule) {
+            defects.push({
+              id: `D5-${rule}`,
+              severity: 'major',
+              criterion: 'specificity',
+              where: `${route}`,
+              fix: `Remover defeito estético detectado: ${iss.message || rule}`,
+            })
+          }
         }
       } catch (err) {
         results.D5.pass = false

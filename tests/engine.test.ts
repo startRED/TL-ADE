@@ -1004,26 +1004,45 @@ describe('S18 telemetria honesta', () => {
     })
   }, 60_000)
 
-  test('engine_executa_fqe_para_historia_com_ui_e_para_em_visual_cut_not_met', async () => {
+  // Sempre autônoma (25/09): visual sem veredito não estaciona mais; a parte segue para o revisor e entrega
+  test('engine_fqe_sem_veredito_segue_para_o_revisor_sem_estacionar', async () => {
     const fixture = setupStoryFixture()
     fixture.input.story.contract.needs_ui = true
 
     const mockRunFQE = vi.fn().mockResolvedValue({
       status: 'awaiting_operator',
       reason: 'visual_cut_not_met',
-      evaluation: { final: 6.8, verdict: 'rework' },
+      evaluation: { final: 6.8, verdict: 'unknown' },
     })
 
-    const depsWithFQE = {
-      ...fixture.deps,
-      runFrontendQuality: mockRunFQE,
-    }
-
+    const depsWithFQE = { ...fixture.deps, runFrontendQuality: mockRunFQE }
     const result = await runStory(depsWithFQE, fixture.input)
-    expect(result.status).toBe('awaiting_operator')
-    expect(result.reason).toBe('visual_cut_not_met')
-    expect(result.exitCode).toBe(3)
-    expect(mockRunFQE).toHaveBeenCalled()
+    expect(result.status).toBe('delivered')
+    expect(mockRunFQE).toHaveBeenCalledTimes(1)
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    expect(events.find((e) => e.kind === 'decision' && (e.data as any).decision === 'visual_continue')?.data).toMatchObject({ next: 'checker_without_visual_pass' })
+  }, 60_000)
+
+  // Múltiplas passadas: reprovação visual volta ao maker com os defeitos; a passada seguinte aprova e a parte entrega
+  test('engine_fqe_reprovado_volta_ao_maker_e_segunda_passada_aprova', async () => {
+    const fixture = setupStoryFixture()
+    fixture.input.story.contract.needs_ui = true
+    const makerFile = path.join(fixture.scenarioDir, 'maker.json')
+    const base = JSON.parse(fs.readFileSync(makerFile, 'utf8'))[0]
+    fs.writeFileSync(makerFile, JSON.stringify(['ok v1\n', 'ok v2\n'].map((c) => ({ ...base, files: { 'src/hello.txt': c } }))))
+    const mockRunFQE = vi.fn()
+      .mockResolvedValueOnce({ status: 'rework', defects: [{ id: 'D6', severity: 'critical', criterion: 'hierarchy', where: '/ [390px] (textarea)', fix: 'Caber em 390px' }] })
+      .mockResolvedValue({ status: 'pass' })
+
+    const depsWithFQE = { ...fixture.deps, runFrontendQuality: mockRunFQE }
+    const result = await runStory(depsWithFQE, fixture.input)
+    expect(result).toMatchObject({ status: 'delivered' })
+    expect(mockRunFQE).toHaveBeenCalledTimes(2)
+    expect(mockRunFQE.mock.calls.map((c) => c[0].round)).toEqual([1, 2])
+    // o pedido de correção leva o defeito visual com texto, não um achado vazio
+    const packs = fs.readdirSync(fixture.missionDir, { recursive: true }).map(String).filter((p) => p.includes('r2'))
+    const texts = packs.map((p) => path.join(fixture.missionDir, p)).filter((p) => fs.statSync(p).isFile()).map((p) => fs.readFileSync(p, 'utf8'))
+    expect(texts.some((t) => t.includes('Caber em 390px') && t.includes('Avaliação visual (hierarchy)'))).toBe(true)
   }, 60_000)
 })
 

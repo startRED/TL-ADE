@@ -12,7 +12,7 @@ interface VisualEvalCriteria {
 
 interface VisualEval {
     story_id: string
-    round: 1 | 2
+    round: number
     rubric_version: string
     judge: { family: string; model_id: string} 
     detector: { engine_version: string; url_mode: 'ok' | 'unsupported'} 
@@ -98,7 +98,7 @@ export async function judgeVisual({
         designBrief: any
         rubric?: any
         judge?: { family: string; model_id: string }
-        round?: 1 | 2
+        round?: number
         storyId?: string
         detectorInfo?: { engine_version: string; url_mode: 'ok' | 'unsupported' }
         makerFamily?: string
@@ -274,7 +274,7 @@ export async function judgeVisual({
 }
 
 /** @param pack @param judge @param round */
-async function dispatchIsolatedJudge(pack: any, judge: { family: string; model_id: string }, round: 1 | 2, deps: any) {
+async function dispatchIsolatedJudge(pack: any, judge: { family: string; model_id: string }, round: number, deps: any) {
   const schemaPath = path.join(deps.missionDir, `visual-judge-schema-r${round}.json`)
   const resultFile = path.join(deps.missionDir, `visual-judge-result-r${round}.json`)
   const criterion = {
@@ -286,7 +286,17 @@ async function dispatchIsolatedJudge(pack: any, judge: { family: string; model_i
     properties: { id: { type: 'string' }, severity: { enum: ['critical', 'major', 'minor'] }, criterion: { type: 'string' }, where: { type: 'string' }, fix: { type: 'string' } },
   }
   fs.writeFileSync(schemaPath, JSON.stringify({ type: 'object', additionalProperties: false, required: ['criteria', 'defects'], properties: { criteria: { type: 'array', minItems: 6, maxItems: 6, items: criterion }, defects: { type: 'array', items: defect } } }), 'utf8')
-  const args = buildCodexArgs({ role: 'visual_judge', cwd: deps.cwd, schemaPath, resultFile, model: judge.model_id, sandbox: 'read-only' })
+  // As capturas vão anexadas como imagem: só com o caminho no texto o juiz não enxergava a tela (25/09)
+  const images = pack.captures.map((c: any) => `--image=${path.resolve(c.path)}`)
+  const args = [...buildCodexArgs({ role: 'visual_judge', cwd: deps.cwd, schemaPath, resultFile, model: judge.model_id, sandbox: 'read-only' }), ...images]
+  const prompt = [
+    'Você é o juiz visual de uma interface. As imagens anexadas são capturas reais da tela, na ordem da lista "captures" abaixo (rota, largura, tema).',
+    'Olhe as imagens, não o código. Dê nota de 0 a 10 a cada critério: specificity (a tela tem identidade própria ou parece gerada por IA genérica), hierarchy, typography, color, states, motion (null se não der para ver numa imagem parada).',
+    'Liste os defeitos visíveis com severidade (critical, major, minor), onde estão na tela e a correção concreta que o desenvolvedor deve fazer. Sem defeito inventado; tela boa pode ter lista vazia.',
+    'Responda só o JSON do schema.',
+    '',
+    JSON.stringify(pack),
+  ].join('\n')
 
   await new Promise((resolve, reject) => {
     const child = spawn(deps.resolved.exe, [...deps.resolved.prefixArgs, ...args], { cwd: deps.cwd, shell: false, windowsHide: true, env: { ...process.env, ...deps.env }, stdio: ['pipe', 'ignore', 'pipe'] })
@@ -305,7 +315,7 @@ async function dispatchIsolatedJudge(pack: any, judge: { family: string; model_i
         reject(new Error(`juiz visual encerrou com ${code}: ${stderr.slice(-1000)}`))
       }
     })
-    child.stdin.end(JSON.stringify(pack))
+    child.stdin.end(prompt)
   })
   return JSON.parse(fs.readFileSync(resultFile, 'utf8'))
 }

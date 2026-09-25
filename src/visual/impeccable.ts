@@ -1,9 +1,23 @@
 import { execFile } from 'node:child_process'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
 
 export const PINNED_ENGINE_VERSION = '0.1.5'
+
+/**
+ * Binário do motor do Impeccable: IMPECCABLE_BIN, senão o cache da versão fixada que o lançador da skill baixa
+ * (~/.impeccable/bin/<versão>/). Null quando não há motor instalado.
+ */
+export function resolveImpeccableBin(version: string = PINNED_ENGINE_VERSION, env: NodeJS.ProcessEnv = process.env, home: string = os.homedir()): string | null {
+  if (env.IMPECCABLE_BIN && fs.existsSync(env.IMPECCABLE_BIN)) return env.IMPECCABLE_BIN
+  const exe = process.platform === 'win32' ? 'impeccable.exe' : 'impeccable'
+  const cached = path.join(env.IMPECCABLE_HOME || path.join(home, '.impeccable'), 'bin', version, exe)
+  return fs.existsSync(cached) ? cached : null
+}
 
 /**
  * Executa a sonda do Impeccable para verificar a versão instalada e o suporte ao modo de URL.
@@ -102,10 +116,21 @@ export function createImpeccableDetector(config: {
     urlMode?: 'ok' | 'unsupported'
     ignores?: string[]
     detectorFn?: (params: any) => Promise<any>
+    bin?: string | null
+    execFn?: (cmd: string, args: string[]) => Promise<{ stdout: string }>
 } = {}) {
   const engineVersion = config.engineVersion || PINNED_ENGINE_VERSION
-  const urlMode = config.urlMode || 'unsupported'
+  const bin = config.bin === undefined ? resolveImpeccableBin(engineVersion) : config.bin
+  // Sem modo declarado, o motor instalado decide: antes o padrão era sempre o fallback e o detector real nunca rodava
+  const urlMode = config.urlMode || (bin ? 'ok' : 'unsupported')
   const ignores = new Set(config.ignores || [])
+  const exec = config.execFn ?? ((cmd: string, args: string[]) => execFileAsync(cmd, args, { windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout: 60_000 }).catch((err: any) => {
+    // saída 2 = achados; o JSON vem no stdout do mesmo jeito
+    if (typeof err?.stdout === 'string' && err.stdout.trim().startsWith('[')) return { stdout: err.stdout }
+    throw err
+  }))
+  // o motor abre o próprio navegador por URL e largura; os temas da mesma largura reaproveitam a varredura
+  const scans = new Map<string, Promise<any[]>>()
 
   return {
     engineVersion,
@@ -150,11 +175,25 @@ export function createImpeccableDetector(config: {
         }
       }
 
+      const url = typeof params.page?.url === 'function' ? params.page.url() : params.url
+      if (!bin || !url) throw new Error('motor do Impeccable ou URL da página ausente')
+      const viewport = `${params.width || 1280}x${params.width === 390 ? 844 : 800}`
+      const key = `${url} ${viewport}`
+      if (!scans.has(key)) {
+        scans.set(key, exec(bin, ['detect', '--json', '--no-advisory', '--viewport', viewport, url]).then(({ stdout }) => {
+          const found = JSON.parse(stdout || '[]')
+          return Array.isArray(found) ? found : []
+        }))
+      }
+      const found = await scans.get(key)!
+      const issues = found
+        .map((f: any) => ({ rule: f.antipattern, category: f.category, severity: f.severity, message: `${f.name}: ${f.snippet}` }))
+        .filter((iss: any) => !ignores.has(iss.rule))
       return {
         mode: 'url',
         engine_version: engineVersion,
         url_mode: 'ok',
-        issues: [],
+        issues,
       }
     },
   }
