@@ -95,6 +95,15 @@ describe('anexos do pedido no painel', () => {
     }
   })
 
+  test('rejeita base64 malformado antes da porta de intenção', async () => {
+    const p = await panel()
+    const res = await p.request({ text: 'Analise o arquivo', attachments: [{ name: 'nota.md', data: 'SGVsbG8=!!!' }] })
+    expect(res.status).toBe(400)
+    expect(res.body.message).toMatch(/base64/i)
+    expect(missionFolders(p.repo)).toEqual([])
+    expect(p.intentCalls).toBe(0)
+  })
+
   test('C1.4 saneia nomes com travessia e separadores sem escrever fora de attachments', async () => {
     const p = await panel()
     const bytes = Buffer.from('conteúdo seguro\n')

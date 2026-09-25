@@ -41,6 +41,8 @@ export function parseAttachments(input: unknown): Attachment[] {
   return input.map((item) => {
     if (!item || typeof item.name !== 'string' || typeof item.data !== 'string') throw invalid('Anexo sem nome ou conteúdo.')
     const bytes = Buffer.from(item.data, 'base64')
+    // Buffer descarta caracteres inválidos em silêncio; só aceita o que reencoda igual.
+    if (bytes.toString('base64') !== item.data) throw invalid(`O conteúdo de "${item.name}" não é base64 válido.`)
     if (bytes.length > MAX_ATTACHMENT_BYTES) throw invalid(`O arquivo "${item.name}" passa do limite de 10 MB.`)
     const name = saneName(item.name, used)
     const ext = path.extname(name).toLowerCase()
