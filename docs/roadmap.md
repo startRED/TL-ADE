@@ -791,6 +791,7 @@ E37 **não** são recalculados agora: a medição da semana 1 do slice 1 replane
 | 9 | **Tauri (painel como app)** | painel usado diariamente por ≥1 mês e `ade serve` virando fricção |
 | 10 | **Graft** | consulta de contexto recuperado passando de 6k tokens com `rg` em repositório real |
 | 11 | **Plugin `dmmulroy/anti-slop` do oxlint, pinado por SHA** (o portão 2 de `slice-1.md` §6 entrou só com regras padrão) | ≥3 achados do Checker num mês que uma regra do plugin teria barrado |
+| 12 | **Estúdio criativo e trabalho além de software** — caixa de ferramentas criativas usada pelo Estúdio e pela Missão, pedido que entende qualquer pedido, Windows e macOS de primeira classe; partes em ordem em [plans/estudio-criativo.md](plans/estudio-criativo.md) | pedido de Erick em 2026-09-25; começa pela P0.1 e pelo ADR de escopo (P0.3) |
 
 Ordem por sinal, não por desejo: nada sobe sem o número.
 
