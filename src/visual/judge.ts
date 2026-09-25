@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { buildCodexArgs } from '../adapters/codex/argv.ts'
+import { buildAgyArgs } from '../adapters/agy/argv.ts'
 
 interface VisualEvalCriteria {
     id: 'specificity' | 'hierarchy' | 'typography' | 'color' | 'states' | 'motion'
@@ -87,6 +88,7 @@ export async function judgeVisual({
   designBrief,
   rubric,
   judge = { family: 'codex', model_id: 'gpt-5.6-terra' },
+  judges,
   round = 1,
   storyId = 'ADE-S1',
   detectorInfo = { engine_version: '0.1.5', url_mode: 'ok' },
@@ -98,6 +100,8 @@ export async function judgeVisual({
         designBrief: any
         rubric?: any
         judge?: { family: string; model_id: string }
+        // fila de juízes, o melhor primeiro; quem falha passa a vez ao próximo
+        judges?: Array<{ family: string; model_id: string; resolved?: { exe: string; prefixArgs: string[] } | null }>
         round?: number
         storyId?: string
         detectorInfo?: { engine_version: string; url_mode: 'ok' | 'unsupported' }
@@ -139,8 +143,11 @@ export async function judgeVisual({
     verdict: ('unknown' as const),
   })
 
-  if (judge.family !== 'codex' || (makerFamily && makerFamily === judge.family)) {
-    return unknown('judge-family-invalid', 'Configurar juiz Codex de família diferente da Maker')
+  // Qualquer empresa com visão julga (Codex, Claude, Gemini), nunca a mesma que escreveu a tela
+  const candidates = (judges ?? [{ ...judge, resolved: deps.resolved }])
+    .filter((j) => JUDGE_FAMILIES.includes(j.family) && j.family !== makerFamily)
+  if (candidates.length === 0) {
+    return unknown('judge-family-invalid', 'Configurar juiz de empresa diferente da que escreveu a tela')
   }
 
   // Protocolo anti-ancoragem: monta o pack estritamente sem diff nem achados do detector
@@ -157,20 +164,41 @@ export async function judgeVisual({
     rubric: rubric || { version: RUBRIC_VERSION, weights },
   }
 
+  const ids = (['specificity', 'hierarchy', 'typography', 'color', 'states', 'motion'] as VisualEvalCriteria['id'][])
+  const complete = (raw: any) => Array.isArray(raw?.criteria) && ids.every((id) => raw.criteria.some((criterion: any) => criterion?.id === id))
   // Se houver despachante injetado (ex: dublê de modelo nos testes)
   let rawResult
+  let used = candidates[0]
+  const failures: string[] = []
   if (deps.dispatchJudge) {
     rawResult = await deps.dispatchJudge(judgePack)
-  } else if (deps.resolved && deps.cwd && deps.missionDir) {
-    rawResult = await dispatchIsolatedJudge(judgePack, judge, round, deps)
+  } else if (deps.cwd && deps.missionDir) {
+    for (const candidate of candidates) {
+      if (!candidate.resolved) continue
+      try {
+        const raw = await dispatchIsolatedJudge(judgePack, candidate, round, { ...deps, resolved: candidate.resolved })
+        if (complete(raw)) {
+          rawResult = raw
+          used = candidate
+          break
+        }
+        failures.push(`${candidate.family}: resultado incompleto`)
+      } catch (err) {
+        failures.push(`${candidate.family}: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`)
+      }
+    }
+  }
+
+  if (!rawResult && failures.length > 0) {
+    return unknown('judge-unavailable', `Nenhum juiz respondeu: ${failures.join(' | ')}`)
   }
 
   if (rawResult) {
-    const ids = (['specificity', 'hierarchy', 'typography', 'color', 'states', 'motion'] as VisualEvalCriteria['id'][])
-    const rawCriteria = (rawResult.criteria as any[])
-    if (!Array.isArray(rawResult.criteria) || !ids.every((id) => rawCriteria.some((criterion) => criterion?.id === id))) {
+    judge = { family: used.family, model_id: used.model_id }
+    if (!complete(rawResult)) {
       return unknown('judge-result-invalid', 'Repetir o julgamento com VisualEval completo')
     }
+    const rawCriteria = (rawResult.criteria as any[])
     
     const criteria: VisualEvalCriteria[] = ids.map((id) => {
       const criterion = rawCriteria.find((item) => item.id === id)
@@ -273,10 +301,16 @@ export async function judgeVisual({
   }
 }
 
-/** @param pack @param judge @param round */
-async function dispatchIsolatedJudge(pack: any, judge: { family: string; model_id: string }, round: number, deps: any) {
-  const schemaPath = path.join(deps.missionDir, `visual-judge-schema-r${round}.json`)
-  const resultFile = path.join(deps.missionDir, `visual-judge-result-r${round}.json`)
+const JUDGE_FAMILIES = ['codex', 'claude', 'agy']
+
+const JUDGE_INSTRUCTIONS = [
+  'Você é o juiz visual de uma interface. Olhe as capturas reais da tela listadas em "captures" (rota, largura, tema); julgue pelas imagens, não pelo código.',
+  'Dê nota de 0 a 10 a cada critério: specificity (a tela tem identidade própria ou parece gerada por IA genérica), hierarchy, typography, color, states, motion (null se não der para ver numa imagem parada).',
+  'Liste os defeitos visíveis com severidade (critical, major, minor), onde estão na tela e a correção concreta que o desenvolvedor deve fazer. Sem defeito inventado; tela boa pode ter lista vazia.',
+  'Responda só o JSON do schema.',
+]
+
+const JUDGE_SCHEMA = (() => {
   const criterion = {
     type: 'object', additionalProperties: false, required: ['id', 'score', 'note'],
     properties: { id: { enum: ['specificity', 'hierarchy', 'typography', 'color', 'states', 'motion'] }, score: { type: ['number', 'null'], minimum: 0, maximum: 10 }, note: { type: 'string' } },
@@ -285,23 +319,20 @@ async function dispatchIsolatedJudge(pack: any, judge: { family: string; model_i
     type: 'object', additionalProperties: false, required: ['id', 'severity', 'criterion', 'where', 'fix'],
     properties: { id: { type: 'string' }, severity: { enum: ['critical', 'major', 'minor'] }, criterion: { type: 'string' }, where: { type: 'string' }, fix: { type: 'string' } },
   }
-  fs.writeFileSync(schemaPath, JSON.stringify({ type: 'object', additionalProperties: false, required: ['criteria', 'defects'], properties: { criteria: { type: 'array', minItems: 6, maxItems: 6, items: criterion }, defects: { type: 'array', items: defect } } }), 'utf8')
-  // As capturas vão anexadas como imagem: só com o caminho no texto o juiz não enxergava a tela (25/09)
-  const images = pack.captures.map((c: any) => `--image=${path.resolve(c.path)}`)
-  const args = [...buildCodexArgs({ role: 'visual_judge', cwd: deps.cwd, schemaPath, resultFile, model: judge.model_id, sandbox: 'read-only' }), ...images]
-  const prompt = [
-    'Você é o juiz visual de uma interface. As imagens anexadas são capturas reais da tela, na ordem da lista "captures" abaixo (rota, largura, tema).',
-    'Olhe as imagens, não o código. Dê nota de 0 a 10 a cada critério: specificity (a tela tem identidade própria ou parece gerada por IA genérica), hierarchy, typography, color, states, motion (null se não der para ver numa imagem parada).',
-    'Liste os defeitos visíveis com severidade (critical, major, minor), onde estão na tela e a correção concreta que o desenvolvedor deve fazer. Sem defeito inventado; tela boa pode ter lista vazia.',
-    'Responda só o JSON do schema.',
-    '',
-    JSON.stringify(pack),
-  ].join('\n')
+  return { type: 'object', additionalProperties: false, required: ['criteria', 'defects'], properties: { criteria: { type: 'array', minItems: 6, maxItems: 6, items: criterion }, defects: { type: 'array', items: defect } } }
+})()
 
-  await new Promise((resolve, reject) => {
-    const child = spawn(deps.resolved.exe, [...deps.resolved.prefixArgs, ...args], { cwd: deps.cwd, shell: false, windowsHide: true, env: { ...process.env, ...deps.env }, stdio: ['pipe', 'ignore', 'pipe'] })
+/** Roda um processo com stdin opcional; rejeita em saída diferente de 0 ou no teto de tempo. */
+function runJudgeProcess(exe: string, args: string[], opts: { cwd: string; env?: Record<string, string>; input?: string; timeoutMs: number }): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(exe, args, { cwd: opts.cwd, shell: false, windowsHide: true, env: { ...process.env, ...opts.env }, stdio: ['pipe', 'pipe', 'pipe'] })
+    let stdout = ''
     let stderr = ''
-    const timer = setTimeout(() => child.kill('SIGKILL'), 180_000)
+    const timer = setTimeout(() => child.kill('SIGKILL'), opts.timeoutMs)
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString()
+      if (stdout.length > 16_777_216) child.kill('SIGKILL')
+    })
     child.stderr.on('data', (chunk) => {
       stderr += chunk.toString()
       if (stderr.length > 1_048_576) child.kill('SIGKILL')
@@ -309,13 +340,49 @@ async function dispatchIsolatedJudge(pack: any, judge: { family: string; model_i
     child.once('error', reject)
     child.once('close', (code) => {
       clearTimeout(timer)
-      if (code === 0) {
-        resolve(undefined)
-      } else {
-        reject(new Error(`juiz visual encerrou com ${code}: ${stderr.slice(-1000)}`))
-      }
+      if (code === 0) resolve(stdout)
+      else reject(new Error(`juiz visual encerrou com ${code}: ${(stderr || stdout).slice(-1000)}`))
     })
-    child.stdin.end(prompt)
+    child.stdin.end(opts.input ?? '')
   })
-  return JSON.parse(fs.readFileSync(resultFile, 'utf8'))
+}
+
+/** Primeiro objeto JSON de um texto (resposta com cerca de código ou prosa em volta). */
+function firstJsonObject(text: string): any {
+  const first = text.indexOf('{')
+  const last = text.lastIndexOf('}')
+  if (first === -1 || last <= first) throw new Error('resposta do juiz sem JSON')
+  return JSON.parse(text.slice(first, last + 1))
+}
+
+/**
+ * Chama o juiz isolado da empresa pedida. O Codex recebe as capturas anexadas (--image); Claude e Gemini (agy) abrem
+ * os PNGs pelo caminho absoluto com a ferramenta de leitura, somente leitura. Testado com as três em 25/09.
+ */
+async function dispatchIsolatedJudge(pack: any, judge: { family: string; model_id: string }, round: number, deps: any) {
+  const shots = pack.captures.map((c: any) => path.resolve(String(c.path)))
+  const listed = { ...pack, captures: pack.captures.map((c: any, i: number) => ({ ...c, path: shots[i] })) }
+  const artifactsDir = path.dirname(shots[0])
+  if (judge.family === 'codex') {
+    const schemaPath = path.join(deps.missionDir, `visual-judge-schema-r${round}.json`)
+    const resultFile = path.join(deps.missionDir, `visual-judge-result-r${round}.json`)
+    fs.writeFileSync(schemaPath, JSON.stringify(JUDGE_SCHEMA), 'utf8')
+    // As capturas vão anexadas como imagem: só com o caminho no texto o juiz não enxergava a tela (25/09)
+    const args = [...buildCodexArgs({ role: 'visual_judge', cwd: deps.cwd, schemaPath, resultFile, model: judge.model_id, sandbox: 'read-only' }), ...shots.map((p: string) => `--image=${p}`)]
+    const prompt = [`${JUDGE_INSTRUCTIONS[0]} As imagens anexadas seguem a ordem da lista.`, ...JUDGE_INSTRUCTIONS.slice(1), '', JSON.stringify(listed)].join('\n')
+    await runJudgeProcess(deps.resolved.exe, [...deps.resolved.prefixArgs, ...args], { cwd: deps.cwd, env: deps.env, input: prompt, timeoutMs: 300_000 })
+    return JSON.parse(fs.readFileSync(resultFile, 'utf8'))
+  }
+  const prompt = [`${JUDGE_INSTRUCTIONS[0]} Abra cada PNG pelo caminho absoluto com a ferramenta de leitura antes de julgar.`, ...JUDGE_INSTRUCTIONS.slice(1), '', JSON.stringify(listed)].join('\n')
+  if (judge.family === 'claude') {
+    const args = ['-p', '--output-format', 'json', '--json-schema', JSON.stringify(JUDGE_SCHEMA), '--safe-mode', '--permission-mode', 'bypassPermissions', '--allowedTools', 'Read', '--add-dir', artifactsDir, ...(judge.model_id ? ['--model', judge.model_id] : [])]
+    const out = await runJudgeProcess(deps.resolved.exe, [...deps.resolved.prefixArgs, ...args], { cwd: deps.cwd, env: deps.env, input: prompt, timeoutMs: 300_000 })
+    const envelope = firstJsonObject(out)
+    if (envelope.is_error) throw new Error(`claude devolveu erro: ${String(envelope.result).slice(0, 300)}`)
+    return envelope.structured_output ?? firstJsonObject(String(envelope.result ?? ''))
+  }
+  const args = buildAgyArgs({ prompt, model: judge.model_id || undefined, schema: JUDGE_SCHEMA, cwd: deps.cwd, addDirs: [artifactsDir], timeout: '5m' })
+  const out = await runJudgeProcess(deps.resolved.exe, [...deps.resolved.prefixArgs, ...args], { cwd: deps.cwd, env: deps.env, timeoutMs: 360_000 })
+  const envelope = firstJsonObject(out)
+  return envelope.structured_output ?? firstJsonObject(String(envelope.response ?? ''))
 }

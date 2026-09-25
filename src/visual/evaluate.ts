@@ -38,6 +38,9 @@ export async function runFrontendQuality({
             startServe?: typeof startServe
             dispatchJudge?: (pack: any) => Promise<any>
             checkerResolved?: { exe: string; prefixArgs: string[] } | null
+            agyResolved?: { exe: string; prefixArgs: string[] } | null
+            // fila de juízes montada pelo motor (empresas com cota, a melhor primeiro)
+            visualJudges?: Array<{ family: string; model_id: string; resolved?: { exe: string; prefixArgs: string[] } | null }>
             resolved?: { exe: string; prefixArgs: string[] }
             workerEnv?: Record<string, string>
         }
@@ -159,6 +162,11 @@ export async function runFrontendQuality({
   // 3. Juiz multimodal (chamado somente após D1–D6 verdes)
   const designBrief = story.design_brief || config.design_briefs?.[story.id] || {}
   const judgeRole = visualConfig.judge || { family: 'codex', model_id: 'gpt-5.6-terra' }
+  const binaryOf = (family: string) => (family === 'codex' ? deps.checkerResolved : family === 'agy' ? deps.agyResolved : deps.resolved) ?? null
+  // juiz fixo na config manda; senão a fila do motor; sem fila, o Codex padrão
+  const judges = visualConfig.judge
+    ? [{ ...visualConfig.judge, resolved: binaryOf(visualConfig.judge.family) }]
+    : deps.visualJudges?.length ? deps.visualJudges : [{ ...judgeRole, resolved: binaryOf(judgeRole.family) ?? deps.resolved ?? null }]
 
   let evaluation
   try {
@@ -167,6 +175,7 @@ export async function runFrontendQuality({
     task: contract.task || '',
     designBrief,
     judge: judgeRole,
+    judges,
     round,
     storyId: story.id,
     detectorInfo: {

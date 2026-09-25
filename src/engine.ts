@@ -623,6 +623,28 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     return writers
   }
 
+  // Juízes visuais: uma empresa por vez na ordem da fila de revisão (a melhor com cota primeiro), nunca a que escreveu a
+  // tela; quem falhar passa a vez ao próximo. Sem planos, o revisor do contrato; sem ele, o Codex padrão do FQE.
+  const visualJudgesFor = async (writer: string) => {
+    const now = deps.now?.() ?? Date.now()
+    const cap = loaded.missionBudget.max_subscription_weekly_percent ?? 50
+    const slots: Array<{ family: string; model_id: string }> = routed
+      ? [...routed.chains.checker, ...routed.chains.fix].map((slot) => ({ family: slot.family, model_id: cliModel(slot) }))
+      : checkerRole ? [{ family: checkerRole.family as string, model_id: checkerRole.model_id as string }] : []
+    const judges: Array<{ family: string; model_id: string; resolved: { exe: string; prefixArgs: string[] } }> = []
+    const seen = new Set([writer])
+    for (const slot of slots) {
+      if (seen.has(slot.family)) continue
+      const resolved = binaryFor(slot.family)
+      if (!resolved) continue
+      const receipt = routed ? routed.receipts[slot.family as keyof typeof routed.receipts] ?? null : await deps.quotaPort.readReceipt({ family: slot.family, now })
+      if (!validateQuotaReceipt(receipt, { family: slot.family, max_percent: cap, now }).ok) continue
+      seen.add(slot.family)
+      judges.push({ ...slot, resolved })
+    }
+    return judges
+  }
+
   const redGitPort = started
     ? {
         ...wtPort,
@@ -1289,6 +1311,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     // Portão do Frontend Quality Engine (FQE) entre gates/evals e Checker
     if (contract.needs_ui && visualEvals < maxVisualEvals) {
       visualEvals++
+      const makerOfRound = ladderState.ladder[ladderState.rung].family
+      const visualJudges = await visualJudgesFor(makerOfRound)
       const fqeStepResult = await deps.step(
         {
           unit: storyId,
@@ -1300,6 +1324,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
           (deps.runFrontendQuality ?? runFrontendQuality)({
             story: {
               ...story,
+              // quem escreveu esta rodada, não o maker do contrato: o juiz tem de ser de outra empresa
+              contract: { ...contract, roles: { ...contract.roles, maker: { ...contract.roles?.maker, family: makerOfRound } } },
               worktreeDir,
               design_brief: loaded.plan?.briefing?.design_briefs?.[storyId],
             },
@@ -1308,7 +1334,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
             capabilities: deps.capabilities ?? {},
             round: (round),
             missionDir,
-            deps,
+            deps: { ...deps, visualJudges },
           }),
       )
 
