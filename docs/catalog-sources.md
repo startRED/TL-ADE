@@ -76,6 +76,27 @@ caminhos em `~/.ade/catalog-repos/.ade/config.json`; sincroniza com `ade catalog
 `helderberto/a11y-audit` (manda rodar `npx`), `helderberto/tdd` (repete a do mattpocock), `alirezarezvani/claude-skills`
 (biblioteca com scripts; fica para uma rodada própria).
 
+## 1.2 Coleções famosas na lista curada (2026-09-25, ADR 0042)
+
+Pedido de Erick: trazer as skills e plugins mais conhecidos da internet, com filtro rígido (licença livre e segura) e
+lista fixa revisada, que só muda por commit e só entra no catálogo por comando. A lista vive no repositório, em
+`docs/catalog/fontes-curadas.json`, e sincroniza com `ade catalog sync --sources docs/catalog/fontes-curadas.json`.
+Cada entrada leva `reason` (motivo) e `community_signal` (sinal da comunidade com data da medição). Esta tabela é o
+espelho legível da lista: commit abreviado e licença têm de bater com o arquivo (`tests/catalog_sources_registry.test.ts`).
+
+| Fonte | Licença | Commit | Skills escolhidas | Motivo | Sinal da comunidade | Ficou de fora e por quê |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `obra/superpowers` | MIT | `5bf4e78` | `dispatching-parallel-agents`, `finishing-a-development-branch`, `receiving-code-review`, `requesting-code-review`, `test-driven-development`, `using-git-worktrees`, `verification-before-completion`, `writing-plans` | Método de trabalho do agente (planejar, revisar, verificar antes de concluir, isolar em worktree), que casa com o ciclo Maker/Checker; LICENSE MIT na raiz do commit | 291.168 estrelas e 26.049 forks (API do GitHub, 2026-09-24) | `hooks/` e `scripts/`; meta-skills (`using-superpowers`, `diagnosing-superpowers`); as que trazem scripts (`brainstorming`, `systematic-debugging`, `writing-skills`, `executing-plans`, `subagent-driven-development`) |
+| `affaan-m/ECC` (antigo `everything-claude-code`) | MIT | `e482e57` | 26 pastas da stack TS/React/Node/Postgres: `api-design`, `architecture-decision-records`, `backend-patterns`, `coding-standards`, `context-budget`, `contract-first`, `database-migrations`, `deployment-patterns`, `design-system`, `docker-patterns`, `e2e-testing`, `error-handling`, `frontend-a11y`, `frontend-patterns`, `hexagonal-architecture`, `mcp-server-patterns`, `postgres-patterns`, `prisma-patterns`, `react-patterns`, `react-performance`, `react-testing`, `search-first`, `security-review`, `tdd-workflow`, `verification-loop`, `vite-patterns` | Recorte da stack do maior acervo de skills; LICENSE MIT na raiz do commit | 266.744 estrelas e 39.863 forks (API do GitHub, 2026-09-24) | `install.*`, `hooks/` e instaladores por CLI; pastas de skill com scripts; padrões de outras linguagens (Django, Laravel, Spring, Perl etc.) |
+| `anthropics/skills` | Apache-2.0 | `3337550` | `skill-creator` (só `SKILL.md`, `LICENSE.txt`, `agents/`, `references/`) | Formato canônico e melhor guia de autoria de skills. Sem LICENSE na raiz: licença conferida em `skills/skill-creator/LICENSE.txt` do commit | 177.965 estrelas e 21.082 forks (API do GitHub, 2026-09-24) | `scripts/` e `eval-viewer/` (Python) do `skill-creator`; `docx`/`pdf`/`pptx`/`xlsx` (proprietárias); `doc-coauthoring` (sem `LICENSE.txt` próprio); as demais declaram `license: Complete terms in LICENSE.txt`, que a checagem de licença do sync recusa |
+| `addyosmani/agent-skills` | MIT | `bcab6a1` | 18 skills: `api-and-interface-design`, `browser-testing-with-devtools`, `ci-cd-and-automation`, `code-review-and-quality`, `code-simplification`, `context-engineering`, `debugging-and-error-recovery`, `deprecation-and-migration`, `documentation-and-adrs`, `git-workflow-and-versioning`, `incremental-implementation`, `observability-and-instrumentation`, `performance-optimization`, `planning-and-task-breakdown`, `security-and-hardening`, `shipping-and-launch`, `source-driven-development`, `spec-driven-development` | Skills canônicas de engenharia, sem espelhos, que preenchem lacunas reais (API, migração, observabilidade, ship-gate, grounding em fonte); LICENSE MIT na raiz. Sai do estado "dormente até pin" da §1 | 98.863 estrelas e 10.388 forks (API do GitHub, 2026-09-24) | `hooks/` (o `SessionStart` injeta um `SKILL.md` inteiro e `simplify-ignore.sh` reescreve arquivos); `test-driven-development` e `frontend-ui-engineering` (ids já cobertos); `idea-refine` (traz script); `using-agent-skills` (meta) |
+| Skills locais de Erick (`~/.claude/skills/`) | local | — | lidas in-place, como na §1 (`trust: local`) | Pedido de olhar também o que já está no computador: as boas continuam valendo por precedência local, sem redistribuição | — | Não entram em `fontes-curadas.json`: sem upstream nem commit para pinar; o `superpowers` local passa a ter pin pela linha acima |
+
+**Ficaram de fora da lista inteira:** `openai/skills` (sem licença declarada, §1), `ComposioHQ/awesome-claude-skills`
+(sem LICENSE e com cópias das proprietárias, ADR 0019) e `vercel-labs/skills` (instalador de registry aberto, que o
+controle 1 do SkillGuard proíbe). O filtro é o mesmo para todas: licença livre conferida no commit pinado, só pastas de
+skill sem scripts nem hooks, e o SkillGuard da sincronização decide liberada ou quarentena.
+
 ## 2. Ferramentas (integradas, não sincronizadas como skill)
 
 | Fonte | Licença | Pin | Papel na ADE | Decisão |
