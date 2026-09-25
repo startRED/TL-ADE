@@ -580,7 +580,10 @@ describe('engine', () => {
       action_items: [{ id: 'F3', severity: 'high', category: 'intent_gap', problem: 'o contrato pede cinco fontes', required_action: 'decidir', target_role: 'human', evidence_refs: ['eval:E1'], location: 'src/hello.txt' }],
     })
     ;(gap.result as any).handoff.next_action = 'rework'
-    fs.writeFileSync(path.join(fixture.scenarioDir, 'checker.json'), JSON.stringify([gap, gap]))
+    // o revisor reescreve o texto a cada rodada (como o real): o critério não pode ser o texto igual
+    const reworded = JSON.parse(JSON.stringify(gap))
+    reworded.result.action_items[0].problem = 'o contrato exige cinco fontes e o arquivo tem quatro'
+    fs.writeFileSync(path.join(fixture.scenarioDir, 'checker.json'), JSON.stringify([gap, reworded]))
 
     const result = await runStory(fixture.deps, fixture.input)
     expect(result).toMatchObject({ status: 'delivered' })
