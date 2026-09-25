@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { makeRepo, removeRepo } from './helpers/git-repo.ts'
@@ -347,5 +347,25 @@ describe('prepare', () => {
     expect(repo.git(['branch', '--list', 'ade/m-velha/S1']).trim()).not.toBe('')
     const kept = repo.git(['for-each-ref', '--format=%(refname)', 'refs/ade/checkpoints/kept/m-velha/S1'])
     expect(repo.git(['show', `${kept.trim().split('\n')[0]}:meio-feito.txt`])).toContain('trabalho da parte parada')
+  })
+  // 25/09, missão real: a pasta .ade/wt/S1 sobrou de um worktree removido, sem .git e só com o atalho node_modules.
+  // O git nela respondia "main" e o preparo parava; a sobra é limpa sem mexer no destino do atalho.
+  slowTest('sobra_de_worktree_so_com_atalho_e_limpa_e_o_destino_fica', async () => {
+    const repo = makeRepo()
+    tmpDirs.push(repo.dir)
+    writeFileSync(path.join(repo.dir, 'main.txt'), 'base\n')
+    repo.git(['add', '-A'])
+    repo.git(['commit', '-m', 'commit base'])
+    const target = path.join(repo.dir, 'modulos')
+    mkdirSync(target)
+    writeFileSync(path.join(target, 'pacote.js'), 'x')
+    const wtDir = path.join(repo.dir, '.ade', 'wt', 'S1')
+    mkdirSync(wtDir, { recursive: true })
+    symlinkSync(target, path.join(wtDir, 'node_modules'), 'junction')
+
+    const res = await prepareStory({ repoDir: repo.dir, missionId: 'm-nova', storyId: 'S1' })
+    expect(res.status).toBe('ready')
+    expect(existsSync(path.join(target, 'pacote.js'))).toBe(true)
+    expect(repo.git(['-C', wtDir, 'rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('ade/m-nova/S1')
   })
 })
