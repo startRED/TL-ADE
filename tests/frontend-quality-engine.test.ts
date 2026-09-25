@@ -855,3 +855,67 @@ describe('defeitos dos portões sem repetição', () => {
     }
   })
 })
+
+// 25/09: a avaliação visual só tirava prints parados; botão que lança exceção ou chama rota 500 passava. O D7 clica e
+// preenche tudo o que é seguro e reporta o que quebrou, uma vez por erro.
+describe('D7 varredura de interação', () => {
+  const FIXTURE = `<!doctype html><html><body>
+    <h1>Painel</h1>
+    <button id="quebra">Quebrar</button>
+    <button id="salva">Salvar</button>
+    <button id="salva2">Salvar de novo</button>
+    <button id="exclui">Excluir</button>
+    <button id="envia">Enviar missão</button>
+    <input id="nome" placeholder="nome">
+    <div id="saida"></div>
+    <script>
+      quebra.onclick = () => { throw new Error('botão quebrado') }
+      salva.onclick = () => fetch('/api/salvar', { method: 'POST' })
+      salva2.onclick = () => fetch('/api/salvar', { method: 'POST' })
+      exclui.onclick = () => fetch('/api/excluir')
+      envia.onclick = () => fetch('/api/enviar')
+      nome.oninput = () => { saida.innerHTML = nome.value }
+    </script>
+  </body></html>`
+
+  test('botao_com_excecao_rota_500_e_xss_viram_defeito_e_acao_destrutiva_ou_pulada_nao_e_clicada', async () => {
+    const http = await import('node:http')
+    const hits: string[] = []
+    const server = http.createServer((req, res) => {
+      hits.push(req.url || '')
+      if (req.url === '/api/salvar') { res.writeHead(500); res.end('erro'); return }
+      if (req.url?.startsWith('/api/')) { res.writeHead(200); res.end('ok'); return }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(FIXTURE)
+    })
+    await new Promise<void>((resolve) => server.listen(4211, '127.0.0.1', resolve))
+    const { chromium } = await import('playwright')
+    const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] })
+    try {
+      const page = await browser.newPage()
+      await page.goto('http://127.0.0.1:4211/')
+      const res = await runVisualGates({ page, route: '/', config: { visual: { gates: ['D7'], crawl: { skip: 'Enviar' } } } })
+      const ids = res.defects.map((d) => `${d.id} ${d.where}`)
+      expect(res.results.D7.pass).toBe(false)
+      expect(ids).toContain('D7-page-error / [1280px] (#quebra)')
+      expect(ids).toContain('D7-xss / [1280px] (#nome)')
+      // duas ações batem na mesma rota 500: o erro chega uma vez
+      expect(res.defects.filter((d) => d.id === 'D7-network-error')).toHaveLength(1)
+      expect(res.defects.find((d) => d.id === 'D7-network-error')?.fix).toContain('/api/salvar')
+      expect(res.defects.find((d) => d.id === 'D7-xss')?.severity).toBe('critical')
+      // destrutiva padrão e crawl.skip nunca são clicadas
+      expect(hits).not.toContain('/api/excluir')
+      expect(hits).not.toContain('/api/enviar')
+      expect(page.url()).toBe('http://127.0.0.1:4211/')
+    } finally {
+      await browser.close()
+      server.close()
+    }
+  }, 60_000)
+
+  test('crawl_que_falha_por_si_registra_o_motivo_e_nao_reprova', async () => {
+    const res = await runVisualGates({ page: {}, route: '/', config: { visual: { gates: ['D7'] } } })
+    expect(res.results.D7.pass).toBe(true)
+    expect(res.artifacts.crawl.skipped).toBeTruthy()
+  })
+})
