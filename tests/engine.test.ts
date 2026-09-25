@@ -593,6 +593,38 @@ describe('engine', () => {
     expect(fs.readFileSync(path.join(fixture.repo.dir, 'src', 'hello.txt'), 'utf8')).toBe('ok v3\n')
   }, 180_000)
 
+  // 25/09, missão real de anexos: a rodada 2 foi aprovada e o commit caiu. A retomada refazia desde a rodada 1 pelo cache,
+  // a revisão da rodada 1 ficava obsoleta diante da árvore final e a parte estacionava. Agora retoma na rodada aprovada.
+  test('aprovada_com_commit_caido_retoma_na_rodada_aprovada_e_entrega', async () => {
+    const fixture = setupStoryFixture()
+    const makerFile = path.join(fixture.scenarioDir, 'maker.json')
+    const base = JSON.parse(fs.readFileSync(makerFile, 'utf8'))[0]
+    fs.writeFileSync(makerFile, JSON.stringify(['ok v1\n', 'ok v2\n'].map((c) => ({ ...base, files: { 'src/hello.txt': c } }))))
+    const changes = approvedReviewAction()
+    Object.assign(changes.result as any, {
+      verdict: 'changes_requested',
+      requested_action: 'rework',
+      action_items: [{ id: 'F1', severity: 'high', category: 'patch', problem: 'ainda falta', required_action: 'corrigir', target_role: 'maker', evidence_refs: ['eval:E1'], location: 'src/hello.txt' }],
+    })
+    ;(changes.result as any).handoff.next_action = 'rework'
+    fs.writeFileSync(path.join(fixture.scenarioDir, 'checker.json'), JSON.stringify([changes, approvedReviewAction()]))
+    let commitFails = true
+    const deps = {
+      ...fixture.deps,
+      gitPortFor: (dir: string) => {
+        const port = createGitPort({ worktreeDir: dir })
+        return { ...port, commit: async (o: any) => { if (commitFails) { commitFails = false; throw new Error('git commit saiu com 1') } return port.commit(o) } }
+      },
+    }
+    await expect(runStory(deps, fixture.input)).rejects.toThrow(/git commit/)
+
+    const second = await runStory(deps, fixture.input)
+    expect(second).toMatchObject({ status: 'delivered' })
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    expect(events.find((e) => e.kind === 'decision' && (e.data as any).decision === 'resume_approved_round')?.data).toMatchObject({ round: 2 })
+    expect(fs.readFileSync(path.join(fixture.repo.dir, 'src', 'hello.txt'), 'utf8')).toBe('ok v2\n')
+  }, 180_000)
+
   // 24/09, missão real (S2): o contrato pedia uma fonte que a validação fora do escopo recusa; o revisor aprovou o resto e
   // repetiu, rodada após rodada, o mesmo intent_gap para "human". A TL-ADE é autônoma e nenhuma rodada do maker decide
   // pelo humano ou pelo planejador: com só esse tipo de achado, a versão atual é entregue já na primeira revisão e o

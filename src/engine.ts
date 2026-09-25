@@ -854,6 +854,12 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       // os achados valem contra a árvore que a revisão viu, não contra trabalho feito depois dela e nunca revisado
       treeBeforeRound = doc.input_revision?.tree ?? treeBeforeAttempt
       await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'retry_new_round', unit: storyId, round, open_findings: openFindings.length } })
+    } else if (started && lastReview?.data?.approved && !committed && Number(lastReview.data.round) > 1) {
+      // aprovada e não entregue (o commit caiu): refazer desde a rodada 1 pelo cache esbarrava na revisão da rodada 1,
+      // obsoleta diante da árvore final, e a parte estacionava (missão real de anexos, 25/09). Retoma na rodada aprovada:
+      // maker e revisor vêm do cache e só a entrega roda de novo.
+      round = Number(lastReview.data.round)
+      await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'resume_approved_round', unit: storyId, round } })
     }
   }
 
