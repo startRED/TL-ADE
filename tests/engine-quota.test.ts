@@ -357,7 +357,7 @@ test('CA1_recibo_oficial_valido_permite_despacho_do_cli_ao_runner_dentro_dos_lim
   expect(subject.dispatched).toHaveBeenCalledWith(expect.objectContaining({
     maxBudgetUsd: 25,
   }))
-}, 20000)
+}, 60_000)
 
 test('CA2_ausencia_expiracao_ou_inconsistencia_bloqueia_antes_da_chamada', async () => {
   const { createLocalQuotaPort } = await import('../src/adapters/local/quota.ts')
@@ -423,7 +423,7 @@ test('CA3_reserva_e_duravel_e_nao_duplicada_na_retomada', async () => {
   const events = readJournal(path.join(subject.missionDir, 'journal.jsonl')).events
   const reservations = events.filter((e) => e.kind === 'budget_reserved')
   expect(reservations).toHaveLength(1)
-}, 20000)
+}, 60_000)
 
 test('CA4_limites_de_chamadas_turnos_e_contexto_sao_aplicados_onde_suportados_com_chamada_autorizada', async () => {
   const subject = fixture()

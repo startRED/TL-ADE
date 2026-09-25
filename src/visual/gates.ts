@@ -269,11 +269,18 @@ export async function runVisualGates(params: {
         const clientWidth = scroller.clientWidth
         const hasScrollOverflow = scrollWidth > clientWidth + 1
 
+        // dentro de contêiner que rola ou corta na horizontal (abas roláveis) o elemento não estoura a página
+        const clipped = (el: Element) => {
+          for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+            if (getComputedStyle(p).overflowX !== 'visible') return true
+          }
+          return false
+        }
         let overflowingElement = null
         const allElements = document.querySelectorAll('*')
         for (const el of allElements) {
           const rect = el.getBoundingClientRect()
-          if (rect.right > window.innerWidth + 1) {
+          if (rect.right > window.innerWidth + 1 && !clipped(el)) {
             overflowingElement = `${el.tagName.toLowerCase()}${el.className ? '.' + String(el.className).split(' ')[0] : ''}`
             break
           }

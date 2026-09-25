@@ -808,3 +808,24 @@ describe('v0.4a Frontend Quality Engine (FQE) Acceptance Tests', () => {
     expect(visualEval.verdict).toBe('pass')
   })
 })
+
+// 25/09, painel no celular: abas numa linha que rola de lado não estouram a página, mas o D6 contava cada aba além da
+// borda como estouro. Só conta o que sai da página sem contêiner que role ou corte na horizontal.
+describe('D6 no chromium', () => {
+  test('abas_rolaveis_passam_e_conteudo_que_estoura_a_pagina_reprova', async () => {
+    const { chromium } = await import('playwright')
+    const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] })
+    try {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
+      const tabs = '<nav style="display:flex;gap:24px;overflow-x:auto">' + Array.from({ length: 8 }, (_, i) => `<button style="flex:none;width:90px">Aba ${i}</button>`).join('') + '</nav>'
+      await page.setContent(`<body style="margin:0">${tabs}</body>`)
+      const scrolling = await runVisualGates({ page, width: 390, config: { visual: { gates: ['D6'] } } })
+      expect(scrolling.results.D6.pass).toBe(true)
+      await page.setContent('<body style="margin:0"><div style="width:600px">largo</div></body>')
+      const wide = await runVisualGates({ page, width: 390, config: { visual: { gates: ['D6'] } } })
+      expect(wide.results.D6.pass).toBe(false)
+    } finally {
+      await browser.close()
+    }
+  }, 60_000)
+})

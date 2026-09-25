@@ -193,7 +193,7 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 }
 .wordmark { font: 500 12px/1 var(--text); letter-spacing: .34em; }
 .program { display: flex; align-items: center; gap: .15rem; min-width: 0; overflow: hidden; }
-.program .sep { color: var(--sage); margin: 0 .5rem; }
+.program .sep { color: var(--ink-faint); margin: 0 .5rem; }
 .chip {
   display: inline-flex;
   align-items: center;
@@ -217,6 +217,18 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 .chip-wrap:hover .chip-x, .chip-x:focus-visible { opacity: 1; }
 
 .tabs { display: flex; gap: 2.25rem; }
+
+/* celular: marca em cima, abas numa linha própria que rola de lado sem empurrar a página */
+@media (max-width: 720px) {
+  .strip { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; height: auto; gap: 0 1rem; padding-top: .6rem; }
+  .tabs { grid-column: 1 / -1; grid-row: 2; gap: 1.5rem; overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { flex: none; padding: 1rem 0; }
+  .readouts { grid-column: 2; grid-row: 1; gap: .75rem; }
+  .wordmark { display: none; }
+  /* a aba cortada na borda esmaece: mostra que a linha rola */
+  .tabs { mask-image: linear-gradient(to right, #000 85%, transparent); }
+}
 .tab {
   position: relative;
   border: 0;
