@@ -1728,31 +1728,37 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       })
     }
 
-    let checkerDispatch
-    let checkerStepNow = checkerStepId
-    let dispatchFailure: unknown = null
-    for (;;) {
-      dispatchFailure = null
-      try {
-        checkerDispatch = await dispatchChecker(checkerStepNow)
-      } catch (err) {
-        dispatchFailure = err
-        checkerDispatch = undefined
+    // cada revisão (a primeira e a refeita por parecer inválido) passa pela fila: quem cai passa a vez ao seguinte
+    const reviewWithFallback = async (baseStep: string, packPath?: string): Promise<{ dispatch: any; stepNow: string; failure: unknown }> => {
+      let stepNow = baseStep
+      for (;;) {
+        let dispatch: any
+        let failure: unknown = null
+        try {
+          dispatch = await dispatchChecker(stepNow, packPath)
+        } catch (err) {
+          failure = err
+        }
+        const answered = !failure && (dispatch?.review_result || (fs.existsSync(checkerResultFile) && !dispatch?.is_error))
+        if (answered) return { dispatch, stepNow, failure: null }
+        const next = checkerBackups.shift()
+        const nextFn = next ? dispatcherFor(next.family) : null
+        const nextBin = next ? binaryFor(next.family) : null
+        if (!next || !nextFn || !nextBin) return { dispatch, stepNow, failure }
+        await appendCheckerTelemetry(dispatch, 'park', stepNow)
+        await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'checker_fallback', unit: storyId, round, from: checker.family, to: next.family, reason: failure instanceof Error ? failure.message.slice(0, 200) : dispatch?.envelope_error ?? 'no_review_result' } })
+        checker = { family: next.family as string, model: cliModel(next), effort: next.effort as string | null }
+        checkerDispatchFn = nextFn
+        checkerResolved = nextBin
+        stepNow = `${baseStep}:c${checker.family}`
+        fs.rmSync(checkerResultFile, { force: true })
       }
-      const answered = !dispatchFailure && (checkerDispatch?.review_result || (fs.existsSync(checkerResultFile) && !checkerDispatch?.is_error))
-      if (answered) break
-      const next = checkerBackups.shift()
-      const nextFn = next ? dispatcherFor(next.family) : null
-      const nextBin = next ? binaryFor(next.family) : null
-      if (!next || !nextFn || !nextBin) break
-      await appendCheckerTelemetry(checkerDispatch, 'park', checkerStepNow)
-      await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'checker_fallback', unit: storyId, round, from: checker.family, to: next.family, reason: dispatchFailure instanceof Error ? dispatchFailure.message.slice(0, 200) : checkerDispatch?.envelope_error ?? 'no_review_result' } })
-      checker = { family: next.family as string, model: cliModel(next), effort: next.effort as string | null }
-      checkerDispatchFn = nextFn
-      checkerResolved = nextBin
-      checkerStepNow = `${checkerStepId}:c${checker.family}`
-      fs.rmSync(checkerResultFile, { force: true })
     }
+
+    const firstReview = await reviewWithFallback(checkerStepId)
+    let checkerDispatch = firstReview.dispatch
+    const checkerStepNow = firstReview.stepNow
+    const dispatchFailure = firstReview.failure
     if (dispatchFailure) {
       const err = dispatchFailure
       const dispatchErrorReason = err instanceof AdeError ? err.code : 'checker_dispatch_failed'
@@ -1854,14 +1860,11 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         missionDir,
         stepId: `${storyId}:r${round}:review-pack-t1`,
       })
-      let retried: any = null
-      try {
-        retried = await dispatchChecker(retryStepId, retryPack.pack_path)
-      } catch {
-        // sem segunda revisão, vale a primeira (reprovada)
-      }
+      // sem segunda revisão de ninguém da fila, vale a primeira (reprovada)
+      const second = await reviewWithFallback(retryStepId, retryPack.pack_path)
+      const retried: any = second.dispatch
       if (retried?.review_result) {
-        await appendCheckerTelemetry(retried, 'rework', retryStepId)
+        await appendCheckerTelemetry(retried, 'rework', second.stepNow)
         checkerDispatch = retried
         reviewDoc = retried.review_result
         reviewApproval = isReviewApproved(reviewDoc, reviewContext)
