@@ -3,7 +3,35 @@ import os from 'node:os'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { syncCatalog, listCatalog, inspectCatalog } from '../skills/catalog.ts'
+import { AdeError } from '../journal/errors.ts'
 import { exitCodeOf } from './exit-codes.ts'
+
+/**
+ * Lê a lista de fontes de `--sources <arquivo>` (mesmo formato de `catalog.sources`). `repo` ausente ou com `~/`
+ * aponta para o clone local em `~/.ade/catalog-repos/<nome>`; caminho relativo é resolvido a partir do arquivo.
+ */
+function readSourcesFile(file: string, homeDir: string): any[] {
+  if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
+    throw new AdeError('catalog_sources_file_invalid', `Arquivo de fontes não encontrado: ${file}`, 4)
+  }
+  let raw: unknown
+  try {
+    raw = JSON.parse(fs.readFileSync(file, 'utf8'))
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err)
+    throw new AdeError('catalog_sources_file_invalid', `Arquivo de fontes com JSON inválido: ${file} (${why})`, 4)
+  }
+  const list = Array.isArray(raw) ? raw : (raw as { sources?: unknown } | null)?.sources
+  if (!Array.isArray(list)) {
+    throw new AdeError('catalog_sources_file_invalid', `Arquivo de fontes deve conter uma lista de fontes: ${file}`, 4)
+  }
+  return list.map((source) => {
+    if (!source || typeof source !== 'object' || typeof source.name !== 'string') return source
+    const repo = typeof source.repo === 'string' && source.repo.trim() ? source.repo : `~/.ade/catalog-repos/${source.name}`
+    const resolved = /^~[\\/]/.test(repo) ? path.join(homeDir, repo.slice(2)) : path.resolve(path.dirname(file), repo)
+    return { ...source, repo: resolved }
+  })
+}
 
 /**
  * Ponto de entrada do comando `ade catalog`.
@@ -13,12 +41,14 @@ export async function main(argv: string[], deps: {
     stderr?: { write: (s: string) => void }
     repoDir?: string
     catalogDir?: string
+    homeDir?: string
 } = {}): Promise<number> {
   const stdout = deps.stdout ?? process.stdout
   const stderr = deps.stderr ?? process.stderr
 
   const repoDir = deps.repoDir || process.cwd()
-  const defaultCatalogDir = path.join(os.homedir(), '.ade', 'catalog')
+  const homeDir = deps.homeDir || os.homedir()
+  const defaultCatalogDir = path.join(homeDir, '.ade', 'catalog')
   const catalogDir = deps.catalogDir || defaultCatalogDir
 
   const [subcommand, ...subcommandArgv] = argv
@@ -37,13 +67,14 @@ export async function main(argv: string[], deps: {
         options: {
           'rebuild-index': { type: 'boolean' },
           'catalog-dir': { type: 'string' },
+          sources: { type: 'string' },
         },
       })
 
       const targetCatalogDir = parsed.values['catalog-dir'] || catalogDir
 
       // Lê catalog.sources de .ade/config.json se existir
-      let config = { sources: [] }
+      let config: { sources: any[]; [key: string]: any } = { sources: [] }
       const configPath = path.join(repoDir, '.ade', 'config.json')
       if (fs.existsSync(configPath)) {
         try {
@@ -52,6 +83,11 @@ export async function main(argv: string[], deps: {
         } catch {
           // ignore
         }
+      }
+
+      // `--sources` substitui só a lista de fontes; o resto de `catalog` (trust_default) segue o do projeto
+      if (parsed.values.sources) {
+        config = { ...config, sources: readSourcesFile(path.resolve(repoDir, parsed.values.sources), homeDir) }
       }
 
       const result = await syncCatalog({

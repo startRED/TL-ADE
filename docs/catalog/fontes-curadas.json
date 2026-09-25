@@ -1,0 +1,102 @@
+[
+  {
+    "name": "superpowers",
+    "url": "https://github.com/obra/superpowers",
+    "repo": "~/.ade/catalog-repos/superpowers",
+    "commit": "5bf4e78011075bcfc0dc295f0724994cd123ee71",
+    "license": "MIT",
+    "paths": [
+      "skills/dispatching-parallel-agents/**",
+      "skills/finishing-a-development-branch/**",
+      "skills/receiving-code-review/**",
+      "skills/requesting-code-review/**",
+      "skills/test-driven-development/**",
+      "skills/using-git-worktrees/**",
+      "skills/verification-before-completion/**",
+      "skills/writing-plans/**"
+    ],
+    "reason": "Método de trabalho do agente (planejar, revisar, verificar antes de concluir, isolar em worktree) que casa com o ciclo Maker/Checker; LICENSE MIT na raiz do commit. Fora: hooks/, scripts/, meta-skills (using-superpowers, diagnosing-superpowers) e as que trazem scripts (brainstorming, systematic-debugging, writing-skills, executing-plans, subagent-driven-development)",
+    "community_signal": "291.168 estrelas e 26.049 forks no GitHub (medido em 2026-09-24 pela API do GitHub)"
+  },
+  {
+    "name": "everything-claude-code",
+    "url": "https://github.com/affaan-m/ECC",
+    "repo": "~/.ade/catalog-repos/everything-claude-code",
+    "commit": "e482e579415fde18357cafce70f177ae19fd7f03",
+    "license": "MIT",
+    "paths": [
+      "skills/api-design/**",
+      "skills/architecture-decision-records/**",
+      "skills/backend-patterns/**",
+      "skills/coding-standards/**",
+      "skills/context-budget/**",
+      "skills/contract-first/**",
+      "skills/database-migrations/**",
+      "skills/deployment-patterns/**",
+      "skills/design-system/**",
+      "skills/docker-patterns/**",
+      "skills/e2e-testing/**",
+      "skills/error-handling/**",
+      "skills/frontend-a11y/**",
+      "skills/frontend-patterns/**",
+      "skills/hexagonal-architecture/**",
+      "skills/mcp-server-patterns/**",
+      "skills/postgres-patterns/**",
+      "skills/prisma-patterns/**",
+      "skills/react-patterns/**",
+      "skills/react-performance/**",
+      "skills/react-testing/**",
+      "skills/search-first/**",
+      "skills/security-review/**",
+      "skills/tdd-workflow/**",
+      "skills/verification-loop/**",
+      "skills/vite-patterns/**"
+    ],
+    "reason": "Recorte da stack TS/React/Node/Postgres do maior acervo de skills (repositório renomeado de everything-claude-code para ECC); LICENSE MIT na raiz do commit. Só pastas de skill sem scripts; nunca install.*, hooks/ nem instaladores por CLI; padrões de outras linguagens ficam de fora",
+    "community_signal": "266.744 estrelas e 39.863 forks no GitHub (medido em 2026-09-24 pela API do GitHub)"
+  },
+  {
+    "name": "anthropics-skills",
+    "url": "https://github.com/anthropics/skills",
+    "repo": "~/.ade/catalog-repos/anthropics-skills",
+    "commit": "33375500bcea98d610eb30ce10ac4e59b89c390d",
+    "license": "Apache-2.0",
+    "paths": [
+      "skills/skill-creator/SKILL.md",
+      "skills/skill-creator/LICENSE.txt",
+      "skills/skill-creator/agents/*",
+      "skills/skill-creator/references/*"
+    ],
+    "reason": "Formato canônico e melhor guia de autoria de skills (skill-creator). Sem LICENSE na raiz: licença conferida no skills/skill-creator/LICENSE.txt do commit (Apache-2.0), e o SKILL.md não declara license no frontmatter, então vale a da fonte. Só SKILL.md, LICENSE.txt, agents/ e references/: scripts/ e eval-viewer/ (Python) ficam fora. docx/pdf/pptx/xlsx são proprietárias; doc-coauthoring fica fora por não ter LICENSE.txt próprio; as demais declaram \"license: Complete terms in LICENSE.txt\" no frontmatter, que a checagem de licença do sync recusa",
+    "community_signal": "177.965 estrelas e 21.082 forks no GitHub (medido em 2026-09-24 pela API do GitHub)"
+  },
+  {
+    "name": "addyosmani-agent-skills",
+    "url": "https://github.com/addyosmani/agent-skills",
+    "repo": "~/.ade/catalog-repos/addyosmani-agent-skills",
+    "commit": "bcab6a1b8503100e8618c3b4e32cc78de43de769",
+    "license": "MIT",
+    "paths": [
+      "skills/api-and-interface-design/**",
+      "skills/browser-testing-with-devtools/**",
+      "skills/ci-cd-and-automation/**",
+      "skills/code-review-and-quality/**",
+      "skills/code-simplification/**",
+      "skills/context-engineering/**",
+      "skills/debugging-and-error-recovery/**",
+      "skills/deprecation-and-migration/**",
+      "skills/documentation-and-adrs/**",
+      "skills/git-workflow-and-versioning/**",
+      "skills/incremental-implementation/**",
+      "skills/observability-and-instrumentation/**",
+      "skills/performance-optimization/**",
+      "skills/planning-and-task-breakdown/**",
+      "skills/security-and-hardening/**",
+      "skills/shipping-and-launch/**",
+      "skills/source-driven-development/**",
+      "skills/spec-driven-development/**"
+    ],
+    "reason": "Skills canônicas de engenharia sem espelhos, que preenchem lacunas reais (API, migração, observabilidade, ship-gate, grounding em fonte); LICENSE MIT na raiz do commit. Nunca hooks/ (SessionStart injeta SKILL.md e simplify-ignore.sh reescreve arquivos); fora test-driven-development e frontend-ui-engineering (ids já cobertos), idea-refine (traz script) e using-agent-skills (meta)",
+    "community_signal": "98.863 estrelas e 10.388 forks no GitHub (medido em 2026-09-24 pela API do GitHub)"
+  }
+]
