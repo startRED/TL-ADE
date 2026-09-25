@@ -769,7 +769,9 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       previousFindings = (doc.action_items ?? doc.findings ?? []).map(normalizeFinding)
       previousFindingsDigest = computeFindingsDigest(previousFindings)
       openFindings = blockingReviewFindings({ findings: doc.action_items ?? doc.findings ?? [], request: { prior_findings: [] } as any, round: 1 })
-      treeBeforeRound = treeBeforeAttempt = await wtPort.worktreeTree()
+      treeBeforeAttempt = await wtPort.worktreeTree()
+      // os achados valem contra a árvore que a revisão viu, não contra trabalho feito depois dela e nunca revisado
+      treeBeforeRound = doc.input_revision?.tree ?? treeBeforeAttempt
       await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'retry_new_round', unit: storyId, round, open_findings: openFindings.length } })
     }
   }
@@ -1094,9 +1096,14 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     filesTouched = changedPaths.length
 
     // Na primeira tentativa o diff da contenção é o da própria chamada; depois, compara a árvore da tentativa.
+    // Árvore que nenhuma revisão viu ainda (trabalho de rodada interrompida antes da revisão) conta como mudança: sem isso
+    // o modelo que não tinha mais nada a fazer estacionava a parte sem a árvore nunca ser revisada (S2 da missão real).
+    const lastReviewedTree = readEvents().filter((e) => e.kind === 'review_result' && (e.unit ?? e.data?.unit) === storyId)
+      .map((e) => e.data?.result?.input_revision?.tree).filter(Boolean).at(-1)
+    const unreviewed = round > 1 && typeof lastReviewedTree === 'string' && tree !== lastReviewedTree && changedPaths.length > 0
     const makerOutcome = classifyMakerOutcome({
       subtype: dispatch?.subtype,
-      changed: tag === 'r1' ? changedPaths.length > 0 : tree !== treeBeforeAttempt,
+      changed: tag === 'r1' ? changedPaths.length > 0 : tree !== treeBeforeAttempt || unreviewed,
       resultText: dispatch?.result_text,
     })
     if (makerOutcome.kind !== 'ok') {

@@ -621,6 +621,37 @@ describe('engine', () => {
     expect(events.some((e) => e.kind === 'decision' && (e.data as any).decision === 'retry_new_round')).toBe(true)
   }, 180_000)
 
+  // 24/09, missão real (S2, r9): o trabalho de uma rodada interrompida antes da revisão ficou na árvore; na rodada nova o
+  // modelo não mudou mais nada e o motor estacionou, sem nunca revisar aquela árvore. Sem mudança, mas com árvore ainda
+  // não revisada, a parte segue para o verde e a revisão.
+  test('sem_mudanca_com_arvore_ainda_nao_revisada_segue_para_revisao', async () => {
+    const fixture = setupStoryFixture()
+    const makerFile = path.join(fixture.scenarioDir, 'maker.json')
+    const base = JSON.parse(fs.readFileSync(makerFile, 'utf8'))[0]
+    fs.writeFileSync(makerFile, JSON.stringify(['ok v1\n', 'ok v2\n', 'ok v2\n'].map((c) => ({ ...base, files: { 'src/hello.txt': c } }))))
+    const changes = approvedReviewAction()
+    Object.assign(changes.result as any, {
+      verdict: 'changes_requested',
+      requested_action: 'rework',
+      action_items: [{ id: 'F1', severity: 'high', category: 'patch', problem: 'ainda falta', required_action: 'corrigir', target_role: 'maker', evidence_refs: ['eval:E1'], location: 'src/hello.txt' }],
+    })
+    ;(changes.result as any).handoff.next_action = 'rework'
+    fs.writeFileSync(path.join(fixture.scenarioDir, 'checker.json'), JSON.stringify([changes, approvedReviewAction()]))
+    const original = fixture.deps.createEvalRunner
+    let greens = 0
+    fixture.deps.createEvalRunner = (opts: any) => {
+      const runner = original(opts)
+      return { ...runner, runEval: async (args: any) => {
+        if (args.phase === 'green' && ++greens === 2) throw new Error('queda antes da revisão da r2')
+        return runner.runEval(args)
+      } }
+    }
+
+    await expect(runStory(fixture.deps, fixture.input)).rejects.toThrow('queda antes da revisão')
+    const result = await runStory(fixture.deps, fixture.input)
+    expect(result).toMatchObject({ status: 'delivered' })
+  }, 180_000)
+
   // CA2: Dado um contrato com roles.maker.family 'codex', quando runStory roda, então
   // lança AdeError com code 'family_without_canary' e exit 4, e o journal não tem nenhum
   // step_intent com step_id terminando em ':maker'.
