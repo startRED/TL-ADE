@@ -582,7 +582,8 @@ export function loadApprovedSkills({ catalogDir, approvedSkills }: { catalogDir:
     skills.push({
       ...entry,
       name: entry.name || entry.id,
-      source: `${entry.source}@${entry.commit}`,
+      // fonte local não tem commit: a telemetria a registra como 'local' (E59)
+      source: entry.commit === 'local' ? 'local' : `${entry.source}@${entry.commit}`,
       content: parsed.body,
       references,
       domain: entry.domains?.[0],

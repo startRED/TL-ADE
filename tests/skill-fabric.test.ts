@@ -733,4 +733,7 @@ test('fonte_local_entra_sem_scripts_com_confianca_local_e_precedencia', async ()
   expect(entries[0]).toMatchObject({ id: 'impeccable', source: 'local', trust: 'local', commit: 'local', has_scripts: false })
   expect(entries[1]).toMatchObject({ source: 'local', trust: 'local' })
   expect(fs.existsSync(path.join(catalogDir, 'sources', 'local@local', 'impeccable', 'scripts'))).toBe(false)
+  // a telemetria recusava a origem "local@local" e derrubava a missão depois do maker (25/09); a origem é "local"
+  const { loadApprovedSkills } = await import('../src/skills/catalog.ts')
+  expect(loadApprovedSkills({ catalogDir, approvedSkills: ['impeccable'] }).skills[0].source).toBe('local')
 })
