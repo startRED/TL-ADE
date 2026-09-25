@@ -47,8 +47,7 @@ export function buildAgyArgs(opts: {
   }
 
   if (schema) {
-    const schemaStr = typeof schema === 'string' ? schema : JSON.stringify(schema)
-    args.push('--json-schema', schemaStr)
+    args.push('--json-schema', JSON.stringify(goRegexSafe(typeof schema === 'string' ? JSON.parse(schema) : schema)))
   }
 
   if (timeout) {
@@ -56,4 +55,19 @@ export function buildAgyArgs(opts: {
   }
 
   return args
+}
+
+/** Olhar em volta e referência de volta: o regexp do Go (RE2), que o agy usa para validar o schema, recusa. */
+const NOT_RE2 = /\(\?<?[=!]|\\[1-9]/
+
+/**
+ * Cópia do schema sem os `pattern` que o RE2 não entende: o agy recusava o schema inteiro ("invalid or unsupported
+ * Perl syntax: (?!") e a parte parava (25/09, missão real). O motor continua validando a resposta contra o original.
+ */
+export function goRegexSafe(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(goRegexSafe)
+  if (!node || typeof node !== 'object') return node
+  return Object.fromEntries(Object.entries(node)
+    .filter(([key, value]) => !(key === 'pattern' && typeof value === 'string' && NOT_RE2.test(value)))
+    .map(([key, value]) => [key, key === 'properties' || key === 'definitions' ? Object.fromEntries(Object.entries(value as object).map(([k, v]) => [k, goRegexSafe(v)])) : goRegexSafe(value)]))
 }
