@@ -95,7 +95,7 @@ const isDone = (s: string) => /committed|delivered|done|approved|pronta/.test(s)
 const isLive = (s: string) => /in_progress|running/.test(s)
 const isStopped = (s: string) => /failed|blocked|rejected|awaiting_operator/.test(s)
 type Mark = 'ok' | 'fail' | 'live'
-const markOf = (state: string): Mark => (state === 'running' ? 'live' : /fail|error|refused/.test(state) ? 'fail' : 'ok')
+const markOf = (state: string): Mark => (state === 'running' ? 'live' : /fail|error|refused|not_red/.test(state) ? 'fail' : 'ok')
 function MarkIcon({ mark }: { mark: Mark }) {
   if (mark === 'live') return <span className="pulse running" aria-hidden="true" />
   return mark === 'fail' ? <X size={13} weight="bold" aria-hidden="true" /> : <Check size={13} weight="bold" aria-hidden="true" />
@@ -106,7 +106,7 @@ function cellSentence(role: StaffKey, steps: Step[]): string {
   const last = steps[steps.length - 1]
   const mark = markOf(last.state)
   if (role === 'escreve') return mark === 'live' ? 'escrevendo' : mark === 'fail' ? 'falhou ao escrever' : steps.length > 1 ? `escreveu ${steps.length} vezes` : 'escreveu'
-  if (role === 'prova') return mark === 'live' ? 'rodando a prova' : mark === 'fail' ? 'prova falhou' : /:green:/.test(last.name) ? 'prova passou' : /:proof$/.test(last.name) ? 'provas escritas' : 'prova falhou antes do código'
+  if (role === 'prova') return mark === 'live' ? 'rodando a prova' : last.state === 'red_not_red' ? 'prova não falhou antes do código' : mark === 'fail' ? 'prova falhou' : /:green:/.test(last.name) ? 'prova passou' : /:proof$/.test(last.name) ? 'provas escritas' : 'prova falhou antes do código'
   if (role === 'revisa') return mark === 'live' ? 'revisando' : mark === 'fail' ? 'pediu correção' : 'revisou'
   return mark === 'live' ? 'trabalhando' : mark === 'fail' ? 'parou' : /deliver|commit/.test(last.name) ? 'entregou' : 'preparou'
 }

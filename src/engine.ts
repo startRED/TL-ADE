@@ -692,7 +692,13 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   // Eval vermelho. Sem prova que falhe antes do código (pedido do painel traz critérios, não testes), a etapa de prova
   // escreve os testes dos critérios e o vermelho roda de novo sobre eles (ADR 0036). Retomada já tem as provas na árvore.
   const redIsValid = async (tree: string) => {
-    for (const evalDef of story.evals) {
+    // prova genérica (a suíte inteira) depois da etapa de provas roda só os testes escritos: a suíte toda do painel passou
+    // dos 600 s sob carga, virou "environment" e estacionou a parte (missão real de anexos, 25/09)
+    const proofFiles: string[] = wholeSuite
+      ? ([...readEvents()].reverse().find((e) => e.kind === 'decision' && e.data?.decision === 'proof_written' && (e.unit ?? e.data?.unit) === storyId)?.data?.files ?? [])
+      : []
+    for (const def of story.evals) {
+      const evalDef = proofFiles.length > 0 ? { ...def, id: `${def.id}-prova`, argv: [...def.argv, ...proofFiles] } : def
       const evalRecord = await runRedEval({ eval: evalDef, phase: 'red', tree, unit: storyId })
       if (evalRecord.verdict !== 'red' && evalRecord.verdict !== 'red_valid') return false
     }
@@ -716,7 +722,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     && (e.evidence ?? []).every((ev: string) => ev === 'package.json'))
   // "ainda sem provas escritas", não "parte não começou": retomada antes da etapa de provas também precisa dela (S3)
   const proofDone = readEvents().some((e) => e.kind === 'decision' && e.data?.decision === 'proof_written' && (e.unit ?? e.data?.unit) === storyId)
-  let redValid = (await redIsValid(treeBefore)) && !(wholeSuite && !proofDone)
+  // suíte inteira antes das provas não prova nada: nem roda (eram minutos descartados a cada parte)
+  let redValid = !(wholeSuite && !proofDone) && (await redIsValid(treeBefore))
   if (!redValid && !proofDone) {
     // cada nova tentativa da parte e cada modelo da cadeia têm passo próprio; modelo que cai com erro passa a vez
     const retries = readEvents().filter((e) => e.kind === 'decision' && e.data?.decision === 'unit_retry' && (e.unit ?? e.data?.unit) === storyId).length

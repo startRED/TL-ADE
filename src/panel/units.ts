@@ -59,7 +59,11 @@ function stepsOf(events: any[], unit: string): UnitStep[] {
     .filter((ev) => ev.kind === 'step_intent' && unitOf(ev) === unit)
     .map((ev) => {
       const result = results.get(ev.step_id)
-      return { name: ev.step_id, state: result?.status ?? 'running', at: result?.at ?? ev.at }
+      // vermelho que não falhou (ou nem rodou) é o passo que estaciona a parte: com "ok" a tela mostrava "prova falhou
+      // antes do código" com um visto enquanto o cartão dizia o contrário
+      const r = result?.data?.result ?? result?.result
+      const notRed = r?.phase === 'red' && typeof r.verdict === 'string' && !r.verdict.startsWith('red')
+      return { name: ev.step_id, state: notRed ? 'red_not_red' : result?.status ?? 'running', at: result?.at ?? ev.at }
     })
 }
 

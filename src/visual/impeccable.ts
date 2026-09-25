@@ -24,6 +24,8 @@ export function resolveImpeccableBin(version: string = PINNED_ENGINE_VERSION, en
  */
 export async function probeImpeccable(options: {
     bin?: string | null
+    /** Binário do cache da versão fixada; padrão: o que resolveImpeccableBin acha (nenhum quando exec é dublê). */
+    cachedBin?: string | null
     expectedVersion?: string
     execFn?: (cmd: string, args: string[]) => Promise<{ stdout: string; stderr?: string; exitCode?: number }>
 } = {}): Promise<{
@@ -33,8 +35,12 @@ export async function probeImpeccable(options: {
     url_mode: 'ok' | 'unsupported'
     error?: string
 }> {
-  const bin = options.bin || process.env.IMPECCABLE_BIN || 'impeccable'
   const expected = options.expectedVersion || PINNED_ENGINE_VERSION
+  // O cache do lançador guarda o motor em ~/.impeccable/bin/<versão do motor>/; o --version desse binário é o do
+  // pacote da CLI (4.0.0), não o do motor. Sem isto a sonda procurava "impeccable" no PATH, achava nada e o FQE
+  // inteiro caía em modo degradado (missão real de anexos, 25/09).
+  const cached = options.bin || process.env.IMPECCABLE_BIN ? null : options.cachedBin !== undefined ? options.cachedBin : options.execFn ? null : resolveImpeccableBin(expected)
+  const bin = options.bin || process.env.IMPECCABLE_BIN || cached || 'impeccable'
   const exec =
     options.execFn ||
     (async (cmd, args) => {
@@ -64,7 +70,7 @@ export async function probeImpeccable(options: {
     }
 
     const verMatch = (verRes.stdout || '').match(/(\d+\.\d+\.\d+)/)
-    const detectedVersion = verMatch ? verMatch[1] : verRes.stdout.trim()
+    const detectedVersion = cached ? expected : verMatch ? verMatch[1] : verRes.stdout.trim()
     const versionMatch = detectedVersion === expected
 
     if (!versionMatch) {
@@ -82,7 +88,8 @@ export async function probeImpeccable(options: {
     try {
       const urlProbeRes = await exec(bin, ['detect', '--json', 'http://127.0.0.1:0/probe'])
       // Se aceitou o argumento de URL sem erro operacional de sintaxe (exit code 0 ou 2 de achados)
-      if (urlProbeRes.exitCode === 0 || urlProbeRes.exitCode === 2) {
+      // erro de navegação (a porta 0 da sonda é recusada: net::ERR_UNSAFE_PORT) prova que o motor aceitou o endereço
+      if (urlProbeRes.exitCode === 0 || urlProbeRes.exitCode === 2 || /net::ERR_|ECONNREFUSED/.test(`${urlProbeRes.stderr ?? ''}${urlProbeRes.stdout ?? ''}`)) {
         urlMode = 'ok'
       } else if (urlProbeRes.stderr && /invalid|unsupported|protocol/i.test(urlProbeRes.stderr)) {
         urlMode = 'unsupported'

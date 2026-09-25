@@ -11,7 +11,7 @@ import { resolveBinary } from '../runner/resolve-binary.ts'
 import { validate } from '../schema/index.ts'
 import { diagnoseDocs } from '../docs/projection.ts'
 import { exitCodeOf } from './exit-codes.ts'
-import { probeImpeccable, PINNED_ENGINE_VERSION } from '../visual/impeccable.ts'
+import { probeImpeccable, PINNED_ENGINE_VERSION, resolveImpeccableBin } from '../visual/impeccable.ts'
 import { checkNativeSqlite } from '../panel/sqlite-index.ts'
 import { readJournal } from '../journal/journal.ts'
 import { auditHarness, evaluateDefaultPruning } from '../telemetry/harness.ts'
@@ -288,6 +288,8 @@ export async function runDoctor(opts: {
     const probeImpeccableFn = opts.probeImpeccableImpl ?? probeImpeccable
     const impeccableRes = await probeImpeccableFn({
       bin: opts.impeccableBin,
+      // o motor do cache fica na casa que o doctor sonda (a de teste não tem; a real tem ~/.impeccable/bin/<versão>)
+      cachedBin: opts.impeccableExecFn ? null : resolveImpeccableBin(opts.expectedEngineVersion ?? PINNED_ENGINE_VERSION, process.env, homeDir),
       expectedVersion: opts.expectedEngineVersion ?? PINNED_ENGINE_VERSION,
       execFn: opts.impeccableExecFn,
     })

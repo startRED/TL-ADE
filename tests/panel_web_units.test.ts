@@ -98,6 +98,7 @@ async function fixture() {
   })
   await journal.append({ kind: 'story_done', unit: 'U1', data: { unit: 'U1', status: 'delivered', commit: head } })
   await journal.append({ kind: 'story_started', unit: 'U2', data: { unit: 'U2', base_before: head } })
+  await step('U2', 'eval:E1:red:t2', 'eval_run', { status: 'ok', result: { eval_id: 'E1', phase: 'red', verdict: 'downgraded_additive' } })
   await step('U2', 'U2:r1:maker', 'model_call')
   await journal.close()
   return { repoDir: repo.dir, missionDir, base, head }
@@ -131,7 +132,9 @@ describe('painel: partes com passos, diff, provas e parecer', () => {
       ['eval:E1:green:t1', 'ok'],
       ['eval:E2:green:t1', 'ok'],
     ])
-    expect(res.body[1].steps).toEqual([{ name: 'U2:r1:maker', state: 'running', at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) }])
+    // vermelho que não falhou sai como tal, não como passo ok (missão real de anexos, 25/09)
+    expect(res.body[1].steps.map((s: any) => [s.name, s.state])).toEqual([['eval:E1:red:t2', 'red_not_red'], ['U2:r1:maker', 'running']])
+    expect(res.body[1].steps[1].at).toMatch(/^\d{4}-\d{2}-\d{2}T/)
   }, 120_000)
 
   test('atividade_completa_em_frases_e_so_o_novo_depois_de_since', async () => {

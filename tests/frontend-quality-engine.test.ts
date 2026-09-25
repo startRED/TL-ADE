@@ -700,6 +700,16 @@ describe('v0.4a Frontend Quality Engine (FQE) Acceptance Tests', () => {
     })
     expect(probeBad.version_match).toBe(false)
 
+    // 25/09, missão real: o motor fica em ~/.impeccable/bin/0.1.5/ e responde --version 4.0.0 (versão do pacote da CLI).
+    // A sonda procurava "impeccable" no PATH e o FQE caía em degradado; o binário do cache da versão fixada vale pela pasta.
+    const cachedExec = vi.fn().mockImplementation(async (_bin: string, args: string[]) => (args.includes('--version') ? { stdout: '4.0.0', exitCode: 0 } : { stdout: '[]', exitCode: 0 }))
+    const probeCached = await probeImpeccable({ cachedBin: '/home/.impeccable/bin/0.1.5/impeccable.exe', execFn: cachedExec })
+    expect(probeCached).toMatchObject({ ok: true, engine_version: PINNED_ENGINE_VERSION, version_match: true, url_mode: 'ok' })
+    expect(cachedExec.mock.calls[0][0]).toBe('/home/.impeccable/bin/0.1.5/impeccable.exe')
+    // a porta 0 da sonda é recusada pelo navegador do motor: isso prova que o endereço foi aceito
+    const unsafePort = vi.fn().mockImplementation(async (_bin: string, args: string[]) => (args.includes('--version') ? { stdout: '4.0.0', exitCode: 0 } : { stdout: '[]', stderr: 'Error: net::ERR_UNSAFE_PORT at http://127.0.0.1:0/probe', exitCode: 1 }))
+    expect((await probeImpeccable({ cachedBin: '/c/0.1.5/impeccable.exe', execFn: unsafePort })).url_mode).toBe('ok')
+
     // Doctor falha fechado com versão divergente
     const mockDoctorProbe = vi.fn().mockResolvedValue(probeBad)
     await expect(

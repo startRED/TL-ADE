@@ -560,6 +560,10 @@ describe('engine', () => {
     expect(result).toMatchObject({ status: 'delivered' })
     const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
     expect(events.some((e) => e.kind === 'decision' && (e.data as any).decision === 'proof_written')).toBe(true)
+    // 25/09, missão real de anexos: a suíte inteira no vermelho passou dos 600 s e estacionou a parte. Antes das provas
+    // ela nem roda; depois, o vermelho roda só os testes escritos.
+    const reds = events.filter((e) => (e.data as any)?.result?.phase === 'red').map((e) => (e.data as any).result.argv)
+    expect(reds).toEqual([['node', 'tests/check.mjs', 'tests/proof.txt']])
   }, 120_000)
 
   // 24/09, missão real (S2): depois de a correção esgotar, a nova tentativa refazia as rodadas antigas pelo cache sobre a
