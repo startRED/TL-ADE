@@ -112,14 +112,35 @@ function claudeProbe(): Promise<string> {
 }
 
 /**
+ * Chamada mínima do codex que grava sessão (sem --ephemeral): o `exec --json` não devolve a cota, só o arquivo da
+ * sessão em ~/.codex/sessions traz o rate_limits. As chamadas do motor são efêmeras e não gravam nada, então sem esta
+ * sonda a leitura ficava parada na última sessão manual (81% de dois dias antes contra 26% reais, 25/09).
+ */
+function codexProbe(): Promise<void> {
+  const { exe, prefixArgs } = resolveBinary('codex')
+  const args = [...prefixArgs, 'exec', '-', '--json', '--color', 'never', '--sandbox', 'read-only', '--skip-git-repo-check', '-c', 'model_reasoning_effort="low"', '-c', 'windows.sandbox=unelevated', '-C', os.tmpdir()]
+  return new Promise((resolve, reject) => {
+    const child = spawn(exe, args, { shell: false, stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true })
+    const timer = setTimeout(() => child.kill(), 120_000)
+    child.once('error', (err) => { clearTimeout(timer); reject(err) })
+    child.once('exit', () => { clearTimeout(timer); resolve() })
+    child.stdin.end('Responda só: ok')
+  })
+}
+
+/** Leitura do Codex mais velha que isto dispara a sonda antes de gravar o recibo. */
+export const CODEX_READING_MAX_AGE_MS = 30 * 60_000
+
+/**
  * Lê a cota oficial do Claude, do Codex e do Google (agy) e grava um recibo por família em ~/.ade/quota-<família>.json.
  * Família sem leitura fica sem recibo (o motor então não gasta aquele plano às cegas). Devolve os recibos gravados.
  */
-export async function refreshQuotaReceipts({ home = os.homedir(), now = Date.now(), readClaude = claudeProbe, readCodex = readCodexRateLimit, readAgy = agyProbe }: {
+export async function refreshQuotaReceipts({ home = os.homedir(), now = Date.now(), readClaude = claudeProbe, readCodex = readCodexRateLimit, probeCodex = codexProbe, readAgy = agyProbe }: {
   home?: string
   now?: number
   readClaude?: () => Promise<string>
   readCodex?: (home: string) => ReturnType<typeof readCodexRateLimit>
+  probeCodex?: () => Promise<void>
   readAgy?: () => Promise<string>
 } = {}): Promise<QuotaReceipt[]> {
   const dir = path.join(home, '.ade')
@@ -131,8 +152,13 @@ export async function refreshQuotaReceipts({ home = os.homedir(), now = Date.now
   }
   const claude = parseClaudeRateLimit(await readClaude().catch(() => ''))
   if (claude) write({ source: 'official', family: 'claude', used_percent: claude.seven_day.used_percent, reserved_percent: 0, observed_at: new Date(now).toISOString(), weekly_reset_at: claude.seven_day.resets_at, five_hour: claude.five_hour })
-  const codex = readCodex(home)
-  if (codex) write({ source: 'official', family: 'codex', used_percent: codex.seven_day.used_percent, reserved_percent: 0, observed_at: codex.observed_at, weekly_reset_at: codex.seven_day.resets_at })
+  let codex = readCodex(home)
+  if (!codex || now - Date.parse(codex.observed_at) > CODEX_READING_MAX_AGE_MS) {
+    await probeCodex().catch(() => undefined)
+    codex = readCodex(home) ?? codex
+  }
+  // leitura que continua velha depois da sonda não vira recibo oficial: o motor não decide com o número de outra semana
+  if (codex && now - Date.parse(codex.observed_at) <= CODEX_READING_MAX_AGE_MS) write({ source: 'official', family: 'codex', used_percent: codex.seven_day.used_percent, reserved_percent: 0, observed_at: codex.observed_at, weekly_reset_at: codex.seven_day.resets_at })
   const agy = parseAgyQuota(await readAgy().catch(() => ''))
   if (agy) write({ source: 'official', family: 'agy', used_percent: agy.seven_day.used_percent, reserved_percent: 0, observed_at: new Date(now).toISOString(), weekly_reset_at: agy.seven_day.resets_at, five_hour: agy.five_hour })
   return written

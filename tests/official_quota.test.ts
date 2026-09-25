@@ -55,11 +55,28 @@ describe('cota oficial dos planos', () => {
   test('grava um recibo oficial por família que a porta do motor aceita', async () => {
     const home = tmp()
     const now = Date.parse('2026-09-23T22:00:00Z')
-    const written = await refreshQuotaReceipts({ home, now, readClaude: async () => CLAUDE_OUT, readCodex: () => ({ seven_day: { used_percent: 81, resets_at: '2026-09-26T08:23:58.000Z' }, observed_at: '2026-09-23T21:00:00.000Z' }), readAgy: async () => '' })
+    const written = await refreshQuotaReceipts({ home, now, readClaude: async () => CLAUDE_OUT, readCodex: () => ({ seven_day: { used_percent: 81, resets_at: '2026-09-26T08:23:58.000Z' }, observed_at: '2026-09-23T21:50:00.000Z' }), probeCodex: async () => { throw new Error('leitura recente não sonda') }, readAgy: async () => '' })
     expect(written.map((r) => [r.family, r.used_percent])).toEqual([['claude', 13], ['codex', 81]])
     const port = createLocalQuotaPort({ receiptPath: path.join(home, '.ade', 'quota-receipt.json') })
     expect(await port.readReceipt({ family: 'claude', now })).toMatchObject({ source: 'official', family: 'claude', used_percent: 13, reserved_percent: 0 })
     expect(await port.readReceipt({ family: 'codex', now })).toMatchObject({ family: 'codex', used_percent: 81 })
     expect(await port.readReceipt({ family: 'agy', now })).toBeNull()
+  })
+  // 25/09: as chamadas do motor ao codex são efêmeras e não gravam sessão; a leitura ficou em 81% de dois dias antes
+  // (26% reais, semana já virada) e o motor pulava o Codex por passar do teto. Leitura velha dispara a sonda.
+  test('leitura_velha_do_codex_dispara_a_sonda_e_grava_a_nova', async () => {
+    const home = tmp()
+    const now = Date.parse('2026-09-25T13:00:00Z')
+    let probed = 0
+    const readCodex = () => probed === 0
+      ? { seven_day: { used_percent: 81, resets_at: '2026-09-26T08:23:58.000Z' }, observed_at: '2026-09-23T20:58:43.000Z' }
+      : { seven_day: { used_percent: 26, resets_at: '2026-10-02T08:23:58.000Z' }, observed_at: '2026-09-25T12:59:00.000Z' }
+    const written = await refreshQuotaReceipts({ home, now, readClaude: async () => '', readCodex, probeCodex: async () => { probed++ }, readAgy: async () => '' })
+    expect(probed).toBe(1)
+    expect(written.map((r) => [r.family, r.used_percent])).toEqual([['codex', 26]])
+    // sonda que não trouxe leitura nova: o número de outra semana não vira recibo
+    const old = () => ({ seven_day: { used_percent: 81, resets_at: '2026-09-26T08:23:58.000Z' }, observed_at: '2026-09-23T20:58:43.000Z' })
+    const stale = await refreshQuotaReceipts({ home: tmp(), now, readClaude: async () => '', readCodex: old, probeCodex: async () => {}, readAgy: async () => '' })
+    expect(stale).toEqual([])
   })
 })
