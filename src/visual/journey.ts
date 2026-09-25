@@ -12,6 +12,7 @@ export type JourneyStep =
   | { click: Target }
   | { fill: Target; value: string }
   | { press: string; target?: Target }
+  | { upload: Target; files: string[] }
   | { expect_text: string }
   | { expect_visible: Target }
   | { expect_hidden: Target }
@@ -38,10 +39,17 @@ export type JourneyResult =
 /** Formato que a prova recebe na política (o mesmo que validateJourney aceita). */
 export const JOURNEY_FORMAT = [
   'Roteiro de navegador em .ade/journey.json: {"journeys":[{"criterio":"C1","steps":[...]}]}, uma jornada por critério que se vê na tela.',
-  'Passos: {"goto":"/rota"}, {"click":ALVO}, {"fill":ALVO,"value":"texto"}, {"press":"Enter"} ou {"press":"Enter","target":ALVO}, {"expect_text":"texto"}, {"expect_visible":ALVO}, {"expect_hidden":ALVO}, {"expect_url":"trecho"}.',
+  'Passos: {"goto":"/rota"}, {"click":ALVO}, {"fill":ALVO,"value":"texto"}, {"press":"Enter"} ou {"press":"Enter","target":ALVO}, {"upload":ALVO,"files":["imagem.png"]} (ALVO é o campo de arquivo ou o botão que abre o seletor; amostras: imagem.png, texto.txt, documento.pdf), {"expect_text":"texto"}, {"expect_visible":ALVO}, {"expect_hidden":ALVO}, {"expect_url":"trecho"}.',
   'ALVO é o que o usuário vê: {"role":"button","name":"Enviar"}, {"label":"Nome"}, {"text":"Salvo"} ou {"testid":"x"}. Comece por goto.',
   'A tela sobe vazia, sem dados. Se o critério depende de dados, crie-os primeiro pela própria interface; se não der, use {"criterio":"Cx","needs_data":true,"steps":[]}.',
 ].join('\n')
+
+// Amostras do motor para o verbo upload: o roteiro nunca aponta caminho do disco
+const SAMPLES: Record<string, { mimeType: string; buffer: Buffer }> = {
+  'imagem.png': { mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64') },
+  'texto.txt': { mimeType: 'text/plain', buffer: Buffer.from('arquivo de exemplo da jornada\n') },
+  'documento.pdf': { mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n') },
+}
 
 const isObj = (v: unknown): v is Record<string, any> => typeof v === 'object' && v !== null && !Array.isArray(v)
 const str = (v: unknown) => typeof v === 'string' && v.length > 0
@@ -60,6 +68,11 @@ function stepError(s: unknown): string | null {
   if ('click' in s) return targetError(s.click)
   if ('fill' in s) return targetError(s.fill) ?? (typeof s.value === 'string' ? null : 'fill exige value')
   if ('press' in s) return !str(s.press) ? 'press exige tecla' : s.target === undefined ? null : targetError(s.target)
+  if ('upload' in s) {
+    if (!Array.isArray(s.files) || s.files.length === 0) return 'upload exige files'
+    const unknown = s.files.filter((n: unknown) => typeof n !== 'string' || !(n in SAMPLES))
+    return unknown.length > 0 ? `upload aceita só as amostras ${Object.keys(SAMPLES).join(', ')}` : targetError(s.upload)
+  }
   if ('expect_text' in s) return str(s.expect_text) ? null : 'expect_text exige texto'
   if ('expect_visible' in s) return targetError(s.expect_visible)
   if ('expect_hidden' in s) return targetError(s.expect_hidden)
@@ -96,7 +109,17 @@ async function runStep(page: any, s: any, url: string, timeout: number) {
   } else if ('click' in s) await locate(page, s.click).first().click({ timeout })
   else if ('fill' in s) await locate(page, s.fill).first().fill(s.value, { timeout })
   else if ('press' in s) await (s.target ? locate(page, s.target).first().press(s.press, { timeout }) : page.keyboard.press(s.press))
-  else if ('expect_text' in s) await page.getByText(s.expect_text).first().waitFor({ state: 'visible', timeout })
+  else if ('upload' in s) {
+    const files = s.files.map((name: string) => ({ name, ...SAMPLES[name] }))
+    const el = locate(page, s.upload).first()
+    const isFileInput = await el.evaluate((n: any) => n.tagName === 'INPUT' && n.type === 'file', undefined, { timeout }).catch(() => false)
+    if (isFileInput) await el.setInputFiles(files, { timeout })
+    else {
+      // botão de clipe que abre o seletor de arquivos do sistema
+      const [chooser] = await Promise.all([page.waitForEvent('filechooser', { timeout }), el.click({ timeout })])
+      await chooser.setFiles(files, { timeout })
+    }
+  } else if ('expect_text' in s) await page.getByText(s.expect_text).first().waitFor({ state: 'visible', timeout })
   else if ('expect_visible' in s) await locate(page, s.expect_visible).first().waitFor({ state: 'visible', timeout })
   else if ('expect_hidden' in s) await locate(page, s.expect_hidden).first().waitFor({ state: 'hidden', timeout })
   else await page.waitForURL((u: URL) => u.href.includes(s.expect_url), { timeout })

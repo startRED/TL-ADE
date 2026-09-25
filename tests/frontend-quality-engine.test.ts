@@ -923,6 +923,49 @@ describe('jornada de usuário', () => {
     }
   }, 60_000)
 
+  // 26/09: anexar arquivo não tinha verbo; a jornada testava só metade de um recurso de anexo. Os arquivos são amostras do
+  // motor (o modelo nunca escolhe caminho do disco); o alvo pode ser o campo de arquivo ou o botão que abre o seletor.
+  test('upload_anexa_amostra_pelo_campo_ou_pelo_botao_que_abre_o_seletor', async () => {
+    expect(validateJourney({ journeys: [{ criterio: 'C1', steps: [{ goto: '/' }, { upload: { role: 'button', name: 'Anexar' }, files: ['imagem.png', 'texto.txt'] }] }] }).ok).toBe(true)
+    const bad = validateJourney({ journeys: [{ criterio: 'C1', steps: [{ upload: { label: 'Arquivo' }, files: ['C:/segredo.txt'] }, { upload: { label: 'Arquivo' }, files: [] }] }] })
+    expect(bad.ok).toBe(false)
+    if (!bad.ok) expect(bad.errors.length).toBe(2)
+
+    const http = await import('node:http')
+    const html = `<!doctype html><html><body><main>
+      <button id="clip">Anexar</button><input id="hidden" type="file" multiple hidden>
+      <label for="doc">Documento</label><input id="doc" type="file">
+      <ul id="lista"></ul></main>
+      <script>
+        const lista = document.getElementById('lista')
+        const mostrar = (input) => input.addEventListener('change', () => {
+          for (const f of input.files) { const li = document.createElement('li'); li.textContent = f.name + ' ' + f.type + ' ' + f.size; lista.append(li) }
+        })
+        mostrar(document.getElementById('hidden')); mostrar(document.getElementById('doc'))
+        document.getElementById('clip').addEventListener('click', () => document.getElementById('hidden').click())
+      </script></body></html>`
+    const server = http.createServer((_req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end(html) })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+    const url = `http://127.0.0.1:${(server.address() as any).port}`
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ade-journey-upload-'))
+    try {
+      const file = path.join(dir, 'S1.json')
+      fs.writeFileSync(file, JSON.stringify({ journeys: [{ criterio: 'C1', steps: [
+        { goto: '/' },
+        { upload: { role: 'button', name: 'Anexar' }, files: ['imagem.png', 'texto.txt'] },
+        { expect_text: 'imagem.png image/png' },
+        { expect_text: 'texto.txt text/plain' },
+        { upload: { label: 'Documento' }, files: ['documento.pdf'] },
+        { expect_text: 'documento.pdf application/pdf' },
+      ] }] }))
+      const res = await runJourneys({ file, url, outDir: dir, tag: 'r1', stepTimeoutMs: 3000 })
+      expect(res.status === 'fail' ? res.failure.error : res.status).toBe('pass')
+    } finally {
+      server.close()
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
+
   test('sem_roteiro_roteiro_invalido_ou_so_criterios_que_dependem_de_dados_nao_abrem_o_navegador', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ade-journey-skip-'))
     try {
