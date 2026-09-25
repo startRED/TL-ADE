@@ -46,19 +46,6 @@ describe('juiz visual de qualquer empresa', () => {
     expect(args).toEqual(expect.arrayContaining(['--allowedTools', 'Read', '--add-dir', path.dirname(captures[0].path), '--model', 'claude-opus-5-5']))
   })
 
-  test('gemini_julga_pela_resposta_em_texto_do_agy', async () => {
-    const { dir, captures, deps } = setup()
-    const agy = fakeCli(dir, 'agy', `process.stdout.write(JSON.stringify({ status: 'SUCCESS', response: '\`\`\`json\\n' + JSON.stringify(${JSON.stringify(RESULT)}) + '\\n\`\`\`' }))`)
-    const evaluation = await judgeVisual({
-      captures, task: 't', designBrief: {}, makerFamily: 'claude', deps,
-      judges: [{ family: 'agy', model_id: 'gemini-3.1-pro-high', resolved: agy }],
-    })
-    expect(evaluation.verdict).toBe('pass')
-    expect(evaluation.judge.family).toBe('agy')
-    const args = JSON.parse(fs.readFileSync(path.join(dir, 'agy.args.json'), 'utf8'))
-    expect(args).toEqual(expect.arrayContaining(['--mode', 'plan', '--model', 'gemini-3.1-pro-high']))
-  })
-
   test('codex_recebe_as_capturas_anexadas', async () => {
     const { dir, captures, deps } = setup()
     // o resultado vai no arquivo de -o, como no codex real
@@ -69,16 +56,36 @@ describe('juiz visual de qualquer empresa', () => {
     expect(args).toContain(`--image=${path.resolve(captures[0].path)}`)
   })
 
-  test('empresa_que_escreveu_a_tela_nunca_julga_e_todos_falhando_da_sem_veredito', async () => {
+  // o Gemini saiu da fila de juízes (assinatura cancelada em outubro)
+  test('empresa_que_escreveu_a_tela_e_gemini_nunca_julgam_e_todos_falhando_da_sem_veredito', async () => {
     const { dir, captures, deps } = setup()
-    const fail = fakeCli(dir, 'agy', 'process.exit(2)')
+    const fail = fakeCli(dir, 'codex', 'process.exit(2)')
     const claude = fakeCli(dir, 'claude', 'process.exit(0)')
     const evaluation = await judgeVisual({
       captures, task: 't', designBrief: {}, makerFamily: 'claude', deps,
-      judges: [{ family: 'claude', model_id: 'claude-opus-5-5', resolved: claude }, { family: 'agy', model_id: 'gemini-3.1-pro', resolved: fail }],
+      judges: [{ family: 'claude', model_id: 'claude-opus-5-5', resolved: claude }, { family: 'agy', model_id: 'gemini-3.1-pro', resolved: claude }, { family: 'codex', model_id: 'gpt-6-sol', resolved: fail }],
     })
     expect(fs.existsSync(path.join(dir, 'claude.args.json'))).toBe(false)
     expect(evaluation.verdict).toBe('unknown')
-    expect(evaluation.defects[0].fix).toMatch(/Nenhum juiz respondeu: agy: juiz visual encerrou com 2/)
+    expect(evaluation.defects[0].fix).toMatch(/^Nenhum juiz respondeu: codex: juiz visual encerrou com 2/)
+  })
+
+  // rubrica v2: a nota é base 5 mais os ajustes observados, e cada ponto fica escrito na nota gravada
+  test('nota_vem_da_base_mais_ajustes_e_cada_ponto_fica_na_nota', async () => {
+    const { dir, captures, deps } = setup()
+    const raw = {
+      criteria: RESULT.criteria.map((c) => c.id === 'typography'
+        ? { ...c, score: 9, adjustments: [{ delta: 1.5, observation: 'escala com 3 tamanhos bem separados' }, { delta: -1, observation: 'ajuda com 12px em 390px' }] }
+        : { ...c, adjustments: c.score === null ? [] : [{ delta: 3, observation: 'bom' }] }),
+      defects: [],
+    }
+    const claude = fakeCli(dir, 'claude', `process.stdout.write(JSON.stringify({ is_error: false, structured_output: ${JSON.stringify(raw)} }))`)
+    const evaluation = await judgeVisual({ captures, task: 't', designBrief: {}, makerFamily: 'codex', deps, judges: [{ family: 'claude', model_id: 'claude-opus-5-5', effort: 'high', resolved: claude }] })
+    const typography = evaluation.criteria.find((c) => c.id === 'typography')!
+    expect(typography.score).toBe(5.5)
+    expect(typography.note).toContain('+1.5 escala com 3 tamanhos bem separados; -1 ajuda com 12px em 390px')
+    expect(evaluation.criteria.find((c) => c.id === 'motion')!.score).toBeNull()
+    expect(JSON.parse(fs.readFileSync(path.join(dir, 'claude.args.json'), 'utf8'))).toEqual(expect.arrayContaining(['--effort', 'high']))
+    expect(fs.existsSync(path.join(dir, 'visual-judge-raw-r1-claude.json'))).toBe(true)
   })
 })

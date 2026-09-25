@@ -40,7 +40,7 @@ export async function runFrontendQuality({
             checkerResolved?: { exe: string; prefixArgs: string[] } | null
             agyResolved?: { exe: string; prefixArgs: string[] } | null
             // fila de juízes montada pelo motor (empresas com cota, a melhor primeiro)
-            visualJudges?: Array<{ family: string; model_id: string; resolved?: { exe: string; prefixArgs: string[] } | null }>
+            visualJudges?: Array<{ family: string; model_id: string; effort?: string | null; resolved?: { exe: string; prefixArgs: string[] } | null }>
             resolved?: { exe: string; prefixArgs: string[] }
             workerEnv?: Record<string, string>
         }
@@ -176,6 +176,8 @@ export async function runFrontendQuality({
     designBrief,
     judge: judgeRole,
     judges,
+    // chegou ao juiz com os portões verdes: se o D3 rodou, o contraste já está medido
+    contrastMeasured: (visualConfig.gates || ['D3']).includes('D3') && inspected.length > 0,
     round,
     storyId: story.id,
     detectorInfo: {

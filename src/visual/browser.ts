@@ -202,6 +202,9 @@ export async function captureVisualSurface({
           const fullUrl = new URL(routePath, url).href
 
           await page.goto(fullUrl, { waitUntil: 'load', timeout: 15000 })
+          // Tela que busca dados depois do load (o painel lista as missões por fetch) saía vazia no print, e o juiz
+          // julgava a tela sem conteúdo (25/09). Espera a rede assentar; websocket aberto não segura a espera.
+          await page.waitForLoadState?.('networkidle', { timeout: 8000 }).catch(() => {})
           // Espera estilos e render estabilizarem
           await page.waitForTimeout?.(150)
 

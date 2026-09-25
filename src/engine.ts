@@ -628,10 +628,10 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   const visualJudgesFor = async (writer: string) => {
     const now = deps.now?.() ?? Date.now()
     const cap = loaded.missionBudget.max_subscription_weekly_percent ?? 50
-    const slots: Array<{ family: string; model_id: string }> = routed
-      ? [...routed.chains.checker, ...routed.chains.fix].map((slot) => ({ family: slot.family, model_id: cliModel(slot) }))
+    const slots: Array<{ family: string; model_id: string; effort?: string | null }> = routed
+      ? [...routed.chains.checker, ...routed.chains.fix].map((slot) => ({ family: slot.family, model_id: cliModel(slot), effort: slot.effort ?? null }))
       : checkerRole ? [{ family: checkerRole.family as string, model_id: checkerRole.model_id as string }] : []
-    const judges: Array<{ family: string; model_id: string; resolved: { exe: string; prefixArgs: string[] } }> = []
+    const judges: Array<{ family: string; model_id: string; effort?: string | null; resolved: { exe: string; prefixArgs: string[] } }> = []
     const seen = new Set([writer])
     for (const slot of slots) {
       if (seen.has(slot.family)) continue
@@ -642,7 +642,9 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       seen.add(slot.family)
       judges.push({ ...slot, resolved })
     }
-    return judges
+    // teste de 25/09 com as mesmas telas: o Claude achou mais defeitos reais e deu correções mais executáveis; o Codex é
+    // o segundo (mais constante, mas deixa passar coisa). A cota e quem escreveu já filtraram a fila acima.
+    return judges.sort((a, b) => Number(b.family === 'claude') - Number(a.family === 'claude'))
   }
 
   const redGitPort = started

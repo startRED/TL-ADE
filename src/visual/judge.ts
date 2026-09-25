@@ -2,7 +2,6 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { buildCodexArgs } from '../adapters/codex/argv.ts'
-import { buildAgyArgs } from '../adapters/agy/argv.ts'
 
 interface VisualEvalCriteria {
     id: 'specificity' | 'hierarchy' | 'typography' | 'color' | 'states' | 'motion'
@@ -25,7 +24,7 @@ interface VisualEval {
     verdict: 'pass' | 'rework' | 'unknown'
 }
 
-export const RUBRIC_VERSION = '2026-09-17-v1'
+export const RUBRIC_VERSION = '2026-09-25-v2'
 
 export const MODE_WEIGHTS = {
   persuade: { specificity: 3.0, hierarchy: 2.0, typography: 2.0, color: 1.5, states: 1.0, motion: 0.5 },
@@ -89,6 +88,7 @@ export async function judgeVisual({
   rubric,
   judge = { family: 'codex', model_id: 'gpt-5.6-terra' },
   judges,
+  contrastMeasured = false,
   round = 1,
   storyId = 'ADE-S1',
   detectorInfo = { engine_version: '0.1.5', url_mode: 'ok' },
@@ -101,7 +101,9 @@ export async function judgeVisual({
         rubric?: any
         judge?: { family: string; model_id: string }
         // fila de juízes, o melhor primeiro; quem falha passa a vez ao próximo
-        judges?: Array<{ family: string; model_id: string; resolved?: { exe: string; prefixArgs: string[] } | null }>
+        judges?: Array<{ family: string; model_id: string; effort?: string | null; resolved?: { exe: string; prefixArgs: string[] } | null }>
+        // o portão D3 (axe-core) mediu o contraste antes do juiz e passou
+        contrastMeasured?: boolean
         round?: number
         storyId?: string
         detectorInfo?: { engine_version: string; url_mode: 'ok' | 'unsupported' }
@@ -143,7 +145,7 @@ export async function judgeVisual({
     verdict: ('unknown' as const),
   })
 
-  // Qualquer empresa com visão julga (Codex, Claude, Gemini), nunca a mesma que escreveu a tela
+  // Codex ou Claude julgam, nunca a mesma empresa que escreveu a tela
   const candidates = (judges ?? [{ ...judge, resolved: deps.resolved }])
     .filter((j) => JUDGE_FAMILIES.includes(j.family) && j.family !== makerFamily)
   if (candidates.length === 0) {
@@ -160,6 +162,7 @@ export async function judgeVisual({
       sha256: c.sha256,
     })),
     task,
+    ...(contrastMeasured ? { contrast_measured: true } : {}),
     design_brief: designBrief,
     rubric: rubric || { version: RUBRIC_VERSION, weights },
   }
@@ -202,11 +205,19 @@ export async function judgeVisual({
     
     const criteria: VisualEvalCriteria[] = ids.map((id) => {
       const criterion = rawCriteria.find((item) => item.id === id)
+      const note = typeof criterion.note === 'string' ? criterion.note : ''
+      // rubrica v2: a nota é a base mais os ajustes observados, não um número solto do juiz
+      if (criterion.score !== null && Array.isArray(criterion.adjustments)) {
+        const adjustments = (criterion.adjustments as any[]).filter((a) => typeof a?.delta === 'number' && Number.isFinite(a.delta))
+        const score = Math.min(10, Math.max(0, Math.round((RUBRIC_BASE + adjustments.reduce((sum, a) => sum + a.delta, 0)) * 10) / 10))
+        const detail = adjustments.map((a) => `${a.delta > 0 ? '+' : ''}${a.delta} ${String(a.observation ?? '')}`).join('; ')
+        return { id, score, weight: weights[id], note: detail ? `${note} [base ${RUBRIC_BASE}; ${detail}]` : note }
+      }
       const score = criterion.score
       if (score !== null && (typeof score !== 'number' || !Number.isFinite(score) || score < 0 || score > 10)) {
         throw new TypeError(`nota inválida do juiz para ${id}`)
       }
-      return { id, score, weight: weights[id], note: typeof criterion.note === 'string' ? criterion.note : '' }
+      return { id, score, weight: weights[id], note }
     })
     const defects = Array.isArray(rawResult.defects)
       ? (rawResult.defects as any[]).filter((defect) => defect && ['critical', 'major', 'minor'].includes(defect.severity))
@@ -301,19 +312,44 @@ export async function judgeVisual({
   }
 }
 
-const JUDGE_FAMILIES = ['codex', 'claude', 'agy']
+const JUDGE_FAMILIES = ['codex', 'claude']
 
+/** Ponto de partida de toda nota: tela funcional, correta e genérica. */
+export const RUBRIC_BASE = 5
+
+/**
+ * Rubrica v2 (25/09). A v1 dava só o nome dos critérios e os juízes davam notas de 3,7 a 7,9 à mesma tela. Agora cada
+ * nota parte da mesma base e só anda com ajuste preso ao que se vê na captura; a correção diz elemento, propriedade e
+ * valor, para o maker executar sem adivinhar.
+ */
 const JUDGE_INSTRUCTIONS = [
-  'Você é o juiz visual de uma interface. Olhe as capturas reais da tela listadas em "captures" (rota, largura, tema); julgue pelas imagens, não pelo código.',
-  'Dê nota de 0 a 10 a cada critério: specificity (a tela tem identidade própria ou parece gerada por IA genérica), hierarchy, typography, color, states, motion (null se não der para ver numa imagem parada).',
-  'Liste os defeitos visíveis com severidade (critical, major, minor), onde estão na tela e a correção concreta que o desenvolvedor deve fazer. Sem defeito inventado; tela boa pode ter lista vazia.',
+  'Você é o juiz visual de uma interface. Julgue só o que se vê nas capturas listadas em "captures" (rota, largura, tema), não o código nem o que a tela poderia ter. Seja realista: nem generoso, nem punitivo por gosto pessoal.',
+  '',
+  `ESCALA (igual para todo critério): 0-2 quebrado (conteúdo cortado, sobreposto ou ilegível); 3-4 problema que qualquer usuário nota; ${RUBRIC_BASE} funcional e correto, mas genérico, cara de modelo pronto; 6 correto com algum cuidado; 7 bom, poucos ajustes; 8 muito bom, decisões próprias e consistentes; 9-10 referência de mercado (raro).`,
+  '',
+  `COMO PONTUAR: cada critério começa em ${RUBRIC_BASE}. Em "adjustments" liste cada ponto que sobe ou desce a nota: delta entre -3 e +3 (passos de 0,5) e a observação concreta (o quê, onde, em qual largura/tema). Sem observação visível, sem ajuste. O mesmo problema desconta num critério só. "score" é ${RUBRIC_BASE} mais a soma dos deltas.`,
+  '',
+  'CRITÉRIOS (o que olhar):',
+  '- specificity: a tela tem identidade própria que combina com a tarefa, ou parece modelo pronto/gerado por IA (card branco centralizado, botão pílula roxo, gradiente decorativo, ícone genérico, emoji como ícone)? Sobe: marca, voz e decisões visuais coerentes com o produto. Desce: clichês de IA, elementos intercambiáveis com qualquer app.',
+  '- hierarchy: a ação principal é óbvia em um segundo? Ordem de leitura, agrupamento por proximidade, ritmo de espaçamento consistente, uso do espaço da tela nas duas larguras. Desce: duas ações com o mesmo peso, área vazia dominante sem propósito, elementos colados na borda em 390 px.',
+  '- typography: escala com poucos tamanhos bem separados, pesos com função, corpo com pelo menos 14 px no celular e 15-16 px no desktop, linha com até ~75 caracteres, altura de linha confortável, família coerente (mono só com motivo).',
+  '- color: contraste de texto (AA: 4,5:1 corpo, 3:1 texto grande), paleta pequena com papéis claros (fundo, superfície, texto, acento, erro), acento usado com parcimônia, tema escuro de verdade quando a tarefa pede os dois temas. Com contrast_measured: true no pacote, o contraste AA já foi medido com axe-core e passou: não desconte contraste por estimativa visual (o olho erra a razão), só texto que esteja ilegível na imagem.',
+  '- states: só os estados visíveis nas capturas ou exigidos pela tarefa e visíveis numa tela parada (vazio, preenchido, foco, desabilitado, erro, carregando, arquivo anexado). Estado de interação que uma captura não mostra (hover, arrastando) não desconta; se a tarefa exige um estado e a tela não dá nenhum sinal dele, desconta.',
+  '- motion: null, a menos que a captura mostre indício de movimento.',
+  '',
+  'DEFEITOS: todo ajuste negativo de -1 ou pior vira um defeito. severity: critical = impede ou quebra o uso (cortado, sobreposto, ilegível, contraste abaixo de 3:1 em texto); major = o usuário nota e a tarefa piora; minor = polimento. "where": elemento e largura/tema. "fix": ação executável com elemento, propriedade e valor-alvo (ex.: "texto de ajuda .hint: font-size 13px -> 15px e cor #a1a1aa -> #52525b"; "botão Anexar: estilo secundário com borda 1px e fundo transparente, Enviar fica o único preenchido"). Nada de "melhorar a identidade" sem dizer como.',
+  '',
   'Responda só o JSON do schema.',
 ]
 
 const JUDGE_SCHEMA = (() => {
+  const adjustment = {
+    type: 'object', additionalProperties: false, required: ['delta', 'observation'],
+    properties: { delta: { type: 'number', minimum: -3, maximum: 3 }, observation: { type: 'string' } },
+  }
   const criterion = {
-    type: 'object', additionalProperties: false, required: ['id', 'score', 'note'],
-    properties: { id: { enum: ['specificity', 'hierarchy', 'typography', 'color', 'states', 'motion'] }, score: { type: ['number', 'null'], minimum: 0, maximum: 10 }, note: { type: 'string' } },
+    type: 'object', additionalProperties: false, required: ['id', 'score', 'note', 'adjustments'],
+    properties: { id: { enum: ['specificity', 'hierarchy', 'typography', 'color', 'states', 'motion'] }, score: { type: ['number', 'null'], minimum: 0, maximum: 10 }, note: { type: 'string' }, adjustments: { type: 'array', items: adjustment } },
   }
   const defect = {
     type: 'object', additionalProperties: false, required: ['id', 'severity', 'criterion', 'where', 'fix'],
@@ -356,33 +392,31 @@ function firstJsonObject(text: string): any {
 }
 
 /**
- * Chama o juiz isolado da empresa pedida. O Codex recebe as capturas anexadas (--image); Claude e Gemini (agy) abrem
- * os PNGs pelo caminho absoluto com a ferramenta de leitura, somente leitura. Testado com as três em 25/09.
+ * Chama o juiz isolado da empresa pedida. O Codex recebe as capturas anexadas (--image); o Claude abre os PNGs pelo
+ * caminho absoluto com Read, somente leitura. A resposta bruta fica na missão para auditar cada ponto da nota.
  */
-async function dispatchIsolatedJudge(pack: any, judge: { family: string; model_id: string }, round: number, deps: any) {
+async function dispatchIsolatedJudge(pack: any, judge: { family: string; model_id: string; effort?: string | null }, round: number, deps: any) {
   const shots = pack.captures.map((c: any) => path.resolve(String(c.path)))
   const listed = { ...pack, captures: pack.captures.map((c: any, i: number) => ({ ...c, path: shots[i] })) }
   const artifactsDir = path.dirname(shots[0])
+  const keep = (raw: any) => {
+    fs.writeFileSync(path.join(deps.missionDir, `visual-judge-raw-r${round}-${judge.family}.json`), JSON.stringify(raw, null, 2), 'utf8')
+    return raw
+  }
   if (judge.family === 'codex') {
     const schemaPath = path.join(deps.missionDir, `visual-judge-schema-r${round}.json`)
     const resultFile = path.join(deps.missionDir, `visual-judge-result-r${round}.json`)
     fs.writeFileSync(schemaPath, JSON.stringify(JUDGE_SCHEMA), 'utf8')
     // As capturas vão anexadas como imagem: só com o caminho no texto o juiz não enxergava a tela (25/09)
-    const args = [...buildCodexArgs({ role: 'visual_judge', cwd: deps.cwd, schemaPath, resultFile, model: judge.model_id, sandbox: 'read-only' }), ...shots.map((p: string) => `--image=${p}`)]
-    const prompt = [`${JUDGE_INSTRUCTIONS[0]} As imagens anexadas seguem a ordem da lista.`, ...JUDGE_INSTRUCTIONS.slice(1), '', JSON.stringify(listed)].join('\n')
+    const args = [...buildCodexArgs({ role: 'visual_judge', cwd: deps.cwd, schemaPath, resultFile, model: judge.model_id, effort: judge.effort ?? undefined, sandbox: 'read-only' }), ...shots.map((p: string) => `--image=${p}`)]
+    const prompt = [...JUDGE_INSTRUCTIONS, 'As imagens anexadas seguem a ordem da lista "captures".', '', JSON.stringify(listed)].join('\n')
     await runJudgeProcess(deps.resolved.exe, [...deps.resolved.prefixArgs, ...args], { cwd: deps.cwd, env: deps.env, input: prompt, timeoutMs: 300_000 })
-    return JSON.parse(fs.readFileSync(resultFile, 'utf8'))
+    return keep(JSON.parse(fs.readFileSync(resultFile, 'utf8')))
   }
-  const prompt = [`${JUDGE_INSTRUCTIONS[0]} Abra cada PNG pelo caminho absoluto com a ferramenta de leitura antes de julgar.`, ...JUDGE_INSTRUCTIONS.slice(1), '', JSON.stringify(listed)].join('\n')
-  if (judge.family === 'claude') {
-    const args = ['-p', '--output-format', 'json', '--json-schema', JSON.stringify(JUDGE_SCHEMA), '--safe-mode', '--permission-mode', 'bypassPermissions', '--allowedTools', 'Read', '--add-dir', artifactsDir, ...(judge.model_id ? ['--model', judge.model_id] : [])]
-    const out = await runJudgeProcess(deps.resolved.exe, [...deps.resolved.prefixArgs, ...args], { cwd: deps.cwd, env: deps.env, input: prompt, timeoutMs: 300_000 })
-    const envelope = firstJsonObject(out)
-    if (envelope.is_error) throw new Error(`claude devolveu erro: ${String(envelope.result).slice(0, 300)}`)
-    return envelope.structured_output ?? firstJsonObject(String(envelope.result ?? ''))
-  }
-  const args = buildAgyArgs({ prompt, model: judge.model_id || undefined, schema: JUDGE_SCHEMA, cwd: deps.cwd, addDirs: [artifactsDir], timeout: '5m' })
-  const out = await runJudgeProcess(deps.resolved.exe, [...deps.resolved.prefixArgs, ...args], { cwd: deps.cwd, env: deps.env, timeoutMs: 360_000 })
+  const prompt = [...JUDGE_INSTRUCTIONS, 'Abra cada PNG pelo caminho absoluto com a ferramenta Read antes de julgar.', '', JSON.stringify(listed)].join('\n')
+  const args = ['-p', '--output-format', 'json', '--json-schema', JSON.stringify(JUDGE_SCHEMA), '--safe-mode', '--permission-mode', 'bypassPermissions', '--allowedTools', 'Read', '--add-dir', artifactsDir, ...(judge.model_id ? ['--model', judge.model_id] : []), ...(judge.effort ? ['--effort', judge.effort] : [])]
+  const out = await runJudgeProcess(deps.resolved.exe, [...deps.resolved.prefixArgs, ...args], { cwd: deps.cwd, env: deps.env, input: prompt, timeoutMs: 300_000 })
   const envelope = firstJsonObject(out)
-  return envelope.structured_output ?? firstJsonObject(String(envelope.response ?? ''))
+  if (envelope.is_error) throw new Error(`claude devolveu erro: ${String(envelope.result).slice(0, 300)}`)
+  return keep(envelope.structured_output ?? firstJsonObject(String(envelope.result ?? '')))
 }
