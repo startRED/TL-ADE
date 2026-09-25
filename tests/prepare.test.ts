@@ -340,8 +340,14 @@ describe('prepare', () => {
     expect((await prepareStory({ repoDir: repo.dir, missionId: 'm-velha', storyId: 'S1' })).status).toBe('ready')
     const wtDir = path.join(repo.dir, '.ade', 'wt', 'S1')
     writeFileSync(path.join(wtDir, 'meio-feito.txt'), 'trabalho da parte parada\n')
+    // como na missão real (S2, 25/09): o worktree da parte parada tem o atalho node_modules, que a remoção deixa
+    const modulos = path.join(repo.dir, 'modulos')
+    mkdirSync(modulos)
+    writeFileSync(path.join(modulos, 'pacote.js'), 'x')
+    symlinkSync(modulos, path.join(wtDir, 'node_modules'), 'junction')
 
     const next = await prepareStory({ repoDir: repo.dir, missionId: 'm-nova', storyId: 'S1' })
+    expect(existsSync(path.join(modulos, 'pacote.js'))).toBe(true)
     expect(next).toMatchObject({ status: 'ready', branch: 'ade/m-nova/S1' })
     expect(existsSync(path.join(wtDir, 'meio-feito.txt'))).toBe(false)
     expect(repo.git(['branch', '--list', 'ade/m-velha/S1']).trim()).not.toBe('')

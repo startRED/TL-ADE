@@ -147,17 +147,6 @@ export async function prepareStory(options: PrepareStoryOptions): Promise<Prepar
   }
 
   
-  // Sobra de worktree removido: a pasta não tem mais o .git e só guarda atalhos (o node_modules ligado ao do projeto).
-  // O git nela sobe até o repositório principal e responde "main"; a sobra é apagada tirando só os atalhos, nunca o
-  // conteúdo para onde apontam (25/09, missão real).
-  if (fs.existsSync(worktreeDir) && !fs.existsSync(path.join(worktreeDir, '.git'))) {
-    const leftovers = fs.readdirSync(worktreeDir, { withFileTypes: true })
-    if (leftovers.every((d) => d.isSymbolicLink())) {
-      for (const d of leftovers) fs.rmSync(path.join(worktreeDir, d.name), { force: true })
-      fs.rmdirSync(worktreeDir)
-    }
-  }
-
   // Ids de parte se repetem entre missões (S1, S2…): a pasta ocupada por uma parte de outra missão (parada) é
   // liberada, com a árvore dela guardada antes em refs/ade/checkpoints; o ramo dela continua no git.
   if (fs.existsSync(worktreeDir)) {
@@ -165,6 +154,17 @@ export async function prepareStory(options: PrepareStoryOptions): Promise<Prepar
     const occupant = (await occupantPort.headInfo()).branch
     if (occupant?.startsWith('ade/') && !occupant.startsWith(`ade/${missionId}/`)) {
       await removeWorktreeKept({ gitPort: basePort, wtPort: occupantPort, worktreeDir, label: `kept/${occupant.slice(4)}` })
+    }
+  }
+
+  // Sobra de worktree removido (inclusive o que o passo acima acabou de liberar): a pasta não tem mais o .git e só guarda atalhos (o node_modules ligado ao do projeto).
+  // O git nela sobe até o repositório principal e responde "main"; a sobra é apagada tirando só os atalhos, nunca o
+  // conteúdo para onde apontam (25/09, missão real).
+  if (fs.existsSync(worktreeDir) && !fs.existsSync(path.join(worktreeDir, '.git'))) {
+    const leftovers = fs.readdirSync(worktreeDir, { withFileTypes: true })
+    if (leftovers.every((d) => d.isSymbolicLink())) {
+      for (const d of leftovers) fs.rmSync(path.join(worktreeDir, d.name), { force: true })
+      fs.rmdirSync(worktreeDir)
     }
   }
 
