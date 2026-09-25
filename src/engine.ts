@@ -1667,19 +1667,13 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       }
     }
 
-    // Conflito do plano que só um humano decidiria (intent_gap para "human"), repetido igual depois de uma rodada de
-    // correção: a TL-ADE é autônoma, então entrega a versão conservadora e registra o achado como adiado, em vez de
-    // girar rodadas sem saída (S2 da missão real: fonte exigida que a validação fora do escopo recusa).
+    // Conflito do plano que só um humano ou o planejador decidiria (intent_gap para "human", bad_spec para "planner"):
+    // nenhuma rodada do maker resolve isso e a TL-ADE é autônoma, então a versão atual (já verde nas provas oficiais) é
+    // entregue na primeira revisão e o achado fica registrado como adiado. Antes esperava repetir e a S2 da missão real
+    // girou oito rodadas no mesmo conflito.
     const reviewedFindings = (reviewDoc.action_items ?? reviewDoc.findings ?? []).map(normalizeFinding)
-    const onlyIntentGaps = !reviewApproval.approved && reviewApproval.errors.length === 0 && reviewedFindings.length > 0
-      && reviewedFindings.every((f: any) => f.category === 'intent_gap' && f.target_role === 'human')
-    // o revisor reescreve o texto do achado a cada rodada: vale a revisão anterior da parte também só com intent_gap para
-    // humano (lida do journal, para valer depois de retomada), não o texto igual
-    const priorReview = readEvents().filter((e) => e.kind === 'review_result' && (e.unit ?? e.data?.unit) === storyId && e.data?.result && Number(e.data?.round ?? 0) < round)
-      .reduce<any>((best, e) => (!best || Number(e.data?.round ?? 0) >= Number(best.data?.round ?? 0) ? e : best), null)
-    const priorFindings = (priorReview?.data?.result?.action_items ?? []).map(normalizeFinding)
-    const priorOnlyIntentGaps = priorFindings.length > 0 && priorFindings.every((f: any) => f.category === 'intent_gap' && f.target_role === 'human')
-    const deferIntentGap = onlyIntentGaps && priorOnlyIntentGaps
+    const deferIntentGap = !reviewApproval.approved && reviewApproval.errors.length === 0 && reviewedFindings.length > 0
+      && reviewedFindings.every((f: any) => (f.category === 'intent_gap' || f.category === 'bad_spec') && (f.target_role === 'human' || f.target_role === 'planner'))
     if (deferIntentGap) {
       await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'intent_gap_deferred', unit: storyId, round, findings: reviewedFindings.map((f: any) => ({ id: f.id, problem: f.problem, required_action: f.required_action })) } })
     }

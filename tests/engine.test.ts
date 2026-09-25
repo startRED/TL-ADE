@@ -568,9 +568,10 @@ describe('engine', () => {
   }, 180_000)
 
   // 24/09, missão real (S2): o contrato pedia uma fonte que a validação fora do escopo recusa; o revisor aprovou o resto e
-  // repetiu, rodada após rodada, o mesmo intent_gap para "human". A TL-ADE é autônoma: com só esse tipo de achado e ele
-  // estagnado, a versão conservadora é entregue e o achado fica registrado como adiado.
-  test('conflito_de_plano_estagnado_entrega_versao_conservadora_e_registra', async () => {
+  // repetiu, rodada após rodada, o mesmo intent_gap para "human". A TL-ADE é autônoma e nenhuma rodada do maker decide
+  // pelo humano ou pelo planejador: com só esse tipo de achado, a versão atual é entregue já na primeira revisão e o
+  // achado fica registrado como adiado.
+  test('conflito_de_plano_entrega_na_primeira_revisao_e_registra', async () => {
     const fixture = setupStoryFixture()
     const makerFile = path.join(fixture.scenarioDir, 'maker.json')
     const base = JSON.parse(fs.readFileSync(makerFile, 'utf8'))[0]
@@ -578,20 +579,22 @@ describe('engine', () => {
     const gap = approvedReviewAction()
     Object.assign(gap.result as any, {
       verdict: 'changes_requested',
-      requested_action: 'rework',
-      action_items: [{ id: 'F3', severity: 'high', category: 'intent_gap', problem: 'o contrato pede cinco fontes', required_action: 'decidir', target_role: 'human', evidence_refs: ['eval:E1'], location: 'src/hello.txt' }],
+      requested_action: 'decide',
+      action_items: [
+        { id: 'F3', severity: 'high', category: 'intent_gap', problem: 'o contrato pede cinco fontes', required_action: 'decidir', target_role: 'human', evidence_refs: ['eval:E1'], location: 'src/hello.txt' },
+        { id: 'F4', severity: 'high', category: 'bad_spec', problem: 'a fonte falha na validação', required_action: 'replanejar', target_role: 'planner', evidence_refs: ['eval:E1'], location: 'src/hello.txt' },
+      ],
     })
-    ;(gap.result as any).handoff.next_action = 'rework'
-    // o revisor reescreve o texto a cada rodada (como o real): o critério não pode ser o texto igual
-    const reworded = JSON.parse(JSON.stringify(gap))
-    reworded.result.action_items[0].problem = 'o contrato exige cinco fontes e o arquivo tem quatro'
-    fs.writeFileSync(path.join(fixture.scenarioDir, 'checker.json'), JSON.stringify([gap, reworded]))
+    ;(gap.result as any).handoff.next_action = 'decide'
+    fs.writeFileSync(path.join(fixture.scenarioDir, 'checker.json'), JSON.stringify([gap]))
 
     const result = await runStory(fixture.deps, fixture.input)
     expect(result).toMatchObject({ status: 'delivered' })
+    expect(fs.readFileSync(path.join(fixture.repo.dir, 'src', 'hello.txt'), 'utf8')).toBe('ok v1\n')
     const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    expect(events.filter((e) => e.kind === 'review_result')).toHaveLength(1)
     const deferred = events.find((e) => e.kind === 'decision' && (e.data as any).decision === 'intent_gap_deferred')
-    expect((deferred?.data as any)?.findings?.[0]?.id).toBe('F3')
+    expect((deferred?.data as any)?.findings?.map((f: any) => f.id)).toEqual(['F3', 'F4'])
   }, 180_000)
 
   // Retomada depois de queda (sem nova tentativa) numa parte que já teve revisão reprovada também começa rodada nova: o
