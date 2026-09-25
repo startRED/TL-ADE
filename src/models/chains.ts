@@ -100,7 +100,7 @@ export function scoreFor(e: ModelEntry, role: RoleId, ctx: { tier: Tier | undefi
   const timed = t !== undefined && t.timed >= 10
   // esforço fixado pelo usuário: o tempo desse esforço é escolha dele e não tira o modelo da fila
   const speed = ctx.fixedEffort ? 0 : r.speed * 10 * (timed ? Math.log2(6 / (t.minutes / t.timed)) : Math.log2(30 / Math.max(15, e.seconds)))
-  parts.push(`${timed ? `${(t.minutes / t.timed).toFixed(1)} min por chamada aqui` : `${e.seconds} s por resposta`}${ctx.fixedEffort ? ' (esforço fixado: tempo não pesa)' : ''}`)
+  parts.push(`${timed ? `${(t.minutes / t.timed).toFixed(1)} min por chamada aqui` : `${e.seconds} s por resposta`}${ctx.fixedEffort ? ' (esforço fixado pelo usuário: tempo não pesa)' : ''}`)
   const p = capacityPressure(ctx.tier, ctx.reading, ctx.now)
   const load = ctx.tier?.api ? r.volume * e.costPerTask * 4 : r.volume * Math.min(p, 2) * e.costPerTask * 10
   parts.push(ctx.tier?.api
@@ -136,8 +136,10 @@ export function buildChains({ plans = {}, quota = {}, measured = {}, blocked = [
     const fixed = effort[role]
     // esforço fixado: vale nos modelos que o oferecem; os outros seguem com os esforços que têm
     const offers = new Set(usable.filter((e) => e.effort === fixed).map((e) => e.model))
+    // o máximo (mais caro e lento) só entra onde o usuário o fixou (ADR 0043): sozinho ele subia a escada até o max
+    const auto = fixed !== 'max' && usable.some((e) => e.effort === 'max')
     const rated: Rated[] = usable
-      .filter((e) => !offers.has(e.model) || e.effort === fixed)
+      .filter((e) => (!offers.has(e.model) || e.effort === fixed) && (e.effort !== 'max' || fixed === 'max'))
       .map((e) => ({ e, ...scoreFor(e, role, { tier: tierOf(e.family, plans[e.family]), reading: quota[e.family] ?? null, measured, now, fixedEffort: e.effort === fixed }) }))
       // quem atinge o mínimo do papel vem antes; os abaixo só completam a fila
       .sort((a, b) => Number(meets(b)) - Number(meets(a)) || b.score - a.score)
@@ -186,6 +188,8 @@ export function buildChains({ plans = {}, quota = {}, measured = {}, blocked = [
     chains[role] = picked.map(({ e, reserve }) => ({ family: e.family, model: e.model, effort: e.effort, ...(reserve ? { reserve } : {}) }))
     why[role] = picked.map(({ e, score, parts, reserve }) =>
       `${e.label} (${e.effort})${reserve ? ', reserva' : ''}: nota ${score.toFixed(1)} · ${parts.join(' · ')}`)
+    // na primeira linha, para não mudar quantas linhas o porquê tem nem a ordem delas
+    if (auto && why[role][0]) why[role][0] += ' · esforço máximo fora da escolha automática'
   }
   return { chains, why }
 }

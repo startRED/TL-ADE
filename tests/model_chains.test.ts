@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { describe, expect, test } from 'vitest'
 import { CATALOG, EFFORTS, PLANS, ROLES } from '../src/models/catalog.ts'
 import type { RoleId } from '../src/models/catalog.ts'
@@ -102,10 +104,10 @@ describe('catálogo, capacidade, qualidade e filas de modelos', () => {
     const timed = Array.from({ length: 10 }, (_, i) => writerCall(`t${i}`, 'gpt-6-astra', { effort: 'high', duration_ms: 180_000 }))
     const { chains, why } = buildChains({ plans: { claude: 'max20', codex: 'pro20' }, measured: measureQuality(timed), now: NOW })
     expect(chains.fix.map(tag)).toEqual([
-      'claude-opus-5-5(high)', 'claude-opus-5-5(xhigh)', 'claude-opus-5-5(max)', 'gpt-6-astra(high) reserva',
+      'claude-opus-5-5(high)', 'claude-opus-5-5(xhigh)', 'gpt-6-astra(high) reserva',
     ])
     expect(chains.fix[0]).toMatchObject({ model: chains.impl_hard[0].model, effort: chains.impl_hard[0].effort })
-    expect(why.fix[3]).toContain('reserva')
+    expect(why.fix[2]).toContain('reserva')
   })
 
   test('CA5: qualidade medida alta com inteligência menor entra como candidato sem passar um degrau mais inteligente', () => {
@@ -168,5 +170,55 @@ describe('catálogo, capacidade, qualidade e filas de modelos', () => {
     const { why } = buildChains({ plans, quota: { agy: manual }, now: NOW })
     expect(why.impl[0]).toContain('(manual)')
     expect(buildChains({ plans, now: NOW }).why.impl[0]).toContain('estimada pelo plano')
+  })
+
+  test('C1.1: planos Max 20x do Claude e Pro 20x do ChatGPT, sem esforço fixado: nenhuma posição de nenhuma fila, nem da escada de correção, usa o esforço máximo', () => {
+    const { chains } = buildChains({ plans: { claude: 'max20', codex: 'pro20' }, now: NOW })
+    for (const [role, chain] of Object.entries(chains)) {
+      for (const slot of chain) {
+        expect(slot.effort, `papel ${role} tem slot com esforço max: ${slot.model}`).not.toBe('max')
+      }
+    }
+  })
+
+  test('C1.3: quando o usuário fixa o esforço máximo no código comum, os modelos que oferecem o máximo aparecem nele e o porquê diz que o esforço foi fixado pelo usuário', () => {
+    const { chains, why } = buildChains({ plans: { claude: 'max20', codex: 'pro20' }, effort: { impl: 'max' }, now: NOW })
+    const maxSlots = chains.impl.filter((s) => s.effort === 'max')
+    expect(maxSlots.length).toBeGreaterThan(0)
+    for (const s of chains.impl) {
+      const offersMax = CATALOG.some((e) => e.model === s.model && e.effort === 'max')
+      if (offersMax) expect(s.effort).toBe('max')
+    }
+    expect(why.impl.join('\n')).toMatch(/esforço fixado pelo usuário/)
+  })
+
+  test('C1.4: planos com modelo disponível oferecendo esforço máximo, sem fixar: porquê diz que o esforço máximo ficou fora da escolha automática, mantendo quantidade, ordem e explicação de cada posição', () => {
+    const { chains, why } = buildChains({ plans: { claude: 'max20', codex: 'pro20' }, now: NOW })
+    for (const [role, chain] of Object.entries(chains) as Array<[RoleId, typeof chains.impl]>) {
+      expect(why[role]).toHaveLength(chain.length)
+      for (let i = 0; i < chain.length; i++) {
+        expect(why[role][i]).toContain('nota ')
+      }
+      const text = why[role].join('\n')
+      expect(text).toMatch(/máximo (ficou )?fora da escolha automática/i)
+    }
+  })
+
+  test('C1.5: o índice de ADRs lista ADR novo (0043) que emenda o 0033 descrevendo a regra do máximo, e o ADR 0033 continua igual', () => {
+    const adrDir = path.resolve(__dirname, '../docs/adr')
+    const readme = fs.readFileSync(path.join(adrDir, 'README.md'), 'utf8')
+    expect(readme).toMatch(/\[0043\]\(0043-esforco-maximo-fora-da-escolha-automatica-emenda-0033\.md\)/)
+    expect(readme).toMatch(/0043.*emenda.*0033/i)
+
+    const adr0043Path = path.join(adrDir, '0043-esforco-maximo-fora-da-escolha-automatica-emenda-0033.md')
+    expect(fs.existsSync(adr0043Path)).toBe(true)
+    const adr0043 = fs.readFileSync(adr0043Path, 'utf8')
+    expect(adr0043).toMatch(/0033/)
+    expect(adr0043).toMatch(/máximo|max/i)
+
+    const adr0033Path = path.join(adrDir, '0033-modelos-pelos-planos-emenda-0005.md')
+    expect(fs.existsSync(adr0033Path)).toBe(true)
+    const adr0033 = fs.readFileSync(adr0033Path, 'utf8')
+    expect(adr0033).toContain('ADR 0033')
   })
 })

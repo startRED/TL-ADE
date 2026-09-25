@@ -66,6 +66,7 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | [0039](0039-catalogo-real-e-escolha-de-skills-pelo-plano.md) | Catálogo real de skills e escolha por parte pelo plano (emenda o ADR 0009) | Aceito (pedido de Erick, 2026-09-24) |
 | [0040](0040-ate-quatro-skills-por-parte.md) | Até quatro skills por parte, escolhidas conforme a parte (emenda os ADRs 0009 e 0039) | Aceito (pedido de Erick, 2026-09-24) |
 | [0041](0041-chat-com-memoria-skills-e-busca-ideias-do-hermes.md) | Chat com memória persistente, skills por pergunta e busca nas conversas (ideias do Hermes Agent) | Aceito (pedido de Erick, 2026-09-24) |
+| [0043](0043-esforco-maximo-fora-da-escolha-automatica-emenda-0033.md) | Esforço máximo fora da escolha automática: só entra no papel em que o usuário o fixou (emenda o ADR 0033) | Aceito (escolha de Erick na entrevista, 2026-09-25) |
 
 ## Mapa decisão → onde ela aparece
 
@@ -77,7 +78,7 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | Intenção, contrato e prova | 0007, 0008, 0016, 0028, 0036 | §4, §5, §11 E1–E4, E12, E18–E20 |
 | Contexto, skills e qualidade | 0009, 0010, 0011, 0018, 0027, 0028, 0029, 0039, 0040 | §7, §10 A1, A7, A11, A13, A14, §11 E8, E9, E13–E15, E33, E35, E39 |
 | Observação e método | 0013, 0017, 0019, 0020, 0024, 0027, 0028, 0029, 0034, 0035, 0037 | §3, §8, §10 A10, A12, §11 E11, E17, E30, E34, E37 |
-| Orçamento e execução | 0026, 0028, 0029, 0032, 0033 | §7, §9.8, §11 E20, E24 |
+| Orçamento e execução | 0026, 0028, 0029, 0032, 0033, 0043 | §7, §9.8, §11 E20, E24 |
 
 O [ADR 0024](0024-autorizacao-roadmap-ate-v1.md) registra a autorização contínua até a v1 e define o recorte sequencial dos marcos, o [ADR 0027](0027-ativacao-da-v04b-painel-local.md) ativou a v0.4b, o [ADR 0028](0028-ativacao-da-v05-pesquisa-telemetria-intervencao.md) formalizou a v0.5 e o [ADR 0029](0029-ativacao-da-v1-noite-desatendida-e-dogfood.md) formaliza a ativação do recorte ativo v1 (noite desatendida sob precondições duras, suíte de dogfood runs: 3 e pass^3 em Vitest, calibração por telemetria e fechamento documental). O [ADR 0030](0030-typescript-no-motor-e-build-do-painel.md) emenda o 0023 e o 0027: produção em TypeScript estrito executado pelo Node 24 sem build e build do painel só em `packages/web`. O [ADR 0031](0031-trilhos-paralelos-emenda-0014.md) emenda o 0014: partes de escopo disjunto rodam em trilhos paralelos no lote desatendido, cada uma na própria worktree fora do projeto. O [ADR 0034](0034-painel-comanda-pela-api-emenda-0013.md) emenda o 0013: o painel comanda pela API, abre vários projetos com um lease cada e é servido do último build que passou, com fallback para o `index.html` da raiz.
 

@@ -182,9 +182,9 @@ test('CA3_resume_after_quota_pause_rebuilds_chains_with_new_reading_before_next_
 }, 30000)
 
 test('CA4_checker_is_always_from_other_company_than_the_round_writer_even_on_reserve_and_parks_without_one', async () => {
-  // 6 rodadas reprovadas do Claude, a 7ª (reserva do ChatGPT) passa nos portões e vai à revisão
+  // 4 rodadas reprovadas do Claude, a 5ª (reserva do ChatGPT) passa nos portões e vai à revisão
   const red = ['tests/a.test.ts > nova']
-  const subject = fixture({ models: { plans: PLANS }, gates: [red, red, red, red, red, red, null] })
+  const subject = fixture({ models: { plans: PLANS }, gates: [red, red, red, red, null] })
   await subject.run()
   expect(subject.makers().at(-1)).toMatchObject({ family: 'codex' })
   expect(subject.checkers()).toHaveLength(1)
@@ -218,23 +218,36 @@ test('CA5_ladder_rounds_per_rung_follow_risk_climb_in_intelligence_and_end_on_si
   expect(normal.makers().map(tag)).toEqual([
     'claude:claude-opus-5-5(high)', 'claude:claude-opus-5-5(high)',
     'claude:claude-opus-5-5(xhigh)', 'claude:claude-opus-5-5(xhigh)',
-    'claude:claude-opus-5-5(max)', 'claude:claude-opus-5-5(max)',
     'codex:gpt-6-astra(medium)',
   ])
 
   const light = fixture({ models: { plans: PLANS }, gates: red })
   await light.run(light.storyOf('ADE-R1', { risk: { level: 'light', surfaces: [], evidence: [] } }))
   expect(light.makers().map(tag)).toEqual([
-    'claude:claude-opus-5-5(high)', 'claude:claude-opus-5-5(xhigh)', 'claude:claude-opus-5-5(max)', 'codex:gpt-6-astra(medium)',
+    'claude:claude-opus-5-5(high)', 'claude:claude-opus-5-5(xhigh)', 'codex:gpt-6-astra(medium)',
   ])
 
   const sensitive = fixture({ models: { plans: PLANS }, gates: red })
   await sensitive.run(sensitive.storyOf('ADE-R1', { title: 'login com senha' }))
   const calls = sensitive.makers().map(tag)
-  expect(calls).toHaveLength(10)
+  expect(calls).toHaveLength(7)
   expect(calls.filter((c) => c.startsWith('codex:'))).toEqual(['codex:gpt-6-astra(medium)'])
   expect(calls.at(-1)).toBe('codex:gpt-6-astra(medium)')
 }, 90000)
+
+test('C1.2: com planos Max 20x e Pro 20x e testes falhando, o motor sobe a escada de correção até esgotar os degraus sem nunca chegar ao máximo e termina na reserva de outra empresa', async () => {
+  const tag = (c: Call) => `${c.family}:${c.model}(${c.effort})`
+  const red = [['tests/a.test.ts > nova']]
+  const subject = fixture({ models: { plans: PLANS }, gates: red })
+  const result = await subject.run(subject.storyOf('ADE-R1', { risk: { level: 'light', surfaces: [], evidence: [] } }))
+  expect(result).toMatchObject({ status: 'awaiting_operator', reason: 'gate_failed' })
+  const calls = subject.makers()
+  expect(calls.some((c) => c.effort === 'max')).toBe(false)
+  expect(calls.map(tag)).toEqual([
+    'claude:claude-opus-5-5(high)', 'claude:claude-opus-5-5(xhigh)', 'codex:gpt-6-astra(medium)',
+  ])
+  expect(calls.at(-1)!.family).toBe('codex')
+}, 60000)
 
 test('CA6_blocked_model_is_never_dispatched_with_plans_and_part_parks_when_no_writer_is_left', async () => {
   const subject = fixture({ models: { plans: PLANS, blocked: ['claude-opus-5-5'] } })
