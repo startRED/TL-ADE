@@ -622,6 +622,8 @@ describe('engine', () => {
     expect(second).toMatchObject({ status: 'delivered' })
     const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
     expect(events.find((e) => e.kind === 'decision' && (e.data as any).decision === 'resume_approved_round')?.data).toMatchObject({ round: 2 })
+    // o passo que veio do cache não é chamada nova: um model_started por chamada de verdade
+    expect(events.filter((e) => e.kind === 'model_started' && (e.data as any).step_id === 'ADE-T1:r2:maker')).toHaveLength(1)
     expect(fs.readFileSync(path.join(fixture.repo.dir, 'src', 'hello.txt'), 'utf8')).toBe('ok v2\n')
   }, 180_000)
 

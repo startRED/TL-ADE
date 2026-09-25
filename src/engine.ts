@@ -160,6 +160,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     const res = readJournal(journalPath)
     return res.events || []
   }
+  const ranBefore = (stepId: string) => readEvents().some((e) => e.kind === 'step_result' && e.step_id === stepId && e.status === 'ok')
   const parkStory = async (reason: string) => {
     await deps.journal.append({ kind: 'story_done', unit: storyId, data: { status: 'awaiting_operator', reason, unit: storyId, commit: null } })
     return { status: 'awaiting_operator' as const, exitCode: 3 as const, reason, commit: null }
@@ -1049,7 +1050,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
 
     // modelo e esforço na hora em que a chamada começa: a telemetria só chega no fim e o painel ficava sem mostrar
     // com que esforço cada modelo estava trabalhando (pedido do operador, 25/09)
-    await deps.journal.append({ kind: 'model_started', unit: storyId, data: { unit: storyId, role: 'maker', step_id: makerStepId, family: rung.family, model_id: rung.model ?? makerModel ?? null, effort: rung.effort ?? null } })
+    // passo que vem do cache (retomada) não é chamada nova: sem o guarda o painel mostrava o esforço de hoje num passo de ontem
+    if (!ranBefore(makerStepId)) await deps.journal.append({ kind: 'model_started', unit: storyId, data: { unit: storyId, role: 'maker', step_id: makerStepId, family: rung.family, model_id: rung.model ?? makerModel ?? null, effort: rung.effort ?? null } })
     const dispatchMaker = dispatcherFor(rung.family)
     if (!dispatchMaker) throw new AdeError('invalid_ladder', `degrau da família ${rung.family} sem despachante`, 4)
     let dispatch: any
@@ -1707,7 +1709,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     }
 
     const dispatchChecker = async (stepId: string, packPath: string = reviewPack.pack_path) => {
-      await deps.journal.append({ kind: 'model_started', unit: storyId, data: { unit: storyId, role: 'checker', step_id: stepId, family: checker.family, model_id: checker.model ?? null, effort: checker.effort ?? null } })
+      if (!ranBefore(stepId)) await deps.journal.append({ kind: 'model_started', unit: storyId, data: { unit: storyId, role: 'checker', step_id: stepId, family: checker.family, model_id: checker.model ?? null, effort: checker.effort ?? null } })
       const dispatchFn = checkerDispatchFn
       if (!dispatchFn) throw new AdeError('invalid_ladder', `revisor da família ${checker.family} sem despachante`, 4)
       return dispatchFn({

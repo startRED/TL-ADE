@@ -71,7 +71,8 @@ export async function writeProof(opts: WriterOpts): Promise<{ kind: 'skip' } | {
   if (targets.length === 0) return { kind: 'skip' }
 
   const stepId = opts.attempt ? `${storyId}:proof:${opts.attempt}` : `${storyId}:proof`
-  await opts.journal.append({ kind: 'model_started', unit: storyId, data: { unit: storyId, role: 'prova', step_id: stepId, family: writer.family, model_id: writer.model ?? null, effort: writer.effort ?? null } })
+  // passo que vem do cache (retomada) não é chamada nova
+  if (!opts.events().some((e) => e.kind === 'step_result' && e.step_id === stepId && e.status === 'ok')) await opts.journal.append({ kind: 'model_started', unit: storyId, data: { unit: storyId, role: 'prova', step_id: stepId, family: writer.family, model_id: writer.model ?? null, effort: writer.effort ?? null } })
   const dispatch = await dispatchWriter(opts, {
     unit: `${storyId}:proof`,
     stepId,
