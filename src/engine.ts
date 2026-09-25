@@ -599,7 +599,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     }
   }
 
-  const proofWriterFor = async () => {
+  const proofWritersFor = async () => {
     const now = deps.now?.() ?? Date.now()
     const cap = loaded.missionBudget.max_subscription_weekly_percent ?? 50
     const slots: Array<{ family: string; model?: string; effort?: string | null }> = routed
@@ -609,15 +609,16 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
           { family: makerFamily as string, model: makerModel as string | undefined },
         ]
     const ordered = [...slots.filter((slot) => slot.family !== writerFamily), ...slots.filter((slot) => slot.family === writerFamily)]
+    const writers: Array<any> = []
     for (const slot of ordered) {
       const dispatch = dispatcherFor(slot.family)
       const resolved = binaryFor(slot.family)
       if (!dispatch || !resolved) continue
       const receipt = routed ? routed.receipts[slot.family as keyof typeof routed.receipts] ?? null : await deps.quotaPort.readReceipt({ family: slot.family, now })
       if (!validateQuotaReceipt(receipt, { family: slot.family, max_percent: cap, now }).ok) continue
-      return { ...slot, dispatch, resolved, receipt }
+      writers.push({ ...slot, dispatch, resolved, receipt })
     }
-    return null
+    return writers
   }
 
   const redGitPort = started
@@ -670,8 +671,11 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   const proofDone = readEvents().some((e) => e.kind === 'decision' && e.data?.decision === 'proof_written' && (e.unit ?? e.data?.unit) === storyId)
   let redValid = (await redIsValid(treeBefore)) && !(wholeSuite && !proofDone)
   if (!redValid && !proofDone) {
-    const writer = await proofWriterFor()
-    if (writer) {
+    // cada nova tentativa da parte e cada modelo da cadeia têm passo próprio; modelo que cai com erro passa a vez
+    const retries = readEvents().filter((e) => e.kind === 'decision' && e.data?.decision === 'unit_retry' && (e.unit ?? e.data?.unit) === storyId).length
+    const writers = await proofWritersFor()
+    for (const [index, writer] of writers.entries()) {
+      const attempt = [retries > 0 ? `a${retries}` : '', index > 0 ? `w${index}` : ''].filter(Boolean).join(':')
       const proof = await writeProof({
         storyId,
         missionId,
@@ -692,13 +696,17 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         contextBytes,
         weeklyCap: loaded.missionBudget.max_subscription_weekly_percent ?? 50,
         workerEnv: deps.workerEnv,
+        ...(attempt ? { attempt } : {}),
+        skills: storyContext.sections?.skills || '',
         now: () => deps.now?.() ?? Date.now(),
       })
+      if (proof.kind === 'park' && proof.reason === 'proof_writer_error' && index < writers.length - 1) continue
       if (proof.kind === 'park') return await parkStory(proof.reason)
       if (proof.kind === 'written') {
         treeBefore = proof.tree
         redValid = await redIsValid(treeBefore)
       }
+      break
     }
   }
   if (!redValid) {

@@ -50,6 +50,10 @@ export async function writeProof(opts: {
   weeklyCap: number
   workerEnv?: Record<string, string>
   maxTurns?: number
+  /** Sufixo do passo: nova tentativa ou outro modelo da cadeia não reaproveita a chamada anterior que falhou. */
+  attempt?: string
+  /** Seção de skills do maker (prova antes do código, método): quem escreve a prova usa as mesmas. */
+  skills?: string
   now: () => number
 }): Promise<{ kind: 'skip' } | { kind: 'park'; reason: string } | { kind: 'written'; tree: string; files: string[] }> {
   const { storyId, contract, writer } = opts
@@ -87,12 +91,12 @@ export async function writeProof(opts: {
         arquivos_de_prova: targets,
         comando_de_provas: opts.testCommand.join(' '),
       }, null, 2),
-      skills: '',
+      skills: opts.skills ?? '',
     },
   })
 
   const startedAt = opts.now()
-  const stepId = `${storyId}:proof`
+  const stepId = opts.attempt ? `${storyId}:proof:${opts.attempt}` : `${storyId}:proof`
   const resultFile = path.join(opts.missionDir, 'proof-result.json')
   let dispatch: any
   let outcome: 'ok' | 'park' | 'stop' = 'ok'
@@ -155,7 +159,8 @@ export async function writeProof(opts: {
     await opts.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'proof_rejected', reason: 'proof_out_of_scope', outside } })
     return { kind: 'park', reason: 'proof_out_of_scope' }
   }
-  if (changed.length === 0) return { kind: 'park', reason: 'proof_not_written' }
+  // modelo que caiu com erro (schema recusado, CLI quebrada) não é o mesmo que "não escreveu": a cadeia tenta o próximo
+  if (changed.length === 0) return { kind: 'park', reason: dispatch?.is_error || (dispatch?.exit_code ?? 0) !== 0 ? 'proof_writer_error' : 'proof_not_written' }
   const tree = await opts.wtPort.worktreeTree()
   await opts.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'proof_written', family: writer.family, model: writer.model ?? null, files: changed, tree } })
   return { kind: 'written', tree, files: changed }

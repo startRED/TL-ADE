@@ -449,6 +449,28 @@ describe('engine', () => {
     expect(reviewPack).toContain('não há operador')
   }, 90_000)
 
+  // 25/09, missão real: o primeiro modelo da cadeia de provas (agy) caiu com erro de schema e a parte parava em
+  // proof_not_written; a nova tentativa ainda reaproveitava a chamada que falhou. Modelo com erro passa a vez ao
+  // próximo da cadeia, cada um com passo próprio.
+  test('escritor_de_prova_com_erro_passa_a_vez_ao_proximo_modelo_da_cadeia', async () => {
+    const fixture = setupStoryFixture({ proof: true })
+    const checker = fixture.deps.dispatchCodex
+    ;(fixture.deps as any).quotaPort = { readReceipt: async ({ family }: { family: string }) => ({
+      source: 'official', family, used_percent: 0, reserved_percent: 0,
+      observed_at: new Date().toISOString(), weekly_reset_at: new Date(Date.now() + 86400000).toISOString(),
+    }) }
+    fixture.deps.dispatchCodex = async (opts: any) => String(opts.stepId).includes(':proof')
+      ? { is_error: true, exit_code: 1, result_text: 'invalid --json-schema' }
+      : checker(opts)
+    const result = await runStory(fixture.deps, fixture.input)
+    expect(result).toMatchObject({ status: 'delivered' })
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    const written = events.find((e) => e.kind === 'decision' && (e.data as any).decision === 'proof_written')
+    expect(written?.data).toMatchObject({ family: 'claude' })
+    const proofSteps = events.filter((e) => e.kind === 'telemetry' && (e.data as any).role === 'prova').map((e) => (e.data as any).step_id)
+    expect(proofSteps).toEqual(['ADE-T1:proof', 'ADE-T1:proof:w1'])
+  }, 90_000)
+
   // Queda depois de escrever as provas e antes do vermelho delas: a retomada partia da árvore de antes das provas
   // (cujo vermelho em cache nasceu verde), não reescrevia provas por a parte já ter começado e estacionava em
   // eval_red_not_red. A retomada parte da árvore das provas gravada em proof_written.

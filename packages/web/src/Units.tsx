@@ -83,6 +83,7 @@ const PARKED_PT: Record<string, string> = {
   empty: 'O revisor de outra empresa não devolveu resposta: a ferramenta dele falhou antes de começar.',
   proof_out_of_scope: 'Quem escreve as provas mexeu fora dos arquivos de teste; a mudança foi desfeita.',
   proof_not_written: 'Quem escreve as provas terminou sem escrever nenhum teste.',
+  proof_writer_error: 'Todos os modelos que escrevem as provas deram erro nesta parte.',
   maker_call_lost: 'A chamada do modelo caiu três vezes seguidas sem devolver o trabalho.',
 }
 const parkedWhy = (reason?: string | null) => (!reason ? 'Sem motivo registrado.' : PARKED_PT[reason] ?? (/\s/.test(reason) ? reason : `Motivo técnico: ${reason}.`))
