@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { AdeError } from './journal/errors.ts'
 import { readJournal } from './journal/journal.ts'
-import { assertCallBudget, authorizePaidCall, DEFAULT_CONTEXT_LIMIT_BYTES, observedUsd, reserveCalls, validateQuotaReceipt } from './engine/budget.ts'
+import { assertCallBudget, authorizePaidCall, budgetExtension, DEFAULT_CONTEXT_LIMIT_BYTES, observedUsd, reserveCalls, validateQuotaReceipt } from './engine/budget.ts'
 import { deliverStory, rebaseOntoMovedBase, withDeliveryFlag } from './engine/deliver.ts'
 import { authorizedStep } from './engine/paid-call.ts'
 import { maybeEngineFault } from './engine/faults.ts'
@@ -309,11 +309,12 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     throw new AdeError('invalid_budget_reservation', 'missão e contrato sem max_usd', 4)
   }
   const requestedUsd = hasPreviousReservation ? 0 : Math.min(...usdCaps)
-  const effectiveMaxCalls = Math.min(
+  // Extensão aprovada pelo operador para esta parte ("mais N chamadas a partir de agora") vale só para ela.
+  const effectiveMaxCalls = Math.max(Math.min(
     loaded.plan.budget.max_model_calls,
     contract.budget.max_model_calls,
     loaded.lineageCallsRemaining ?? Infinity,
-  )
+  ), budgetExtension(eventsBeforeReservation, storyId))
   const makerBudgetEvents = eventsBeforeReservation.filter((event) => {
     const stepId = event.step_id ?? event.data?.step_id
     return event.kind !== 'step_result' || typeof stepId !== 'string' || stepId.endsWith(':maker')

@@ -11,6 +11,7 @@ import { computeObservedInputDigest, runStory } from '../src/engine.ts'
 import { loadPlan } from '../src/engine/plan-load.ts'
 import { prepareStory } from '../src/engine/prepare.ts'
 import { nextReady, runSequentialMission } from '../src/engine/schedule.ts'
+import { budgetExtension } from '../src/engine/budget.ts'
 import { createEvalRunner } from '../src/evals/eval-runner.ts'
 import { createGateRunner } from '../src/gates/gates.ts'
 import { createGitPort } from '../src/git/gitport.ts'
@@ -1010,3 +1011,18 @@ describe('v0.3: Executar e retomar missão sequencial', { timeout: 80_000 }, () 
     ).rejects.toThrow()
   })
 })
+
+// 24/09, missão real: a S2 bateu no teto de chamadas da missão e o operador aprovou mais chamadas só para ela. O pedido
+// vem por arquivo (o painel não escreve no journal), o motor registra budget_extended e a parte volta a andar.
+test('extensao_de_teto_aprovada_pelo_operador_vale_so_para_a_parte', async () => {
+  const fixture = await setupThreeStoryFixture({ dependencies: { S1: [], S2: ['S1'], S3: ['S2'] } })
+  fs.writeFileSync(path.join(fixture.missionDir, 'budget-extension-request.json'), JSON.stringify({ unit: 'S1', calls: 3 }))
+  await runSequentialMission(fixture.deps, { loaded: fixture.loaded, repoDir: fixture.repo.dir, missionDir: fixture.missionDir })
+  expect(fs.existsSync(path.join(fixture.missionDir, 'budget-extension-request.json'))).toBe(false)
+  const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+  const ext = events.filter((e) => e.kind === 'decision' && e.data?.decision === 'budget_extended')
+  expect(ext.map((e) => [e.data?.unit, e.data?.calls])).toEqual([['S1', 3]])
+  // teto da parte = chamadas já feitas quando a extensão foi aprovada + as aprovadas
+  expect(budgetExtension(events, 'S1')).toBe(ext[0].data?.base + 3)
+  expect(budgetExtension(events, 'S2')).toBe(0)
+}, 120_000)

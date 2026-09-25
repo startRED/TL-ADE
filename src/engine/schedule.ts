@@ -13,6 +13,7 @@ import { deriveMissionState, epicSuitesToOpen } from './mission-state.ts'
 import { drainMission, readMissionControl, clearControlRequest } from './control.ts'
 import { readLineageCallBudget } from './resume.ts'
 import { removeWorktreeKept } from './preserve.ts'
+import { modelCallsSoFar } from './budget.ts'
 
 /**
  * Retorna as dependências declaradas de uma story, suportando story.depends_on e story.contract.depends_on.
@@ -423,6 +424,16 @@ export async function runSequentialMission(deps: Record<string, any>, { loaded, 
         })
       }
     }
+  }
+
+  // Extensão de teto aprovada pelo operador: também vem por arquivo e o motor registra a decisão no journal.
+  const extensionPath = path.join(currentMissionDir, 'budget-extension-request.json')
+  if (deps.journal && fs.existsSync(extensionPath)) {
+    const req = JSON.parse(fs.readFileSync(extensionPath, 'utf8'))
+    if (typeof req?.unit === 'string' && Number.isInteger(req?.calls) && req.calls > 0) {
+      await deps.journal.append({ kind: 'decision', unit: req.unit, source: 'operator', data: { decision: 'budget_extended', unit: req.unit, calls: req.calls, base: modelCallsSoFar(readEvents(currentMissionDir)) } })
+    }
+    fs.rmSync(extensionPath, { force: true })
   }
 
   // "Tentar de novo" do painel: o pedido vem por arquivo (o painel não escreve no journal) e o motor, escritor

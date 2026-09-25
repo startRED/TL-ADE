@@ -658,3 +658,18 @@ export function authorizePaidCall(params: { events?: Array<Record<string, any>>;
     usd_total: totalUsd,
   }
 }
+
+/**
+ * Teto de chamadas que o operador estendeu para a parte (decisão budget_extended): "mais N chamadas a partir de agora",
+ * gravado como base (chamadas já feitas na missão) + N. Devolve 0 sem extensão; as outras partes seguem o plano.
+ */
+export function budgetExtension(events: Array<Record<string, any>>, storyId: string): number {
+  return (Array.isArray(events) ? events : []).filter((e) => e?.kind === 'decision' && e.data?.decision === 'budget_extended'
+    && (e.unit ?? e.data?.unit) === storyId && Number.isInteger(e.data?.calls) && e.data.calls > 0)
+    .reduce((cap, e) => Math.max(cap, (Number.isInteger(e.data?.base) ? e.data.base : 0) + e.data.calls), 0)
+}
+
+/** Chamadas de modelo já feitas na missão (resultado gravado de step model_call). */
+export function modelCallsSoFar(events: Array<Record<string, any>>): number {
+  return (Array.isArray(events) ? events : []).filter((e) => e?.kind === 'step_result' && e.effect_class === 'model_call').length
+}
