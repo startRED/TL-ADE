@@ -292,6 +292,7 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
                 </div>
               )}
           {mission && units.length > 0 && <CostChart mission={mission} units={units} live={live} />}
+          {mission?.by_company && mission.by_company.length > 0 && <CompanySpend rows={mission.by_company} />}
           {mission && <ActivityLog projectId={projectId} missionId={missionId} live={running || live >= 0} />}
         </div>
 
@@ -367,6 +368,48 @@ function CostChart({ mission, units, live }: { mission: Mission; units: Unit[]; 
         ))}
       </ol>
       <p className="note-line">Em dólares equivalentes de API; o que pesa de verdade é a cota do plano.</p>
+    </figure>
+  )
+}
+
+const COMPANY_PT: Record<string, string> = { claude: 'Claude', codex: 'ChatGPT', agy: 'Google' }
+const ROLE_ORDER = ['prova', 'código', 'revisão']
+
+/**
+ * Gasto da missão por empresa numa régua só: US$ equivalente de API (o Claude informa; Codex e Gemini saem dos tokens
+ * vezes o preço de lista), a fatia de cada uma no total, chamadas por papel, minutos e os modelos que rodaram.
+ */
+function CompanySpend({ rows }: { rows: NonNullable<Mission['by_company']> }) {
+  const total = rows.reduce((sum, r) => sum + r.usd, 0)
+  const calls = rows.reduce((sum, r) => sum + r.calls, 0)
+  return (
+    <figure className="cost-chart company-spend">
+      <figcaption className="direction">Gasto por empresa, em US$ de API</figcaption>
+      <table>
+        <thead>
+          <tr><th>Empresa</th><th>US$</th><th>do total</th><th>chamadas</th><th>por papel</th><th>minutos</th><th>modelos</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const share = total > 0 ? r.usd / total : 0
+            return (
+              <tr key={r.family}>
+                <th scope="row">{COMPANY_PT[r.family] ?? r.family}</th>
+                <td className="num">{decimal.format(r.usd)}{r.unknown_cost_calls > 0 ? ` + ${r.unknown_cost_calls} sem preço` : ''}</td>
+                <td><span className="share-bar" style={{ ['--share' as string]: `${Math.round(share * 100)}%` }} /><span className="num"> {Math.round(share * 100)}%</span></td>
+                <td className="num">{r.calls}</td>
+                <td>{ROLE_ORDER.filter((role) => r.roles[role]).map((role) => `${role} ${r.roles[role]}`).join(' · ') || '·'}</td>
+                <td className="num">{Math.round(r.minutes)}</td>
+                <td className="mono">{Object.entries(r.models).sort((a, b) => b[1] - a[1]).map(([m, n]) => `${m} ×${n}`).join(', ')}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+        <tfoot>
+          <tr><th scope="row">Total</th><td className="num">{decimal.format(total)}</td><td /><td className="num">{calls}</td><td /><td /><td /></tr>
+        </tfoot>
+      </table>
+      <p className="note-line">Claude informa o valor; ChatGPT e Google saem dos tokens vezes o preço de lista. O que pesa de verdade é a cota de cada plano.</p>
     </figure>
   )
 }

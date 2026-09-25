@@ -120,6 +120,9 @@ export function projectMissionFromSources({ missionDir }: { missionDir: string }
   }
 
   const decisions = []
+  // gasto da missão por empresa: chamadas, US$ (informado ou preço de lista), minutos, papéis e modelos
+  const byCompany = new Map<string, { family: string; calls: number; usd: number; unknown_cost_calls: number; minutes: number; roles: Record<string, number>; models: Record<string, number> }>()
+  const ROLE_OF: Record<string, string> = { prova: 'prova', maker: 'código', checker_round: 'revisão' }
   let totalCalls = 0
   let totalCostUsd = 0
 
@@ -165,6 +168,17 @@ export function projectMissionFromSources({ missionDir }: { missionDir: string }
         : null
       const cost = Number(ev.data?.cost_usd ?? ev.data?.cost ?? listed ?? 0)
       totalCostUsd += cost
+      const family = String(ev.data?.family ?? 'desconhecida')
+      const company = byCompany.get(family) ?? { family, calls: 0, usd: 0, unknown_cost_calls: 0, minutes: 0, roles: {}, models: {} }
+      company.calls++
+      if (ev.data?.cost_usd != null || ev.data?.cost != null || listed !== null) company.usd += cost
+      else company.unknown_cost_calls++
+      company.minutes += Number(ev.data?.duration_ms ?? 0) / 60_000
+      const role = ROLE_OF[ev.data?.role] ?? String(ev.data?.role ?? 'outro')
+      company.roles[role] = (company.roles[role] ?? 0) + 1
+      const model = String(ev.data?.models?.find((m: any) => m.role === 'executor')?.model_id ?? '')
+      if (model) company.models[model] = (company.models[model] ?? 0) + 1
+      byCompany.set(family, company)
       if (targetStory && (ev.data?.cost_usd != null || ev.data?.cost != null || listed !== null)) {
         targetStory.cost = (targetStory.cost ?? 0) + cost
       }
@@ -217,6 +231,7 @@ export function projectMissionFromSources({ missionDir }: { missionDir: string }
     max_usd: plan.mission_budget?.max_usd,
     consumed_usd: totalCalls > 0 ? totalCostUsd : null,
     total_calls: totalCalls,
+    by_company: [...byCompany.values()].sort((a, b) => b.usd - a.usd),
     epics,
     stories,
     decisions,

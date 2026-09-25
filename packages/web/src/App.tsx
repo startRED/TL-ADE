@@ -53,6 +53,7 @@ export interface Mission {
   intent?: string
   consumed_usd?: number | null
   total_calls?: number
+  by_company?: Array<{ family: string; calls: number; usd: number; unknown_cost_calls: number; minutes: number; roles: Record<string, number>; models: Record<string, number> }>
   stories?: MissionStory[]
   runtime_state?: string
   current_story?: string | null

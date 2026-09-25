@@ -885,3 +885,13 @@ h3.ui-heading, h4.ui-heading { font-size: 1.15rem; }
 .log-lines { list-style: none; margin: 1rem 0 0; padding: 0; max-height: 26rem; overflow-y: auto; display: grid; gap: .15rem; }
 .log-lines li { display: grid; grid-template-columns: 5.5rem 5rem minmax(0, 1fr); gap: .75rem; padding: .3rem 0; border-bottom: 1px dotted var(--sage-line); font: 400 13px/1.45 var(--text); }
 .log-lines time, .log-unit { font-size: 11.5px; color: var(--ink-faint); }
+
+/* Gasto por empresa: tabela compacta com régua da fatia de cada empresa */
+.company-spend table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.company-spend th, .company-spend td { text-align: left; padding: .35rem .6rem .35rem 0; border-bottom: 1px solid var(--sage-line); vertical-align: middle; }
+.company-spend thead th { font: 600 10.5px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-faint); }
+.company-spend tfoot th, .company-spend tfoot td { border-bottom: 0; font-weight: 600; }
+.company-spend .share-bar { display: inline-block; width: 4rem; height: 4px; vertical-align: middle; background: linear-gradient(90deg, var(--baton) var(--share), var(--sage-line) var(--share)); }
+.company-spend .mono { font-size: 11px; color: var(--ink-faint); }
+@media (max-width: 720px) { .company-spend table { display: block; overflow-x: auto; } }
+.cost-chart.company-spend { max-width: 60rem; }
