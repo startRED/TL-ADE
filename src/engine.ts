@@ -67,6 +67,7 @@ const REVIEW_POLICY = [
   '- Em evidence, sources, evidence_refs e result_ref, cite só referências da lista citable_refs, escritas igual (arquivo sempre com intervalo de linhas).',
   '- Toda ref que um achado (action_items, deferred, rejected) ou uma claim do handoff cita em evidence_refs precisa aparecer também como result_ref de um item de evidence; e cada critério do contrato precisa de um item de evidence.',
   '- As provas já rodaram no motor, fora da sua sandbox: proof_results é o resultado oficial (verde julgado contra a largada conta como verde, e as vermelhas listadas nos avisos já existiam antes da parte). Não rode a suíte inteira nem reprove por não conseguir rodá-la; se precisar conferir, rode só as provas da parte.',
+  '- A TL-ADE é autônoma e não há operador para decidir nada durante a missão. Se um requisito do contrato é impossível dentro do escopo (decisão de produto ou de intenção, não defeito do código), não reprove por ele: aprove o que foi entregue e registre o requisito em deferred, com o motivo. Reprove só por defeito que quem escreve consegue corrigir dentro do escopo.',
   '- Responda somente pelo schema.',
 ].join('\n')
 
@@ -1682,6 +1683,11 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     }
 
     if (reviewApproval.approved || deferIntentGap) {
+      // Itens que o revisor adiou (requisito impossível dentro do escopo) ficam registrados para o relatório.
+      const deferredItems = (reviewDoc.deferred ?? []).map(normalizeFinding)
+      if (reviewApproval.approved && deferredItems.length > 0) {
+        await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'review_deferred', unit: storyId, round, items: deferredItems.map((f: any) => ({ id: f.id, problem: f.problem, required_action: f.required_action })) } })
+      }
       maybeEngineFault('before_commit', env)
 
       const commitEvents = readEvents()

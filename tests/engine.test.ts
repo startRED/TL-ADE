@@ -445,6 +445,8 @@ describe('engine', () => {
     expect(reviewPack).toContain('"proof_results"')
     expect(reviewPack).toMatch(/"verdict": "green"/)
     expect(reviewPack).toContain('proof_results é o resultado oficial')
+    // não há operador: requisito impossível dentro do escopo vai para deferred, não para reprovação (S2 girou 8 rodadas)
+    expect(reviewPack).toContain('não há operador')
   }, 90_000)
 
   // Queda depois de escrever as provas e antes do vermelho delas: a retomada partia da árvore de antes das provas
@@ -651,6 +653,20 @@ describe('engine', () => {
     const result = await runStory(fixture.deps, fixture.input)
     expect(result).toMatchObject({ status: 'delivered' })
   }, 180_000)
+
+  // Revisão aprovada com itens adiados (requisito impossível dentro do escopo): o motor registra os adiados para o
+  // relatório, e a parte entra sem rodada extra.
+  test('aprovacao_com_itens_adiados_registra_os_adiados', async () => {
+    const fixture = setupStoryFixture()
+    const approved = approvedReviewAction()
+    ;(approved.result as any).deferred = [{ id: 'D1', severity: 'high', category: 'intent_gap', problem: 'a quinta fonte exige mudar o validador', required_action: 'decidir depois', target_role: 'human', evidence_refs: ['eval:E1'], location: 'src/hello.txt' }]
+    fs.writeFileSync(path.join(fixture.scenarioDir, 'checker.json'), JSON.stringify([approved]))
+    const result = await runStory(fixture.deps, fixture.input)
+    expect(result).toMatchObject({ status: 'delivered' })
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    const d = events.find((e) => e.kind === 'decision' && (e.data as any).decision === 'review_deferred')
+    expect((d?.data as any)?.items?.[0]?.id).toBe('D1')
+  }, 120_000)
 
   // CA2: Dado um contrato com roles.maker.family 'codex', quando runStory roda, então
   // lança AdeError com code 'family_without_canary' e exit 4, e o journal não tem nenhum
