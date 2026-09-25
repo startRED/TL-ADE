@@ -70,9 +70,11 @@ export async function writeProof(opts: WriterOpts): Promise<{ kind: 'skip' } | {
   const targets = proofTargets(contract.guardrails?.scope_paths ?? [])
   if (targets.length === 0) return { kind: 'skip' }
 
+  const stepId = opts.attempt ? `${storyId}:proof:${opts.attempt}` : `${storyId}:proof`
+  await opts.journal.append({ kind: 'model_started', unit: storyId, data: { unit: storyId, role: 'prova', step_id: stepId, family: writer.family, model_id: writer.model ?? null, effort: writer.effort ?? null } })
   const dispatch = await dispatchWriter(opts, {
     unit: `${storyId}:proof`,
-    stepId: opts.attempt ? `${storyId}:proof:${opts.attempt}` : `${storyId}:proof`,
+    stepId,
     policy: contract.needs_ui ? `${PROOF_POLICY}\n${JOURNEY_POLICY}` : PROOF_POLICY,
     story: {
       tarefa: 'Escrever as provas que falham desta parte, antes do código.',

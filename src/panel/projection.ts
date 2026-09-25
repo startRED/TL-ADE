@@ -108,6 +108,8 @@ export function projectMissionFromSources({ missionDir }: { missionDir: string }
       complexity: contract?.complexity,
       needs_ui: contract?.needs_ui,
       maker: contract?.roles?.maker,
+      // modelo e esforço de cada papel na chamada em curso ou na última (evento model_started do motor)
+      models: {} as Record<string, { family: string | null; model_id: string | null; effort: string | null }>,
       status: null,
       reason: null,
       calls: 0,
@@ -131,7 +133,11 @@ export function projectMissionFromSources({ missionDir }: { missionDir: string }
     const targetStory = unit ? storyStates.get(unit) : null
 
     // Retomada (queda, pausa, "tentar de novo") volta a parte a andar; antes a tela ficava no último story_done.
-    if ((ev.kind === 'story_started' || ev.kind === 'story_resumed') && targetStory) {
+    if (ev.kind === 'model_started' && targetStory && typeof ev.data?.role === 'string') {
+      const m = { family: ev.data.family ?? null, model_id: ev.data.model_id ?? null, effort: ev.data.effort ?? null }
+      targetStory.models[ev.data.role] = m
+      if (ev.data.role === 'maker') targetStory.maker = m
+    } else if ((ev.kind === 'story_started' || ev.kind === 'story_resumed') && targetStory) {
       targetStory.status = 'in_progress'
       targetStory.reason = null
     } else if (ev.kind === 'story_done' && targetStory) {

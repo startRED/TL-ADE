@@ -64,7 +64,9 @@ function buildVerifiers({ risk, discovery }: { risk: any; discovery: any }) {
     kind: 'script',
     cmd: testCmd,
     expect_exit: 0,
-    timeout_s: 600,
+    // a suíte inteira da TL-ADE leva ~6 min livre e passou dos 10 com o computador ocupado (missão real, 25/09): o
+    // estouro virava "environment" e a parte parava
+    timeout_s: 1800,
     max_output_bytes: 1024,
     evidence,
     strictness: { mode: 'must_fail_before' },

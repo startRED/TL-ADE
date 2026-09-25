@@ -117,6 +117,12 @@ const decimal = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maxim
 
 const EFFORT_PT: Record<string, string> = { low: 'esforço baixo', medium: 'esforço médio', high: 'esforço alto', xhigh: 'esforço muito alto', max: 'esforço máximo' }
 
+/** Modelo e esforço de um papel na parte em curso (ou na última que chamou esse papel). */
+function roleModelOf(mission: Mission | null, role: string, unitId?: string) {
+  const stories = mission?.stories ?? []
+  return (unitId && stories.find((s) => s.id === unitId)?.models?.[role]) || [...stories].reverse().find((s) => s.models?.[role])?.models?.[role] || null
+}
+
 function makerOf(mission: Mission | null, unitId?: string) {
   const stories = mission?.stories ?? []
   const m = (unitId && stories.find((s) => s.id === unitId)?.maker) || stories.find((s) => s.maker)?.maker
@@ -181,6 +187,8 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
   const title = mission?.title ?? mission?.intent ?? missionId
   const open = units.find((u) => u.id === openId)
   const maker = makerOf(mission, liveUnit?.id)
+  const prover = roleModelOf(mission, 'prova', liveUnit?.id)
+  const checker = roleModelOf(mission, 'checker', liveUnit?.id)
 
   const cells = useMemo(() => units.map((u) => {
     const byStaff: Record<StaffKey, Step[]> = { escreve: [], prova: [], revisa: [], motor: [] }
@@ -241,9 +249,9 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
                       <Staff
                         key={staff.key}
                         label={staff.label}
-                        sub={staff.key === 'escreve' ? maker?.model_id ?? 'quem escreve' : staff.key === 'prova' ? 'antes e depois' : staff.key === 'revisa' ? 'outra empresa' : 'preparo e entrega'}
-                        mono={staff.key === 'escreve' && !!maker}
-                        dynamic={staff.key === 'escreve' ? EFFORT_PT[maker?.effort ?? ''] ?? '' : ''}
+                        sub={staff.key === 'escreve' ? maker?.model_id ?? 'quem escreve' : staff.key === 'prova' ? prover?.model_id ?? 'antes e depois' : staff.key === 'revisa' ? checker?.model_id ?? 'outra empresa' : 'preparo e entrega'}
+                        mono={(staff.key === 'escreve' && !!maker) || (staff.key === 'prova' && !!prover?.model_id) || (staff.key === 'revisa' && !!checker?.model_id)}
+                        dynamic={EFFORT_PT[(staff.key === 'escreve' ? maker?.effort : staff.key === 'prova' ? prover?.effort : staff.key === 'revisa' ? checker?.effort : '') ?? ''] ?? ''}
                         percussion={staff.key === 'motor'}
                       >
                         {units.map((u, mi) => {
@@ -337,7 +345,7 @@ function Staff({ label, sub, mono, dynamic, percussion, children }: { label: str
       <div className="staff-label" style={percussion ? { minHeight: '4rem' } : undefined}>
         <strong>{label}</strong>
         <span className={mono ? 'model' : undefined}>{sub}</span>
-        {dynamic && <em className="dynamic" title="Esforço de quem escreve">{dynamic}</em>}
+        {dynamic && <em className="dynamic" title="Esforço com que o modelo trabalha">{dynamic}</em>}
       </div>
       {children}
     </>

@@ -34,6 +34,18 @@ describe('projeção da missão para a tela', () => {
     expect(s1).toMatchObject({ status: 'in_progress', reason: null })
   })
 
+  // 25/09, pedido do operador: ver com que esforço cada modelo trabalha enquanto a chamada roda (a telemetria só chega
+  // no fim). O motor anuncia modelo e esforço em model_started; o último de cada papel vale.
+  test('modelo_e_esforco_de_cada_papel_aparecem_quando_a_chamada_comeca', async () => {
+    const s1 = await mission([
+      { kind: 'model_started', data: { unit: 'S1', role: 'prova', family: 'codex', model_id: 'gpt-6-sol', effort: 'high' } },
+      { kind: 'model_started', data: { unit: 'S1', role: 'maker', family: 'claude', model_id: 'claude-opus-5-5', effort: 'low' } },
+      { kind: 'model_started', data: { unit: 'S1', role: 'maker', family: 'claude', model_id: 'claude-opus-5-5', effort: 'high' } },
+    ])
+    expect(s1.maker).toEqual({ family: 'claude', model_id: 'claude-opus-5-5', effort: 'high' })
+    expect(s1.models).toEqual({ prova: { family: 'codex', model_id: 'gpt-6-sol', effort: 'high' }, maker: { family: 'claude', model_id: 'claude-opus-5-5', effort: 'high' } })
+  })
+
   test('gasto_da_parte_vem_da_telemetria_das_chamadas', async () => {
     const s1 = await mission([
       { kind: 'story_started', data: { unit: 'S1', worktree_dir: 'w', tree_before: 't0' } },

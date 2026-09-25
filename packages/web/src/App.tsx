@@ -44,8 +44,8 @@ function activityLine(a: Activity): string {
   return 'A última missão terminou'
 }
 
-export interface ModelRef { family: string; model_id: string; effort?: string }
-export interface MissionStory { id: string; title?: string; status?: string | null; reason?: string | null; calls?: number; cost?: number | null; maker?: ModelRef | string | null }
+export interface ModelRef { family: string | null; model_id: string | null; effort?: string | null }
+export interface MissionStory { id: string; title?: string; status?: string | null; reason?: string | null; calls?: number; cost?: number | null; maker?: ModelRef | string | null; models?: Record<string, ModelRef> }
 export interface Mission {
   id: string
   status?: string

@@ -1041,6 +1041,9 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     })
     }
 
+    // modelo e esforço na hora em que a chamada começa: a telemetria só chega no fim e o painel ficava sem mostrar
+    // com que esforço cada modelo estava trabalhando (pedido do operador, 25/09)
+    await deps.journal.append({ kind: 'model_started', unit: storyId, data: { unit: storyId, role: 'maker', step_id: makerStepId, family: rung.family, model_id: rung.model ?? makerModel ?? null, effort: rung.effort ?? null } })
     const dispatchMaker = dispatcherFor(rung.family)
     if (!dispatchMaker) throw new AdeError('invalid_ladder', `degrau da família ${rung.family} sem despachante`, 4)
     let dispatch: any
@@ -1694,7 +1697,9 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     })
     }
 
-    const dispatchChecker = (stepId: string, packPath: string = reviewPack.pack_path) => checkerDispatchFn({
+    const dispatchChecker = async (stepId: string, packPath: string = reviewPack.pack_path) => {
+      await deps.journal.append({ kind: 'model_started', unit: storyId, data: { unit: storyId, role: 'checker', step_id: stepId, family: checker.family, model_id: checker.model ?? null, effort: checker.effort ?? null } })
+      return checkerDispatchFn({
         step: authorizedStep(
           deps.step,
           paidAuthorization,
@@ -1716,6 +1721,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         role: 'checker_round',
         sandbox: 'read-only',
       })
+    }
 
     let checkerDispatch
     try {
