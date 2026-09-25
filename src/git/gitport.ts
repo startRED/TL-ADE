@@ -210,7 +210,10 @@ export function createGitPort(options: { worktreeDir: string; execFile?: typeof 
 
   async function commit({ message }: { message: string }): Promise<CommitResult> {
     await run(['add', '-A'], { maxBuffer: 1 << 26 })
-    await run(['commit', '-m', message], { maxBuffer: 1 << 24 })
+    // modelo que já commitou o próprio trabalho deixa nada a commitar: o git commit saía com 1 e a parte aprovada
+    // caía com crash (missão real de anexos, 25/09). A entrega fica no HEAD que ele deixou.
+    const staged = await run(['diff', '--cached', '--quiet'], { maxBuffer: 1 << 20, okCodes: [0, 1] })
+    if (staged.code === 1) await run(['commit', '-m', message], { maxBuffer: 1 << 24 })
     const commit = (await run(['rev-parse', 'HEAD'], { maxBuffer: 1 << 20 })).text
     const tree = (await run(['rev-parse', 'HEAD^{tree}'], { maxBuffer: 1 << 20 })).text
     return { commit, tree }

@@ -62,7 +62,7 @@ export function buildClaudeArgs(opts: { sessionId: string; packPath: string; max
     '--permission-prompts',
     'none',
     '--disallowedTools',
-    checker ? CHECKER_DISALLOWED : 'Bash(git push*),Bash(gh pr*)',
+    checker ? CHECKER_DISALLOWED : 'Bash(git push*),Bash(git commit*),Bash(gh pr*)',
     '--append-system-prompt-file',
     packPath,
   ]

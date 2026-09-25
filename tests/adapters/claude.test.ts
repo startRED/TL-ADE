@@ -229,7 +229,7 @@ describe('claude token parsing and telemetry adapter', () => {
 
     // quem escreve segue com escrita e o schema de resultado de unidade; papel desconhecido nem chega ao spawn
     expect(await dispatchClaude({ ...common, stepId: 'S23:r1:maker' })).toMatchObject({ review_result: null })
-    expect(flag(argvs[1], '--disallowedTools')).toBe('Bash(git push*),Bash(gh pr*)')
+    expect(flag(argvs[1], '--disallowedTools')).toBe('Bash(git push*),Bash(git commit*),Bash(gh pr*)')
     expect(JSON.parse(flag(argvs[1], '--json-schema')).required).toContain('tree_after')
     await expect(dispatchClaude({ ...common, stepId: 'S23:r1:planner', role: 'planner' })).rejects.toMatchObject({ code: 'invalid_claude_args' })
     expect(worker).toHaveBeenCalledTimes(2)

@@ -75,12 +75,12 @@ describe('claude argv', () => {
       '--permission-prompts',
       'none',
       '--disallowedTools',
-      'Bash(git push*),Bash(gh pr*)',
+      'Bash(git push*),Bash(git commit*),Bash(gh pr*)',
       '--append-system-prompt-file',
       packPath,
     ])
 
-    expect(args[args.indexOf('--disallowedTools') + 1]).toBe('Bash(git push*),Bash(gh pr*)')
+    expect(args[args.indexOf('--disallowedTools') + 1]).toBe('Bash(git push*),Bash(git commit*),Bash(gh pr*)')
     expect(args.includes('--bare')).toBe(false)
     expect(CLAUDE_PROMPT).toBe('Siga a seção task do contexto anexado e responda somente pelo schema.')
 
