@@ -117,6 +117,7 @@ export function projectMissionFromSources({ missionDir }: { missionDir: string }
       diff: [],
       tests: [],
       visual: null,
+      visual_error: null as string | null,
       review: null,
     })
   }
@@ -144,18 +145,12 @@ export function projectMissionFromSources({ missionDir }: { missionDir: string }
       targetStory.status = ev.data?.status || 'committed'
       targetStory.reason = ev.data?.reason || null
     } else if (ev.kind === 'visual_eval_done' && targetStory) {
-      targetStory.visual = ev.data?.evaluation || null
-      // Validação do schema visual-eval
-      if (targetStory.visual) {
-        const vResult = validate('visual-eval', targetStory.visual)
-        if (!vResult.valid) {
-          throw new AdeError(
-            'visual_eval_invalid',
-            `visual_eval_done inválido na story ${unit}: ${vResult.errors.map((e) => e.path + ' ' + e.message).join(', ')}`,
-            2,
-          )
-        }
-      }
+      // Validação do schema visual-eval. Avaliação fora do schema some da parte com o motivo, sem derrubar a tela
+      // inteira: a S3 da missão de anexos passou das 2 rodadas do schema e a tabela da missão parou de carregar (26/09).
+      const evaluation = ev.data?.evaluation || null
+      const vResult = evaluation ? validate('visual-eval', evaluation) : null
+      targetStory.visual = vResult && !vResult.valid ? null : evaluation
+      targetStory.visual_error = vResult && !vResult.valid ? vResult.errors.map((e) => e.path + ' ' + e.message).join(', ') : null
     } else if (ev.kind === 'decision') {
       decisions.push({
         seq: ev.seq,

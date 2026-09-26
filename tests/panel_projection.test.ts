@@ -111,4 +111,17 @@ describe('projeção da missão para a tela', () => {
     expect(elapsed(t0, at(60))).toBe('1 h')
     expect(elapsed(t0, at(5 * 60 + 12))).toBe('5 h 12 min')
   })
+
+  // 26/09, missão de anexos: a S3 passou das 2 rodadas que o schema visual-eval aceita e a projeção lançava erro; a tabela
+  // da missão inteira parou de carregar. A avaliação fora do schema sai da parte com o motivo, e o resto aparece.
+  test('avaliacao_visual_fora_do_schema_nao_derruba_a_tela_da_missao', async () => {
+    const s1: any = await mission([
+      { kind: 'story_started', data: { unit: 'S1', worktree_dir: 'w', tree_before: 't0' } },
+      { kind: 'visual_eval_done', unit: 'S1', data: { round: 7, evaluation: { round: 7 } } },
+      { kind: 'story_done', data: { unit: 'S1', status: 'delivered', commit: 'c1' } },
+    ])
+    expect(s1.status).toBe('delivered')
+    expect(s1.visual).toBeNull()
+    expect(s1.visual_error).toMatch(/round/)
+  })
 })
