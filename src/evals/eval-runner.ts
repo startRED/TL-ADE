@@ -309,6 +309,20 @@ export function createEvalRunner({ step, missionDir, gitPort, spawnSuite = execS
    * estava lá (instável, fim de linha, dívida antiga) não conta; prova nova precisa passar. Sem suíte reconhecida ou
    * sem relatório legível, devolve null e o verde segue falho.
    */
+  const baselineFile = (baseTree: string) => path.join(missionDir, 'artifacts', 'baselines', `${baseTree}.json`)
+  /** Vermelhas da largada já medida (0 sem medição guardada). */
+  function baselineReds(baseTree: string): number {
+    try {
+      const baseline: TestResult[] = JSON.parse(fs.readFileSync(baselineFile(baseTree), 'utf8'))
+      return baseline.filter((t) => t.status === 'failed' || t.status === 'timeout').length
+    } catch {
+      return 0
+    }
+  }
+  /** O eval é a suíte da raiz (o comando dela sem os argumentos de relatório), não um script próprio. */
+  const isWholeSuite = (evalDef: EvalDef) =>
+    findSuites(gitPort.worktreeDir).some((s) => s.dir === '' && evalDef.argv.length > 0 && evalDef.argv.every((a, i) => s.argv[i] === a))
+
   async function judgeAgainstBase(evalDef: EvalDef, tree: string, baseTree: string): Promise<{ verdict: 'green' | 'green_failed'; warnings: string[] } | null> {
     if (typeof gitPort.restoreTree !== 'function') return null
     const cwd = gitPort.worktreeDir
@@ -319,7 +333,7 @@ export function createEvalRunner({ step, missionDir, gitPort, spawnSuite = execS
     try {
       // A largada não muda dentro da parte: fica guardada pela árvore e roda uma vez só (cada rodada da S2 da missão real
       // pagava de novo os ~5 min da suíte inteira).
-      const cacheFile = path.join(missionDir, 'artifacts', 'baselines', `${baseTree}.json`)
+      const cacheFile = baselineFile(baseTree)
       let baseline: TestResult[]
       if (fs.existsSync(cacheFile)) {
         baseline = JSON.parse(fs.readFileSync(cacheFile, 'utf8'))
@@ -389,6 +403,20 @@ export function createEvalRunner({ step, missionDir, gitPort, spawnSuite = execS
           worktree: gitPort.worktreeDir,
         },
         async () => {
+          // Suíte inteira com a largada já medida e com vermelhas: rodá-la do jeito comum só falharia de novo pelas mesmas
+          // vermelhas antes do julgamento contra a base. Vai direto a ele (S3 da missão de anexos: 2 suítes por rodada).
+          if (baseTree && baselineReds(baseTree) > 0 && isWholeSuite(evalDef)) {
+            const t0 = Date.now()
+            const judged = await judgeAgainstBase(evalDef, tree, baseTree)
+            if (judged) {
+              return buildEvalRecord({
+                eval_id: evalDef.id, phase, tree, argv: evalDef.argv, expect_exit: evalDef.expect_exit, strictness_mode: strictnessMode,
+                verdict: judged.verdict,
+                warnings: ['verde julgado direto contra a base: a largada já tinha vermelhas', ...judged.warnings],
+                duration_ms: Date.now() - t0,
+              })
+            }
+          }
           const { contained, raw_ref, red_reason, num_total_tests } = await executeEval(
             evalDef,
             phase,

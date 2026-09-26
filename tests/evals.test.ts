@@ -1682,8 +1682,15 @@ describe('verde da suíte julgado contra a base', () => {
       const tree = await real.worktreeTree()
       return runner.runEval({ eval: { id: 'V1', argv: ['node', '--test'], kind: 'script', expect_exit: 0, timeout_s: 120, max_output_bytes: 1024, strictness: { mode: 'must_fail_before' as const } }, phase: 'green', tree, unit: 'S1', baseTree })
     }
-    expect((await green(1)).verdict).toBe('green')
-    expect((await green(2)).verdict).toBe('green')
+    const first = await green(1)
+    expect(first.verdict).toBe('green')
+    // com a largada já medida e vermelha, a suíte inteira comum falharia de novo pelas mesmas vermelhas: a rodada
+    // seguinte vai direto ao julgamento contra a base (na S3 da missão de anexos eram 2 suítes por rodada, ~12 min)
+    const second = await green(2)
+    expect(second.verdict).toBe('green')
+    expect(first.exit_code).toBe(1)
+    expect(second.exit_code).toBeNull()
+    expect(second.warnings.join(' ')).toContain('direto contra a base')
     expect(restores.filter((t) => t === baseTree)).toHaveLength(1)
     await journal.close()
     removeRepo(repo.dir)
