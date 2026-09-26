@@ -231,4 +231,51 @@ describe('anexos no campo do pedido', () => {
     await page.keyboard.press('Space')
     expect(await page.getByRole('button', { name: 'Remover documento.pdf' }).count()).toBe(0)
   }, 120_000)
+  test('C3.6 Ctrl+V com imagem anexa; prints seguidos ganham nomes próprios e texto colado segue texto', async () => {
+    const { page } = await panel()
+    const field = page.getByLabel('Pedido')
+    // o print do sistema chega como image.png, sempre com o mesmo nome
+    const paste = (withText: boolean) => field.evaluate((el, [data, text]) => {
+      const bytes = Uint8Array.from(atob(data as string), (c) => c.charCodeAt(0))
+      const dt = new DataTransfer()
+      dt.items.add(new File([bytes], 'image.png', { type: 'image/png' }))
+      if (text) dt.setData('text/plain', 'texto copiado')
+      const ev = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })
+      el.dispatchEvent(ev)
+      return ev.defaultPrevented
+    }, [png.toString('base64'), withText])
+    expect(await paste(false)).toBe(true)
+    await page.getByRole('button', { name: 'Remover imagem-colada-1.png' }).waitFor()
+    expect(await paste(false)).toBe(true)
+    await page.getByRole('button', { name: 'Remover imagem-colada-2.png' }).waitFor()
+    await thumbnail(page, 'imagem-colada-2.png')
+    // área de transferência com texto (Word, Excel): o texto vence e nada é anexado
+    expect(await paste(true)).toBe(false)
+    expect(await page.locator('form.composer li.attach').count()).toBe(2)
+    expect(await page.getByRole('alert').count()).toBe(0)
+  }, 120_000)
+
+  test('C3.7 campo cresce com o texto e o botão expande e retrai o pedido longo', async () => {
+    const { page } = await panel()
+    const field = page.getByLabel('Pedido')
+    const height = () => field.evaluate((el) => el.getBoundingClientRect().height)
+    const empty = await height()
+    expect(await page.getByRole('button', { name: 'Expandir campo' }).count()).toBe(0)
+    await field.fill(Array.from({ length: 6 }, (_, i) => `linha ${i + 1}`).join('\n'))
+    const six = await height()
+    expect(six).toBeGreaterThan(empty)
+    await field.fill(Array.from({ length: 60 }, (_, i) => `linha ${i + 1}`).join('\n'))
+    const capped = await height()
+    // cresce um pouco, não muito: o teto fica bem abaixo da altura da janela
+    expect(capped).toBeLessThan(await page.evaluate(() => innerHeight * 0.45))
+    const expand = page.getByRole('button', { name: 'Expandir campo' })
+    await expand.waitFor()
+    await expand.click()
+    // o teto muda com transição: mede depois que ela assenta
+    await expect.poll(height).toBeGreaterThan(capped * 1.5)
+    const retract = page.getByRole('button', { name: 'Retrair campo' })
+    expect(await retract.getAttribute('aria-expanded')).toBe('true')
+    await retract.click()
+    await expect.poll(height).toBe(capped)
+  }, 120_000)
 })

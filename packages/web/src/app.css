@@ -924,6 +924,12 @@ h3.ui-heading, h4.ui-heading { font-size: 1.15rem; }
 .clip { display: inline-grid; place-items: center; flex: none; width: 36px; height: 36px; background: transparent; color: var(--ink-faint); border: 1px solid var(--sage-line); transition: color .15s, border-color .15s; }
 .clip:hover { color: var(--ink); }
 .clip:focus-visible { border-color: var(--ink); color: var(--ink); outline: none; }
+.clip[aria-expanded='true'] { color: var(--ink); border-color: var(--ink-soft); }
+/* o pedido cresce com o texto até ~10 linhas e rola dali; aberto, ocupa até 62% da janela */
+.composer .field { field-sizing: content; resize: none; min-height: calc(1lh + 1.5rem); max-height: calc(10lh + 1.8rem); overflow-y: auto; transition: border-color .25s var(--ease-out), max-height .35s var(--ease-out); }
+.terminal .field { min-height: calc(3lh + 1.8rem); }
+.composer .field.open { max-height: 62vh; }
+@media (prefers-reduced-motion: reduce) { .composer .field { transition: none; } }
 .composer .composer-row .note-line { font-size: 15px; }
 /* dica de atalho: secundária, abaixo da instrução do campo */
 .composer .composer-row .kbd-hint { font-size: 15px; color: color-mix(in srgb, var(--ink) 75%, transparent); }

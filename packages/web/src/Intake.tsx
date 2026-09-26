@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { ArrowRight, Check, Paperclip, Pause, PaperPlaneRight, Play, Stop, WarningCircle, X } from '@phosphor-icons/react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type FormEvent, type ReactNode } from 'react'
+import { ArrowRight, ArrowsInSimple, ArrowsOutSimple, Check, Paperclip, Pause, PaperPlaneRight, Play, Stop, WarningCircle, X } from '@phosphor-icons/react'
 import { motion } from 'motion/react'
 import { apiFetch, postJson, subscribeEvents } from './api.ts'
 import type { Mission } from './App.tsx'
@@ -269,6 +269,15 @@ function signed(name: string, data: string) {
   const head = atob(data.slice(0, 16))
   return !!sigs?.some((s) => head.startsWith(s)) && (ext !== 'webp' || head.slice(8, 12) === 'WEBP')
 }
+// o print do sistema chega sempre como image.png: cada colagem ganha nome próprio para não esbarrar no repetido
+const GENERIC_PASTE = /^image\.(png|jpe?g|gif|webp)$/i
+function pastedName(f: File, taken: string[]) {
+  const ext = GENERIC_PASTE.exec(f.name)?.[1].toLowerCase()
+  if (!ext) return f
+  let n = 1
+  while (taken.includes(`imagem-colada-${n}.${ext}`)) n++
+  return new File([f], `imagem-colada-${n}.${ext}`, { type: f.type })
+}
 const toBase64 = (f: File) => new Promise<string>((resolve, reject) => {
   const r = new FileReader()
   r.onload = () => resolve(String(r.result).slice(String(r.result).indexOf(',') + 1))
@@ -290,6 +299,21 @@ function RequestBox({ last, busy, compact, onSend }: { last: Intake | null; busy
   const blocked = busy || reading > 0
   const send = () => onSend(files.length ? { text, attachments: files.map(({ name, data }) => ({ name, data })) } : { text })
   const field = useRef<HTMLTextAreaElement>(null)
+  // o campo cresce com o texto até um teto; passou dele, o botão abre o pedido inteiro
+  const [expanded, setExpanded] = useState(false)
+  const [overflowing, setOverflowing] = useState(false)
+  useLayoutEffect(() => {
+    const el = field.current
+    if (el && !expanded) setOverflowing(el.scrollHeight > el.clientHeight + 1)
+  }, [text, expanded])
+  function paste(e: ClipboardEvent<HTMLTextAreaElement>) {
+    // com texto junto (Word, Excel) o texto vence; só arquivo ou print vira anexo
+    const pasted = Array.from(e.clipboardData.files)
+    if (!pasted.length || e.clipboardData.getData('text/plain')) return
+    e.preventDefault()
+    const names = [...taken.current]
+    void add(pasted.map((f) => { const g = pastedName(f, names); names.push(g.name); return g }))
+  }
   function submit(e: FormEvent) {
     e.preventDefault()
     if (blocked) return
@@ -297,7 +321,7 @@ function RequestBox({ last, busy, compact, onSend }: { last: Intake | null; busy
     if (!text.trim()) { setProblem('Escreva o pedido antes de enviar.'); field.current?.focus(); return }
     send()
   }
-  async function add(picked: FileList | null) {
+  async function add(picked: FileList | File[] | null) {
     const chosen = Array.from(picked ?? [])
     if (picker.current) picker.current.value = ''
     const errors: string[] = []
@@ -370,10 +394,11 @@ function RequestBox({ last, busy, compact, onSend }: { last: Intake | null; busy
       <span className="prompt" aria-hidden="true">›</span>
       <textarea
         ref={field}
-        className="field"
+        className={expanded ? 'field open' : 'field'}
         aria-label="Pedido"
         value={text}
         onChange={(e) => setText(e.target.value)}
+        onPaste={paste}
         onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && text.trim() && !blocked) send() }}
         placeholder={compact ? 'Peça a próxima mudança' : 'Descreva o que você quer construir ou mudar'}
         rows={compact ? 1 : 3}
@@ -404,8 +429,13 @@ function RequestBox({ last, busy, compact, onSend }: { last: Intake | null; busy
           <button ref={clip} type="button" className="clip" aria-label="Anexar arquivos" title="Anexar arquivos" onClick={() => picker.current?.click()}>
             <Paperclip size={18} weight="light" aria-hidden="true" />
           </button>
+          {(overflowing || expanded) && (
+            <button type="button" className="clip" aria-expanded={expanded} aria-label={expanded ? 'Retrair campo' : 'Expandir campo'} title={expanded ? 'Retrair campo' : 'Expandir campo'} onClick={() => { setExpanded(!expanded); field.current?.focus({ preventScroll: true }) }}>
+              {expanded ? <ArrowsInSimple size={18} weight="light" aria-hidden="true" /> : <ArrowsOutSimple size={18} weight="light" aria-hidden="true" />}
+            </button>
+          )}
           <input ref={picker} type="file" multiple accept={ACCEPT} hidden tabIndex={-1} onChange={(e) => void add(e.target.files)} />
-          {!compact && <span className="note-line kbd-hint">Ctrl + Enter também envia.</span>}
+          {!compact && <span className="note-line kbd-hint">Ctrl + Enter envia. Ctrl + V cola imagens.</span>}
         </div>
         <button className="btn baton" type="submit" disabled={blocked || (!text.trim() && files.length === 0)}>
           <PaperPlaneRight size={15} aria-hidden="true" /> {busy ? 'Enviando…' : reading ? 'Lendo anexos…' : 'Enviar pedido'}
