@@ -24,6 +24,19 @@ export function startSmoothScroll(): void {
  * limite dele velhos quando a tela troca de altura (plano recusado vira partitura), e a barra fixa do pedido
  * aparece pintada por cima da conversa até a próxima rolagem.
  */
+/** Traz o fim do elemento para dentro da janela pela mesma rolagem da página; já visível, não mexe. */
+export function revealBottom(el: Element, margin = 24): void {
+  const overflow = el.getBoundingClientRect().bottom + margin - window.innerHeight
+  if (overflow <= 0) return
+  const top = window.scrollY + overflow
+  if (!lenis) {
+    window.scrollTo({ top, behavior: reducedMotion() ? 'auto' : 'smooth' })
+    return
+  }
+  lenis.resize()
+  lenis.scrollTo(top, { force: true })
+}
+
 export function scrollToTop(smooth = false): void {
   if (!lenis) {
     window.scrollTo(0, 0)

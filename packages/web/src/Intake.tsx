@@ -5,7 +5,7 @@ import { apiFetch, postJson, subscribeEvents } from './api.ts'
 import type { Mission } from './App.tsx'
 import MissionScore from './Units.tsx'
 import { shortPath } from './format.ts'
-import { EASE_OUT, scrollToTop } from './motion.ts'
+import { EASE_OUT, reducedMotion, revealBottom, scrollToTop } from './motion.ts'
 import Plate from './Plate.tsx'
 
 interface Question {
@@ -306,6 +306,16 @@ function RequestBox({ last, busy, compact, onSend }: { last: Intake | null; busy
     const el = field.current
     if (el && !expanded) setOverflowing(el.scrollHeight > el.clientHeight + 1)
   }, [text, expanded])
+  // aberto, o campo cresce para baixo: a página acompanha até Retrair e Enviar ficarem à vista
+  useEffect(() => {
+    const el = field.current
+    if (!expanded || !el?.form) return
+    const form = el.form
+    if (reducedMotion()) { revealBottom(form); return }
+    const done = (e: TransitionEvent) => { if (e.propertyName === 'max-height') revealBottom(form) }
+    el.addEventListener('transitionend', done)
+    return () => el.removeEventListener('transitionend', done)
+  }, [expanded])
   function paste(e: ClipboardEvent<HTMLTextAreaElement>) {
     // com texto junto (Word, Excel) o texto vence; só arquivo ou print vira anexo
     const pasted = Array.from(e.clipboardData.files)

@@ -274,6 +274,9 @@ describe('anexos no campo do pedido', () => {
     // o teto muda com transição: mede depois que ela assenta
     await expect.poll(height).toBeGreaterThan(capped * 1.5)
     const retract = page.getByRole('button', { name: 'Retrair campo' })
+    // aberto, o campo não empurra Retrair e Enviar para fora da janela
+    await expect.poll(() => page.getByRole('button', { name: 'Enviar pedido' }).evaluate((el) => el.getBoundingClientRect().bottom <= innerHeight)).toBe(true)
+    expect(await retract.evaluate((el) => el.getBoundingClientRect().bottom <= innerHeight)).toBe(true)
     expect(await retract.getAttribute('aria-expanded')).toBe('true')
     await retract.click()
     await expect.poll(height).toBe(capped)
