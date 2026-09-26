@@ -131,7 +131,9 @@ function codexProbe(): Promise<void> {
   })
 }
 
-/** Leitura do Codex mais velha que isto dispara a sonda antes de gravar o recibo. */
+/** Leitura do Codex mais velha que isto dispara a sonda: o painel relê a cada 3 min e o número não fica atrás. */
+export const CODEX_PROBE_AFTER_MS = 5 * 60_000
+/** Leitura do Codex mais velha que isto não vira recibo, mesmo com a sonda falhando. */
 export const CODEX_READING_MAX_AGE_MS = 30 * 60_000
 
 /**
@@ -156,7 +158,7 @@ export async function refreshQuotaReceipts({ home = os.homedir(), now = Date.now
   const claude = parseClaudeRateLimit(await readClaude().catch(() => ''))
   if (claude) write({ source: 'official', family: 'claude', used_percent: claude.seven_day.used_percent, reserved_percent: 0, observed_at: new Date(now).toISOString(), weekly_reset_at: claude.seven_day.resets_at, five_hour: claude.five_hour })
   let codex = readCodex(home)
-  if (!codex || now - Date.parse(codex.observed_at) > CODEX_READING_MAX_AGE_MS) {
+  if (!codex || now - Date.parse(codex.observed_at) > CODEX_PROBE_AFTER_MS) {
     await probeCodex().catch(() => undefined)
     codex = readCodex(home) ?? codex
   }

@@ -79,4 +79,16 @@ describe('cota oficial dos planos', () => {
     const stale = await refreshQuotaReceipts({ home: tmp(), now, readClaude: async () => '', readCodex: old, probeCodex: async () => {}, readAgy: async () => '' })
     expect(stale).toEqual([])
   })
+  // 26/09: o painel relia a cada 3 min, mas a sonda só rodava com leitura de mais de 30 min: o Codex ficava atrasado
+  test('leitura_do_codex_com_mais_de_5_min_sonda_e_sem_sonda_nova_ainda_vale_ate_30_min', async () => {
+    const now = Date.parse('2026-09-26T14:40:00Z')
+    const at = (min: number) => ({ seven_day: { used_percent: 39, resets_at: '2026-10-01T03:17:24.000Z' }, observed_at: new Date(now - min * 60_000).toISOString() })
+    let probed = 0
+    await refreshQuotaReceipts({ home: tmp(), now, readClaude: async () => '', readCodex: () => at(3), probeCodex: async () => { probed++ }, readAgy: async () => '' })
+    expect(probed).toBe(0)
+    // sonda que falha: a leitura de 8 min ainda é desta semana e vira recibo
+    const written = await refreshQuotaReceipts({ home: tmp(), now, readClaude: async () => '', readCodex: () => at(8), probeCodex: async () => { probed++; throw new Error('codex fora') }, readAgy: async () => '' })
+    expect(probed).toBe(1)
+    expect(written.map((r) => [r.family, r.used_percent])).toEqual([['codex', 39]])
+  })
 })
