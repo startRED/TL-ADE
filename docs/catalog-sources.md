@@ -62,7 +62,7 @@ caminhos em `~/.ade/catalog-repos/.ade/config.json`; sincroniza com `ade catalog
 
 | Fonte | Licença | Commit | Skills pinadas | Estado no índice |
 | :--- | :--- | :--- | :--- | :--- |
-| `mattpocock/skills` | MIT | `c55ee46` | `tdd`, `code-review`, `codebase-design` | as 3 liberadas |
+| `mattpocock/skills` | MIT | `c55ee46` | `tdd`, `code-review`, `codebase-design`, `resolving-merge-conflicts`, `writing-for-agents` | as 5 liberadas (as 2 últimas em 2026-09-26) |
 | `helderberto/agent-skills` | MIT | `369b84f` | `frontend-ui-engineering` | liberada |
 | `mblode/agent-skills` | MIT | `e7db33d` | `tidy`, `ui-design` | quarentena (`credentials`, `<!--`, `.env` em referência) |
 | `product-on-purpose/pm-skills` | Apache-2.0 | `1cef1a9` | `deliver-acceptance-criteria`, `deliver-edge-cases` | quarentena (`<!--` de atribuição e de template) |
@@ -71,7 +71,11 @@ caminhos em `~/.ade/catalog-repos/.ade/config.json`; sincroniza com `ade catalog
 | `DevelopersGlobal/ai-agent-skills` | MIT | `f47f948` | `debugging-methodology` | liberada |
 | `antfu/skills` | MIT | `a74f281` | `vitest` | quarentena (`<!--`, `--env-file=.env.staging` em referência) |
 
-**Cortadas na medição:** `mattpocock/diagnosing-bugs` (traz `scripts/hitl-loop.template.sh`), `mcollina/skills/node`
+**Cortadas na medição:** `mattpocock/diagnosing-bugs` (traz `scripts/hitl-loop.template.sh`; só o `SKILL.md` cai em
+quarentena `network_command`, medido em 2026-09-26), `mattpocock/grilling`, `grill-me`, `grill-with-docs`, `to-spec`,
+`to-tickets`, `triage`, `wayfinder` e `handoff` (entrevistam o operador ou publicam em issue tracker: não cabem em
+missão autônoma), `mattpocock/domain-modeling` (cria `CONTEXT.md` na raiz, fora da allowlist), `mattpocock/prototype`
+e `research` (código descartável e agente de fundo, fora do escopo da parte), `mcollina/skills/node`
 (`SKILL.md` parado desde 2026-03-13 e assets `.ts`), `facebookresearch/secpriv-skill` (`SKILL.md` na raiz, sem `name`),
 `helderberto/a11y-audit` (manda rodar `npx`), `helderberto/tdd` (repete a do mattpocock), `alirezarezvani/claude-skills`
 (biblioteca com scripts; fica para uma rodada própria).
