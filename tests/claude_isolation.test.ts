@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, test } from 'vitest'
-import { CLAUDE_ISOLATION_ENV, isolationArgs, isolationSettings, writeIsolationSettings } from '../src/adapters/claude/isolation.ts'
+import { CLAUDE_ISOLATION_ENV, claudeWorkerEnv, isolationArgs, isolationLeaks, isolationSettings, writeIsolationSettings } from '../src/adapters/claude/isolation.ts'
 import { buildClaudeArgs } from '../src/adapters/claude/argv.ts'
 import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
@@ -60,7 +60,7 @@ describe('isolamento do claude sem --safe-mode (ADR 0044)', () => {
   test('isolation_args_load_only_project_sources_strict_mcp_and_the_settings_file', () => {
     expect(isolationArgs('/s.json')).toEqual(['--setting-sources', 'project', '--strict-mcp-config', '--exclude-dynamic-system-prompt-sections', '--settings', '/s.json'])
     expect(isolationArgs('/s.json', 'none').slice(0, 2)).toEqual(['--setting-sources', ''])
-    expect(CLAUDE_ISOLATION_ENV).toEqual({ CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' })
+    expect(CLAUDE_ISOLATION_ENV).toEqual({ CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', ENABLE_CLAUDEAI_MCP_SERVERS: 'false' })
   })
 
   test('maker_and_checker_args_carry_isolation_and_never_safe_mode', () => {
@@ -70,6 +70,53 @@ describe('isolamento do claude sem --safe-mode (ADR 0044)', () => {
       const at = args.indexOf('--setting-sources')
       expect(args.slice(at, at + 6)).toEqual(isolationArgs('/p/iso.json'))
     }
+  })
+
+  // O doctor de qualquer máquina lê o system/init da sonda: o que for do operador reprova a sonda e trava missões.
+  test('isolation_leaks_flag_user_plugins_mcp_skills_agents_commands_and_synced_skills', () => {
+    const cfg = makeTmpDir('ade-iso-cfg-')
+    tmps.push(cfg)
+    fs.mkdirSync(path.join(cfg, 'skills', 'minha-skill'), { recursive: true })
+    fs.mkdirSync(path.join(cfg, 'agents'), { recursive: true })
+    fs.writeFileSync(path.join(cfg, 'agents', 'meu-agente.md'), 'x')
+    fs.mkdirSync(path.join(cfg, 'commands'), { recursive: true })
+    fs.writeFileSync(path.join(cfg, 'commands', 'meu-comando.md'), 'x')
+    const clean = {
+      plugins: [{ name: 'agents-md', path: 'builtin', source: 'agents-md@builtin' }],
+      mcp_servers: [],
+      skills: ['verify', 'run', 'run-tl-ade'],
+      agents: ['Explore', 'general-purpose'],
+      slash_commands: ['verify', 'run'],
+    }
+    expect(isolationLeaks(clean, cfg)).toEqual([])
+    const dirty = {
+      plugins: [...clean.plugins, { name: 'caveman', path: path.join(cfg, 'plugins', 'caveman'), source: 'caveman@caveman' }],
+      mcp_servers: [{ name: 'github', status: 'connected' }],
+      skills: [...clean.skills, 'minha-skill', 'anthropic-skills:humanizer'],
+      agents: [...clean.agents, 'meu-agente'],
+      slash_commands: [...clean.slash_commands, 'meu-comando'],
+    }
+    expect(isolationLeaks(dirty, cfg)).toEqual([
+      'plugin caveman@caveman',
+      'MCP github',
+      'skill minha-skill',
+      'skill anthropic-skills:humanizer',
+      'agente meu-agente',
+      'comando meu-comando',
+    ])
+  })
+
+  // Juiz, chat e sonda de cota herdavam o process.env inteiro do operador; agora usam o mesmo ambiente fechado do motor.
+  test('claude_worker_env_is_closed_keeps_config_dir_and_sets_isolation_flags', () => {
+    const env = claudeWorkerEnv({ PATH: '/bin', CLAUDE_CONFIG_DIR: '/cfg', CLAUDE_CODE_MAX_OUTPUT_TOKENS: '9', ANTHROPIC_API_KEY: 'x', MAX_THINKING_TOKENS: '1' })
+    expect(env.CLAUDE_CONFIG_DIR).toBe('/cfg')
+    expect(env.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe('1')
+    expect(env.ENABLE_CLAUDEAI_MCP_SERVERS).toBe('false')
+    for (const k of ['CLAUDE_CODE_MAX_OUTPUT_TOKENS', 'ANTHROPIC_API_KEY', 'MAX_THINKING_TOKENS']) expect(env[k]).toBeUndefined()
+  })
+
+  test('isolation_leaks_without_init_event_is_a_leak', () => {
+    expect(isolationLeaks(null, '/nada')).toEqual(['sem evento system/init na sonda'])
   })
 
   // --safe-mode também desliga as skills do projeto e as nativas (run, verify) e os hooks que o motor passa.

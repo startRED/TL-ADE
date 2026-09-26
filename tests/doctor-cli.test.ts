@@ -229,6 +229,12 @@ describe('ade doctor - modo offline', () => {
   })
 })
 
+/** Saída real da sonda em stream-json: o system/init (o que a chamada carregou) e depois o result. */
+const CLEAN_INIT = { type: 'system', subtype: 'init', plugins: [{ name: 'agents-md', path: 'builtin', source: 'agents-md@builtin' }], mcp_servers: [], skills: ['verify', 'run'], agents: ['Explore'], slash_commands: ['verify', 'run'] }
+function probeStream(result: Record<string, unknown>, init: Record<string, unknown> = CLEAN_INIT): string {
+  return [JSON.stringify(init), JSON.stringify({ type: 'result', ...result })].join('\n')
+}
+
 describe('ade doctor - sonda real', () => {
   const FIXED_UUID = 'uuid-fixed-001'
   const FIXED_NOW = '2026-09-18T08:00:00.000Z'
@@ -246,7 +252,7 @@ describe('ade doctor - sonda real', () => {
       calls.push({ resolved, args })
       return {
         exitCode: 0,
-        stdout: JSON.stringify({
+        stdout: probeStream({
           session_id: FIXED_UUID,
           structured_output: { ok: true },
           total_cost_usd: 0.01,
@@ -272,7 +278,8 @@ describe('ade doctor - sonda real', () => {
       '-p',
       'responda apenas OK',
       '--output-format',
-      'json',
+      'stream-json',
+      '--verbose',
       '--model',
       'haiku',
       ...isolationArgs(writeIsolationSettings(process.cwd())),
@@ -301,6 +308,25 @@ describe('ade doctor - sonda real', () => {
     expect(doc.probe_ok).toBe(true)
     const schemaResult = validate('capability-set', doc)
     expect(schemaResult.valid).toBe(true)
+  })
+
+  // ADR 0044: o que for do operador no system/init reprova a sonda (e o motor recusa missão com probe_ok false)
+  test('doctor_real_probe_fails_when_isolation_leaks_user_config', async () => {
+    const homeDir = makeHomeDir('ade-doctor-real-')
+    const claudeConfigDir = path.join(homeDir, '.claude')
+    mkdirSync(path.join(claudeConfigDir, 'skills', 'minha-skill'), { recursive: true })
+    const leaky = { ...CLEAN_INIT, plugins: [...CLEAN_INIT.plugins, { name: 'caveman', source: 'caveman@caveman' }], mcp_servers: [{ name: 'github' }], skills: ['verify', 'minha-skill'] }
+    const result = await runDoctor({
+      offline: false,
+      homeDir,
+      claudeConfigDir,
+      resolveImpl: makeResolveImpl(),
+      probeImpl: async () => ({ exitCode: 0, stdout: probeStream({ session_id: FIXED_UUID, structured_output: { ok: true } }, leaky) }),
+      randomUUID: () => FIXED_UUID,
+      now: () => FIXED_NOW,
+    })
+    expect(result.capabilities.probe_ok).toBe(false)
+    expect(result.warnings[0]).toBe('isolamento do claude vazou: plugin caveman@caveman, MCP github, skill minha-skill')
   })
 
   // CA1 (borda): bootstrap_cost_tokens soma usage.input_tokens + usage.cache_creation_input_tokens
@@ -531,7 +557,7 @@ describe('ade doctor - sonda real', () => {
     const homeDir = makeHomeDir('ade-doctor-real-')
     const probeImpl = async () => ({
       exitCode: 0,
-      stdout: JSON.stringify({ session_id: FIXED_UUID, structured_output: { ok: true } }),
+      stdout: probeStream({ session_id: FIXED_UUID, structured_output: { ok: true } }),
     })
 
     const result = await runDoctor({

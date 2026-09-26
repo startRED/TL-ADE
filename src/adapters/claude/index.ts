@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import { buildClaudeArgs } from './argv.ts'
-import { CLAUDE_ISOLATION_ENV, writeIsolationSettings } from './isolation.ts'
+import { claudeEnvExtras, writeIsolationSettings } from './isolation.ts'
 import { parseClaudeOutput, parseTokens, parseUnitResult, parseUsage } from './parse.ts'
 import { parseReviewResult } from '../codex/parse.ts'
 import { runWorker } from '../../runner/spawn.ts'
@@ -98,7 +98,7 @@ export async function dispatchClaude(opts: {
         result_file: resultFile,
       },
       timeoutS,
-      env: { ...env, ...CLAUDE_ISOLATION_ENV },
+      env: { ...env, ...claudeEnvExtras() },
     })
 
     const { envelope, error } = parseClaudeOutput(result.stdout)

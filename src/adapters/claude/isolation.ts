@@ -6,12 +6,26 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { buildWorkerEnv } from '../../runner/spawn.ts'
 
 /** Arquivos de instrução que o Claude Code lê subindo as pastas acima do cwd, mesmo passando da raiz do repositório. */
 const ANCESTOR_FILES = ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', '.claude/CLAUDE.md', '.claude/AGENTS.md', '.claude/rules/**']
 
-/** A auto memory é uma por repositório e as worktrees a compartilham: sem isto o maker lia a memória do operador. */
-export const CLAUDE_ISOLATION_ENV = { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' } as const
+/**
+ * A auto memory é uma por repositório e as worktrees a compartilham: sem isto o maker lia a memória do operador. Os
+ * conectores do claude.ai já ficam fora pelo `--strict-mcp-config`; a variável é a segunda trava.
+ */
+export const CLAUDE_ISOLATION_ENV = { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', ENABLE_CLAUDEAI_MCP_SERVERS: 'false' } as const
+
+/** Extras do ambiente fechado do worker para o `claude`: as travas e a pasta de configuração (onde fica o login). */
+export function claudeEnvExtras(env: Record<string, string | undefined> = process.env): Record<string, string> {
+  return { ...CLAUDE_ISOLATION_ENV, ...(env.CLAUDE_CONFIG_DIR ? { CLAUDE_CONFIG_DIR: env.CLAUDE_CONFIG_DIR } : {}) }
+}
+
+/** Ambiente completo para quem abre o `claude` sem `runWorker` (juiz, chat, sonda de cota): o mesmo do motor. */
+export function claudeWorkerEnv(env: Record<string, string | undefined> = process.env): Record<string, string> {
+  return buildWorkerEnv(claudeEnvExtras(env))
+}
 
 const DRIVE = /^([a-z]):\//i
 
@@ -77,4 +91,34 @@ export function writeIsolationSettings(cwd: string, dir: string = path.join(os.t
  */
 export function isolationArgs(settingsPath: string, sources: 'project' | 'none' = 'project'): string[] {
   return ['--setting-sources', sources === 'project' ? 'project' : '', '--strict-mcp-config', '--exclude-dynamic-system-prompt-sections', '--settings', settingsPath]
+}
+
+type InitEvent = { plugins?: Array<{ name?: string; source?: string }>; mcp_servers?: Array<{ name?: string } | string>; skills?: string[]; agents?: string[]; slash_commands?: string[] } | null | undefined
+
+function ownNames(dir: string): Set<string> {
+  try {
+    return new Set(fs.readdirSync(dir).map((n) => n.replace(/\.md$/i, '')))
+  } catch {
+    return new Set()
+  }
+}
+
+/**
+ * O que é do operador e apareceu no `system/init` de uma chamada isolada: plugins que não são embutidos, qualquer MCP
+ * (a sonda não passa nenhum), skills sincronizadas da conta e skills, agentes e comandos da pasta de configuração do
+ * usuário. Instruções e memória não aparecem no init; elas ficam cobertas pelas flags e pelos testes deste módulo.
+ */
+// ponytail: skill do usuário com o nome de uma nativa (run, verify) acusa falso vazamento; renomear a do usuário
+export function isolationLeaks(init: InitEvent, configDir: string): string[] {
+  if (!init) return ['sem evento system/init na sonda']
+  const leaks: string[] = []
+  for (const p of init.plugins ?? []) if (!String(p.source ?? '').endsWith('@builtin')) leaks.push(`plugin ${p.source ?? p.name}`)
+  for (const m of init.mcp_servers ?? []) leaks.push(`MCP ${typeof m === 'string' ? m : m.name}`)
+  const skills = ownNames(path.join(configDir, 'skills'))
+  for (const s of init.skills ?? []) if (skills.has(s) || s.startsWith('anthropic-skills:')) leaks.push(`skill ${s}`)
+  const agents = ownNames(path.join(configDir, 'agents'))
+  for (const a of init.agents ?? []) if (agents.has(a)) leaks.push(`agente ${a}`)
+  const commands = ownNames(path.join(configDir, 'commands'))
+  for (const c of init.slash_commands ?? []) if (commands.has(c) && !skills.has(c)) leaks.push(`comando ${c}`)
+  return leaks
 }

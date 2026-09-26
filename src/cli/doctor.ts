@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
-import { isolationArgs, writeIsolationSettings } from '../adapters/claude/isolation.ts'
+import { isolationArgs, isolationLeaks, writeIsolationSettings } from '../adapters/claude/isolation.ts'
 import { parseClaudeOutput, parseUsage } from '../adapters/claude/parse.ts'
 import { AdeError } from '../journal/errors.ts'
 import { resolveBinary } from '../runner/resolve-binary.ts'
@@ -55,7 +55,8 @@ export function buildProbeArgs(uuid: string, settingsPath: string): string[] {
     '-p',
     'responda apenas OK',
     '--output-format',
-    'json',
+    'stream-json',
+    '--verbose',
     '--model',
     'haiku',
     ...isolationArgs(settingsPath),
@@ -68,6 +69,27 @@ export function buildProbeArgs(uuid: string, settingsPath: string): string[] {
     '--json-schema',
     PROBE_JSON_SCHEMA,
   ]
+}
+
+/**
+ * Lê a saída da sonda: em stream-json, o `system/init` (o que a chamada carregou) e o `result`; saída de um objeto só
+ * (sondas antigas e dublês) vale como o próprio resultado, sem init.
+ */
+export function parseProbeStream(stdout: string): { envelope: Record<string, any> | null; init: Record<string, any> | null } {
+  let init: Record<string, any> | null = null
+  let result: Record<string, any> | null = null
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim().startsWith('{')) continue
+    try {
+      const j = JSON.parse(line)
+      if (j?.type === 'system' && j.subtype === 'init') init = j
+      else if (j?.type === 'result') result = j
+    } catch {
+      // linha que não é JSON inteiro
+    }
+  }
+  if (result) return { envelope: result, init }
+  return { envelope: parseClaudeOutput(stdout).envelope as Record<string, any> | null, init }
 }
 
 /**
@@ -186,6 +208,8 @@ export async function runDoctor(opts: {
         impeccableBin?: string
         expectedEngineVersion?: string
         impeccableExecFn?: NonNullable<Parameters<typeof probeImpeccable>[0]>['execFn']
+        /** Pasta de configuração do Claude do usuário (padrão: CLAUDE_CONFIG_DIR ou <casa>/.claude). */
+        claudeConfigDir?: string
     }): Promise<{ capabilities: Record<string, any>; path: string; longpaths: string | null; warnings: string[] }> {
   const {
     offline,
@@ -202,6 +226,7 @@ export async function runDoctor(opts: {
 
   
   let doc: Record<string, unknown>
+  const isolationWarnings: string[] = []
 
   if (offline) {
     doc = readFixtureDoc(fixturePath)
@@ -249,9 +274,14 @@ export async function runDoctor(opts: {
       doc.probed_at = now()
     } else {
       doc = readFixtureDoc(fixturePath)
-      const { envelope } = parseClaudeOutput((probeResult as { stdout: string }).stdout)
+      const { envelope, init } = parseProbeStream((probeResult as { stdout: string }).stdout)
 
+      // o que for do operador no system/init (plugin, MCP, skill, agente, comando) reprova a sonda e o motor não roda
+      // missão até corrigir: é a prova do isolamento na máquina de cada usuário, não só na de quem escreveu o motor
+      const leaks = isolationLeaks(init, opts.claudeConfigDir ?? process.env.CLAUDE_CONFIG_DIR ?? path.join(homeDir, '.claude'))
+      if (leaks.length > 0) isolationWarnings.push(`isolamento do claude vazou: ${leaks.join(', ')}`)
       doc.probe_ok =
+        leaks.length === 0 &&
         envelope?.session_id === uuid &&
         typeof envelope?.structured_output === 'object' &&
         envelope?.structured_output !== null
@@ -309,7 +339,7 @@ export async function runDoctor(opts: {
   validateCapabilitySet(doc)
   const capsPath = writeCapabilitiesFile(homeDir, doc)
 
-  return { capabilities: doc, path: capsPath, longpaths, warnings }
+  return { capabilities: doc, path: capsPath, longpaths, warnings: [...isolationWarnings, ...warnings] }
 }
 
 function listFilesRec(dir: string, base: string = ''): string[] {

@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { buildCodexArgs } from '../adapters/codex/argv.ts'
-import { CLAUDE_ISOLATION_ENV, isolationArgs, writeIsolationSettings } from '../adapters/claude/isolation.ts'
+import { claudeWorkerEnv, isolationArgs, writeIsolationSettings } from '../adapters/claude/isolation.ts'
 
 interface VisualEvalCriteria {
     id: 'specificity' | 'hierarchy' | 'typography' | 'color' | 'states' | 'motion'
@@ -381,9 +381,9 @@ function scoreCriteria(raw: any, ids: VisualEvalCriteria['id'][], weights: Recor
 }
 
 /** Roda um processo com stdin opcional; rejeita em saída diferente de 0 ou no teto de tempo. */
-function runJudgeProcess(exe: string, args: string[], opts: { cwd: string; env?: Record<string, string>; input?: string; timeoutMs: number }): Promise<string> {
+function runJudgeProcess(exe: string, args: string[], opts: { cwd: string; env?: Record<string, string>; closedEnv?: Record<string, string>; input?: string; timeoutMs: number }): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(exe, args, { cwd: opts.cwd, shell: false, windowsHide: true, env: { ...process.env, ...opts.env }, stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn(exe, args, { cwd: opts.cwd, shell: false, windowsHide: true, env: opts.closedEnv ?? { ...process.env, ...opts.env }, stdio: ['pipe', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     const timer = setTimeout(() => child.kill('SIGKILL'), opts.timeoutMs)
@@ -437,7 +437,7 @@ async function dispatchIsolatedJudge(pack: any, judge: { family: string; model_i
   }
   const prompt = [...JUDGE_INSTRUCTIONS, 'Abra cada PNG pelo caminho absoluto com a ferramenta Read antes de julgar.', '', JSON.stringify(listed)].join('\n')
   const args = ['-p', '--output-format', 'json', '--json-schema', JSON.stringify(JUDGE_SCHEMA), ...isolationArgs(writeIsolationSettings(deps.cwd), 'none'), '--permission-mode', 'bypassPermissions', '--allowedTools', 'Read', '--add-dir', artifactsDir, ...(judge.model_id ? ['--model', judge.model_id] : []), ...(judge.effort ? ['--effort', judge.effort] : [])]
-  const out = await runJudgeProcess(deps.resolved.exe, [...deps.resolved.prefixArgs, ...args], { cwd: deps.cwd, env: { ...(deps.env ?? process.env), ...CLAUDE_ISOLATION_ENV }, input: prompt, timeoutMs: 300_000 })
+  const out = await runJudgeProcess(deps.resolved.exe, [...deps.resolved.prefixArgs, ...args], { cwd: deps.cwd, closedEnv: claudeWorkerEnv(), input: prompt, timeoutMs: 300_000 })
   const envelope = firstJsonObject(out)
   if (envelope.is_error) throw new Error(`claude devolveu erro: ${String(envelope.result).slice(0, 300)}`)
   return keep(envelope.structured_output ?? firstJsonObject(String(envelope.result ?? '')))

@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { resolveBinary } from '../../runner/resolve-binary.ts'
-import { CLAUDE_ISOLATION_ENV, isolationArgs, writeIsolationSettings } from '../claude/isolation.ts'
+import { claudeWorkerEnv, isolationArgs, writeIsolationSettings } from '../claude/isolation.ts'
 
 export type QuotaWindow = { used_percent: number; resets_at: string }
 export type QuotaReceipt = { source: 'official'; family: string; used_percent: number; reserved_percent: number; observed_at: string; weekly_reset_at: string; five_hour?: QuotaWindow | null }
@@ -104,7 +104,7 @@ function claudeProbe(): Promise<string> {
   const cwd = os.tmpdir()
   const args = [...prefixArgs, '-p', '--output-format', 'stream-json', '--verbose', '--max-turns', '1', '--model', 'claude-haiku-4-5', '--no-session-persistence', ...isolationArgs(writeIsolationSettings(cwd), 'none')]
   return new Promise((resolve, reject) => {
-    const child = spawn(exe, args, { cwd, shell: false, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, env: { ...process.env, ...CLAUDE_ISOLATION_ENV } })
+    const child = spawn(exe, args, { cwd, shell: false, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, env: claudeWorkerEnv() })
     let out = ''
     child.stdout.on('data', (d) => { out += d })
     const timer = setTimeout(() => child.kill(), 90_000)

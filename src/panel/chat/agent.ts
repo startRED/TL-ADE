@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { assertArgvLimit, buildArgv, resolveBinary } from '../../runner/resolve-binary.ts'
 import type { ChatAgent, ChatAgentInput } from './chat.ts'
-import { CLAUDE_ISOLATION_ENV, isolationArgs, writeIsolationSettings } from '../../adapters/claude/isolation.ts'
+import { claudeWorkerEnv, isolationArgs, writeIsolationSettings } from '../../adapters/claude/isolation.ts'
 
 const MAX_OUTPUT = 16 * 1024 * 1024
 const TIMEOUT_MS = 15 * 60 * 1000
@@ -42,7 +42,7 @@ export const defaultChatAgent: ChatAgent = (input) => {
   const argv = buildArgv(resolved, args)
   assertArgvLimit(resolved.exe, argv)
   return new Promise((resolve, reject) => {
-    const env = cmd === 'claude' ? { ...process.env, ...CLAUDE_ISOLATION_ENV } : process.env
+    const env = cmd === 'claude' ? claudeWorkerEnv() : process.env
     const child = spawn(resolved.exe, argv, { cwd: input.cwd, shell: false, windowsHide: true, timeout: TIMEOUT_MS, env })
     let out = ''
     let err = ''
