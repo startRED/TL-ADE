@@ -159,10 +159,13 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
   const [detail, setDetail] = useState<Detail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [drawn, setDrawn] = useState(reducedMotion())
+  // Antes da primeira leitura a lista vazia não quer dizer missão sem partes: a tela dizia "esperando a primeira parte" com a parte 2 rodando.
+  const [loaded, setLoaded] = useState(false)
 
   const load = useCallback(async () => {
     if (!mission) return
     setUnits(await apiFetch<Unit[]>(base))
+    setLoaded(true)
     if (openId) setDetail(await apiFetch<Detail>(`${base}/${encodeURIComponent(openId)}`))
   }, [base, openId, mission])
 
@@ -198,7 +201,7 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
 
   const status = liveUnit
     ? `parte ${live + 1} de ${units.length} rodando agora${liveUnit.rounds > 0 ? `, ${reviews(liveUnit.rounds)} até agora` : ''}`
-    : units.length ? `${done} de ${units.length} partes prontas` : 'esperando a primeira parte'
+    : units.length ? `${done} de ${units.length} partes prontas` : loaded ? 'esperando a primeira parte' : 'lendo as partes…'
 
   return (
     <section aria-labelledby="score-title" className="score-view">
@@ -220,7 +223,7 @@ export default function MissionScore({ projectId, mission, fallbackId, running, 
           {!mission
             ? <p className="empty">A missão {missionId} começou; a tabela aparece assim que a primeira parte entrar.</p>
             : units.length === 0
-              ? <p className="empty">Lendo as partes…</p>
+              ? <p className="empty">{loaded ? 'A tabela aparece assim que a primeira parte entrar.' : 'Lendo as partes…'}</p>
               : (
                 <div className="score" role="group" aria-label={`Partitura da missão ${missionId}`}>
                   <div className="score-grid" style={{ ['--measures' as string]: units.length }}>

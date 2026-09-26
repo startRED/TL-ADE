@@ -160,7 +160,7 @@ export default function App() {
                   onClick={() => { if (page === 'projects' || page === 'appearance') setPage('home'); if (!p.active) act(() => postJson('/api/projects/select', { id: p.id })) }}
                 >
                   {p.activity && (p.activity.kind === 'running' || p.activity.kind === 'waiting') && <span className={`pulse ${p.activity.kind}`} aria-hidden="true" />}
-                  {p.active ? <span data-testid="active-project">{p.name}</span> : p.name}
+                  <span className="chip-name" data-testid={p.active ? 'active-project' : undefined}>{p.name}</span>
                 </button>
                 <button className="chip-x" aria-label={`Fechar ${p.name}`} onClick={() => act(() => postJson('/api/projects/close', { id: p.id }))}>
                   <X size={11} aria-hidden="true" />
