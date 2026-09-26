@@ -20,7 +20,7 @@ import { readModelSettings } from './models/settings.ts'
 import { storyRisk } from './intent/risk.ts'
 import { dedupStorySection } from './pack/dedup.ts'
 import { measurePackBytes, packTelemetry } from './pack/pack.ts'
-import { buildStoryContext, guardStoryContext, roleSkillsSection } from './context/story.ts'
+import { buildStoryContext, guardStoryContext, projectRecipes, recipePolicy, roleSkillsSection } from './context/story.ts'
 import { dispatchClaude } from './adapters/claude/index.ts'
 import { dispatchCodex } from './adapters/codex/index.ts'
 import { dispatchAgyUnit } from './adapters/agy/index.ts'
@@ -571,10 +571,15 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     0,
     dedup.saved_bytes + Buffer.byteLength(dedup.text) - Buffer.byteLength(contextStorySection),
   )
+  // Receita do projeto para subir e usar o programa: a política pede a conferência rodando o app e o texto vai no pack de
+  // toda empresa, porque Codex e agy não leem .claude/skills (ADR 0048)
+  const recipes = projectRecipes(worktreeDir)
+  const recipeAsk = recipePolicy(recipes)
+  const recipeText = recipes.length === 0 ? '' : `\n\napp_recipes:\n${recipes.map((r) => `### ${r.path}\n\n${r.text}`).join('\n\n')}`
   const packResult = deps.compilePack({
     missionDir,
     stepId: `${storyId}:r1:maker`,
-    sections: { ...baseSections, story: contextStorySection, retrieved: storyContext.sections.retrieved, skills: storyContext.sections?.skills || '' },
+    sections: { ...baseSections, policy: baseSections.policy + recipeAsk, story: contextStorySection + recipeText, retrieved: storyContext.sections.retrieved, skills: storyContext.sections?.skills || '' },
     savedBytes: contextSavedBytes,
     skills: storyContext.selectedSkills.map((s) => ({
       name: s.name,
@@ -989,9 +994,9 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         const reworkPack = deps.compilePack({
           sections: {
             contract: JSON.stringify(contract),
-            policy: 'rework',
+            policy: `rework${recipeAsk}`,
             // o texto deduplicado não traz o handoff; o pedido de correção vai junto dele
-            story: JSON.stringify({ ...JSON.parse(storySection.text), correction: { red_tests: correction.red_tests, handoff: reworkHandoff } }, null, 2),
+            story: JSON.stringify({ ...JSON.parse(storySection.text), correction: { red_tests: correction.red_tests, handoff: reworkHandoff }, ...(recipes.length ? { app_recipes: recipes } : {}) }, null, 2),
           },
           missionDir,
           stepId: `${storyId}:${tag}:pack`,

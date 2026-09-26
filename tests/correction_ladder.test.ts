@@ -399,3 +399,27 @@ test('codex_e_agy_ficam_com_sessao_nova', async () => {
   await subject.run()
   expect(subject.dispatched.mock.calls.map((call) => call[0].resumeSessionId)).toEqual([undefined, undefined])
 }, 30000)
+
+// ADR 0048: com receita no projeto, a política do maker pede para subir e usar o programa e o texto da receita vai no
+// pack, igual para toda empresa (Codex e agy não leem .claude/skills), também no pack de retrabalho.
+test('receita_do_projeto_vai_no_pack_do_maker_de_toda_empresa', async () => {
+  const reply = { result: { subtype: 'success', num_turns: 5 }, changes: true }
+  const subject = fixture([reply, reply], { makerLadder: [{ model: 'gpt', family: 'codex' }], maxModelCalls: 10 })
+  subject.deps.dispatchCodex = subject.dispatched
+  subject.deps.createGateRunner = redGate([['tests/a.test.ts > nova'], null])
+  const packs: any[] = []
+  subject.deps.compilePack = (opts: any) => {
+    packs.push(opts)
+    return { pack_path: '', manifest_path: '', manifest: { bytes: 1 } }
+  }
+  const repoDir = (await subject.deps.prepareStory()).worktreeDir
+  fs.mkdirSync(path.join(repoDir, '.claude', 'skills', 'run-app'), { recursive: true })
+  fs.writeFileSync(path.join(repoDir, '.claude', 'skills', 'run-app', 'SKILL.md'), 'Suba com `node server.js` e abra http://localhost:3000')
+  await subject.run()
+  const makerPacks = packs.filter((p) => /:(r1:maker|r2:pack)$/.test(p.stepId))
+  expect(makerPacks).toHaveLength(2)
+  for (const pack of makerPacks) {
+    expect(pack.sections.policy).toContain('"app-run"')
+    expect(pack.sections.story).toContain('Suba com `node server.js`')
+  }
+}, 30000)

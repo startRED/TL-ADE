@@ -584,3 +584,29 @@ test('skills_de_revisao_vao_para_o_revisor_e_o_maker_recebe_as_outras_sem_numero
   const withTests = [...skills, ...['test-driven-development', 'javascript-testing-patterns', 'typescript-advanced-types'].map((name) => ({ name, source: 's', sha256: name, content: `corpo ${name}` }))]
   expect(roleSkillsSection('proof', withTests.map((s) => s.name), withTests).skills.map((s) => s.name)).toEqual(['test-driven-development', 'javascript-testing-patterns'])
 })
+
+// ADR 0048: o projeto-alvo com receita para subir e usar o programa tem o maker conferindo rodando o app de verdade.
+describe('receita do projeto para o maker', () => {
+  test('acha_as_receitas_run_e_verify_e_ignora_as_outras_skills', async () => {
+    const { projectRecipes, recipePolicy } = await import('../src/context/story.ts')
+    const dir = makeTmpDir('ade-recipe-')
+    try {
+      expect(projectRecipes(dir)).toEqual([])
+      expect(recipePolicy([])).toBe('')
+      for (const [name, text] of [['run-app', 'suba com node server.js'], ['verify', 'abra /health'], ['tdd', 'outra coisa']]) {
+        fs.mkdirSync(path.join(dir, '.claude', 'skills', name), { recursive: true })
+        fs.writeFileSync(path.join(dir, '.claude', 'skills', name, 'SKILL.md'), text)
+      }
+      const recipes = projectRecipes(dir)
+      expect(recipes).toEqual([
+        { path: '.claude/skills/run-app/SKILL.md', text: 'suba com node server.js' },
+        { path: '.claude/skills/verify/SKILL.md', text: 'abra /health' },
+      ])
+      const ask = recipePolicy(recipes)
+      expect(ask).toContain('.claude/skills/run-app/SKILL.md')
+      expect(ask).toContain('"app-run"')
+    } finally {
+      removeTmpDir(dir)
+    }
+  })
+})

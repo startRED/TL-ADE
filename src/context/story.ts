@@ -57,6 +57,42 @@ function sanitizeSkillText(text: string) {
     .trim()
 }
 
+const RECIPE = /^(run-.+|verify)$/
+
+/**
+ * Receitas do projeto para subir e usar o programa (ADR 0048): o SKILL.md de `.claude/skills/run-<nome>` e de
+ * `.claude/skills/verify`. O texto entra no pack sem a limpeza das skills do catálogo, porque é do próprio
+ * projeto e manda rodar comandos.
+ */
+export function projectRecipes(dir: string): Array<{ path: string; text: string }> {
+  let names: string[] = []
+  try {
+    names = fs.readdirSync(path.join(dir, '.claude', 'skills')).filter((n) => RECIPE.test(n)).sort()
+  } catch {
+    return []
+  }
+  return names.flatMap((name) => {
+    const rel = `.claude/skills/${name}/SKILL.md`
+    try {
+      return [{ path: rel, text: fs.readFileSync(path.join(dir, rel), 'utf8') }]
+    } catch {
+      return []
+    }
+  })
+}
+
+/** Pedido da política do maker para conferir rodando o programa pela receita; vazio sem receita. */
+export function recipePolicy(recipes: Array<{ path: string }>): string {
+  if (recipes.length === 0) return ''
+  return [
+    '',
+    '',
+    `Conferência rodando o programa: este projeto tem receita para subir e usar o programa (${recipes.map((r) => r.path).join(', ')}; o texto está em app_recipes na seção story).`,
+    'Antes de entregar, suba e use o programa segundo a receita para conferir de verdade o que você mudou, e pare o que subiu.',
+    'Relate em handoff.claims um item com id "app-run": o comando que rodou e o que viu. Se não conseguir subir, diga o motivo em handoff.notes; isso sozinho não impede a entrega.',
+  ].join('\n')
+}
+
 /**
  * Converte um padrão glob simples em expressão regular.
  */
