@@ -163,7 +163,9 @@ export function closeMissionSummary({ mission, events, outcome, capabilitiesDige
   if (typeof mission?.id !== 'string' || typeof capabilitiesDigest !== 'string') {
     throw new TelemetryInvalidError('mission.id e capabilitiesDigest são obrigatórios')
   }
-  if (events.some((e) => e?.kind === 'telemetry' && e.data?.scope === 'mission_summary')) return null
+  // um resumo por fechamento: qualquer evento depois do último resumo é a missão reaberta (retomada, nova tentativa) (a parada vira 'parked' e a conclusão, horas depois, 'completed')
+  const lastSummary = events.map((e) => e?.kind === 'telemetry' && e.data?.scope === 'mission_summary').lastIndexOf(true)
+  if (lastSummary >= 0 && lastSummary === events.length - 1) return null
 
   const times = events.map((e) => Date.parse(e?.at)).filter(Number.isFinite)
   const duration = times.length > 0 ? Math.max(0, Math.max(...times) - Math.min(...times)) : 0

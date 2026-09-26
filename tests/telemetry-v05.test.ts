@@ -244,6 +244,12 @@ describe('v0.5 telemetria completa e auditoria do harness', () => {
     const closed = [...events, { seq: 6, at: '2026-09-20T01:00:01.000Z', kind: 'telemetry', data: { scope: 'mission_summary' } }]
     expect(closeMissionSummary({ mission, events: closed, outcome: 'completed', capabilitiesDigest: 'dddddddddddddddd' })).toBeNull()
     expect(() => closeMissionSummary({ mission, events, outcome: 'talvez', capabilitiesDigest: 'dddddddddddddddd' })).toThrow(/outcome/)
+
+    // 26/09, missão de anexos: o resumo saiu na primeira parada (parked) e, retomada e concluída horas depois, a missão
+    // nunca ganhou o fechamento 'completed'. Retomar reabre a missão; o fechamento seguinte grava de novo.
+    const reopened = [...closed, { seq: 7, at: '2026-09-20T03:00:00.000Z', kind: 'decision', source: 'operator', runtime_stamp: stamp, data: { decision: 'unit_retry' } }]
+    const again: any = closeMissionSummary({ mission, events: reopened, outcome: 'completed', capabilitiesDigest: 'dddddddddddddddd' })
+    expect(again?.data).toMatchObject({ outcome: 'completed', duration_ms: 3 * 3_600_000 })
   })
 
   // (6) Diagnóstico: sete categorias, score, checks com evidência e ações, pelos eventos.
