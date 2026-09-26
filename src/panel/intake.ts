@@ -155,6 +155,14 @@ function normalizeQuestions(questions: any[]): any[] {
   })
 }
 
+/** Bloco de referência dos anexos para a IA (caminho absoluto, nome e tipo); vazio sem anexos. Não vai para o intake.json. */
+function attachmentsBlock(repoDir: string, intake: Intake): string {
+  if (!intake.attachments?.length) return ''
+  const missionDir = path.join(missionsDir(repoDir), intake.mission_id)
+  const lines = intake.attachments.map((a) => `- ${path.resolve(missionDir, a.path)} (nome: ${a.name}, tipo: ${path.extname(a.name).slice(1).toLowerCase() || 'desconhecido'})`)
+  return `\n\nAnexos do pedido (referência):\n${lines.join('\n')}`
+}
+
 type ResultKind = 'questions' | 'briefing' | 'plan'
 
 /** Leva o intake à etapa que o resultado da porta de intenção pede; plano vai para o disco da missão. */
@@ -180,6 +188,10 @@ function applyResult(repoDir: string, intake: Intake, result: Awaited<ReturnType
   const contracts: any[] = Array.isArray(result.contracts) ? result.contracts : []
   plan.mission_id = intake.mission_id
   const missionDir = path.join(missionsDir(repoDir), intake.mission_id)
+  const block = attachmentsBlock(repoDir, intake)
+  for (const contract of contracts) {
+    if (block && typeof contract.task === 'string') contract.task += block
+  }
   for (const contract of contracts) writeJsonAtomic(path.join(missionDir, 'stories', `${contract.id}.json`), contract)
   const planPath = path.join(missionDir, 'plan.json')
   writeJsonAtomic(planPath, plan)
@@ -262,8 +274,11 @@ export function createIntake({ intent, runMission, eligibleSkills, beginActivity
     return requestMissionControl({ repoDir, missionId: intake.mission_id, action, expectedDigest: digest16(plan), source: 'panel' })
   }
 
-  const compile = (repoDir: string, intake: Intake, extra: { answers?: Answers; briefing?: ProductBriefing } = {}) =>
-    intent.compile({ request: intake.request, repoDir, options: readProjectOptions(repoDir), eligibleSkills: eligibleSkills(repoDir), missionId: intake.mission_id, questions: intake.questions, understanding: intake.understanding, ...extra })
+  const compile = (repoDir: string, intake: Intake, extra: { answers?: Answers; briefing?: ProductBriefing } = {}) => {
+    const block = attachmentsBlock(repoDir, intake)
+    const understanding = block && intake.understanding ? { ...intake.understanding, summary: intake.understanding.summary + block } : intake.understanding
+    return intent.compile({ request: intake.request + block, repoDir, options: readProjectOptions(repoDir), eligibleSkills: eligibleSkills(repoDir), missionId: intake.mission_id, questions: intake.questions, understanding, ...extra })
+  }
 
   return {
     /** Último intake do projeto, vivo ou encerrado; null quando nunca houve pedido. */
@@ -292,8 +307,8 @@ export function createIntake({ intent, runMission, eligibleSkills, beginActivity
           request: text.trim(),
           stage: 'interview',
         }
-        applyResult(repoDir, intake, await compile(repoDir, intake), ['questions', 'briefing', 'plan'])
         if (files.length) intake.attachments = saveAttachments(path.dirname(intakePath(repoDir, intake.mission_id)), files)
+        applyResult(repoDir, intake, await compile(repoDir, intake), ['questions', 'briefing', 'plan'])
         return write(repoDir, intake)
       })
     },
