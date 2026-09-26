@@ -463,7 +463,9 @@ async function setupThreeStoryFixture(options: SetupOptions = {}) {
   }
 }
 
-describe('v0.3: Executar e retomar missão sequencial', { timeout: 80_000 }, () => {
+// Cada teste sobe missões reais com CLIs falsas (20–80 s sozinho); com a suíte inteira ou uma missão rodando ao lado
+// passava dos 80 s e caía por tempo, não por defeito (26/09).
+describe('v0.3: Executar e retomar missão sequencial', { timeout: 240_000 }, () => {
   // Critério (1): Dado um plano aprovado com várias stories dependentes, quando ade run --plan é executado,
   // então cada story roda somente depois de suas dependências, uma por vez, e a missão termina apenas quando todas estiverem concluídas.
   test('test_criterio_1_execucao_sequencial_com_dependencias_ate_encerramento_completo', async () => {

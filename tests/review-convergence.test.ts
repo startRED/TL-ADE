@@ -946,7 +946,7 @@ describe('Integrar revisão e correção que convergem', () => {
       (e) => e.kind === 'step_result' && typeof e.step_id === 'string' && e.step_id.includes(':checker'),
     )
     expect(checkerSteps.length).toBe(2)
-  }, 45000)
+  }, 120_000) // retomada com CLIs falsas; sob carga passava dos 45 s (26/09)
 
   // O Checker real lê o prompt pela entrada padrão (`codex exec -`): o adapter tem de entregar
   // ao worker exatamente o conteúdo do pack, e recusar o despacho quando não há o que revisar.
