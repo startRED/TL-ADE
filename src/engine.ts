@@ -869,6 +869,21 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       // maker e revisor vêm do cache e só a entrega roda de novo.
       round = Number(lastReview.data.round)
       await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'resume_approved_round', unit: storyId, round } })
+    } else if (started && !lastReview && !committed) {
+      // sem revisão ainda (polimento visual): recomeçar na rodada 1 trazia a rodada 2 antiga do cache "sem mudança", a
+      // escada subia o maker e o teto de passadas visuais zerava (S3 da missão de anexos, 26/09). Retoma na última
+      // rodada do maker, que vem do cache, com as passadas visuais já feitas contadas.
+      const makerRound = /^.+:r(\d+):maker$/
+      const done = events.filter((e) => e.kind === 'step_result' && e.status === 'ok' && String(e.step_id ?? '').startsWith(`${storyId}:r`))
+        .map((e) => makerRound.exec(String(e.step_id))?.[1]).filter(Boolean).map(Number)
+      const lastRound = Math.max(1, ...done)
+      if (lastRound > 1) {
+        round = lastRound
+        const passes = events.filter((e) => e.kind === 'visual_eval_done' && unitOf(e) === storyId)
+        visualEvals = passes.length
+        lastVisualEval = passes.at(-1)?.data?.evaluation ?? null
+        await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'resume_round', unit: storyId, round, visual_evals: visualEvals } })
+      }
     }
   }
 

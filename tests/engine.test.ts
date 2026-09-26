@@ -627,6 +627,29 @@ describe('engine', () => {
     expect(fs.readFileSync(path.join(fixture.repo.dir, 'src', 'hello.txt'), 'utf8')).toBe('ok v2\n')
   }, 180_000)
 
+  // 26/09, missão real de anexos (S3): o motor caiu no verde da rodada 3 de polimento visual e, retomado, recomeçou na
+  // rodada 1. A rodada 2 antiga veio do cache "sem mudança" (a árvore já era a final), a escada subiu o maker para
+  // esforço alto e o teto de passadas visuais zerou. Parte sem revisão ainda retoma na última rodada do maker.
+  test('queda_no_polimento_visual_retoma_na_mesma_rodada_sem_subir_a_escada', async () => {
+    const fixture = setupStoryFixture()
+    fixture.input.story.contract.needs_ui = true
+    const makerFile = path.join(fixture.scenarioDir, 'maker.json')
+    const base = JSON.parse(fs.readFileSync(makerFile, 'utf8'))[0]
+    fs.writeFileSync(makerFile, JSON.stringify(['ok v1\n', 'ok v2\n', 'ok v3\n'].map((c) => ({ ...base, files: { 'src/hello.txt': c } }))))
+    const rework = { status: 'rework', defects: [{ id: 'D1', severity: 'major', criterion: 'color', where: '/', fix: 'trocar a cor' }] }
+    const fqe = vi.fn().mockResolvedValueOnce(rework).mockRejectedValueOnce(new Error('queda do motor'))
+    await expect(runStory({ ...fixture.deps, runFrontendQuality: fqe } as any, fixture.input)).rejects.toThrow(/queda/)
+
+    const fqe2 = vi.fn().mockResolvedValue({ status: 'pass' })
+    const second = await runStory({ ...fixture.deps, runFrontendQuality: fqe2 } as any, fixture.input)
+    expect(second).toMatchObject({ status: 'delivered' })
+    expect(fqe2.mock.calls.map((c) => c[0].round)).toEqual([2])
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    expect(events.find((e) => e.kind === 'decision' && (e.data as any).decision === 'resume_round')?.data).toMatchObject({ round: 2, visual_evals: 1 })
+    expect(events.some((e) => e.kind === 'decision' && (e.data as any).decision === 'maker_ladder' && (e.data as any).outcome === 'no_change')).toBe(false)
+    expect(fs.readFileSync(path.join(fixture.repo.dir, 'src', 'hello.txt'), 'utf8')).toBe('ok v2\n')
+  }, 180_000)
+
   // 24/09, missão real (S2): o contrato pedia uma fonte que a validação fora do escopo recusa; o revisor aprovou o resto e
   // repetiu, rodada após rodada, o mesmo intent_gap para "human". A TL-ADE é autônoma e nenhuma rodada do maker decide
   // pelo humano ou pelo planejador: com só esse tipo de achado, a versão atual é entregue já na primeira revisão e o
