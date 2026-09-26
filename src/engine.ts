@@ -1,6 +1,7 @@
 // @ts-check
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { AdeError } from './journal/errors.ts'
 import { readJournal } from './journal/journal.ts'
@@ -44,8 +45,11 @@ import {
   buildReworkHandoff,
   computeFindingsDigest,
   detectUnresolvedFindings,
+  isBlockingFinding,
   normalizeFinding,
 } from './review/handoff.ts'
+import { applyReviewProofs, makeReviewCopy, PROOF_DIR, readReviewProofs, removeReviewCopy } from './review/scratch.ts'
+import { safeId } from './gates/output.ts'
 import { blockingReviewFindings, buildReviewHandoff, journeyWrongClaim, testEditViolations, wrongTestClaims, wrongTestVerdict } from './review/contract.ts'
 import { isReviewApproved } from './review/validate.ts'
 import { buildModelTelemetry, modelsFromUsage } from './telemetry/telemetry.ts'
@@ -62,12 +66,14 @@ export const CANARY_FAMILIES: readonly string[] = ['claude', 'codex']
  */
 /** Instrução do revisor de outra empresa: sem ela o modelo real inventava as revisões e citava refs que o motor não verifica. */
 const REVIEW_POLICY = [
-  'Você revisa esta parte e é de outra empresa, não de quem escreveu. Leia o contrato, o review_request e o código na worktree; não altere nada.',
+  'Você revisa esta parte e é de outra empresa, não de quem escreveu. Leia o contrato, o review_request e o código.',
+  '- A pasta atual é uma cópia descartável da árvore revisada, com node_modules: rode comandos e escreva arquivos à vontade nela (git diff HEAD mostra o que mudou). Nada do que você mexe volta para o código de quem escreveu.',
   '- Aprove só se o código e as provas cumprem os critérios do contrato; senão, liste os achados com severidade e ação.',
+  '- Achado que bloqueia (critical, high ou medium para o maker) precisa de prova executável: rode o comando que mostra o defeito (ou escreva em .ade-review/ um teste que falha e rode-o) e grave .ade-review/<id do achado>.json com {"argv": ["node", ...], "exit_code": <código de saída>, "output": "<trecho da saída que mostra o defeito>"}. argv sem shell: comece por node e nunca use npx nem npm. Cite artifact:.ade-review/<id do achado>.json no evidence_refs do achado e como result_ref de um item de evidence. Achado sem essa prova é rebaixado a low pelo motor e não bloqueia.',
   '- Copie contract_revision e input_revision exatamente como estão em echo_exactly.',
-  '- Em evidence, sources, evidence_refs e result_ref, cite só referências da lista citable_refs, escritas igual (arquivo sempre com intervalo de linhas).',
+  '- Em evidence, sources, evidence_refs e result_ref, cite só referências da lista citable_refs, escritas igual (arquivo sempre com intervalo de linhas), ou as artifact:.ade-review/ que você gravou.',
   '- Toda ref que um achado (action_items, deferred, rejected) ou uma claim do handoff cita em evidence_refs precisa aparecer também como result_ref de um item de evidence; e cada critério do contrato precisa de um item de evidence.',
-  '- As provas já rodaram no motor, fora da sua sandbox: proof_results é o resultado oficial (verde julgado contra a largada conta como verde, e as vermelhas listadas nos avisos já existiam antes da parte). Não rode a suíte inteira nem reprove por não conseguir rodá-la; se precisar conferir, rode só as provas da parte.',
+  '- As provas já rodaram no motor: proof_results é o resultado oficial (verde julgado contra a largada conta como verde, e as vermelhas listadas nos avisos já existiam antes da parte). Não rode a suíte inteira nem reprove por não conseguir rodá-la; rode só o que prova o seu achado.',
   '- A TL-ADE é autônoma e não há operador para decidir nada durante a missão. Se um requisito do contrato é impossível dentro do escopo (decisão de produto ou de intenção, não defeito do código), não reprove por ele: aprove o que foi entregue e registre o requisito em deferred, com o motivo. Reprove só por defeito que quem escreve consegue corrigir dentro do escopo.',
   '- Responda somente pelo schema.',
 ].join('\n')
@@ -1730,6 +1736,18 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       ...(reviewSkills.skills.length > 0 ? { skills: reviewSkills.skills } : {}),
     })
 
+    // O revisor trabalha numa cópia descartável da árvore revisada: roda comandos e grava provas sem tocar a worktree do
+    // maker (ADR 0047). As provas vão para a pasta da missão, durável: a cópia some no fim e a retomada relê de lá.
+    // uma por worktree: missões de projetos diferentes podem repetir o id da parte
+    const reviewCopyDir = path.join(os.tmpdir(), 'ade-review', `${safeId(storyId)}-r${round}-${createHash('sha256').update(path.resolve(worktreeDir)).digest('hex').slice(0, 12)}`)
+    const proofsDir = path.join(missionDir, 'review-proofs', `r${round}`)
+    const reviewCopy = deps.reviewCopy ?? { make: makeReviewCopy, remove: removeReviewCopy }
+    await reviewCopy.make({ wtPort, tree: treeAfterContain, repoDir, dir: reviewCopyDir })
+    const keepProofs = () => {
+      const made = path.join(reviewCopyDir, PROOF_DIR)
+      if (fs.existsSync(made)) fs.cpSync(made, proofsDir, { recursive: true })
+    }
+
     const checkerResultFile = path.join(missionDir, `checker-result-r${round}.json`)
     const checkerStepId = `${storyId}:r${round}:checker`
     const checkerWorkerEnv = {
@@ -1789,7 +1807,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         packPath,
         missionDir,
         missionId,
-        cwd: worktreeDir,
+        cwd: reviewCopyDir,
         resultFile: checkerResultFile,
         maxBudgetUsd: authorizedReservation.usd,
         model: checker.model,
@@ -1797,7 +1815,9 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         resolved: checkerResolved,
         env: checkerWorkerEnv,
         role: 'checker_round',
-        sandbox: 'read-only',
+        // escrita e comandos só na cópia descartável
+        sandbox: 'workspace-write',
+        scratch: true,
       })
     }
 
@@ -1829,12 +1849,14 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     }
 
     const firstReview = await reviewWithFallback(checkerStepId)
+    keepProofs()
     let checkerDispatch = firstReview.dispatch
     const checkerStepNow = firstReview.stepNow
     const dispatchFailure = firstReview.failure
     if (dispatchFailure) {
       const err = dispatchFailure
       const dispatchErrorReason = err instanceof AdeError ? err.code : 'checker_dispatch_failed'
+      await reviewCopy.remove(wtPort, reviewCopyDir)
       await appendCheckerTelemetry(undefined, 'park', checkerStepNow)
       await deps.journal.append({
         kind: 'story_done',
@@ -1875,6 +1897,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     await appendCheckerTelemetry(checkerDispatch, !reviewDoc ? 'park' : isReviewApproved(reviewDoc).approved ? 'ok' : 'rework', checkerStepNow)
 
     if (!reviewDoc) {
+      await reviewCopy.remove(wtPort, reviewCopyDir)
       const failReason = checkerDispatch?.envelope_error ?? 'no_review_result'
       await deps.journal.append({
         kind: 'story_done',
@@ -1894,13 +1917,14 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       }
     }
 
+    // o que o revisor gravou em .ade-review/ também pode ser citado
     const reviewContext = {
       contractRevision: expectedContractRevision,
       inputRevision: {
         tree: treeAfterContain,
         digest: observedDigest,
       },
-      verifiedRefs: Array.from(verifiedRefs),
+      verifiedRefs: [...Array.from(verifiedRefs) as string[], ...readReviewProofs(proofsDir).refs],
     }
 
     let reviewApproval = isReviewApproved(reviewDoc, reviewContext)
@@ -1935,6 +1959,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       })
       // sem segunda revisão de ninguém da fila, vale a primeira (reprovada)
       const second = await reviewWithFallback(retryStepId, retryPack.pack_path)
+      keepProofs()
+      reviewContext.verifiedRefs = [...Array.from(verifiedRefs) as string[], ...readReviewProofs(proofsDir).refs]
       const retried: any = second.dispatch
       if (retried?.review_result) {
         await appendCheckerTelemetry(retried, 'rework', second.stepNow)
@@ -1949,6 +1975,22 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       }
     }
 
+    await reviewCopy.remove(wtPort, reviewCopyDir)
+    // O revisor não altera a árvore do maker: mexeu nela, é violação de contenção, como o canário.
+    if ((await wtPort.worktreeTree()) !== treeAfterContain) return await parkStory('checker_touched_maker_tree')
+    // Achado que bloqueia sem prova executável vira low (ADR 0047); os arquivos das provas vão para a worktree do maker,
+    // fora do commit, e a ação pedida leva o comando e a saída.
+    const proofsInWorktree = `.ade/review/r${round}`
+    if (fs.existsSync(proofsDir)) fs.cpSync(proofsDir, path.join(worktreeDir, proofsInWorktree), { recursive: true })
+    const proven = applyReviewProofs(reviewDoc.action_items ?? reviewDoc.findings ?? [], readReviewProofs(proofsDir).proofs, proofsInWorktree)
+    reviewDoc = { ...reviewDoc, action_items: proven.findings }
+    // pediu mudança só com achados sem prova: nada sobra para corrigir, e outra rodada só gastaria cota
+    const unprovenOnly = !reviewApproval.approved && reviewApproval.errors.length === 0 && reviewDoc.verdict === 'changes_requested'
+      && proven.demoted.length > 0 && !proven.findings.map(normalizeFinding).some(isBlockingFinding)
+    if (proven.demoted.length > 0) {
+      await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'finding_demoted_no_evidence', unit: storyId, round, findings: proven.demoted, next: unprovenOnly ? 'deliver' : 'rework' } })
+    }
+
     // Conflito do plano que só um humano ou o planejador decidiria (intent_gap para "human", bad_spec para "planner"):
     // nenhuma rodada do maker resolve isso e a TL-ADE é autônoma, então a versão atual (já verde nas provas oficiais) é
     // entregue na primeira revisão e o achado fica registrado como adiado. Antes esperava repetir e a S2 da missão real
@@ -1960,7 +2002,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
       await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'intent_gap_deferred', unit: storyId, round, findings: reviewedFindings.map((f: any) => ({ id: f.id, problem: f.problem, required_action: f.required_action })) } })
     }
 
-    if (reviewApproval.approved || deferIntentGap) {
+    if (reviewApproval.approved || deferIntentGap || unprovenOnly) {
       // Itens que o revisor adiou (requisito impossível dentro do escopo) ficam registrados para o relatório.
       const deferredItems = (reviewDoc.deferred ?? []).map(normalizeFinding)
       if (reviewApproval.approved && deferredItems.length > 0) {

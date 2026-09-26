@@ -57,6 +57,31 @@ interface FixtureOptions {
   maxReworkRounds?: number
   makerActions?: any[]
   checkerActions?: any[]
+  /** revisões do cenário como estão, sem a prova executável automática */
+  rawChecker?: boolean
+}
+
+/**
+ * Revisões com prova executável em cada achado que bloqueia (ADR 0047): o revisor dublê grava a prova na cópia e a cita.
+ * Sem ela o achado seria rebaixado e o cenário não testaria a convergência.
+ */
+function provenActions(actions: any[]): any[] {
+  const digest = 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+  return actions.map((action) => {
+    const items = action?.result?.action_items ?? []
+    const blocking = items.filter((f: any) => ['critical', 'high', 'medium'].includes(f.severity) && f.target_role === 'maker')
+    if (blocking.length === 0) return action
+    const files = { ...action.files }
+    const evidence = [...(action.result.evidence ?? [])]
+    const proven = items.map((f: any) => {
+      if (!blocking.includes(f)) return f
+      const ref = `artifact:.ade-review/${f.id}.json`
+      files[`.ade-review/${f.id}.json`] = JSON.stringify({ argv: ['node', 'tests/check.mjs'], exit_code: 1, output: f.problem })
+      evidence.push({ criterion: 'R1', result_ref: ref, input_digest: digest })
+      return { ...f, evidence_refs: [...f.evidence_refs, ref] }
+    })
+    return { ...action, files, result: { ...action.result, action_items: proven, evidence } }
+  })
 }
 
 function setupConvergenceFixture(options: FixtureOptions = {}) {
@@ -253,7 +278,7 @@ function setupConvergenceFixture(options: FixtureOptions = {}) {
   ]
   fs.writeFileSync(path.join(scenarioDir, 'maker.json'), JSON.stringify(defaultMakerActions, null, 2), 'utf8')
 
-  const defaultCheckerActions = options.checkerActions ?? [
+  const defaultCheckerActions = options.checkerActions ? (options.rawChecker ? options.checkerActions : provenActions(options.checkerActions)) : [
     {
       result: {
         format_version: 2,
@@ -998,4 +1023,77 @@ describe('Integrar revisão e correção que convergem', () => {
 
     removeTmpDir(dir)
   })
+})
+
+// ADR 0047: o revisor roda comandos numa cópia descartável da árvore revisada e prova o que acha; achado que bloqueia
+// sem prova executável é rebaixado e não gasta rodada.
+describe('Revisor com comandos numa cópia descartável', () => {
+  const review = (items: any[], extraEvidence: any[] = []) => ({
+    format_version: 2,
+    contract_revision: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+    input_revision: { tree: 'AUTO_TREE', digest: 'sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08' },
+    verdict: 'changes_requested',
+    action_items: items,
+    deferred: [],
+    rejected: [],
+    evidence: [
+      { criterion: 'R1', result_ref: 'eval:E1', input_digest: 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' },
+      ...extraEvidence,
+    ],
+    requested_action: 'rework',
+    sources: ['eval:E1'],
+    summary: 'mudanças pedidas',
+    handoff: { claims: [], unknowns: [], questions_for_owner: [], deltas: [], next_action: 'rework', notes: 'x' },
+  })
+  const finding = (id: string, severity: string, refs: string[]) => ({
+    id, severity, category: 'patch', target_role: 'maker', location: 'src/hello.txt:1', problem: 'saudação errada', evidence_refs: refs, required_action: 'corrigir a saudação',
+  })
+
+  test('revisor_roda_na_copia_e_achado_sem_prova_e_rebaixado_sem_gastar_rodada', async () => {
+    const fixture = setupConvergenceFixture({
+      rawChecker: true,
+      checkerActions: [{ result: review([finding('F1', 'high', ['eval:E1'])]), stdout: JSON.stringify({ total_cost_usd: 0.01 }) }],
+    })
+    const seen: any[] = []
+    const dispatch = fixture.deps.dispatchCodex
+    fixture.deps.dispatchCodex = async (opts: any) => {
+      seen.push({ cwd: opts.cwd, scratch: opts.scratch, sandbox: opts.sandbox, hello: fs.readFileSync(path.join(opts.cwd, 'src/hello.txt'), 'utf8') })
+      return dispatch(opts)
+    }
+    const res = await runStory(fixture.deps, fixture.input)
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    const worktree = events.map((e: any) => e.data?.worktree_dir).find(Boolean)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({ scratch: true, sandbox: 'workspace-write', hello: 'ok\n' })
+    expect(path.resolve(seen[0].cwd)).not.toBe(path.resolve(worktree))
+    // a cópia some no fim
+    expect(fs.existsSync(seen[0].cwd)).toBe(false)
+    const demoted = events.find((e: any) => e.kind === 'decision' && e.data?.decision === 'finding_demoted_no_evidence')
+    expect(demoted?.data).toMatchObject({ findings: [{ id: 'F1', severity: 'high' }], next: 'deliver' })
+    expect(res.status).toBe('delivered')
+  }, 60000)
+
+  test('achado_com_prova_executavel_volta_ao_maker_com_o_comando_e_a_saida', async () => {
+    const proofRef = 'artifact:.ade-review/F1.json'
+    const fixture = setupConvergenceFixture({
+      rawChecker: true,
+      makerActions: [1, 2].map((i) => ({ files: { 'src/hello.txt': `ok ${i}\n` }, result: { status: 'ready_for_verification' }, stdout: JSON.stringify({ total_cost_usd: 0.01 }) })),
+      checkerActions: [
+        {
+          files: { '.ade-review/F1.json': JSON.stringify({ argv: ['node', 'tests/check.mjs'], exit_code: 1, output: 'numFailedTests: 1' }) },
+          result: review([finding('F1', 'critical', [proofRef])], [{ criterion: 'R1', result_ref: proofRef, input_digest: 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' }]),
+          stdout: JSON.stringify({ total_cost_usd: 0.01 }),
+        },
+        { result: { ...review([]), verdict: 'approved', requested_action: 'verify', handoff: { ...review([]).handoff, next_action: 'verify' } }, stdout: JSON.stringify({ total_cost_usd: 0.01 }) },
+      ],
+    })
+    const res = await runStory(fixture.deps, fixture.input)
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    expect(res.status).toBe('delivered')
+    expect(events.some((e: any) => e.kind === 'decision' && e.data?.decision === 'finding_demoted_no_evidence')).toBe(false)
+    expect(fs.existsSync(path.join(fixture.missionDir, 'review-proofs', 'r1', 'F1.json'))).toBe(true)
+    const texts = fs.readdirSync(fixture.missionDir, { recursive: true }).map(String).map((p) => path.join(fixture.missionDir, p))
+      .filter((p) => fs.statSync(p).isFile()).map((p) => fs.readFileSync(p, 'utf8'))
+    expect(texts.some((t) => t.includes('`node tests/check.mjs` saiu 1') && t.includes('numFailedTests: 1'))).toBe(true)
+  }, 60000)
 })

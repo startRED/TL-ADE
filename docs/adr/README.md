@@ -70,6 +70,7 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | [0044](0044-isolamento-pelo-projeto-sem-safe-mode-emenda-0009-0011.md) | Isolamento pelo projeto, sem `--safe-mode`: só a configuração do operador fica de fora; skills do repositório e as nativas `run`/`verify` passam a valer (emenda os ADRs 0009, 0011 e 0019) | Aceito (pedido de Erick, 2026-09-26) |
 | [0045](0045-codex-e-agy-com-casa-do-motor-e-prova-de-isolamento.md) | Codex e agy com casa própria do motor (sem as instruções globais do usuário) e prova do isolamento do Claude pelo `ade doctor` em cada máquina (complementa o ADR 0044) | Aceito (pedido de Erick, 2026-09-26) |
 | [0046](0046-maker-retoma-a-sessao-no-mesmo-degrau.md) | Maker retoma a própria sessão (`--resume`, mesmo pack, só o que mudou no prompt) na rodada seguinte do mesmo degrau; sessão nova ao trocar de degrau ou depois de 2 retomadas; Codex e agy com sessão nova | Aceito (pedido de Erick, 2026-09-26) |
+| [0047](0047-revisor-roda-comandos-numa-copia-e-prova-o-que-acha.md) | Revisor roda comandos numa cópia descartável da árvore revisada (worktree sem ramo com o `node_modules` do projeto); achado que bloqueia sem prova executável em `artifact:.ade-review/` é rebaixado, e o pedido que só tinha esses achados é entregue | Aceito (pedido de Erick, 2026-09-26) |
 
 ## Mapa decisão → onde ela aparece
 
@@ -77,7 +78,7 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | :--- | :--- | :--- |
 | Stack e repositório | 0001, 0022, 0023, 0027, 0030 | §2, §6, §11 E29 |
 | Durabilidade e recuperação | 0002, 0003, 0012, 0014, 0021, 0025, 0027, 0028, 0029, 0031, 0038 | §6, §11 E6, E7, E21, E25–E27 |
-| Modelos, transporte e papéis | 0004, 0005, 0006, 0015, 0028 | §7, §11 E10, E16, E23, E24 |
+| Modelos, transporte e papéis | 0004, 0005, 0006, 0015, 0028, 0047 | §7, §11 E10, E16, E23, E24 |
 | Intenção, contrato e prova | 0007, 0008, 0016, 0028, 0036 | §4, §5, §11 E1–E4, E12, E18–E20 |
 | Contexto, skills e qualidade | 0009, 0010, 0011, 0018, 0027, 0028, 0029, 0039, 0040, 0044, 0045 | §7, §10 A1, A7, A11, A13, A14, §11 E8, E9, E13–E15, E33, E35, E39 |
 | Observação e método | 0013, 0017, 0019, 0020, 0024, 0027, 0028, 0029, 0034, 0035, 0037 | §3, §8, §10 A10, A12, §11 E11, E17, E30, E34, E37 |

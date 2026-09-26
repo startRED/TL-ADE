@@ -5,9 +5,11 @@ import { isolationArgs } from './isolation.ts'
 const SCHEMA_URL = new URL('../../../schemas/unit-result.schema.json', import.meta.url)
 const REVIEW_SCHEMA_URL = new URL('../../../schemas/review-result.schema.json', import.meta.url)
 
-// O revisor é só leitura: sem ferramenta que escreve nem shell (o Claude não tem sandbox de leitura para o Bash).
-// ponytail: sem Bash o revisor não roda comandos; liberar os de leitura quando houver sandbox de leitura no Claude.
+// O revisor é só leitura: sem ferramenta que escreve nem shell (o Claude não tem sandbox de leitura para o Bash). Numa
+// cópia descartável da árvore (`scratch`, ADR 0047) ele roda comandos e escreve como quem escreve a parte; o motor
+// confere depois que a worktree do maker não mudou.
 const CHECKER_DISALLOWED = 'Bash,Edit,MultiEdit,Write,NotebookEdit'
+const MAKER_DISALLOWED = 'Bash(git push*),Bash(git commit*),Bash(gh pr*)'
 
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 
@@ -30,7 +32,7 @@ function loadSchemaJson(url: URL) {
  * Com `resume` a chamada retoma a sessão `sessionId` (ADR 0046): o pack repete no prompt de sistema, para o cache da
  * conversa valer, e o prompt vem pela entrada padrão (o que mudou na rodada pode passar do teto do argv do Windows).
  */
-export function buildClaudeArgs(opts: { sessionId: string; packPath: string; settingsPath: string; maxBudgetUsd: number; model?: string; effort?: string; mcpConfigPath?: string; maxTurns?: number; role?: string; resume?: boolean }): string[] {
+export function buildClaudeArgs(opts: { sessionId: string; packPath: string; settingsPath: string; maxBudgetUsd: number; model?: string; effort?: string; mcpConfigPath?: string; maxTurns?: number; role?: string; resume?: boolean; scratch?: boolean }): string[] {
   const { sessionId, packPath, settingsPath, maxBudgetUsd, model, role = 'maker' } = opts ?? {}
 
   if (typeof sessionId !== 'string' || (!SESSION_ID_RE.test(sessionId) && sessionId !== 's')) {
@@ -70,7 +72,7 @@ export function buildClaudeArgs(opts: { sessionId: string; packPath: string; set
     '--permission-prompts',
     'none',
     '--disallowedTools',
-    checker ? CHECKER_DISALLOWED : 'Bash(git push*),Bash(git commit*),Bash(gh pr*)',
+    checker && !opts.scratch ? CHECKER_DISALLOWED : MAKER_DISALLOWED,
     '--append-system-prompt-file',
     packPath,
   ]

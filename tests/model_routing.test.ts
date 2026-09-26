@@ -65,6 +65,8 @@ function fixture(opts: { models?: Record<string, unknown>; receipts?: Record<str
     quotaPort: { readReceipt: vi.fn().mockImplementation(async ({ family }: { family: string }) => receipts[family] ?? null) },
     step: async (spec: any, effect: any) => ({ step_id: spec.id, status: 'ok', result: await effect(), reused: false }),
     gitPortFor: () => ({ worktreeTree: async () => `tree${tree}`, dirtyPaths: async () => [] }),
+    // git dublê: a cópia descartável do revisor (ADR 0047) não tem o que copiar
+    reviewCopy: { make: async () => {}, remove: async () => {} },
     prepareStory: vi.fn().mockResolvedValue({ status: 'ready', worktreeDir: repo.dir }),
     createEvalRunner: () => ({ runEval: async () => ({ verdict: 'green' }) }),
     createGateRunner: () => ({

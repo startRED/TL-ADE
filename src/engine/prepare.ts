@@ -18,7 +18,7 @@ function lockHash(dir: string): string | null {
 /**
  * Vincula node_modules da base ao worktree por junction (Windows) ou dir (outros).
  */
-function linkNodeModules(repoDir: string, worktreeDir: string): 'linked' | 'absent' | 'already_present' {
+export function linkNodeModules(repoDir: string, worktreeDir: string): 'linked' | 'absent' | 'already_present' {
   if (fs.existsSync(path.join(worktreeDir, 'node_modules'))) return 'already_present'
   if (!fs.existsSync(path.join(repoDir, 'node_modules'))) return 'absent'
   fs.symlinkSync(

@@ -287,22 +287,25 @@ export async function dispatchAgyUnit(opts: {
     timeoutS?: number
     env?: Record<string, string>
     runWorkerImpl?: typeof runWorker
+    scratch?: boolean
   }) {
-  const { step, unit, stepId, packPath, missionDir, missionId, cwd, resultFile, resolved, model = 'gemini-3.8-flash-medium', role = 'maker', maxBudgetUsd = 0.25, authorization, timeoutS = 1800, env = {}, runWorkerImpl = runWorker } = opts
+  const { step, unit, stepId, packPath, missionDir, missionId, cwd, resultFile, resolved, model = 'gemini-3.8-flash-medium', role = 'maker', maxBudgetUsd = 0.25, authorization, timeoutS = 1800, env = {}, runWorkerImpl = runWorker, scratch = false } = opts
   const isChecker = role.startsWith('checker')
+  // revisor numa cópia descartável da árvore (ADR 0047) roda comandos e escreve nela; fora dela, só lê
+  const readOnly = isChecker && !scratch
   if (!isChecker && role !== 'maker') throw new AdeError('agy_role_unsupported', `papel sem suporte no adapter agy: ${role}`, 4)
   if (!agyAvailable) throw new AdeError('family_unavailable', 'família agy indisponível devido a violação de contenção anterior', 4)
   if (!resolved || typeof resolved.exe !== 'string') throw new AdeError('binary_not_found', 'executável do agy não encontrado', 2)
   if (!fs.existsSync(packPath)) throw new AdeError('agy_pack_missing', `pack ausente em ${packPath}`, 4)
   if (authorization) assertPaidAuthorization(authorization, maxBudgetUsd)
 
-  const prompt = `Leia o pacote de contexto em ${packPath} e cumpra a tarefa descrita nele${isChecker ? ' sem alterar nenhum arquivo' : ''}.`
+  const prompt = `Leia o pacote de contexto em ${packPath} e cumpra a tarefa descrita nele${readOnly ? ' sem alterar nenhum arquivo' : ''}.`
   const args = buildAgyArgs({
     prompt,
     model,
     cwd,
     addDirs: [path.dirname(packPath)],
-    readOnly: isChecker,
+    readOnly,
     timeout: `${Math.ceil(timeoutS / 60)}m`,
     schema: fs.readFileSync(new URL(`../../../schemas/${isChecker ? 'review-result' : 'unit-result'}.schema.json`, import.meta.url), 'utf8'),
   })
@@ -317,7 +320,7 @@ export async function dispatchAgyUnit(opts: {
       stepId: safeId(stepId),
       request: { unit, authorization: 'unattended', cwd, argv: [resolved.exe, ...resolved.prefixArgs, ...args], timeout: timeoutS, result_file: resultFile },
       timeoutS,
-      env: { ...env, ...agyEnvExtras(), ...(isChecker ? { AGY_READ_ONLY: '1' } : {}) },
+      env: { ...env, ...agyEnvExtras(), ...(readOnly ? { AGY_READ_ONLY: '1' } : {}) },
     })
     const { envelope, error } = parseAgyOutput(result.stdout)
     const parsed = isChecker ? { ...parseReviewResult(envelope), unit_result: null } : { ...parseUnitResult(envelope), review_result: null }

@@ -361,6 +361,14 @@ function setupStoryFixture(options: SetupFixtureOptions = {}) {
   }
 }
 
+/** Prova executável do achado F1 gravada pelo revisor dublê na cópia (ADR 0047): sem ela o achado é rebaixado. */
+function withProof(action: any): void {
+  const ref = 'artifact:.ade-review/F1.json'
+  action.files = { '.ade-review/F1.json': JSON.stringify({ argv: ['node', 'tests/check.mjs'], exit_code: 1, output: 'ainda falta' }) }
+  action.result.action_items[0].evidence_refs = [...action.result.action_items[0].evidence_refs, ref]
+  action.result.evidence = [...action.result.evidence, { ...action.result.evidence[0], result_ref: ref }]
+}
+
 describe('engine', () => {
   // CA1: Dada uma story trivial com a CLI falsa escrevendo o arquivo que o eval exige,
   // quando runStory roda, então devolve { status: 'committed', exitCode: 0 }, a branch
@@ -580,6 +588,7 @@ describe('engine', () => {
       action_items: [{ id: 'F1', severity: 'high', category: 'patch', problem: 'ainda falta', required_action: 'corrigir', target_role: 'maker', evidence_refs: ['eval:E1'], location: 'src/hello.txt' }],
     })
     ;(changes.result as any).handoff.next_action = 'rework'
+    withProof(changes)
     fs.writeFileSync(path.join(fixture.scenarioDir, 'checker.json'), JSON.stringify([changes, changes, approvedReviewAction()]))
 
     const first = await runStory(fixture.deps, fixture.input)
@@ -607,6 +616,7 @@ describe('engine', () => {
       action_items: [{ id: 'F1', severity: 'high', category: 'patch', problem: 'ainda falta', required_action: 'corrigir', target_role: 'maker', evidence_refs: ['eval:E1'], location: 'src/hello.txt' }],
     })
     ;(changes.result as any).handoff.next_action = 'rework'
+    withProof(changes)
     fs.writeFileSync(path.join(fixture.scenarioDir, 'checker.json'), JSON.stringify([changes, approvedReviewAction()]))
     let commitFails = true
     const deps = {
@@ -694,6 +704,7 @@ describe('engine', () => {
       action_items: [{ id: 'F1', severity: 'high', category: 'patch', problem: 'ainda falta', required_action: 'corrigir', target_role: 'maker', evidence_refs: ['eval:E1'], location: 'src/hello.txt' }],
     })
     ;(changes.result as any).handoff.next_action = 'rework'
+    withProof(changes)
     fs.writeFileSync(path.join(fixture.scenarioDir, 'checker.json'), JSON.stringify([changes, approvedReviewAction()]))
     const realDispatch = fixture.deps.dispatchClaude
     let calls = 0
@@ -724,6 +735,7 @@ describe('engine', () => {
       action_items: [{ id: 'F1', severity: 'high', category: 'patch', problem: 'ainda falta', required_action: 'corrigir', target_role: 'maker', evidence_refs: ['eval:E1'], location: 'src/hello.txt' }],
     })
     ;(changes.result as any).handoff.next_action = 'rework'
+    withProof(changes)
     fs.writeFileSync(path.join(fixture.scenarioDir, 'checker.json'), JSON.stringify([changes, approvedReviewAction()]))
     const original = fixture.deps.createEvalRunner
     let greens = 0

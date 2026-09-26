@@ -8,7 +8,8 @@ import { AdeError } from '../../journal/errors.ts'
  * 1. Prompt sempre por stdin com `codex exec -`, nunca em argv.
  * 2. Schema é arquivo (`--output-schema <file>`), não inline. Resultado em `-o <file>`.
  * 3. `--color never` em toda chamada.
- * 4. `--sandbox read-only` para Checker (e `--sandbox workspace-write` para Maker).
+ * 4. `--sandbox read-only` para Checker (e `--sandbox workspace-write` para Maker); o Checker só escreve numa cópia
+ *    descartável da árvore (`scratch`, ADR 0047).
  * 5. `--ignore-user-config` e `--skip-git-repo-check`.
  */
 export function buildCodexArgs(opts: {
@@ -19,6 +20,7 @@ export function buildCodexArgs(opts: {
     model?: string
     effort?: string
     sandbox?: string
+    scratch?: boolean
   }): string[] {
   const {
     role = 'checker_round',
@@ -41,7 +43,7 @@ export function buildCodexArgs(opts: {
   }
 
   const isChecker = role.startsWith('checker')
-  if (isChecker && sandbox !== 'read-only') {
+  if (isChecker && sandbox !== 'read-only' && !opts.scratch) {
     throw new AdeError('invalid_codex_args', 'Checker não pode ter permissão de escrita; sandbox deve ser read-only', 4)
   }
 

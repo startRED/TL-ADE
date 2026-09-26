@@ -36,6 +36,7 @@ export async function dispatchClaude(opts: {
     mcpConfigPath?: string
     resumeSessionId?: string
     prompt?: string
+    scratch?: boolean
   }): Promise<{
   step_id: string
   status: 'ok' | 'ambiguous'
@@ -77,6 +78,7 @@ export async function dispatchClaude(opts: {
     mcpConfigPath,
     resumeSessionId,
     prompt,
+    scratch,
   } = opts ?? {}
 
   if (authorization) {
@@ -84,7 +86,7 @@ export async function dispatchClaude(opts: {
   }
 
   const sessionId = resumeSessionId ?? randomUUID()
-  const args = buildClaudeArgs({ sessionId, packPath, settingsPath: writeIsolationSettings(cwd), maxBudgetUsd, model, effort, mcpConfigPath, maxTurns, role, resume: resumeSessionId !== undefined })
+  const args = buildClaudeArgs({ sessionId, packPath, settingsPath: writeIsolationSettings(cwd), maxBudgetUsd, model, effort, mcpConfigPath, maxTurns, role, resume: resumeSessionId !== undefined, scratch })
   const input = { pack_path: packPath, max_budget_usd: maxBudgetUsd, model: model ?? null, ...(effort === undefined ? {} : { effort }), ...(maxTurns === undefined ? {} : { max_turns: maxTurns }), ...(resumeSessionId === undefined ? {} : { resume_of: resumeSessionId }) }
 
   const r = await step({ unit, id: stepId, effect_class: 'model_call', input, session_ref: sessionId }, async () => {

@@ -44,6 +44,7 @@ export async function dispatchCodex(opts: {
     effort?: string
     sandbox?: string
     schemaPath?: string
+    scratch?: boolean
   }): Promise<{
   step_id: string
   status: 'ok' | 'ambiguous'
@@ -80,6 +81,7 @@ export async function dispatchCodex(opts: {
     effort,
     sandbox,
     schemaPath = role === 'maker' ? UNIT_RESULT_SCHEMA : DEFAULT_REVIEW_SCHEMA,
+    scratch,
   } = opts ?? {}
 
   // Revisão (review-result) ou quem escreve a parte (`maker`, sandbox de escrita e unit-result); outro papel é erro.
@@ -118,6 +120,7 @@ export async function dispatchCodex(opts: {
     model,
     effort,
     sandbox,
+    scratch,
   })
 
   const input = {
