@@ -11,7 +11,7 @@ import SkillsPage from './Skills.tsx'
 import Appearance, { LIGHT_PALETTES, PALETTES, type Palette } from './Appearance.tsx'
 import { EASE_OUT, scrollToTop } from './motion.ts'
 import { shortPath } from './format.ts'
-import { brl } from './format.ts'
+import { brl, elapsed } from './format.ts'
 
 interface Project {
   id: string
@@ -52,6 +52,8 @@ export interface Mission {
   title?: string
   intent?: string
   consumed_usd?: number | null
+  started_at?: string | null
+  finished_at?: string | null
   total_calls?: number
   by_company?: Array<{ family: string; calls: number; usd: number; unknown_cost_calls: number; minutes: number; roles: Record<string, number>; models: Record<string, number> }>
   stories?: MissionStory[]
@@ -182,15 +184,18 @@ export default function App() {
         <div className="readouts">
           {mission?.consumed_usd != null && <span className="num" title="Custo equivalente de API">{brl(mission.consumed_usd)}</span>}
           {mission?.total_calls ? <><span className="rule" aria-hidden="true" /><span className="num">{mission.total_calls} chamadas</span></> : null}
+          {mission?.started_at && <><span className="rule" aria-hidden="true" /><MissionClock start={mission.started_at} end={mission.finished_at ?? null} /></>}
         </div>
       </header>
 
       <main className="stage">
         {error && <div className="alert" role="alert" style={{ marginBottom: '2rem' }}>{error}</div>}
-        <AnimatePresence mode="wait" initial={false}>
+        {/* antes da primeira resposta não há o que mostrar: um quadro vazio com chave própria esperava a saída animada
+            e a missão só aparecia uns 6 s depois de abrir o painel */}
+        {loaded && <AnimatePresence mode="wait" initial={false}>
           {/* troca de página: sai rápido e entra suave; a primeira tela entra pelas animações dela mesma */}
           <motion.div
-            key={page === 'home' ? active?.id ?? (loaded ? 'none' : 'loading') : page}
+            key={page === 'home' ? active?.id ?? 'none' : page}
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, transition: { duration: 0.18 } }}
@@ -220,13 +225,24 @@ export default function App() {
                   : <IntakeFlow key={active.id} project={active} mission={mission} missionCount={missions.length} snapshotLoaded={snapshot?.projectId === active.id} />
                 : loaded ? <NoProject onOpen={() => setPage('projects')} /> : null}
           </motion.div>
-        </AnimatePresence>
+        </AnimatePresence>}
         {/* Conversa sobre o projeto: abaixo da missão, na cópia do projeto; o cartão de permissão decide o que entra. */}
         {page === 'home' && active && missions.length > 0 && <MissionHistory missions={missions} current={mission?.id ?? null} viewing={past?.id ?? null} onOpen={openPast} />}
         {page === 'home' && active && <section className="conversation" aria-label="Conversa"><ChatPanel key={`chat:${active.id}`} projectId={active.id} /></section>}
       </main>
     </>
   )
+}
+
+/** Há quanto tempo a missão roda; parada no fim quando ela fecha. Atualiza a cada 30 s. */
+function MissionClock({ start, end }: { start: string; end: string | null }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (end) return
+    const id = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(id)
+  }, [end])
+  return <span className="num" title={end ? 'Tempo total da missão' : 'Tempo desde o começo da missão'}>{elapsed(start, end ? Date.parse(end) : now)}</span>
 }
 
 function NoProject({ onOpen }: { onOpen: () => void }) {

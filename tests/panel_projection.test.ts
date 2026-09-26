@@ -3,6 +3,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { openJournal } from '../src/journal/journal.ts'
 import { projectMissionFromSources } from '../src/panel/projection.ts'
+import { elapsed } from '../packages/web/src/format.ts'
 import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 
 let dirs: string[] = []
@@ -78,5 +79,36 @@ describe('projeção da missão para a tela', () => {
       ['codex', 0.3, 1, 0, { revisão: 1 }],
       ['agy', 0, 1, 1, { prova: 1 }],
     ])
+  })
+
+  // 26/09, pedido do operador: a missão de anexos rodava havia horas e o painel não mostrava há quanto tempo. A missão
+  // traz o começo (primeiro evento) e o fim (resumo da missão); a tela conta o tempo em horas e minutos.
+  test('missao_traz_comeco_e_fim_para_a_tela_contar_o_tempo', async () => {
+    const dir = makeTmpDir('ade-projection-')
+    dirs.push(dir)
+    writeFileSync(path.join(dir, 'plan.json'), JSON.stringify({ mission_id: 'm1', phases: [{ epics: [{ stories: ['S1'] }] }] }))
+    const journal = openJournal({ missionDir: dir, runtimeStamp: '1:aaaaaaaa:bbbbbbbb' })
+    await journal.append({ kind: 'story_started', data: { unit: 'S1', worktree_dir: 'w', tree_before: 't0' } })
+    const running: any = projectMissionFromSources({ missionDir: dir })
+    expect(running.started_at).toBe(running.events[0].at)
+    expect(running.finished_at).toBeNull()
+    // o resumo sai já na primeira parada: não é o fim
+    await journal.append({ kind: 'story_done', data: { unit: 'S1', status: 'awaiting_operator', reason: 'x' } })
+    await journal.append({ kind: 'telemetry', data: { scope: 'mission_summary', cost_usd: 0, model_calls: 0 } })
+    expect((projectMissionFromSources({ missionDir: dir }) as any).finished_at).toBeNull()
+    await journal.append({ kind: 'decision', data: { decision: 'unit_retry', unit: 'S1' } })
+    await journal.append({ kind: 'story_done', data: { unit: 'S1', status: 'delivered', commit: 'c1' } })
+    await journal.close()
+    const done: any = projectMissionFromSources({ missionDir: dir })
+    expect(done.finished_at).toBe(done.events.at(-1).at)
+  })
+
+  test('tempo_da_missao_em_horas_e_minutos', () => {
+    const t0 = '2026-09-25T20:29:38Z'
+    const at = (min: number) => Date.parse(t0) + min * 60_000
+    expect(elapsed(t0, at(0.5))).toBe('menos de 1 min')
+    expect(elapsed(t0, at(38))).toBe('38 min')
+    expect(elapsed(t0, at(60))).toBe('1 h')
+    expect(elapsed(t0, at(5 * 60 + 12))).toBe('5 h 12 min')
   })
 })

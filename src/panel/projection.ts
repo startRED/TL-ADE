@@ -237,6 +237,10 @@ export function projectMissionFromSources({ missionDir }: { missionDir: string }
     max_usd: plan.mission_budget?.max_usd,
     consumed_usd: totalCalls > 0 ? totalCostUsd : null,
     total_calls: totalCalls,
+    // começo e fim da missão para a tela contar há quanto tempo ela roda. O fim é a última parte entregue quando todas
+    // estão entregues: o resumo da missão sai já na primeira parada e não marca o fim.
+    started_at: events[0]?.at ?? null,
+    finished_at: stories.length > 0 && stories.every((s) => s.status === 'delivered') ? [...events].reverse().find((e) => e.kind === 'story_done')?.at ?? null : null,
     by_company: [...byCompany.values()].sort((a, b) => b.usd - a.usd),
     epics,
     stories,

@@ -249,6 +249,8 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 
 .readouts { display: flex; justify-content: flex-end; align-items: center; gap: 1.5rem; color: var(--ink-soft); font-size: 13px; }
 .readouts .rule { width: 1px; height: 1rem; background: var(--sage-line); }
+/* valor e unidade numa linha só: "US$ 4,72" e "5 h 13 min" quebravam no meio */
+.readouts .num { white-space: nowrap; }
 
 .stage { padding: clamp(2rem, 4vw, 3.5rem) var(--gutter) 6rem; max-width: 1600px; margin: 0 auto; }
 
