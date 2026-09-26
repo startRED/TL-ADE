@@ -942,9 +942,9 @@ describe('jornada de usuário', () => {
   // motor (o modelo nunca escolhe caminho do disco); o alvo pode ser o campo de arquivo ou o botão que abre o seletor.
   test('upload_anexa_amostra_pelo_campo_ou_pelo_botao_que_abre_o_seletor', async () => {
     expect(validateJourney({ journeys: [{ criterio: 'C1', steps: [{ goto: '/' }, { upload: { role: 'button', name: 'Anexar' }, files: ['imagem.png', 'texto.txt'] }] }] }).ok).toBe(true)
-    const bad = validateJourney({ journeys: [{ criterio: 'C1', steps: [{ upload: { label: 'Arquivo' }, files: ['C:/segredo.txt'] }, { upload: { label: 'Arquivo' }, files: [] }] }] })
+    const bad = validateJourney({ journeys: [{ criterio: 'C1', steps: [{ upload: { label: 'Arquivo' }, files: ['C:/segredo.txt'] }, { upload: { label: 'Arquivo' }, files: [] }, { upload: { label: 'Arquivo' }, files: ['constructor'] }] }] })
     expect(bad.ok).toBe(false)
-    if (!bad.ok) expect(bad.errors.length).toBe(2)
+    if (!bad.ok) expect(bad.errors.length).toBe(3)
 
     const http = await import('node:http')
     const html = `<!doctype html><html><body><main>
@@ -972,6 +972,12 @@ describe('jornada de usuário', () => {
         { expect_text: 'texto.txt text/plain' },
         { upload: { label: 'Documento' }, files: ['documento.pdf'] },
         { expect_text: 'documento.pdf application/pdf' },
+        // 26/09, S3 da missão de anexos: o critério de limite (arquivo acima de 10 MB, tipo não aceito) ficava needs_data
+        // porque as amostras eram todas pequenas e aceitas
+        { upload: { label: 'Documento' }, files: ['grande.png'] },
+        { expect_text: 'grande.png image/png 11534336' },
+        { upload: { label: 'Documento' }, files: ['programa.exe'] },
+        { expect_text: 'programa.exe application/x-msdownload' },
       ] }] }))
       const res = await runJourneys({ file, url, outDir: dir, tag: 'r1', stepTimeoutMs: 3000 })
       expect(res.status === 'fail' ? res.failure.error : res.status).toBe('pass')
