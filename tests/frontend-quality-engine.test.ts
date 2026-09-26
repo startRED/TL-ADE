@@ -1110,3 +1110,19 @@ describe('D7 varredura de interação', () => {
     expect(res.artifacts.crawl.skipped).toBeTruthy()
   })
 })
+
+// 26/09, missão de anexos: a tela servida para jornada, D7 e juízes lia e gravava o ~/.ade do operador; o roteiro da S3
+// abria a cópia da missão pela tela e a registrava na lista real de projetos. O serve roda com ADE_HOME próprio.
+test('tela_servida_para_avaliacao_usa_casa_propria_e_nao_o_ade_do_operador', async () => {
+  const { startServe } = await import('../src/visual/browser.ts')
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ade-serve-home-')), 'home.txt')
+  const port = 43000 + Math.floor(Math.random() * 2000)
+  const script = `require('fs').writeFileSync(${JSON.stringify(out)}, process.env.ADE_HOME || ''); require('http').createServer((q, s) => s.end('ok')).listen(${port}, '127.0.0.1')`
+  const serve = await startServe({ command: ['node', '-e', script], cwd: process.cwd(), url: `http://127.0.0.1:${port}/`, timeoutSeconds: 20 })
+  const home = fs.readFileSync(out, 'utf8')
+  expect(home).not.toBe('')
+  expect(path.resolve(home)).not.toBe(path.resolve(os.homedir()))
+  expect(fs.existsSync(home)).toBe(true)
+  await serve.stop()
+  expect(fs.existsSync(home)).toBe(false)
+}, 30_000)

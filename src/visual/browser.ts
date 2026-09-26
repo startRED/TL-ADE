@@ -2,6 +2,7 @@ import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
+import os from 'node:os'
 import https from 'node:https'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -102,8 +103,12 @@ export async function startServe(options: {
   const bin = cmdArgs[0]
   const args = cmdArgs.slice(1)
 
+  // Casa própria para o app servido: jornada, D7 e juízes clicam na tela, e o painel da TL-ADE grava a lista de
+  // projetos e a memória em ADE_HOME; sem isso eles mexiam no ~/.ade do operador.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ade-visual-home-'))
   const child = spawn(bin, args, {
     cwd,
+    env: { ...process.env, ADE_HOME: home },
     shell: false,
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
@@ -114,6 +119,7 @@ export async function startServe(options: {
     if (stopped) return
     stopped = true
     await terminateProcess(child)
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
   }
 
   const ready = await waitForUrlReady(url, timeoutSeconds * 1000)

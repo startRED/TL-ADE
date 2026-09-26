@@ -188,7 +188,7 @@ export async function startServer({
   }
 
   const resolvedRepo = path.resolve(repoDir)
-  const homeDir = deps.homeDir ?? os.homedir()
+  const homeDir = deps.homeDir ?? process.env.ADE_HOME ?? os.homedir()
 
   // 2. Verificação antecipada da dependência nativa
   const probeFn = deps.checkNativeSqlite ?? checkNativeSqlite
