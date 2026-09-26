@@ -46,9 +46,13 @@ function buildEnv(hooksDir: string, extra: Record<string,string|undefined> = {})
   return {
     ...copied,
     ...extra,
-    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_COUNT: '2',
     GIT_CONFIG_KEY_0: 'core.hooksPath',
     GIT_CONFIG_VALUE_0: hooksDir,
+    // A cópia da missão sai com os bytes do commit: com autocrlf=true do Git do Windows ela ganhava CRLF e testes que
+    // conferem arquivos byte a byte falhavam só lá. 'input' ainda normaliza CRLF para LF no que o motor commita.
+    GIT_CONFIG_KEY_1: 'core.autocrlf',
+    GIT_CONFIG_VALUE_1: 'input',
     GIT_TERMINAL_PROMPT: '0',
     GIT_OPTIONAL_LOCKS: '0',
   }
