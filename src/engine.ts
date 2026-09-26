@@ -882,7 +882,10 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         const passes = events.filter((e) => e.kind === 'visual_eval_done' && unitOf(e) === storyId)
         visualEvals = passes.length
         lastVisualEval = passes.at(-1)?.data?.evaluation ?? null
-        await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'resume_round', unit: storyId, round, visual_evals: visualEvals } })
+        // passadas sem ganho também continuam contadas (mesma regra do laço: subir menos de 0,3 é passada parada)
+        const finals = passes.map((e) => e.data?.evaluation?.final).filter((f): f is number => typeof f === 'number')
+        for (let i = 1; i < finals.length; i++) visualStalls = finals[i] < finals[i - 1] + 0.3 ? visualStalls + 1 : 0
+        await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'resume_round', unit: storyId, round, visual_evals: visualEvals, visual_stalls: visualStalls } })
       }
     }
   }

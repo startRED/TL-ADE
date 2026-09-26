@@ -645,7 +645,7 @@ describe('engine', () => {
     expect(second).toMatchObject({ status: 'delivered' })
     expect(fqe2.mock.calls.map((c) => c[0].round)).toEqual([2])
     const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
-    expect(events.find((e) => e.kind === 'decision' && (e.data as any).decision === 'resume_round')?.data).toMatchObject({ round: 2, visual_evals: 1 })
+    expect(events.find((e) => e.kind === 'decision' && (e.data as any).decision === 'resume_round')?.data).toMatchObject({ round: 2, visual_evals: 1, visual_stalls: 0 })
     expect(events.some((e) => e.kind === 'decision' && (e.data as any).decision === 'maker_ladder' && (e.data as any).outcome === 'no_change')).toBe(false)
     expect(fs.readFileSync(path.join(fixture.repo.dir, 'src', 'hello.txt'), 'utf8')).toBe('ok v2\n')
   }, 180_000)
