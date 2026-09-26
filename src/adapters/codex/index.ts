@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AdeError } from '../../journal/errors.ts'
 import { buildCodexArgs } from './argv.ts'
+import { codexEnvExtras } from './home.ts'
 import { parseCodexOutput, parseCodexStreamUsage, parseCodexTokens, parseReviewResult } from './parse.ts'
 import { dropNulls, fitToSchema, strictSchemaFile } from './strict-schema.ts'
 import { runWorker } from '../../runner/spawn.ts'
@@ -130,6 +131,8 @@ export async function dispatchCodex(opts: {
     
     const workerEnv: Record<string, string> = {
       ...env,
+      // pasta do Codex só com o login: sem ela o revisor recebia o ~/.codex/AGENTS.md do operador (ADR 0045)
+      ...codexEnvExtras(),
       ADE_FAKE_ROLE: isMaker ? 'maker' : 'checker',
       ADE_FAKE_RESULT_FILE: resultFile,
     }

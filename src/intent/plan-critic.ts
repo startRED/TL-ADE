@@ -6,11 +6,13 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { buildAgyArgs } from '../adapters/agy/argv.ts'
+import { agyEnvExtras } from '../adapters/agy/home.ts'
 import { isAgyAvailable, setAgyAvailable } from '../adapters/agy/index.ts'
 import { parseAgyOutput } from '../adapters/agy/parse.ts'
 import { isolationArgs, writeIsolationSettings } from '../adapters/claude/isolation.ts'
 import { parseClaudeOutput } from '../adapters/claude/parse.ts'
 import { buildCodexArgs } from '../adapters/codex/argv.ts'
+import { codexEnvExtras } from '../adapters/codex/home.ts'
 import { dropNulls, strictSchema } from '../adapters/codex/strict-schema.ts'
 import { parseCodexOutput } from '../adapters/codex/parse.ts'
 import { checkCanary, plantCanary } from '../contain/canary.ts'
@@ -99,7 +101,7 @@ async function codexCall(ref: ModelRef, call: ModelCall, missionDir: string, opt
     stepId,
     request: workerRequest(stepId, opts.repoDir, [resolved.exe, ...resolved.prefixArgs, ...args], resultFile),
     timeoutS: CRITIC_TIMEOUT_S,
-    env: opts.env as Record<string, string>,
+    env: { ...(opts.env as Record<string, string>), ...codexEnvExtras() },
     stdinData: call.prompt,
   })
   const { envelope, error } = parseCodexOutput(res.stdout, resultFile)
@@ -129,7 +131,7 @@ async function agyCall(ref: ModelRef, call: ModelCall, missionDir: string, opts:
       stepId,
       request: workerRequest(stepId, opts.repoDir, [resolved.exe, ...resolved.prefixArgs, ...args], path.join(missionDir, `${stepId}.json`)),
       timeoutS: CRITIC_TIMEOUT_S,
-      env: { ...opts.env, AGY_READ_ONLY: '1' } as Record<string, string>,
+      env: { ...opts.env, ...agyEnvExtras(), AGY_READ_ONLY: '1' } as Record<string, string>,
     })
     .then((res) => ({ res }), (error: unknown) => ({ error }))
   // A fuga do canário prevalece sobre o erro do worker, como na pesquisa.

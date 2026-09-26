@@ -6,6 +6,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { isolationArgs, isolationLeaks, writeIsolationSettings } from '../adapters/claude/isolation.ts'
+import { isolatedCodexHome } from '../adapters/codex/home.ts'
 import { parseClaudeOutput, parseUsage } from '../adapters/claude/parse.ts'
 import { AdeError } from '../journal/errors.ts'
 import { resolveBinary } from '../runner/resolve-binary.ts'
@@ -210,6 +211,8 @@ export async function runDoctor(opts: {
         impeccableExecFn?: NonNullable<Parameters<typeof probeImpeccable>[0]>['execFn']
         /** Pasta de configuração do Claude do usuário (padrão: CLAUDE_CONFIG_DIR ou <casa>/.claude). */
         claudeConfigDir?: string
+        /** Pasta do Codex do usuário (padrão: CODEX_HOME ou <casa>/.codex). */
+        codexHome?: string
     }): Promise<{ capabilities: Record<string, any>; path: string; longpaths: string | null; warnings: string[] }> {
   const {
     offline,
@@ -280,6 +283,11 @@ export async function runDoctor(opts: {
       // missão até corrigir: é a prova do isolamento na máquina de cada usuário, não só na de quem escreveu o motor
       const leaks = isolationLeaks(init, opts.claudeConfigDir ?? process.env.CLAUDE_CONFIG_DIR ?? path.join(homeDir, '.claude'))
       if (leaks.length > 0) isolationWarnings.push(`isolamento do claude vazou: ${leaks.join(', ')}`)
+      // sem auth.json (login no keyring) o Codex roda na pasta do usuário e lê as instruções globais dele (ADR 0045)
+      const codexHome = opts.codexHome ?? process.env.CODEX_HOME ?? path.join(homeDir, '.codex')
+      if (existsSync(path.join(codexHome, 'AGENTS.md')) && !isolatedCodexHome({ realHome: codexHome, engineHome: path.join(homeDir, '.ade', 'codex-home') })) {
+        isolationWarnings.push(`aviso: o Codex não tem login em ${path.join(codexHome, 'auth.json')}; as instruções globais do usuário entram nas chamadas do Codex (rode codex login com cli_auth_credentials_store = "file")`)
+      }
       doc.probe_ok =
         leaks.length === 0 &&
         envelope?.session_id === uuid &&

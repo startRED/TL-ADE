@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { buildCodexArgs } from '../adapters/codex/argv.ts'
+import { codexEnvExtras } from '../adapters/codex/home.ts'
 import { claudeWorkerEnv, isolationArgs, writeIsolationSettings } from '../adapters/claude/isolation.ts'
 
 interface VisualEvalCriteria {
@@ -432,7 +433,7 @@ async function dispatchIsolatedJudge(pack: any, judge: { family: string; model_i
     // As capturas vão anexadas como imagem: só com o caminho no texto o juiz não enxergava a tela (25/09)
     const args = [...buildCodexArgs({ role: 'visual_judge', cwd: deps.cwd, schemaPath, resultFile, model: judge.model_id, effort: judge.effort ?? undefined, sandbox: 'read-only' }), ...shots.map((p: string) => `--image=${p}`)]
     const prompt = [...JUDGE_INSTRUCTIONS, 'As imagens anexadas seguem a ordem da lista "captures".', '', JSON.stringify(listed)].join('\n')
-    await runJudgeProcess(deps.resolved.exe, [...deps.resolved.prefixArgs, ...args], { cwd: deps.cwd, env: deps.env, input: prompt, timeoutMs: 300_000 })
+    await runJudgeProcess(deps.resolved.exe, [...deps.resolved.prefixArgs, ...args], { cwd: deps.cwd, env: { ...deps.env, ...codexEnvExtras() }, input: prompt, timeoutMs: 300_000 })
     return keep(JSON.parse(fs.readFileSync(resultFile, 'utf8')))
   }
   const prompt = [...JUDGE_INSTRUCTIONS, 'Abra cada PNG pelo caminho absoluto com a ferramenta Read antes de julgar.', '', JSON.stringify(listed)].join('\n')

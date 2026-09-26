@@ -2,6 +2,8 @@ import { spawn } from 'node:child_process'
 import { assertArgvLimit, buildArgv, resolveBinary } from '../../runner/resolve-binary.ts'
 import type { ChatAgent, ChatAgentInput } from './chat.ts'
 import { claudeWorkerEnv, isolationArgs, writeIsolationSettings } from '../../adapters/claude/isolation.ts'
+import { codexEnvExtras } from '../../adapters/codex/home.ts'
+import { agyEnvExtras } from '../../adapters/agy/home.ts'
 
 const MAX_OUTPUT = 16 * 1024 * 1024
 const TIMEOUT_MS = 15 * 60 * 1000
@@ -23,7 +25,7 @@ function command(input: ChatAgentInput, prompt: string): { cmd: string; args: st
   const model = input.model ? ['--model', input.model] : []
   if (input.family === 'codex') {
     const effort = input.effort ? ['-c', `model_reasoning_effort=${input.effort}`] : []
-    return { cmd: 'codex', args: ['exec', '-', '--color', 'never', '--sandbox', 'workspace-write', '--skip-git-repo-check', '--ephemeral', ...effort, ...model], stdin: prompt }
+    return { cmd: 'codex', args: ['exec', '-', '--color', 'never', '--sandbox', 'workspace-write', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check', '--ephemeral', ...effort, ...model], stdin: prompt }
   }
   if (input.family === 'agy') return { cmd: 'agy', args: [`--print=${prompt.replace(/\r?\n/g, ' ')}`, ...model, '--dangerously-skip-permissions'] }
   const effort = input.effort ? ['--effort', input.effort] : []
@@ -42,7 +44,7 @@ export const defaultChatAgent: ChatAgent = (input) => {
   const argv = buildArgv(resolved, args)
   assertArgvLimit(resolved.exe, argv)
   return new Promise((resolve, reject) => {
-    const env = cmd === 'claude' ? claudeWorkerEnv() : process.env
+    const env = cmd === 'claude' ? claudeWorkerEnv() : cmd === 'codex' ? { ...process.env, ...codexEnvExtras() } : { ...process.env, ...agyEnvExtras() }
     const child = spawn(resolved.exe, argv, { cwd: input.cwd, shell: false, windowsHide: true, timeout: TIMEOUT_MS, env })
     let out = ''
     let err = ''

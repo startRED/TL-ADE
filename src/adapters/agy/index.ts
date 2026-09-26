@@ -7,6 +7,7 @@ import { runWorker } from '../../runner/spawn.ts'
 import { safeId } from '../../gates/output.ts'
 import { plantCanary, checkCanary } from '../../contain/canary.ts'
 import { buildAgyArgs } from './argv.ts'
+import { agyEnvExtras } from './home.ts'
 import { parseAgyFinding, parseAgyOutput, parseAgyUsage } from './parse.ts'
 import { buildModelTelemetry, modelsFromUsage } from '../../telemetry/telemetry.ts'
 import { parseReviewResult } from '../codex/parse.ts'
@@ -171,7 +172,7 @@ export async function dispatchAgy(opts: {
             result_file: path.join(missionDir, `agy-${safeId(stepId)}.json`),
           },
           timeoutS,
-          env: { ...env, AGY_READ_ONLY: '1' },
+          env: { ...env, ...agyEnvExtras(), AGY_READ_ONLY: '1' },
         })
       } catch (err) {
         workerFailed = true
@@ -316,7 +317,7 @@ export async function dispatchAgyUnit(opts: {
       stepId: safeId(stepId),
       request: { unit, authorization: 'unattended', cwd, argv: [resolved.exe, ...resolved.prefixArgs, ...args], timeout: timeoutS, result_file: resultFile },
       timeoutS,
-      env: { ...env, ...(isChecker ? { AGY_READ_ONLY: '1' } : {}) },
+      env: { ...env, ...agyEnvExtras(), ...(isChecker ? { AGY_READ_ONLY: '1' } : {}) },
     })
     const { envelope, error } = parseAgyOutput(result.stdout)
     const parsed = isChecker ? { ...parseReviewResult(envelope), unit_result: null } : { ...parseUnitResult(envelope), review_result: null }
