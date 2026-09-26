@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { ArrowRight, Check, Pause, PaperPlaneRight, Play, Stop, X } from '@phosphor-icons/react'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { ArrowRight, Check, Paperclip, Pause, PaperPlaneRight, Play, Stop, WarningCircle, X } from '@phosphor-icons/react'
 import { motion } from 'motion/react'
 import { apiFetch, postJson, subscribeEvents } from './api.ts'
 import type { Mission } from './App.tsx'
@@ -197,7 +197,7 @@ export default function IntakeFlow({ project, mission, missionCount, snapshotLoa
             <MissionControls intake={intake} busy={busy} onAct={(a) => act(`/mission/${a}`, {})} />
             {running
               ? <p className="direction">O próximo pedido abre quando esta missão terminar.</p>
-              : <RequestBox last={intake} busy={busy} compact onSend={(text) => act('/requests', { text })} />}
+              : <RequestBox last={intake} busy={busy} compact onSend={(body) => act('/requests', body)} />}
           </>}
         />
       </>
@@ -211,7 +211,7 @@ export default function IntakeFlow({ project, mission, missionCount, snapshotLoa
         <div className="copy">
           <motion.h1 className="display" {...rise(0)}>O que você quer construir em <em>{project.name}</em>?<span className="cursor" aria-hidden="true" /></motion.h1>
           <motion.div {...rise(1)}>{projectLine}</motion.div>
-          <motion.div {...rise(2)}><RequestBox last={intake} busy={busy} onSend={(text) => act('/requests', { text })} /></motion.div>
+          <motion.div {...rise(2)}><RequestBox last={intake} busy={busy} onSend={(body) => act('/requests', body)} /></motion.div>
         </div>
         <motion.div
           className="plate-frame"
@@ -249,11 +249,111 @@ function Ledger({ title, items, kind }: { title: string; items: string[]; kind?:
   )
 }
 
-function RequestBox({ last, busy, compact, onSend }: { last: Intake | null; busy: boolean; compact?: boolean; onSend: (text: string) => void }) {
+type Attachment = { name: string; data: string; url?: string; broken?: boolean }
+// os mesmos formatos que o servidor grava (src/panel/attachments.ts): extensão e assinatura dos primeiros bytes
+const ACCEPT = '.png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.md'
+const MAX_FILES = 10
+const MAX_BYTES = 10 * 1024 * 1024
+const SIGNATURES: Record<string, string[] | null> = {
+  png: ['\x89PNG\r\n\x1a\n'], jpg: ['\xff\xd8\xff'], jpeg: ['\xff\xd8\xff'], gif: ['GIF87a', 'GIF89a'], webp: ['RIFF'], pdf: ['%PDF-'], txt: null, md: null,
+}
+// a miniatura sai da extensão já conferida pela assinatura: File.type pode vir vazio ou genérico
+const IMAGE_TYPES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }
+const extension = (name: string) => /\.([^.]+)$/.exec(name)?.[1].toLowerCase() ?? ''
+// só extensões próprias da lista: `in` aceitaria herdadas como `constructor`
+const accepted = (f: File) => Object.hasOwn(SIGNATURES, extension(f.name))
+function signed(name: string, data: string) {
+  const ext = extension(name)
+  const sigs = SIGNATURES[ext]
+  if (sigs === null) return true
+  const head = atob(data.slice(0, 16))
+  return !!sigs?.some((s) => head.startsWith(s)) && (ext !== 'webp' || head.slice(8, 12) === 'WEBP')
+}
+const toBase64 = (f: File) => new Promise<string>((resolve, reject) => {
+  const r = new FileReader()
+  r.onload = () => resolve(String(r.result).slice(String(r.result).indexOf(',') + 1))
+  r.onerror = () => reject(r.error)
+  r.readAsDataURL(f)
+})
+
+function RequestBox({ last, busy, compact, onSend }: { last: Intake | null; busy: boolean; compact?: boolean; onSend: (body: { text: string; attachments?: { name: string; data: string }[] }) => void }) {
   const [text, setText] = useState('')
+  const [files, setFiles] = useState<Attachment[]>([])
+  const [problem, setProblem] = useState<string | null>(null)
+  // leituras em base64 ainda abertas: o envio espera por elas
+  const [reading, setReading] = useState(0)
+  // nomes na lista ou em leitura; seleções seguidas conferem limite e repetição contra todos
+  const taken = useRef<string[]>([])
+  const picker = useRef<HTMLInputElement>(null)
+  const clip = useRef<HTMLButtonElement>(null)
+  const list = useRef<HTMLUListElement>(null)
+  const blocked = busy || reading > 0
+  const send = () => onSend(files.length ? { text, attachments: files.map(({ name, data }) => ({ name, data })) } : { text })
+  const field = useRef<HTMLTextAreaElement>(null)
   function submit(e: FormEvent) {
     e.preventDefault()
-    onSend(text)
+    if (blocked) return
+    // com só anexos o botão fica ativo, mas o servidor exige o texto: avisa e devolve o foco ao campo
+    if (!text.trim()) { setProblem('Escreva o pedido antes de enviar.'); field.current?.focus(); return }
+    send()
+  }
+  async function add(picked: FileList | null) {
+    const chosen = Array.from(picked ?? [])
+    if (picker.current) picker.current.value = ''
+    const errors: string[] = []
+    const batch: File[] = []
+    for (const f of chosen) {
+      if (!accepted(f)) { errors.push(`${f.name}: tipo não aceito (use PNG, JPEG, GIF, WebP, PDF, .txt ou .md).`); continue }
+      if (f.size > MAX_BYTES) { errors.push(`${f.name}: passa do limite de 10 MB.`); continue }
+      if (taken.current.length >= MAX_FILES) { errors.push(`${f.name}: limite de 10 arquivos atingido.`); continue }
+      if (taken.current.includes(f.name)) { errors.push(`${f.name}: já está anexado.`); continue }
+      taken.current.push(f.name)
+      batch.push(f)
+    }
+    setProblem(errors.length ? errors.join(' ') : null)
+    if (!batch.length) return
+    setReading((n) => n + 1)
+    const ready: Attachment[] = []
+    try {
+      const read = await Promise.allSettled(batch.map(toBase64))
+      read.forEach((r, i) => {
+        const f = batch[i]
+        let ok = false
+        try { ok = r.status === 'fulfilled' && signed(f.name, r.value) } catch { ok = false }
+        if (ok && r.status === 'fulfilled') {
+          // signed() já restringiu a extensão às chaves próprias da lista
+          const image = IMAGE_TYPES[extension(f.name)]
+          ready.push({ name: f.name, data: r.value, url: image ? URL.createObjectURL(new Blob([f], { type: image })) : undefined })
+          return
+        }
+        taken.current = taken.current.filter((n) => n !== f.name)
+        errors.push(r.status === 'fulfilled' ? `${f.name}: o conteúdo não corresponde ao tipo do arquivo.` : `${f.name}: não foi possível ler o arquivo.`)
+      })
+    } catch {
+      // falha inesperada: nada do lote entra e o envio não fica travado
+      const names = batch.map((f) => f.name)
+      taken.current = taken.current.filter((n) => !names.includes(n))
+      for (const x of ready.splice(0)) if (x.url) URL.revokeObjectURL(x.url)
+      errors.push('Não foi possível anexar os arquivos escolhidos.')
+    } finally {
+      setFiles((xs) => [...xs, ...ready])
+      setReading((n) => n - 1)
+      if (errors.length) setProblem(errors.join(' '))
+    }
+  }
+  function remove(name: string) {
+    // o foco não cai no vazio: passa ao X vizinho, ou ao clipe quando a lista acaba
+    const i = files.findIndex((x) => x.name === name)
+    const neighbour = files[i + 1] ?? files[i - 1]
+    taken.current = taken.current.filter((n) => n !== name)
+    setFiles((xs) => xs.filter((x) => { if (x.name === name && x.url) URL.revokeObjectURL(x.url); return x.name !== name }))
+    requestAnimationFrame(() => {
+      const next = neighbour && list.current?.querySelector<HTMLButtonElement>(`button[data-name="${CSS.escape(neighbour.name)}"]`)
+      ;(next || clip.current)?.focus()
+    })
+  }
+  function broken(name: string) {
+    setFiles((xs) => xs.map((x) => (x.name === name ? { ...x, broken: true } : x)))
   }
   const what = last?.rejected_at === 'plan' ? 'O plano' : 'O briefing'
   return (
@@ -269,19 +369,46 @@ function RequestBox({ last, busy, compact, onSend }: { last: Intake | null; busy
       <div className="field-wrap">
       <span className="prompt" aria-hidden="true">›</span>
       <textarea
+        ref={field}
         className="field"
         aria-label="Pedido"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && text.trim() && !busy) onSend(text) }}
+        onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && text.trim() && !blocked) send() }}
         placeholder={compact ? 'Peça a próxima mudança' : 'Descreva o que você quer construir ou mudar'}
         rows={compact ? 1 : 3}
       />
       </div>
+      {(files.length > 0 || problem) && (
+        <div className="attachments">
+          {files.length > 0 && (
+            <ul ref={list} className="attach-list" aria-label="Anexos">
+              {files.map((f) => {
+                const thumb = f.url && !f.broken
+                return (
+                  <li key={f.name} className={thumb ? 'attach thumb' : 'attach chip'} title={f.name}>
+                    {thumb ? <img src={f.url} alt={f.name} onError={() => broken(f.name)} /> : <span className="attach-name">{f.name}</span>}
+                    <button type="button" className="attach-remove" data-name={f.name} aria-label={`Remover ${f.name}`} onClick={() => remove(f.name)}>
+                      <X size={12} weight="bold" aria-hidden="true" />
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+          {problem && <p className="attach-error" role="alert"><WarningCircle size={14} weight="bold" aria-hidden="true" /><span>{problem}</span></p>}
+        </div>
+      )}
       <div className="composer-row">
-        {!compact && <span className="note-line">Ctrl + Enter também envia.</span>}
-        <button className="btn baton" type="submit" disabled={busy || !text.trim()}>
-          <PaperPlaneRight size={15} aria-hidden="true" /> {busy ? 'Enviando…' : 'Enviar pedido'}
+        <div className="composer-tools">
+          <button ref={clip} type="button" className="clip" aria-label="Anexar arquivos" title="Anexar arquivos" onClick={() => picker.current?.click()}>
+            <Paperclip size={18} weight="light" aria-hidden="true" />
+          </button>
+          <input ref={picker} type="file" multiple accept={ACCEPT} hidden tabIndex={-1} onChange={(e) => void add(e.target.files)} />
+          {!compact && <span className="note-line kbd-hint">Ctrl + Enter também envia.</span>}
+        </div>
+        <button className="btn baton" type="submit" disabled={blocked || (!text.trim() && files.length === 0)}>
+          <PaperPlaneRight size={15} aria-hidden="true" /> {busy ? 'Enviando…' : reading ? 'Lendo anexos…' : 'Enviar pedido'}
         </button>
       </div>
     </form>

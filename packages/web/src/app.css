@@ -704,7 +704,8 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
    Onde se trabalha com dado (rótulos, abas, botões, passos, provas, parecer, custos, diff), a letra é mono e o
    espaçamento é de terminal; títulos grandes e gravuras ficam para as telas de decisão. Divisórias pontilhadas. */
 .caps { font: 500 10.5px/1.2 var(--mono); letter-spacing: .14em; }
-.tab { font: 500 11px/1 var(--mono); letter-spacing: .16em; }
+.tab { font: 500 13px/1 var(--mono); letter-spacing: .12em; }
+.tab[aria-current='page'] { font-weight: 700; }
 .btn { font: 500 11.5px/1 var(--mono); letter-spacing: .12em; min-height: 2.5rem; }
 .wordmark { font: 600 12px/1 var(--mono); letter-spacing: .28em; }
 .chip { font: 400 12.5px/1 var(--mono); }
@@ -727,8 +728,8 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 .stems .no { font: 600 11px/1 var(--mono); }
 .diff-file pre { font-size: 12px; line-height: 1.5; }
 
-.terminal { gap: 0; border: 1px solid var(--sage-line); background: color-mix(in srgb, var(--ground) 72%, #000); }
-.overture .terminal { background: color-mix(in srgb, var(--field) 70%, #000); border-color: color-mix(in srgb, var(--field-ink) 22%, var(--field)); }
+.terminal { --composer-bg: color-mix(in srgb, var(--ground) 72%, #000); gap: 0; border: 1px solid var(--sage-line); background: var(--composer-bg); }
+.overture .terminal { --composer-bg: color-mix(in srgb, var(--field) 70%, #000); background: var(--composer-bg); border-color: color-mix(in srgb, var(--field-ink) 22%, var(--field)); }
 .term-tabs { display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--sage-line); }
 .term-tabs li { padding: .6rem .9rem; font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); border-right: 1px dotted var(--sage-line); }
 .term-tabs li[aria-current='step'] { color: var(--ink); background: color-mix(in srgb, var(--ink) 8%, transparent); }
@@ -738,11 +739,11 @@ ul, ol { margin: 0; padding: 0; list-style: none; }
 .composer.compact .field-wrap { display: contents; }
 .terminal > .note-line { padding: .7rem 1rem; border-bottom: 1px dotted var(--sage-line); }
 .terminal { position: relative; }
-.terminal .field { font: 400 15px/1.55 var(--mono); padding: .9rem 1rem .9rem 2.4rem; border-bottom: 1px dotted var(--sage-line); }
+.terminal .field { font: 400 16px/1.5 var(--mono); padding: .9rem 1rem .9rem 2.4rem; border-bottom: 1px dotted var(--sage-line); }
 .terminal .composer-row { padding: .7rem .7rem .7rem 1rem; }
 .terminal .note-line { font: 400 11.5px/1.3 var(--mono); }
 .composer.compact { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; }
-.composer.compact .field { font: 400 15px/1.5 var(--mono); border-bottom: 0; }
+.composer.compact .field { font: 400 16px/1.5 var(--mono); border-bottom: 0; }
 .composer.compact .note-line { grid-column: 1 / -1; }
 
 /* ---------- três vozes ----------
@@ -758,7 +759,7 @@ body { font: 400 15px/1.6 var(--text); font-feature-settings: 'ss01'; }
 .direction { font-family: var(--text); font-style: normal; font-weight: 400; color: var(--ink-soft); letter-spacing: 0; }
 .lede { font: 400 16px/1.6 var(--text); }
 .overture h1 { font-size: clamp(3.6rem, 6.4vw, 7rem); max-width: 17ch; }
-.cursor { display: inline-block; width: .42em; height: .78em; margin-left: .1em; vertical-align: -.02em; background: var(--baton-text); animation: blink 1.1s steps(1) infinite; }
+.cursor { display: inline-block; width: .12em; opacity: .7; height: .78em; margin-left: .1em; vertical-align: -.02em; background: var(--baton-text); animation: blink 1.1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 .score-title h1 { font-size: clamp(2.8rem, 4.8vw, 4.8rem); }
 .status-line { font-size: 16px; }
@@ -916,3 +917,47 @@ h3.ui-heading, h4.ui-heading { font-size: 1.15rem; }
 .company-spend .mono { font-size: 11px; color: var(--ink-faint); }
 @media (max-width: 720px) { .company-spend table { display: block; overflow-x: auto; } }
 .cost-chart.company-spend { max-width: 60rem; }
+
+/* ---------- anexos do pedido ---------- */
+.composer-tools { display: flex; align-items: center; gap: 8px; margin-right: auto; min-width: 0; }
+.clip { display: inline-grid; place-items: center; flex: none; width: 36px; height: 36px; background: transparent; color: var(--ink-faint); border: 1px solid var(--sage-line); transition: color .15s, border-color .15s; }
+.clip:hover { color: var(--ink); }
+.clip:focus-visible { border-color: var(--ink); color: var(--ink); outline: none; }
+.composer .composer-row .note-line { font-size: 15px; }
+/* dica de atalho: secundária, abaixo da instrução do campo */
+.composer .composer-row .kbd-hint { font-size: 15px; color: color-mix(in srgb, var(--ink) 75%, transparent); }
+.composer .field::placeholder { font-size: 16px; line-height: 1.5; }
+.path-line { font-size: 14px; }
+.composer.compact { grid-template-columns: auto minmax(0, 1fr) auto; }
+.attachments { display: grid; gap: .6rem; }
+/* compacto: prompt, campo e botões seguem na mesma linha; os anexos descem para uma faixa inteira abaixo deles */
+.composer.compact .attachments { grid-column: 1 / -1; order: 1; }
+.terminal .attachments { padding: 8px 1rem; border-bottom: 1px dotted var(--sage-line); }
+.terminal .attach-error { padding-top: .6rem; border-top: 1px dotted var(--sage-line); }
+.attach-list { display: flex; flex-wrap: wrap; gap: .5rem; }
+.attach { position: relative; display: inline-flex; align-items: center; border: 1px solid var(--sage-line); background: color-mix(in srgb, var(--ink) 5%, transparent); }
+/* xadrez atrás da imagem: PNG transparente não vira um quadrado vazio */
+.attach.thumb { overflow: hidden; width: 64px; height: 64px; background: var(--hatch); }
+.attach.thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.attach.chip { box-sizing: border-box; height: 34px; gap: .45rem; padding: 0 .3rem 0 .65rem; font: 500 15px/1.2 var(--mono); color: var(--ink); }
+.attach-name { font-weight: 500; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* X de remover: tinta secundária do composer, sem o cinza do botão nativo; alvo de 24 px */
+.attach-remove { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; padding: 0; background: transparent; color: var(--ink-soft); border: 1px solid var(--sage-line); cursor: pointer; transition: color .15s, border-color .15s; }
+.attach-remove:hover { color: var(--ink); border-color: var(--ink-soft); }
+.attach-remove:focus-visible { outline: 2px solid var(--baton); outline-offset: 1px; color: var(--ink); }
+.attach.thumb .attach-remove { position: absolute; top: 4px; right: 4px; background: color-mix(in srgb, var(--composer-bg, var(--ground)) 85%, transparent); }
+.attach-error { display: flex; align-items: flex-start; gap: .45rem; margin: 0; font: 400 14px/1.4 var(--text); color: var(--attach-error, #ffb4a8); }
+.attach-error svg { flex: none; margin-top: .2em; }
+/* nos temas claros o alerta escurece; na abertura o composer é sempre escuro */
+:root[data-theme='light'], :root[data-palette='papel'] { --attach-error: #a3261a; }
+.overture { --attach-error: #ffb4a8; }
+.project-line, .project-line .mono { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.term-tabs li { font-size: 14px; letter-spacing: .06em; }
+.composer .btn.baton:not(:disabled) { --b-bg: #f4f4ff; --b-fg: #1428c8; --b-line: #f4f4ff; }
+.composer .btn.baton:not(:disabled):hover { --b-bg: var(--ink); --b-fg: var(--ground); --b-line: var(--ink); }
+.composer .btn.baton:disabled { opacity: .6; }
+/* celular: sem projeto, o convite ocupa o espaço abaixo da navegação, com o botão logo após o texto */
+@media (max-width: 720px) { .library:has(> :only-child) { min-height: calc(100dvh - 115px); display: grid; align-content: center; padding: 24px; } }
+/* celular: as abas quebram em duas linhas em vez de rolar; Opções e Aparência ficam à vista, sem aba escondida atrás da borda */
+@media (max-width: 720px) { .tabs { flex-wrap: wrap; overflow: visible; gap: 0 1.25rem; mask-image: none; } .tab { padding: .75rem 0; } }
+.overture:has(.composer:focus-within) .cursor { visibility: hidden; }
