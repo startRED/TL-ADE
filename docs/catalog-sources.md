@@ -94,12 +94,57 @@ espelho legível da lista: commit abreviado e licença têm de bater com o arqui
 | `affaan-m/ECC` (antigo `everything-claude-code`) | MIT | `e482e57` | 26 pastas da stack TS/React/Node/Postgres: `api-design`, `architecture-decision-records`, `backend-patterns`, `coding-standards`, `context-budget`, `contract-first`, `database-migrations`, `deployment-patterns`, `design-system`, `docker-patterns`, `e2e-testing`, `error-handling`, `frontend-a11y`, `frontend-patterns`, `hexagonal-architecture`, `mcp-server-patterns`, `postgres-patterns`, `prisma-patterns`, `react-patterns`, `react-performance`, `react-testing`, `search-first`, `security-review`, `tdd-workflow`, `verification-loop`, `vite-patterns` | Recorte da stack do maior acervo de skills; LICENSE MIT na raiz do commit | 266.744 estrelas e 39.863 forks (API do GitHub, 2026-09-24) | `install.*`, `hooks/` e instaladores por CLI; pastas de skill com scripts; padrões de outras linguagens (Django, Laravel, Spring, Perl etc.) |
 | `anthropics/skills` | Apache-2.0 | `3337550` | `skill-creator` (só `SKILL.md`, `LICENSE.txt`, `agents/`, `references/`) | Formato canônico e melhor guia de autoria de skills. Sem LICENSE na raiz: licença conferida em `skills/skill-creator/LICENSE.txt` do commit | 177.965 estrelas e 21.082 forks (API do GitHub, 2026-09-24) | `scripts/` e `eval-viewer/` (Python) do `skill-creator`; `docx`/`pdf`/`pptx`/`xlsx` (proprietárias); `doc-coauthoring` (sem `LICENSE.txt` próprio); as demais declaram `license: Complete terms in LICENSE.txt`, que a checagem de licença do sync recusa |
 | `addyosmani/agent-skills` | MIT | `bcab6a1` | 18 skills: `api-and-interface-design`, `browser-testing-with-devtools`, `ci-cd-and-automation`, `code-review-and-quality`, `code-simplification`, `context-engineering`, `debugging-and-error-recovery`, `deprecation-and-migration`, `documentation-and-adrs`, `git-workflow-and-versioning`, `incremental-implementation`, `observability-and-instrumentation`, `performance-optimization`, `planning-and-task-breakdown`, `security-and-hardening`, `shipping-and-launch`, `source-driven-development`, `spec-driven-development` | Skills canônicas de engenharia, sem espelhos, que preenchem lacunas reais (API, migração, observabilidade, ship-gate, grounding em fonte); LICENSE MIT na raiz. Sai do estado "dormente até pin" da §1 | 98.863 estrelas e 10.388 forks (API do GitHub, 2026-09-24) | `hooks/` (o `SessionStart` injeta um `SKILL.md` inteiro e `simplify-ignore.sh` reescreve arquivos); `test-driven-development` e `frontend-ui-engineering` (ids já cobertos); `idea-refine` (traz script); `using-agent-skills` (meta) |
+| `petergyang/no-ai-slop` | MIT | `000650b` | `no-ai-slop` | Edição de prosa para humanos contra padrões de texto de IA, preservando a voz do autor; nenhuma skill do catálogo edita prosa. Rodada de 2026-09-26, abaixo | 11.336 estrelas e 775 forks (API do GitHub, 2026-09-26) | `scripts/build_plugin.py`, `.codex-plugin/` e `assets/` da raiz |
+| `backnotprop/pstack` (espelho de `cursor/plugins/pstack`) | MIT | `157aae3` | `principle-make-operations-idempotent`, `principle-separate-before-serializing-shared-state` | Dois princípios curtos sem colisão no catálogo (idempotência depois de crash e retry; estado compartilhado entre escritores concorrentes). Rodada de 2026-09-26, abaixo | 548 estrelas e 44 forks no espelho; 8.701 estrelas e 812 forks no upstream (API do GitHub, 2026-09-26) | as outras 49 skills; motivo por grupo na rodada abaixo |
 | Skills locais de Erick (`~/.claude/skills/`) | local | — | lidas in-place, como na §1 (`trust: local`) | Pedido de olhar também o que já está no computador: as boas continuam valendo por precedência local, sem redistribuição | — | Não entram em `fontes-curadas.json`: sem upstream nem commit para pinar; o `superpowers` local passa a ter pin pela linha acima |
 
 **Ficaram de fora da lista inteira:** `openai/skills` (sem licença declarada, §1), `ComposioHQ/awesome-claude-skills`
 (sem LICENSE e com cópias das proprietárias, ADR 0019) e `vercel-labs/skills` (instalador de registry aberto, que o
 controle 1 do SkillGuard proíbe). O filtro é o mesmo para todas: licença livre conferida no commit pinado, só pastas de
 skill sem scripts nem hooks, e o SkillGuard da sincronização decide liberada ou quarentena.
+
+### Rodada de 2026-09-26: hyperframes, no-ai-slop e pstack
+
+Pedido de Erick: analisar três repositórios e integrar o que passar no filtro, desde que o plano escolha a skill sozinho.
+Cada repositório foi clonado raso no commit abaixo; palavras contadas com `wc -w` no `SKILL.md` do commit, estrelas e
+forks pela API do GitHub em 2026-09-26.
+
+| Repositório | Commit medido | Licença | O que é | Classificação | Decisão |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `heygen-com/hyperframes` | `89fe898` | Apache-2.0 (raiz) | Framework que renderiza HTML, CSS e animações em MP4 determinístico, com CLI (`@hyperframes/cli` 0.8.78) e 21 skills em `skills/`, 7 blocos com `SKILL.md` em `registry/blocks/` e 6 skills internas em `.claude/skills/`. 53.220 estrelas e 4.851 forks | ferramenta | **REFERENCE** (proposta no estúdio criativo) |
+| `petergyang/no-ai-slop` | `000650b` | MIT (raiz) | Uma skill de edição de texto contra padrões de IA, com `eval.md` de autochecagem | skill | **ADOPT** |
+| `backnotprop/pstack` | `157aae3` | MIT (raiz; `pstack/LICENSE` do upstream também MIT) | Espelho de `cursor/plugins/pstack` (Lauren Tan): 48 skills em `skills/` e 3 em `automations/benny/skills/`, quase todas com `disable-model-invocation: true` e presas ao fluxo do Cursor (subagentes, vários modelos, `/comando`) | skill | **ADAPT** (recorte de 2) |
+
+**Entraram (as três liberadas pelo SkillGuard, sem achado):** `no-ai-slop` (1.715 palavras, ~2,6k tokens),
+`principle-make-operations-idempotent` (~280 tokens) e `principle-separate-before-serializing-shared-state`
+(~320 tokens). Os dois `SKILL.md` do pstack têm o mesmo blob git no espelho e em `cursor/plugins/pstack`. O índice não
+lê `disable-model-invocation`: a escolha é do plano (ADR 0039), e os dois princípios foram escritos para serem
+aplicados por contexto ("Apply when…").
+
+**Ficou de fora e por quê:**
+
+- `hyperframes`, as 21 skills de `skills/`: 19 mandam rodar `npx hyperframes` ou `npx skills`, e as duas que não
+  mandam (`hyperframes-creative`, `hyperframes-studio`) só servem com a CLI instalada; 15 trazem arquivo executável
+  (`scripts/`, `.mjs`, `.sh`), de 1 em `figma` a 54 em `media-use`; `talking-head-recut` tem 7.917 palavras. Os blocos
+  de `registry/blocks/` são componentes do registro, não skill; `.claude/skills/` e `.agents/skills/` são internas do
+  repositório. O repositório é ferramenta: candidato a vídeo como código ao lado do Remotion
+  (`docs/plans/estudio-criativo.md` §5), a decidir quando a fase de vídeo começar.
+- `pstack`, por grupo: disparam subagentes ou vários modelos (`arena`, `swarm`, `interrogate`, `reflect`,
+  `blast-radius`, `architect`, `no-comments`, `poteto-mode`); conversam com o operador, leem histórico ou MCPs
+  (`teach`, `how`, `why`, `recall`, `bro`, `figure-it-out`, `automate-me`); publicam ou abrem PR
+  (`automations/benny/*`, `make-bot-ui`, `create-verification-skill`, `maintain-verification-skill`); trazem scripts
+  (`poteto-mode`, `show-me-your-work`); configuram o harness (`setup-pstack`); `unslop` tem descrição "Must always apply",
+  que não serve para escolha, e repete `no-ai-slop`; `technical-writing` depende de `unslop` e cruza com
+  `documentation-and-adrs`; `tdd` e `typescript-best-practices` já estão cobertas; os demais `principle-*` repetem skills
+  do catálogo (`ponytail`, `verification-before-completion`, `debugging-methodology`, `incremental-implementation`,
+  `context-engineering`, `code-simplification`, `deprecation-and-migration`, `codebase-design`) ou dependem de fato que o
+  plano não tem antes de executar (`principle-attack-the-premise`: "dois consertos já falharam").
+
+**Prova de escolha:** o plano real (`createLlmIntent`, `claude-opus-5-5`) escolheu cada skill no pedido certo em
+português e ignorou os dois princípios nos pedidos parecidos; `no-ai-slop` ficou de fora de JSDoc e de tradução fiel,
+mas entrou nas duas rodadas de um pedido de README, junto de `documentation-and-adrs` (texto para humano, o que a
+descrição cobre). O seletor BM25 de reserva só casa pedidos em inglês (teste
+`selecao_bm25_escolhe_no_ai_slop_e_principios_do_pstack_so_no_pedido_certo`).
 
 ## 2. Ferramentas (integradas, não sincronizadas como skill)
 

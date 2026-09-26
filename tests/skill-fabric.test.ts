@@ -399,6 +399,34 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
     expect(selectedAgain.map((s) => s.id)).toEqual(selectedIds)
   })
 
+  // Skills da rodada de 2026-09-26 (`docs/catalog-sources.md` §1.2): cada uma entra no pedido certo e fica de fora
+  // do corte do chat no pedido parecido. Descrições copiadas do frontmatter no commit pinado; o BM25 casa inglês com
+  // inglês e não tem lista de palavras vazias, então "the", "to" e "that" também pontuam contra descrições em inglês.
+  test('selecao_bm25_escolhe_no_ai_slop_e_principios_do_pstack_so_no_pedido_certo', async () => {
+    const { selectStorySkills } = await import('../src/skills/select.ts')
+    const { CHAT_SKILL_MIN_SCORE } = await import('../src/panel/options.ts')
+    const catalog = JSON.parse(fs.readFileSync(path.resolve('fixtures/catalog/index-2026-09.json'), 'utf8'))
+    const novas = [
+      { id: 'no-ai-slop', body_tokens: 2637, description: "Edit drafts into sharper, more human writing while preserving the writer's personal voice, or detect AI-slop patterns without rewriting. Use when the user wants a draft clearer, more direct, more opinionated, or less AI-sounding, or asks whether writing reads as AI." },
+      { id: 'principle-make-operations-idempotent', body_tokens: 279, description: 'Apply when designing commands, lifecycle steps, or processing loops that run amid crashes, restarts, and retries. Converge to the same end state regardless of partial prior runs.' },
+      { id: 'principle-separate-before-serializing-shared-state', body_tokens: 316, description: 'Apply when concurrent actors might write to the same file, branch, key, or state object. Eliminate the sharing first; serialize structurally only when one shared writer is a real invariant.' },
+    ].map((e) => ({ ...e, name: e.id, license: 'MIT', trust: 'allowlisted', has_scripts: false }))
+    const candidates = [...catalog.entries, ...novas]
+    // o mesmo corte do interceptador do chat: abaixo do placar mínimo a skill não entra
+    const chosen = (task: string) => selectStorySkills({ story: { task }, candidates })
+      .filter((s) => s.score >= CHAT_SKILL_MIN_SCORE).map((s) => s.id)
+
+    const casos = [
+      ['no-ai-slop', 'Edit this blog post draft so it sounds less AI and more human, keeping my voice', 'Write the API reference documentation for the new endpoint'],
+      ['principle-make-operations-idempotent', 'Make the resume command converge to the same state when it reruns after a crash', 'Print every resumed task id under --verbose'],
+      ['principle-separate-before-serializing-shared-state', 'Two concurrent workers write the same state.json file and lose each other writes', 'Add a summary command that prints how many tasks the indexer finished'],
+    ]
+    for (const [id, positivo, negativo] of casos) {
+      expect(chosen(positivo), positivo).toContain(id)
+      expect(chosen(negativo), negativo).not.toContain(id)
+    }
+  })
+
   // Critério 6: Dadas habilidades aprovadas e compatíveis com domínio, linguagem, família e licença,
   // quando o contexto da história é preparado, então no máximo três corpos sanitizados são injetados em ordem estável,
   // cada um respeita o teto de 7,5 mil tokens, o conjunto respeita 20 mil tokens e o manifesto registra nome, origem, hash e tamanho.

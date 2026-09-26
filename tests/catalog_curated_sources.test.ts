@@ -105,7 +105,7 @@ describe('fontes curadas do catálogo', () => {
   test('C2.1 cada fonte tem nome seguro, url, commit completo, licença livre, motivo e sinal datado', () => {
     expect(Array.isArray(sources)).toBe(true)
     expect(sources.map((s: { name: string }) => s.name).sort()).toEqual(
-      ['addyosmani-agent-skills', 'anthropics-skills', 'everything-claude-code', 'superpowers'],
+      ['addyosmani-agent-skills', 'anthropics-skills', 'everything-claude-code', 'no-ai-slop', 'pstack', 'superpowers'],
     )
     for (const s of sources) {
       expect(s.name).toMatch(/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/)

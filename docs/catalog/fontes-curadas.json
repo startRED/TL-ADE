@@ -98,5 +98,30 @@
     ],
     "reason": "Skills canônicas de engenharia sem espelhos, que preenchem lacunas reais (API, migração, observabilidade, ship-gate, grounding em fonte); LICENSE MIT na raiz do commit. Nunca hooks/ (SessionStart injeta SKILL.md e simplify-ignore.sh reescreve arquivos); fora test-driven-development e frontend-ui-engineering (ids já cobertos), idea-refine (traz script) e using-agent-skills (meta)",
     "community_signal": "98.863 estrelas e 10.388 forks no GitHub (medido em 2026-09-24 pela API do GitHub)"
+  },
+  {
+    "name": "no-ai-slop",
+    "url": "https://github.com/petergyang/no-ai-slop",
+    "repo": "~/.ade/catalog-repos/no-ai-slop",
+    "commit": "000650b156983f5159695b441477f4e63b25dc85",
+    "license": "MIT",
+    "paths": [
+      "skills/no-ai-slop/**"
+    ],
+    "reason": "Edição de texto para humanos (post, artigo, e-mail, roteiro) contra padrões de texto de IA, preservando a voz do autor; lacuna real: nenhuma skill do catálogo edita prosa (writing-for-agents e documentation-and-adrs escrevem para agentes e para o repositório). LICENSE MIT na raiz do commit. Uma skill só, 1.715 palavras, sem scripts. Fora: scripts/build_plugin.py, .codex-plugin/ e assets/ da raiz",
+    "community_signal": "11.336 estrelas e 775 forks no GitHub (medido em 2026-09-26 pela API do GitHub)"
+  },
+  {
+    "name": "pstack",
+    "url": "https://github.com/backnotprop/pstack",
+    "repo": "~/.ade/catalog-repos/pstack",
+    "commit": "157aae39a733135e93d8b5b19ff62c6a84b0ad56",
+    "license": "MIT",
+    "paths": [
+      "skills/principle-make-operations-idempotent/**",
+      "skills/principle-separate-before-serializing-shared-state/**"
+    ],
+    "reason": "Espelho de cursor/plugins/pstack (Lauren Tan, LICENSE MIT na raiz do espelho e em pstack/LICENSE do upstream; os dois SKILL.md têm o mesmo blob git nos dois repositórios). Só dois princípios curtos sem colisão no catálogo: operação idempotente que converge depois de crash e retry, e eliminar estado compartilhado antes de serializar escrita concorrente. Fora: as skills que disparam subagentes ou vários modelos (arena, swarm, interrogate, reflect, blast-radius, architect, no-comments), as que conversam com o operador ou leem histórico (teach, how, why, recall, bro, figure-it-out, automate-me), as que publicam (automations/benny, make-bot-ui, create/maintain-verification-skill), as com scripts (poteto-mode, show-me-your-work), setup-pstack, unslop (descrição \"Must always apply\" e duplica no-ai-slop), tdd e typescript-best-practices (já cobertas) e os demais princípios que repetem skills do catálogo",
+    "community_signal": "548 estrelas e 44 forks no espelho; 8.701 estrelas e 812 forks no upstream cursor/plugins (medido em 2026-09-26 pela API do GitHub)"
   }
 ]
