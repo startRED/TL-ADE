@@ -26,7 +26,11 @@ function loadSchemaJson(url: URL) {
  * Monta o argv para invocar o `claude` real seguindo a ordem fixa de flags decidida para o Slice 1.
  * Quem escreve (`maker`, o padrão) responde pelo unit-result; quem revisa (`checker_*`) pelo review-result, só leitura.
  */
-export function buildClaudeArgs(opts: { sessionId: string; packPath: string; settingsPath: string; maxBudgetUsd: number; model?: string; effort?: string; mcpConfigPath?: string; maxTurns?: number; role?: string }): string[] {
+/**
+ * Com `resume` a chamada retoma a sessão `sessionId` (ADR 0046): o pack repete no prompt de sistema, para o cache da
+ * conversa valer, e o prompt vem pela entrada padrão (o que mudou na rodada pode passar do teto do argv do Windows).
+ */
+export function buildClaudeArgs(opts: { sessionId: string; packPath: string; settingsPath: string; maxBudgetUsd: number; model?: string; effort?: string; mcpConfigPath?: string; maxTurns?: number; role?: string; resume?: boolean }): string[] {
   const { sessionId, packPath, settingsPath, maxBudgetUsd, model, role = 'maker' } = opts ?? {}
 
   if (typeof sessionId !== 'string' || (!SESSION_ID_RE.test(sessionId) && sessionId !== 's')) {
@@ -51,12 +55,12 @@ export function buildClaudeArgs(opts: { sessionId: string; packPath: string; set
 
   const args = [
     '-p',
-    CLAUDE_PROMPT,
+    ...(opts.resume ? [] : [CLAUDE_PROMPT]),
     '--output-format',
     'json',
     '--json-schema',
     loadSchemaJson(checker ? REVIEW_SCHEMA_URL : SCHEMA_URL),
-    '--session-id',
+    opts.resume ? '--resume' : '--session-id',
     sessionId,
     '--max-budget-usd',
     String(maxBudgetUsd),

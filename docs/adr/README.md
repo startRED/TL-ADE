@@ -69,6 +69,7 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | [0043](0043-esforco-maximo-fora-da-escolha-automatica-emenda-0033.md) | Esforço máximo fora da escolha automática: só entra no papel em que o usuário o fixou (emenda o ADR 0033) | Aceito (escolha de Erick na entrevista, 2026-09-25) |
 | [0044](0044-isolamento-pelo-projeto-sem-safe-mode-emenda-0009-0011.md) | Isolamento pelo projeto, sem `--safe-mode`: só a configuração do operador fica de fora; skills do repositório e as nativas `run`/`verify` passam a valer (emenda os ADRs 0009, 0011 e 0019) | Aceito (pedido de Erick, 2026-09-26) |
 | [0045](0045-codex-e-agy-com-casa-do-motor-e-prova-de-isolamento.md) | Codex e agy com casa própria do motor (sem as instruções globais do usuário) e prova do isolamento do Claude pelo `ade doctor` em cada máquina (complementa o ADR 0044) | Aceito (pedido de Erick, 2026-09-26) |
+| [0046](0046-maker-retoma-a-sessao-no-mesmo-degrau.md) | Maker retoma a própria sessão (`--resume`, mesmo pack, só o que mudou no prompt) na rodada seguinte do mesmo degrau; sessão nova ao trocar de degrau ou depois de 2 retomadas; Codex e agy com sessão nova | Aceito (pedido de Erick, 2026-09-26) |
 
 ## Mapa decisão → onde ela aparece
 
@@ -80,7 +81,7 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | Intenção, contrato e prova | 0007, 0008, 0016, 0028, 0036 | §4, §5, §11 E1–E4, E12, E18–E20 |
 | Contexto, skills e qualidade | 0009, 0010, 0011, 0018, 0027, 0028, 0029, 0039, 0040, 0044, 0045 | §7, §10 A1, A7, A11, A13, A14, §11 E8, E9, E13–E15, E33, E35, E39 |
 | Observação e método | 0013, 0017, 0019, 0020, 0024, 0027, 0028, 0029, 0034, 0035, 0037 | §3, §8, §10 A10, A12, §11 E11, E17, E30, E34, E37 |
-| Orçamento e execução | 0026, 0028, 0029, 0032, 0033, 0043 | §7, §9.8, §11 E20, E24 |
+| Orçamento e execução | 0026, 0028, 0029, 0032, 0033, 0043, 0046 | §7, §9.8, §11 E20, E24 |
 
 O [ADR 0024](0024-autorizacao-roadmap-ate-v1.md) registra a autorização contínua até a v1 e define o recorte sequencial dos marcos, o [ADR 0027](0027-ativacao-da-v04b-painel-local.md) ativou a v0.4b, o [ADR 0028](0028-ativacao-da-v05-pesquisa-telemetria-intervencao.md) formalizou a v0.5 e o [ADR 0029](0029-ativacao-da-v1-noite-desatendida-e-dogfood.md) formaliza a ativação do recorte ativo v1 (noite desatendida sob precondições duras, suíte de dogfood runs: 3 e pass^3 em Vitest, calibração por telemetria e fechamento documental). O [ADR 0030](0030-typescript-no-motor-e-build-do-painel.md) emenda o 0023 e o 0027: produção em TypeScript estrito executado pelo Node 24 sem build e build do painel só em `packages/web`. O [ADR 0031](0031-trilhos-paralelos-emenda-0014.md) emenda o 0014: partes de escopo disjunto rodam em trilhos paralelos no lote desatendido, cada uma na própria worktree fora do projeto. O [ADR 0034](0034-painel-comanda-pela-api-emenda-0013.md) emenda o 0013: o painel comanda pela API, abre vários projetos com um lease cada e é servido do último build que passou, com fallback para o `index.html` da raiz.
 

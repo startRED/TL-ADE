@@ -103,6 +103,25 @@ export function nextAttempt(state: LadderState, outcome: MakerOutcome): Attempt 
   return park(true)
 }
 
+/** Sessão do maker que a chamada seguinte pode retomar (ADR 0046): o pack dela e quantas retomadas seguidas já teve. */
+export type MakerSession = { ref: string; packPath: string; manifest: unknown; rung: number; family: string; model: string | null; round: number; resumes: number }
+
+// Depois de 2 retomadas seguidas o contexto carrega mais tentativa falha do que ajuda: a seguinte abre sessão nova.
+const MAX_RESUMES = 2
+
+/**
+ * A chamada seguinte retoma a sessão só no mesmo degrau e modelo e antes de 2 retomadas seguidas. Só o Claude retoma:
+ * o agy não devolve sessão, e o `codex exec resume` (0.157) não aceita `--sandbox`, `-C` nem `--color`, e o maker do
+ * Codex roda `--ephemeral`, sem sessão gravada.
+ */
+// ponytail: Codex com sessão nova a cada rodada; retomar quando o `exec resume` aceitar o sandbox por flag e medir o
+// `-c sandbox_mode` contra a sessão gravada
+export function resumableSession(session: MakerSession | null, state: LadderState): MakerSession | null {
+  const rung = state.ladder[state.rung]
+  return session && session.family === 'claude' && session.rung === state.rung && rung.family === session.family
+    && rung.model === session.model && session.resumes < MAX_RESUMES ? session : null
+}
+
 /** Troca de modelo gasta uma chamada da reserva existente; negada, a parte estaciona. */
 export function reserveRung(opts: { events: Array<Record<string, any>>; storyId: string; rung: number; maxModelCalls: number }): 'reserved' | 'already_reserved' | 'denied' {
   const { reason } = reserveCalls({ events: opts.events, storyId: `${opts.storyId}:rung${opts.rung}`, maxModelCalls: opts.maxModelCalls })

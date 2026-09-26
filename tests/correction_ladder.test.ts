@@ -329,3 +329,73 @@ test('nova_tentativa_depois_de_correcao_esgotada_da_mais_rodadas', () => {
   const bonus = nextAttempt(ladderStart(LADDER, 2 * (1 + retryRoundBonus([retry('rework_exhausted')], 'S2'))), { kind: 'rejected' }).state
   expect(nextAttempt(bonus, { kind: 'rejected' }).kind).toBe('repeat')
 })
+
+// ADR 0046: cada rodada abria sessão nova e o maker relia tudo. A rodada seguinte no mesmo degrau retoma a sessão com o
+// mesmo pack (o prompt de sistema igual mantém o cache) e só o que mudou no prompt; degrau novo ou 2 retomadas seguidas
+// abrem sessão nova.
+const SESSION = (n: number) => `${String(n).repeat(8)}-2222-4333-8444-555555555555`
+const withPackPaths = (deps: any) => { deps.compilePack = (opts: any) => ({ pack_path: `pack-${opts.stepId}`, manifest_path: '', manifest: { bytes: 1 } }) }
+
+test('retoma_a_sessao_do_maker_no_mesmo_degrau_e_abre_nova_ao_subir', async () => {
+  const reply = (n: number) => ({ result: { subtype: 'success', num_turns: 5, session_ref: SESSION(n) }, changes: true })
+  const subject = fixture([reply(1), reply(2), reply(3)], {
+    makerLadder: [{ model: 'sonnet', family: 'claude' }, { model: 'opus', family: 'claude' }],
+    maxModelCalls: 10,
+  })
+  withPackPaths(subject.deps)
+  subject.deps.createGateRunner = redGate([['tests/a.test.ts > nova'], ['tests/a.test.ts > nova'], null])
+  await subject.run()
+  const calls = subject.dispatched.mock.calls.map((call) => call[0])
+  expect(calls.map((c) => c.resumeSessionId)).toEqual([undefined, SESSION(1), undefined])
+  // o mesmo arquivo de pack da sessão, e o que mudou (a prova vermelha) no prompt
+  expect(calls[1].packPath).toBe(calls[0].packPath)
+  expect(calls[1].prompt).toContain('tests/a.test.ts > nova')
+  expect(calls[2].model).toBe('opus')
+  const resumed = subject.events().filter((e: any) => e.kind === 'decision' && e.data?.decision === 'maker_resume')
+  expect(resumed.map((e: any) => e.data.session_ref)).toEqual([SESSION(1)])
+  // o prompt da retomada fica gravado na pasta da missão, como o pack de uma sessão nova
+  expect(fs.readFileSync(resumed[0].data.prompt_path, 'utf8')).toContain('tests/a.test.ts > nova')
+}, 30000)
+
+test('duas_retomadas_seguidas_abrem_sessao_nova_e_corte_pede_continuar', async () => {
+  const reply = (n: number, subtype = 'success') => ({ result: { subtype, num_turns: 5, session_ref: SESSION(n) }, changes: true })
+  const subject = fixture([reply(1, 'error_max_turns'), reply(2), reply(3), reply(4), reply(5)], {
+    makerLadder: [{ model: 'sonnet', family: 'claude' }],
+    maxModelCalls: 10,
+  })
+  withPackPaths(subject.deps)
+  subject.deps.createGateRunner = redGate([['tests/a.test.ts > nova']])
+  // nova tentativa depois de correção esgotada: 4 rodadas no degrau, para caber a terceira chamada seguida nele
+  await subject.deps.journal.append({ kind: 'decision', unit: 'ADE-L1', data: { decision: 'unit_retry', unit: 'ADE-L1', previous_reason: 'rework_exhausted' } })
+  await subject.run()
+  const calls = subject.dispatched.mock.calls.map((call) => call[0])
+  expect(calls.map((c) => c.resumeSessionId)).toEqual([undefined, SESSION(1), SESSION(1), undefined, SESSION(4)])
+  expect(calls[1].prompt).toMatch(/continue/i)
+}, 30000)
+
+test('sessao_sumida_cai_para_sessao_nova_e_registra', async () => {
+  const subject = fixture([
+    { result: { subtype: 'success', num_turns: 5, session_ref: SESSION(1) }, changes: true },
+    { result: { exit_code: 1, is_error: false, session_ref: SESSION(1), session_missing: true }, changes: false },
+    { result: { subtype: 'success', num_turns: 5, session_ref: SESSION(3) }, changes: true },
+  ], { maxModelCalls: 10 })
+  withPackPaths(subject.deps)
+  subject.deps.createGateRunner = redGate([['tests/a.test.ts > nova'], null])
+  await subject.run()
+  const calls = subject.dispatched.mock.calls.map((call) => call[0])
+  expect(calls.map((c) => c.resumeSessionId)).toEqual([undefined, SESSION(1), undefined])
+  // a sessão nova da mesma rodada leva o pack de correção, não o da sessão sumida
+  expect(calls[2].packPath).not.toBe(calls[0].packPath)
+  const fallback = subject.events().find((e: any) => e.kind === 'decision' && e.data?.decision === 'maker_resume_fallback')
+  expect(fallback?.data).toMatchObject({ session_ref: SESSION(1), next: 'new_session' })
+}, 30000)
+
+test('codex_e_agy_ficam_com_sessao_nova', async () => {
+  const reply = { result: { subtype: 'success', num_turns: 5, session_ref: SESSION(1) }, changes: true }
+  const subject = fixture([reply, reply], { makerLadder: [{ model: 'gpt', family: 'codex' }], maxModelCalls: 10 })
+  subject.deps.dispatchCodex = subject.dispatched
+  subject.deps.checkerResolved = { exe: process.execPath, prefixArgs: [] }
+  subject.deps.createGateRunner = redGate([['tests/a.test.ts > nova'], null])
+  await subject.run()
+  expect(subject.dispatched.mock.calls.map((call) => call[0].resumeSessionId)).toEqual([undefined, undefined])
+}, 30000)

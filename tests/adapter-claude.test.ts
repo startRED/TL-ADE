@@ -418,3 +418,57 @@ describe('claude adapter dispatch', () => {
     expect(stepResult!.status).toBe('ok')
   })
 })
+
+// ADR 0046: a rodada seguinte no mesmo degrau retoma a sessão do maker. O pack repete no prompt de sistema (o cache da
+// conversa vale) e o que mudou vai pela entrada padrão, fora do argv (teto de 32.767 caracteres do Windows).
+describe('claude retomada de sessão', () => {
+  test('buildClaudeArgs_com_resume_troca_session_id_por_resume_e_tira_o_prompt_do_argv', () => {
+    const args = buildClaudeArgs({ sessionId: FIXED_UUID, packPath: '/p/pack.md', settingsPath: '/p/iso.json', maxBudgetUsd: 0.25, resume: true })
+    expect(args).not.toContain('--session-id')
+    expect(args[args.indexOf('--resume') + 1]).toBe(FIXED_UUID)
+    expect(args[0]).toBe('-p')
+    expect(args[1]).toBe('--output-format')
+    expect(args).not.toContain(CLAUDE_PROMPT)
+    expect(args[args.indexOf('--append-system-prompt-file') + 1]).toBe('/p/pack.md')
+  })
+
+  test('dispatchClaude_retoma_a_sessao_pedida_manda_o_prompt_por_stdin_e_acusa_sessao_sumida', async () => {
+    const missionDir = makeTmpDir('ade-adapter-claude-')
+    try {
+      const journal = openJournal({ missionDir, runtimeStamp: RUNTIME_STAMP })
+      const { step } = createStepRunner({ journal, missionDir, gitPort: null, env: {} })
+      const packPath = path.join(missionDir, 'pack.md')
+      writeFileSync(packPath, '# pack\n')
+      let seen: any
+      const result = await dispatchClaude({
+        step,
+        unit: 'S13',
+        stepId: 'S13:r2:maker',
+        packPath,
+        missionDir,
+        missionId: 'm1',
+        cwd: missionDir,
+        resultFile: path.join(missionDir, 'result.json'),
+        maxBudgetUsd: 0.25,
+        authorization: paidAuthorization(),
+        resolved: { exe: process.execPath, prefixArgs: [] },
+        resumeSessionId: FIXED_UUID,
+        prompt: 'Rodada 2: corrija a prova vermelha.',
+        runWorkerImpl: (async (opts: any) => {
+          seen = opts
+          return { stdout: '', stderr: `No conversation found with session ID: ${FIXED_UUID}`, exitCode: 1 }
+        }) as any,
+        randomUUID: () => '99999999-2222-4333-8444-555555555555',
+      })
+      expect(seen.args[seen.args.indexOf('--resume') + 1]).toBe(FIXED_UUID)
+      expect(seen.stdinData).toBe('Rodada 2: corrija a prova vermelha.')
+      expect(result.session_ref).toBe(FIXED_UUID)
+      expect(result.session_missing).toBe(true)
+      const intent = readJournal(path.join(missionDir, 'journal.jsonl')).events.find((e: any) => e.kind === 'step_intent' && e.step_id === 'S13:r2:maker')
+      expect(intent!.session_ref).toBe(FIXED_UUID)
+      await journal.close()
+    } finally {
+      removeTmpDir(missionDir)
+    }
+  })
+})

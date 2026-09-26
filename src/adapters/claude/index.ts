@@ -11,6 +11,7 @@ import { assertPaidAuthorization } from '../../engine/paid-call.ts'
  * Cunha o session id antes do spawn, monta os args do `claude` e despacha o efeito `model_call`
  * através do `step()` write-ahead, para que o journal já tenha o `session_ref` no instante do spawn.
  * Com `role: 'checker_*'` o Claude revisa: só leitura e resposta pelo review-result.
+ * Com `resumeSessionId` retoma aquela sessão e manda `prompt` pela entrada padrão (ADR 0046).
  */
 export async function dispatchClaude(opts: {
     step: Function
@@ -33,6 +34,8 @@ export async function dispatchClaude(opts: {
     randomUUID?: () => string
     authorization?: any
     mcpConfigPath?: string
+    resumeSessionId?: string
+    prompt?: string
   }): Promise<{
   step_id: string
   status: 'ok' | 'ambiguous'
@@ -49,6 +52,7 @@ export async function dispatchClaude(opts: {
   num_turns: number | null
   result_text: string
   is_error: boolean
+  session_missing: boolean
 }> {
   const {
     step,
@@ -71,15 +75,17 @@ export async function dispatchClaude(opts: {
     randomUUID = crypto.randomUUID,
     authorization,
     mcpConfigPath,
+    resumeSessionId,
+    prompt,
   } = opts ?? {}
 
   if (authorization) {
     assertPaidAuthorization(authorization, maxBudgetUsd)
   }
 
-  const sessionId = randomUUID()
-  const args = buildClaudeArgs({ sessionId, packPath, settingsPath: writeIsolationSettings(cwd), maxBudgetUsd, model, effort, mcpConfigPath, maxTurns, role })
-  const input = { pack_path: packPath, max_budget_usd: maxBudgetUsd, model: model ?? null, ...(effort === undefined ? {} : { effort }), ...(maxTurns === undefined ? {} : { max_turns: maxTurns }) }
+  const sessionId = resumeSessionId ?? randomUUID()
+  const args = buildClaudeArgs({ sessionId, packPath, settingsPath: writeIsolationSettings(cwd), maxBudgetUsd, model, effort, mcpConfigPath, maxTurns, role, resume: resumeSessionId !== undefined })
+  const input = { pack_path: packPath, max_budget_usd: maxBudgetUsd, model: model ?? null, ...(effort === undefined ? {} : { effort }), ...(maxTurns === undefined ? {} : { max_turns: maxTurns }), ...(resumeSessionId === undefined ? {} : { resume_of: resumeSessionId }) }
 
   const r = await step({ unit, id: stepId, effect_class: 'model_call', input, session_ref: sessionId }, async () => {
     const result = await runWorkerImpl({
@@ -99,6 +105,7 @@ export async function dispatchClaude(opts: {
       },
       timeoutS,
       env: { ...env, ...claudeEnvExtras() },
+      ...(resumeSessionId === undefined ? {} : { stdinData: prompt ?? '' }),
     })
 
     const { envelope, error } = parseClaudeOutput(result.stdout)
@@ -125,6 +132,8 @@ export async function dispatchClaude(opts: {
       result_text: typeof envelope?.result === 'string' ? envelope.result : '',
       // a cota é lida só da mensagem de erro, nunca do texto de uma resposta bem-sucedida
       is_error: envelope?.is_error === true,
+      // sessão de outra máquina ou apagada: a CLI sai 1 sem envelope e o motor cai para sessão nova
+      session_missing: resumeSessionId !== undefined && /No conversation found/i.test(String(result.stderr ?? '')),
     }
   })
 
@@ -147,5 +156,6 @@ export async function dispatchClaude(opts: {
     num_turns: effectResult.num_turns ?? null,
     result_text: effectResult.result_text ?? '',
     is_error: effectResult.is_error === true,
+    session_missing: effectResult.session_missing === true,
   }
 }

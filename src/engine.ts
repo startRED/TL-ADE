@@ -12,7 +12,7 @@ import { findStoryCommitted, findStoryStarted } from './engine/resume.ts'
 import { preserveInterruptedTree } from './engine/preserve.ts'
 import { rewriteJourney, writeProof } from './engine/proof.ts'
 import { classifyCallFailure, pauseForQuota, refreshChains, waitQuotaPause } from './engine/quota.ts'
-import { buildLadder, classifyMakerOutcome, correctionRequest, ladderStart, nextAttempt, reserveRung, retryRoundBonus, roundsPerRung, type MakerOutcome } from './engine/ladder.ts'
+import { buildLadder, classifyMakerOutcome, correctionRequest, ladderStart, nextAttempt, reserveRung, resumableSession, retryRoundBonus, roundsPerRung, type MakerOutcome, type MakerSession } from './engine/ladder.ts'
 import { readMissionOptionsBesidePlan } from './mission/options.ts'
 import { blockedInContract, cliModel } from './models/route.ts'
 import { readModelSettings } from './models/settings.ts'
@@ -837,6 +837,8 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     return ladderStart(buildLadder(rungs), perRung, caps)
   }
   let ladderState = startLadder(routed)
+  // sessão da última chamada do maker que a seguinte pode retomar (ADR 0046)
+  let makerSession: MakerSession | null = null
   let attempt = 0
   let treeBeforeAttempt = treeBefore
 
@@ -948,9 +950,15 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     }
     // Tentativa repetida pela escada ganha passo próprio dentro da mesma rodada.
     const tag = attempt === 0 ? `r${round}` : `r${round}t${attempt}`
-    let currentPackPath = packResult.pack_path
-    let currentManifest = packResult.manifest
-    if (round > 1) {
+    // Chamada seguinte no mesmo degrau retoma a sessão do maker: o mesmo arquivo de pack (prompt de sistema igual, cache
+    // da conversa inteira vale) e só o que mudou no prompt, em vez de reler tudo numa sessão nova (ADR 0046).
+    const resumeFrom = resumableSession(makerSession, ladderState)
+    let currentPackPath: string = resumeFrom?.packPath ?? packResult.pack_path
+    let currentManifest: any = resumeFrom?.manifest ?? packResult.manifest
+    let resumePrompt: string | undefined
+    if (resumeFrom && resumeFrom.round === round) {
+      resumePrompt = 'Você foi cortado no teto de turnos antes de terminar. Continue de onde parou e responda somente pelo schema.'
+    } else if (round > 1) {
       // O pedido de correção leva as vermelhas cobráveis e os achados graves abertos.
       const correction = correctionRequest({ redTests, findings: openFindings })
       const reworkHandoff = buildReworkHandoff({
@@ -962,22 +970,29 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         round,
         notes: `rework round ${round}`,
       })
-      const storySection = dedupStorySection({
-        ...story,
-        handoff: reworkHandoff,
-      })
-      const reworkPack = deps.compilePack({
-        sections: {
-          contract: JSON.stringify(contract),
-          policy: 'rework',
-          // o texto deduplicado não traz o handoff; o pedido de correção vai junto dele
-          story: JSON.stringify({ ...JSON.parse(storySection.text), correction: { red_tests: correction.red_tests, handoff: reworkHandoff } }, null, 2),
-        },
-        missionDir,
-        stepId: `${storyId}:${tag}:pack`,
-      })
-      currentPackPath = reworkPack.pack_path
-      currentManifest = reworkPack.manifest
+      if (resumeFrom) {
+        resumePrompt = [
+          `Rodada ${round}: o motor reprovou a entrega anterior. Corrija o que está em correction (provas vermelhas e achados abertos) e responda somente pelo schema.`,
+          JSON.stringify({ round, correction: { red_tests: correction.red_tests, handoff: reworkHandoff } }, null, 2),
+        ].join('\n\n')
+      } else {
+        const storySection = dedupStorySection({
+          ...story,
+          handoff: reworkHandoff,
+        })
+        const reworkPack = deps.compilePack({
+          sections: {
+            contract: JSON.stringify(contract),
+            policy: 'rework',
+            // o texto deduplicado não traz o handoff; o pedido de correção vai junto dele
+            story: JSON.stringify({ ...JSON.parse(storySection.text), correction: { red_tests: correction.red_tests, handoff: reworkHandoff } }, null, 2),
+          },
+          missionDir,
+          stepId: `${storyId}:${tag}:pack`,
+        })
+        currentPackPath = reworkPack.pack_path
+        currentManifest = reworkPack.manifest
+      }
     }
 
     // Canário fora da worktree
@@ -1080,6 +1095,12 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     if (!ranBefore(makerStepId)) await deps.journal.append({ kind: 'model_started', unit: storyId, data: { unit: storyId, role: 'maker', step_id: makerStepId, family: rung.family, model_id: rung.model ?? makerModel ?? null, effort: rung.effort ?? null } })
     const dispatchMaker = dispatcherFor(rung.family)
     if (!dispatchMaker) throw new AdeError('invalid_ladder', `degrau da família ${rung.family} sem despachante`, 4)
+    // o prompt da retomada fica na pasta da missão ao lado do resultado, como o pack de uma sessão nova
+    const resumePromptPath = path.join(missionDir, `maker-resume-${tag}.md`)
+    if (resumeFrom && !ranBefore(makerStepId)) {
+      fs.writeFileSync(resumePromptPath, resumePrompt ?? '', 'utf8')
+      await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'maker_resume', unit: storyId, step_id: makerStepId, session_ref: resumeFrom.ref, resumes: resumeFrom.resumes + 1, prompt_path: resumePromptPath } })
+    }
     let dispatch: any
     try {
       dispatch = await dispatchMaker({
@@ -1107,6 +1128,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         ...(rung.effort && rung.family !== 'agy' ? { effort: rung.effort } : {}),
         ...(rung.family === 'claude' ? {} : { role: 'maker' }),
         maxTurns: ladderState.maxTurns,
+        ...(resumeFrom ? { resumeSessionId: resumeFrom.ref, prompt: resumePrompt } : {}),
       })
     } catch (err) {
       await appendMakerTelemetry(undefined, 'stop')
@@ -1120,11 +1142,20 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
 
     maybeEngineFault('after_maker_effect', env)
 
+    // Sessão que não existe mais (outra máquina, arquivo apagado): a mesma rodada é refeita numa sessão nova.
+    if (resumeFrom && dispatch?.session_missing) {
+      await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'maker_resume_fallback', unit: storyId, step_id: makerStepId, session_ref: resumeFrom.ref, next: 'new_session' } })
+      makerSession = null
+      attempt++
+      continue
+    }
+
     // Chamada interrompida (processo morto) volta do journal `ambiguous` e sem resultado: foi cobrada, mas o trabalho dela
     // não chegou. Seguir com a árvore sem mudança estacionava a parte; ela é refeita como nova tentativa.
     if (dispatch?.status === 'ambiguous' && dispatch.exit_code == null && !dispatch.unit_result) {
       await deps.journal.append({ kind: 'decision', unit: storyId, data: { decision: 'maker_call_lost', unit: storyId, step_id: `${storyId}:${tag}:maker`, next: 'retry' } })
       if (attempt >= 3) return await parkStory('maker_call_lost')
+      makerSession = null
       attempt++
       continue
     }
@@ -1134,9 +1165,14 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
     if (failure.kind === 'quota') {
       await appendMakerTelemetry(dispatch, 'stop')
       await pauseForQuota({ journal: deps.journal, events: readEvents(), unit: storyId, stepId: `${storyId}:${tag}:maker`, resetAt: failure.resetAt, now: deps.now?.() ?? Date.now() })
+      makerSession = null
       attempt++
       continue
     }
+
+    makerSession = typeof dispatch?.session_ref !== 'string' ? null
+      : resumeFrom ? { ...resumeFrom, round, resumes: resumeFrom.resumes + 1 }
+        : { ref: dispatch.session_ref, packPath: currentPackPath, manifest: currentManifest, rung: ladderState.rung, family: rung.family, model: rung.model, round, resumes: 0 }
 
     maybeEngineFault('before_contain', env)
 
