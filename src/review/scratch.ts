@@ -60,7 +60,8 @@ export function readReviewProofs(dir: string): { refs: string[]; proofs: Map<str
     refs.push(ref)
     if (!file.endsWith('.json')) continue
     try {
-      const parsed = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'))
+      // o Codex no Windows grava com BOM UTF-8, que o JSON.parse recusa (missão de rascunho, 26/09)
+      const parsed = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8').replace(/^﻿/, ''))
       if (isProof(parsed)) proofs.set(ref, { argv: parsed.argv, exit_code: parsed.exit_code, output: parsed.output })
     } catch {
       // JSON inválido não é prova; a ref continua existindo como arquivo

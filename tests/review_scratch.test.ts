@@ -56,11 +56,13 @@ test('achado_que_bloqueia_sem_prova_executavel_e_rebaixado_e_com_prova_leva_o_co
   dirs.push(() => removeTmpDir(dir))
   fs.writeFileSync(path.join(dir, 'F1.json'), JSON.stringify({ argv: ['node', 'tests/soma.test.mjs'], exit_code: 1, output: 'esperado 4, veio 5' }))
   fs.writeFileSync(path.join(dir, 'F3.json'), JSON.stringify({ argv: 'node x', exit_code: 1, output: '' }))
+  // missão real de rascunho, 26/09: o Codex no Windows grava o JSON com BOM UTF-8 e a prova válida virava "sem prova"
+  fs.writeFileSync(path.join(dir, 'F6.json'), `﻿${JSON.stringify({ argv: ['node', 'x.mjs'], exit_code: 1, output: 'veio 1.0%' })}`)
   fs.writeFileSync(path.join(dir, 'soma.test.mjs'), 'throw new Error()\n')
   const { refs, proofs } = readReviewProofs(dir)
-  expect(refs).toEqual(['artifact:.ade-review/F1.json', 'artifact:.ade-review/F3.json', 'artifact:.ade-review/soma.test.mjs'])
+  expect(refs).toEqual(['artifact:.ade-review/F1.json', 'artifact:.ade-review/F3.json', 'artifact:.ade-review/F6.json', 'artifact:.ade-review/soma.test.mjs'])
   // argv que não é lista não é prova
-  expect([...proofs.keys()]).toEqual(['artifact:.ade-review/F1.json'])
+  expect([...proofs.keys()]).toEqual(['artifact:.ade-review/F1.json', 'artifact:.ade-review/F6.json'])
 
   const base = { category: 'patch', target_role: 'maker', location: 'src/soma.js', problem: 'soma errada', required_action: 'corrigir' }
   const { findings, demoted } = applyReviewProofs([
