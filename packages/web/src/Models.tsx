@@ -50,6 +50,11 @@ export default function ModelsPage({ projectId }: { projectId: string }) {
   }, [])
 
   useEffect(() => { load().catch((err) => setError(messageOf(err))) }, [load, projectId])
+  // a cota é relida no servidor a cada 3 min: a página aberta acompanha sem recarregar
+  useEffect(() => {
+    const id = setInterval(() => { load().catch(() => undefined) }, 60_000)
+    return () => clearInterval(id)
+  }, [load])
 
   async function act(fn: () => Promise<unknown>) {
     setError(null)

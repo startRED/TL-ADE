@@ -290,20 +290,23 @@ describe('painel: página Modelos com filas, cota e uso', () => {
     await expect.poll(() => page.getByRole('region', { name: 'Modelos bloqueados' }).textContent()).toContain('claude-opus-5-5')
   }, 180_000)
 
-  test('abrir_modelos_rele_a_cota_dos_planos_em_segundo_plano_no_maximo_a_cada_10_minutos', async () => {
+  // 26/09: com 10 min e só ao abrir Modelos, o painel mostrava 32% com o plano do Claude já em 35%. Relê ao subir e,
+  // com o painel ligado ou ao abrir a página, no máximo a cada 3 min.
+  test('cota_dos_planos_e_relida_ao_subir_e_no_maximo_a_cada_3_minutos', async () => {
     let clock = NOW
     let reads = 0
     const homeDir = makeTmpDir('ade-models-home-')
     const server = await startServer({
       repoDir: repoFixture(PLANS).dir, port: await freePort(), openBrowser: false,
-      deps: { stdout: () => {}, homeDir, quotaPort: quotaPortFixture(), now: () => clock, refreshQuota: async () => { reads++ } },
+      deps: { stdout: () => {}, homeDir, quotaPort: quotaPortFixture(), now: () => clock, refreshQuota: async () => { reads++ }, watchQuota: true },
     })
     cleanups.push(async () => { await server.close(); removeTmpDir(homeDir) })
     const get = () => apiRequest(server.port, '/api/models', { token: server.sessionToken })
+    expect(reads).toBe(1)
     expect((await get()).status).toBe(200)
     await get()
     expect(reads).toBe(1)
-    clock += 11 * 60_000
+    clock += 4 * 60_000
     await get()
     expect(reads).toBe(2)
   }, 180_000)

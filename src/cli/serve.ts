@@ -44,6 +44,8 @@ export async function main(argv: string[], deps: {
       port,
       openBrowser,
       deps: {
+        // o painel de verdade relê a cota sozinho; servidores de teste não chamam as CLIs dos planos
+        watchQuota: true,
         ...deps,
         stdout,
         stderr,

@@ -28,6 +28,9 @@ import { resolveCurrentBuild } from './web-build.ts'
 import { createWebSocketHandler } from './websocket.ts'
 import { checkNativeSqlite, readPanelSnapshot, rebuildProjection } from './sqlite-index.ts'
 
+/** Intervalo da releitura da cota dos planos com o painel ligado. */
+const QUOTA_EVERY_MS = 3 * 60_000
+
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
@@ -167,6 +170,8 @@ export async function startServer({
             quotaPort?: QuotaPort
             /** Relê a cota oficial dos planos (padrão: Claude, Codex e Google; só com a porta de cota real). */
             refreshQuota?: () => Promise<unknown>
+            /** Relê a cota ao subir e a cada 3 min (o `ade serve` liga; servidor de teste só relê ao abrir Modelos). */
+            watchQuota?: boolean
             /** Relógio da página Modelos e do relatório de uso. */
             now?: () => number
             /** Catálogo de skills sincronizado (padrão: ~/.ade/catalog). */
@@ -199,12 +204,13 @@ export async function startServer({
   const { indexPath } = await projects.open(resolvedRepo)
   const quotaPort = deps.quotaPort ?? createLocalQuotaPort({ receiptPath: path.join(homeDir, '.ade', 'quota-receipt.json') })
   const now = deps.now ?? Date.now
-  // Cota dos planos na página Modelos sem passo manual: abrir a página relê em segundo plano, no máximo a cada 10 min
-  // (o Claude gasta uma chamada mínima; Codex e Google não gastam). A leitura nova aparece na próxima abertura.
+  // Cota dos planos sem passo manual: relê ao subir, a cada 3 min com o painel ligado e ao abrir Modelos, no máximo a
+  // cada 3 min (o Claude gasta uma chamada mínima; Codex e Google não gastam). Com 10 min e só ao abrir a página, o
+  // painel mostrava 32% com o plano já em 35% (26/09); a página Modelos relê a tela a cada minuto.
   const refreshQuota = deps.refreshQuota ?? (deps.quotaPort ? null : () => refreshQuotaReceipts({ home: homeDir }))
   let quotaReadAt = -Infinity
   const refreshQuotaSoon = () => {
-    if (!refreshQuota || now() - quotaReadAt < 10 * 60_000) return
+    if (!refreshQuota || now() - quotaReadAt < QUOTA_EVERY_MS) return
     quotaReadAt = now()
     refreshQuota().catch((err) => stderrWrite(`ade serve: falha ao ler a cota dos planos: ${err instanceof Error ? err.message : String(err)}\n`))
   }
@@ -661,10 +667,17 @@ export async function startServer({
     } catch {}
   }
 
+  const quotaTimer = deps.watchQuota ? setInterval(refreshQuotaSoon, QUOTA_EVERY_MS) : null
+  if (quotaTimer) {
+    refreshQuotaSoon()
+    quotaTimer.unref()
+  }
+
   let closed = false
   const close = async () => {
     if (closed) return
     closed = true
+    if (quotaTimer) clearInterval(quotaTimer)
     wsHandler.closeAll()
     await intervention.closeAll()
     projects.closeAll()
