@@ -130,7 +130,7 @@ test('CA1_writer_is_head_of_code_chain_with_model_and_effort_per_cli_and_real_te
   })
 
   // cada linha de comando recebe o esforço do seu jeito
-  const claudeArgs = buildClaudeArgs({ sessionId: 's', packPath: 'p', maxBudgetUsd: 1, model: 'claude-opus-5-5', effort: 'high' })
+  const claudeArgs = buildClaudeArgs({ sessionId: 's', packPath: 'p', settingsPath: 'i.json', maxBudgetUsd: 1, model: 'claude-opus-5-5', effort: 'high' })
   expect(claudeArgs.slice(claudeArgs.indexOf('--effort'), claudeArgs.indexOf('--effort') + 2)).toEqual(['--effort', 'high'])
   expect(buildCodexArgs({ role: 'maker', cwd: 'w', resultFile: 'r', model: 'gpt-6-astra', effort: 'high' })).toContain('model_reasoning_effort="high"')
 

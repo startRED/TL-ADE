@@ -67,6 +67,7 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | [0040](0040-ate-quatro-skills-por-parte.md) | Até quatro skills por parte, escolhidas conforme a parte (emenda os ADRs 0009 e 0039) | Aceito (pedido de Erick, 2026-09-24) |
 | [0041](0041-chat-com-memoria-skills-e-busca-ideias-do-hermes.md) | Chat com memória persistente, skills por pergunta e busca nas conversas (ideias do Hermes Agent) | Aceito (pedido de Erick, 2026-09-24) |
 | [0043](0043-esforco-maximo-fora-da-escolha-automatica-emenda-0033.md) | Esforço máximo fora da escolha automática: só entra no papel em que o usuário o fixou (emenda o ADR 0033) | Aceito (escolha de Erick na entrevista, 2026-09-25) |
+| [0044](0044-isolamento-pelo-projeto-sem-safe-mode-emenda-0009-0011.md) | Isolamento pelo projeto, sem `--safe-mode`: só a configuração do operador fica de fora; skills do repositório e as nativas `run`/`verify` passam a valer (emenda os ADRs 0009, 0011 e 0019) | Aceito (pedido de Erick, 2026-09-26) |
 
 ## Mapa decisão → onde ela aparece
 
@@ -76,7 +77,7 @@ que ainda não tem medição vem marcado `[hipótese]`.
 | Durabilidade e recuperação | 0002, 0003, 0012, 0014, 0021, 0025, 0027, 0028, 0029, 0031, 0038 | §6, §11 E6, E7, E21, E25–E27 |
 | Modelos, transporte e papéis | 0004, 0005, 0006, 0015, 0028 | §7, §11 E10, E16, E23, E24 |
 | Intenção, contrato e prova | 0007, 0008, 0016, 0028, 0036 | §4, §5, §11 E1–E4, E12, E18–E20 |
-| Contexto, skills e qualidade | 0009, 0010, 0011, 0018, 0027, 0028, 0029, 0039, 0040 | §7, §10 A1, A7, A11, A13, A14, §11 E8, E9, E13–E15, E33, E35, E39 |
+| Contexto, skills e qualidade | 0009, 0010, 0011, 0018, 0027, 0028, 0029, 0039, 0040, 0044 | §7, §10 A1, A7, A11, A13, A14, §11 E8, E9, E13–E15, E33, E35, E39 |
 | Observação e método | 0013, 0017, 0019, 0020, 0024, 0027, 0028, 0029, 0034, 0035, 0037 | §3, §8, §10 A10, A12, §11 E11, E17, E30, E34, E37 |
 | Orçamento e execução | 0026, 0028, 0029, 0032, 0033, 0043 | §7, §9.8, §11 E20, E24 |
 

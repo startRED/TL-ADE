@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import { AdeError } from '../../journal/errors.ts'
+import { isolationArgs } from './isolation.ts'
 
 const SCHEMA_URL = new URL('../../../schemas/unit-result.schema.json', import.meta.url)
 const REVIEW_SCHEMA_URL = new URL('../../../schemas/review-result.schema.json', import.meta.url)
@@ -25,14 +26,17 @@ function loadSchemaJson(url: URL) {
  * Monta o argv para invocar o `claude` real seguindo a ordem fixa de flags decidida para o Slice 1.
  * Quem escreve (`maker`, o padrão) responde pelo unit-result; quem revisa (`checker_*`) pelo review-result, só leitura.
  */
-export function buildClaudeArgs(opts: { sessionId: string; packPath: string; maxBudgetUsd: number; model?: string; effort?: string; mcpConfigPath?: string; maxTurns?: number; role?: string }): string[] {
-  const { sessionId, packPath, maxBudgetUsd, model, role = 'maker' } = opts ?? {}
+export function buildClaudeArgs(opts: { sessionId: string; packPath: string; settingsPath: string; maxBudgetUsd: number; model?: string; effort?: string; mcpConfigPath?: string; maxTurns?: number; role?: string }): string[] {
+  const { sessionId, packPath, settingsPath, maxBudgetUsd, model, role = 'maker' } = opts ?? {}
 
   if (typeof sessionId !== 'string' || (!SESSION_ID_RE.test(sessionId) && sessionId !== 's')) {
     throw new AdeError('invalid_claude_args', 'sessionId inválido', 2)
   }
   if (typeof packPath !== 'string' || packPath === '') {
     throw new AdeError('invalid_claude_args', 'packPath inválido', 2)
+  }
+  if (typeof settingsPath !== 'string' || settingsPath === '') {
+    throw new AdeError('invalid_claude_args', 'settingsPath inválido', 2)
   }
   if (typeof maxBudgetUsd !== 'number' || !Number.isFinite(maxBudgetUsd) || maxBudgetUsd <= 0) {
     throw new AdeError('invalid_claude_args', 'maxBudgetUsd inválido', 2)
@@ -56,7 +60,7 @@ export function buildClaudeArgs(opts: { sessionId: string; packPath: string; max
     sessionId,
     '--max-budget-usd',
     String(maxBudgetUsd),
-    '--safe-mode',
+    ...isolationArgs(settingsPath),
     '--permission-mode',
     'bypassPermissions',
     '--permission-prompts',

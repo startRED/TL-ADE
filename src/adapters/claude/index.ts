@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import { buildClaudeArgs } from './argv.ts'
+import { CLAUDE_ISOLATION_ENV, writeIsolationSettings } from './isolation.ts'
 import { parseClaudeOutput, parseTokens, parseUnitResult, parseUsage } from './parse.ts'
 import { parseReviewResult } from '../codex/parse.ts'
 import { runWorker } from '../../runner/spawn.ts'
@@ -77,7 +78,7 @@ export async function dispatchClaude(opts: {
   }
 
   const sessionId = randomUUID()
-  const args = buildClaudeArgs({ sessionId, packPath, maxBudgetUsd, model, effort, mcpConfigPath, maxTurns, role })
+  const args = buildClaudeArgs({ sessionId, packPath, settingsPath: writeIsolationSettings(cwd), maxBudgetUsd, model, effort, mcpConfigPath, maxTurns, role })
   const input = { pack_path: packPath, max_budget_usd: maxBudgetUsd, model: model ?? null, ...(effort === undefined ? {} : { effort }), ...(maxTurns === undefined ? {} : { max_turns: maxTurns }) }
 
   const r = await step({ unit, id: stepId, effect_class: 'model_call', input, session_ref: sessionId }, async () => {
@@ -97,7 +98,7 @@ export async function dispatchClaude(opts: {
         result_file: resultFile,
       },
       timeoutS,
-      env: { ...env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
+      env: { ...env, ...CLAUDE_ISOLATION_ENV },
     })
 
     const { envelope, error } = parseClaudeOutput(result.stdout)

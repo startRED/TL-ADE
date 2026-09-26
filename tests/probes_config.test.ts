@@ -51,6 +51,7 @@ describe('probe plan and helpers', () => {
       const argv = buildClaudeArgs({
         sessionId: 's',
         packPath: 'p.md',
+        settingsPath: 'i.json',
         maxBudgetUsd: loaded.missionBudget.max_usd,
       })
       const maxBudgetIdx = argv.indexOf('--max-budget-usd')

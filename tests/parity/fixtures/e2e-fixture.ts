@@ -290,7 +290,7 @@ export function setupE2E(options: SetupE2EOptions = {}) {
     sandbox: 'none',
     cost_report: 'reported',
     advisor: false,
-    unattended_flags: ['--safe-mode'],
+    unattended_flags: ['--setting-sources', 'project', '--strict-mcp-config'],
     probe_ok: true,
     probe_mode: 'fixture',
     bootstrap_cost_tokens: 0,

@@ -7,6 +7,7 @@ import { openJournal, readJournal } from '../src/journal/journal.ts'
 import { createStepRunner } from '../src/step/step.ts'
 import { validate } from '../src/schema/index.ts'
 import { buildClaudeArgs, CLAUDE_PROMPT } from '../src/adapters/claude/argv.ts'
+import { isolationArgs } from '../src/adapters/claude/isolation.ts'
 import { parseClaudeOutput, parseUnitResult, parseUsage, stripAnsi } from '../src/adapters/claude/parse.ts'
 import { dispatchClaude } from '../src/adapters/claude/index.ts'
 import { runWorker } from '../src/runner/spawn.ts'
@@ -51,7 +52,7 @@ describe('claude argv', () => {
     const sessionId = '11111111-2222-4333-8444-555555555555'
     const packPath = '/p/pack.md'
 
-    const args = buildClaudeArgs({ sessionId, packPath, maxBudgetUsd: 0.25 })
+    const args = buildClaudeArgs({ sessionId, packPath, settingsPath: '/p/iso.json', maxBudgetUsd: 0.25 })
 
     const schemaRaw = JSON.parse(readFileSync(SCHEMA_PATH, 'utf8'))
     delete schemaRaw.$id
@@ -69,7 +70,7 @@ describe('claude argv', () => {
       sessionId,
       '--max-budget-usd',
       '0.25',
-      '--safe-mode',
+      ...isolationArgs('/p/iso.json'),
       '--permission-mode',
       'bypassPermissions',
       '--permission-prompts',
@@ -84,14 +85,14 @@ describe('claude argv', () => {
     expect(args.includes('--bare')).toBe(false)
     expect(CLAUDE_PROMPT).toBe('Siga a seção task do contexto anexado e responda somente pelo schema.')
 
-    const withModel = buildClaudeArgs({ sessionId, packPath, maxBudgetUsd: 0.25, model: 'haiku' })
+    const withModel = buildClaudeArgs({ sessionId, packPath, settingsPath: '/p/iso.json', maxBudgetUsd: 0.25, model: 'haiku' })
     expect(withModel.slice(-2)).toEqual(['--model', 'haiku'])
   })
 
   // AC2: sessionId 'abc' ou maxBudgetUsd 0 -> AdeError code 'invalid_claude_args' com a mensagem exata,
   // exitCode 2; packPath vazio segue a mesma regra de validação descrita nas decisões.
   test('buildClaudeArgs_rejects_invalid_session_id_pack_path_and_max_budget_with_ade_error', () => {
-    const base = { sessionId: '11111111-2222-4333-8444-555555555555', packPath: '/p/pack.md', maxBudgetUsd: 1 }
+    const base = { sessionId: '11111111-2222-4333-8444-555555555555', packPath: '/p/pack.md', settingsPath: '/p/iso.json', maxBudgetUsd: 1 }
 
     try {
       buildClaudeArgs({ ...base, sessionId: 'abc' })
@@ -128,7 +129,7 @@ describe('claude argv', () => {
   })
   // Revisão: model, quando informado, tem de ser string não vazia; senão AdeError invalid_claude_args.
   test('buildClaudeArgs_rejects_non_string_or_empty_model_with_ade_error', () => {
-    const base = { sessionId: '11111111-2222-4333-8444-555555555555', packPath: '/p/pack.md', maxBudgetUsd: 1 }
+    const base = { sessionId: '11111111-2222-4333-8444-555555555555', packPath: '/p/pack.md', settingsPath: '/p/iso.json', maxBudgetUsd: 1 }
 
     for (const model of [null, 42, '']) {
       try {

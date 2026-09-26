@@ -616,13 +616,16 @@ describe('v0.4a Skill Fabric - Critérios de Aceite', () => {
     expect(docResult.capabilities).toBeDefined()
 
     // Supressão nas chamadas despachadas:
-    // Claude args deve conter --safe-mode
+    // Claude args: só a configuração do projeto, sem a do operador (ADR 0044)
     const claudeArgs = buildClaudeArgs({
       sessionId: '11111111-2222-4333-8444-555555555555',
       packPath: '/tmp/pack.md',
+      settingsPath: '/tmp/iso.json',
       maxBudgetUsd: 0.25,
     })
-    expect(claudeArgs).toContain('--safe-mode')
+    expect(claudeArgs).not.toContain('--safe-mode')
+    expect(claudeArgs).toContain('--strict-mcp-config')
+    expect(claudeArgs[claudeArgs.indexOf('--setting-sources') + 1]).toBe('project')
 
     // Codex args deve suprimir user config / rules / skills nativas
     const codexArgs = buildCodexArgs({

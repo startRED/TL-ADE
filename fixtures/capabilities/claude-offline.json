@@ -23,7 +23,9 @@
   "cost_report": "reported",
   "advisor": false,
   "unattended_flags": [
-    "--safe-mode"
+    "--setting-sources",
+    "project",
+    "--strict-mcp-config"
   ],
   "probe_ok": null,
   "probe_mode": "fixture",

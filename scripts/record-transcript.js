@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { AdeError } from '../src/journal/errors.ts'
 import { buildArgv, resolveBinary } from '../src/runner/resolve-binary.ts'
 import { buildClaudeArgs } from '../src/adapters/claude/argv.ts'
+import { writeIsolationSettings } from '../src/adapters/claude/isolation.ts'
 
 const NAME_RE = /^[a-z0-9_]+$/
 
@@ -122,7 +123,7 @@ export async function recordTranscript(opts) {
   try {
     const packPath = path.join(tmpDir, 'pack.md')
     writeFileSync(packPath, TEMP_PACK_INSTRUCTION, 'utf8')
-    const claudeArgs = buildClaudeArgs({ sessionId, packPath, maxBudgetUsd, model })
+    const claudeArgs = buildClaudeArgs({ sessionId, packPath, settingsPath: writeIsolationSettings(process.cwd(), tmpDir), maxBudgetUsd, model })
     run = await spawnRecording(resolved, claudeArgs)
   } finally {
     rmSync(tmpDir, { recursive: true, force: true })

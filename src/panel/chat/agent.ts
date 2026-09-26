@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { assertArgvLimit, buildArgv, resolveBinary } from '../../runner/resolve-binary.ts'
 import type { ChatAgent, ChatAgentInput } from './chat.ts'
+import { CLAUDE_ISOLATION_ENV, isolationArgs, writeIsolationSettings } from '../../adapters/claude/isolation.ts'
 
 const MAX_OUTPUT = 16 * 1024 * 1024
 const TIMEOUT_MS = 15 * 60 * 1000
@@ -28,7 +29,8 @@ function command(input: ChatAgentInput, prompt: string): { cmd: string; args: st
   const effort = input.effort ? ['--effort', input.effort] : []
   return {
     cmd: 'claude',
-    args: ['-p', '--output-format', 'text', '--no-session-persistence', '--max-turns', '20', '--permission-mode', 'acceptEdits', '--tools', 'Read', 'Glob', 'Grep', 'Edit', 'Write', ...effort, ...model],
+    // sem isolamento o chat carregava plugins, hooks e instruções pessoais do operador (modos de estilo, MCP)
+    args: ['-p', '--output-format', 'text', ...isolationArgs(writeIsolationSettings(input.cwd)), '--no-session-persistence', '--max-turns', '20', '--permission-mode', 'acceptEdits', '--tools', 'Read', 'Glob', 'Grep', 'Edit', 'Write', ...effort, ...model],
     stdin: prompt,
   }
 }
@@ -40,7 +42,8 @@ export const defaultChatAgent: ChatAgent = (input) => {
   const argv = buildArgv(resolved, args)
   assertArgvLimit(resolved.exe, argv)
   return new Promise((resolve, reject) => {
-    const child = spawn(resolved.exe, argv, { cwd: input.cwd, shell: false, windowsHide: true, timeout: TIMEOUT_MS })
+    const env = cmd === 'claude' ? { ...process.env, ...CLAUDE_ISOLATION_ENV } : process.env
+    const child = spawn(resolved.exe, argv, { cwd: input.cwd, shell: false, windowsHide: true, timeout: TIMEOUT_MS, env })
     let out = ''
     let err = ''
     child.stdout.setEncoding('utf8').on('data', (c: string) => {

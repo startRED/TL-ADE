@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
+import { isolationArgs, writeIsolationSettings } from '../adapters/claude/isolation.ts'
 import { parseClaudeOutput, parseUsage } from '../adapters/claude/parse.ts'
 import { AdeError } from '../journal/errors.ts'
 import { resolveBinary } from '../runner/resolve-binary.ts'
@@ -47,9 +48,9 @@ type ResolveImpl = (cmd: string) => ResolvedClaude | Promise<ResolvedClaude>
 
 /**
  * Monta os argumentos da sonda barata do `claude` (regra I45: `--session-id` pré-cunhado e
- * `--json-schema` inline, sem `--bare`).
+ * `--json-schema` inline, sem `--bare`) e o mesmo isolamento das chamadas despachadas (ADR 0044).
  */
-function buildProbeArgs(uuid: string): string[] {
+export function buildProbeArgs(uuid: string, settingsPath: string): string[] {
   return [
     '-p',
     'responda apenas OK',
@@ -57,7 +58,7 @@ function buildProbeArgs(uuid: string): string[] {
     'json',
     '--model',
     'haiku',
-    '--safe-mode',
+    ...isolationArgs(settingsPath),
     '--tools',
     '',
     '--session-id',
@@ -217,7 +218,7 @@ export async function runDoctor(opts: {
     }
 
     const uuid = randomUUID()
-    const args = buildProbeArgs(uuid)
+    const args = buildProbeArgs(uuid, writeIsolationSettings(process.cwd()))
 
     
     let probeResult: { stdout: string; exitCode: number | null } | null = null

@@ -3,6 +3,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { makeTmpDir, removeTmpDir } from './helpers/tmp-dir.ts'
 import { main, runDoctor } from '../src/cli/doctor.ts'
+import { isolationArgs, writeIsolationSettings } from '../src/adapters/claude/isolation.ts'
 import { validate } from '../src/schema/index.ts'
 import { AdeError } from '../src/journal/errors.ts'
 
@@ -50,7 +51,7 @@ function writeCapabilitySetFixture(dir: string, name: string, omit: string[] = [
     sandbox: 'none',
     cost_report: 'reported',
     advisor: false,
-    unattended_flags: ['--safe-mode'],
+    unattended_flags: ['--setting-sources', 'project', '--strict-mcp-config'],
     probe_ok: null,
     probe_mode: 'fixture',
     bootstrap_cost_tokens: 0,
@@ -274,7 +275,7 @@ describe('ade doctor - sonda real', () => {
       'json',
       '--model',
       'haiku',
-      '--safe-mode',
+      ...isolationArgs(writeIsolationSettings(process.cwd())),
       '--tools',
       '',
       '--session-id',

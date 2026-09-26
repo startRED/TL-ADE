@@ -8,6 +8,7 @@ import path from 'node:path'
 import { buildAgyArgs } from '../adapters/agy/argv.ts'
 import { isAgyAvailable, setAgyAvailable } from '../adapters/agy/index.ts'
 import { parseAgyOutput } from '../adapters/agy/parse.ts'
+import { isolationArgs, writeIsolationSettings } from '../adapters/claude/isolation.ts'
 import { parseClaudeOutput } from '../adapters/claude/parse.ts'
 import { buildCodexArgs } from '../adapters/codex/argv.ts'
 import { dropNulls, strictSchema } from '../adapters/codex/strict-schema.ts'
@@ -156,7 +157,7 @@ async function claudeCall(ref: ModelRef, call: ModelCall, missionDir: string, op
   const resolved = opts.resolveBinaryImpl('claude')
   const args = [
     '-p', '--output-format', 'json', '--json-schema', JSON.stringify(call.schema),
-    '--safe-mode', '--no-session-persistence', '--max-turns', String(call.maxTurns ?? 8),
+    ...isolationArgs(writeIsolationSettings(opts.repoDir)), '--no-session-persistence', '--max-turns', String(call.maxTurns ?? 8),
     '--permission-mode', 'acceptEdits', '--tools', 'Read', 'Glob', 'Grep', ...(call.web ? ['WebSearch', 'WebFetch'] : []),
     '--model', ref.model_id, ...(ref.effort ? ['--effort', ref.effort] : []),
   ]
