@@ -23,8 +23,8 @@ const EXPECTED_ADR_HASHES: Record<string, string> = {
   '0009-skill-fabric-catalogo-curado-selecao-12-controles.md': 'e0be095eff74ab01ff46a332691651a347497f47ab5fa1a33d0db22981f9b531',
   '0010-frontend-quality-engine-impeccable-juiz-2-rodadas.md': '2f23825407381046232e53b50f8466cbb14fcb0038d1bee38a7aac12038c30d3',
   '0011-context-pack-firewall-telemetria.md': '928d1036391b611479a9188a0eec5bc277e9f286483d0a8255d2f625cc50ea0e',
-  '0012-engine-dono-de-worktree-e-processo.md': '45d05f4dfe4b4df519c8c3f31e27bf2de089dc213c8fdf0da26cc1c3fb1f9835',
-  '0013-painel-projecao-takeover-por-comando-pty-depois.md': '203e92cb9315355de822bf5e6466db4b69724d035b161647639c1ce96e738892',
+  '0012-engine-dono-de-worktree-e-processo.md': '486835fb73467394cb21737dfd8130cb3e50ce4aa62bfe0827cdf20f593bd754',
+  '0013-painel-projecao-takeover-por-comando-pty-depois.md': '5fa1ea54f9674a75cd2ba02863c3666eaf5163ce96476cf30a9f9aa828e33ffd',
   '0014-concorrencia-1-git-por-worktree.md': 'e35bbe5b99b1ff5a65297329e1724178352da818f2b8856c07c454d2d1664c1a',
   '0015-autonomia-niveis-flags-desatendidas.md': '3a3dd3b2beb949e2dccf13698e10b0c73cd91421d73ae2b2180d3e6f586d184d',
   '0016-pesquisa-como-subsistema.md': 'ad81abe71eab91d2e27632cbe5c94e49aefbcb9bbbbdaed396af03b5a6670ab5',
@@ -150,7 +150,8 @@ describe('Governança e ativação exclusiva da v0.5', () => {
       const filePath = path.join(ROOT_DIR, 'docs', 'adr', filename)
       expect(existsSync(filePath), `ADR ${filename} deve existir`).toBe(true)
       const content = readFileSync(filePath)
-      const hash = createHash('sha256').update(content).digest('hex')
+      // bytes do commit: a cópia de trabalho pode ter CRLF (autocrlf do Git do Windows) sem o ADR ter mudado
+      const hash = createHash('sha256').update(content.toString('utf8').replace(/\r\n/g, '\n')).digest('hex')
       expect(hash, `ADR ${filename} não pode ter sido modificado`).toBe(expectedHash)
     }
   })
