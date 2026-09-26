@@ -168,10 +168,14 @@ export async function runFrontendQuality({
     ? [{ ...visualConfig.judge, resolved: binaryOf(visualConfig.judge.family) }]
     : deps.visualJudges?.length ? deps.visualJudges : [{ ...judgeRole, resolved: binaryOf(judgeRole.family) ?? deps.resolved ?? null }]
 
+  // o fim de cada jornada que passou vai aos juízes junto das capturas da rota (sem inspeção: os portões já rodaram)
+  const journeyShots = journey?.status === 'pass'
+    ? (journey.shots ?? []).map((s) => ({ route: `fim da jornada ${s.criterio}`, width: 1280, theme: themes[0], path: s.path, sha256: s.sha256 }))
+    : []
   let evaluation
   try {
     evaluation = await judgeFn({
-    captures,
+    captures: [...captures, ...journeyShots],
     task: contract.task || '',
     designBrief,
     judge: judgeRole,

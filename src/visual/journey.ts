@@ -2,6 +2,7 @@
 // estado de erro nunca visto. A prova de parte com tela escreve um roteiro declarativo derivado dos critérios de aceite
 // (abrir a rota, clicar, digitar, conferir) e o motor o roda no Playwright antes dos portões D1–D6 e dos juízes.
 // Roteiro declarativo e não código livre: o motor valida os passos, sabe dizer qual quebrou e não executa código do modelo.
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { launchChromium, withServedApp } from './browser.ts'
@@ -32,7 +33,7 @@ export type JourneyFailure = {
   url: string
 }
 export type JourneyResult =
-  | { status: 'pass'; needs_data: string[] }
+  | { status: 'pass'; needs_data: string[]; shots?: Array<{ criterio: string; path: string; sha256: string }> }
   | { status: 'fail'; failure: JourneyFailure; needs_data: string[] }
   | { status: 'skipped'; reason: 'no_script' | 'invalid_script' | 'needs_data' | 'browser_failed' | 'no_serve' | 'serve_failed'; errors?: string[]; needs_data?: string[] }
 
@@ -155,6 +156,9 @@ export async function runJourneys(opts: { file: string; url: string; outDir: str
     fs.writeFileSync(path.join(opts.outDir, `journey-${opts.tag}.json`), JSON.stringify(result, null, 2), 'utf8')
     return result
   }
+  // print do fim de cada jornada que passou: é o estado que o critério pede (anexo na tela, lista preenchida), que a
+  // captura parada da rota não mostra
+  const shots: Array<{ criterio: string; path: string; sha256: string }> = []
   try {
     for (const journey of runnable) {
       const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
@@ -196,11 +200,14 @@ export async function runJourneys(opts: { file: string; url: string; outDir: str
           }
         }
         await context.tracing?.stop().catch(() => {})
+        const shot = path.join(opts.outDir, `journey-${opts.tag}-${journey.criterio.replace(/[^\w.-]/g, '_')}.png`)
+        const png = await page.screenshot({ path: shot }).catch(() => null)
+        if (png) shots.push({ criterio: journey.criterio, path: shot.replace(/\\/g, '/'), sha256: createHash('sha256').update(png).digest('hex') })
       } finally {
         await context.close().catch(() => {})
       }
     }
-    return record({ status: 'pass', needs_data: needsData })
+    return record({ status: 'pass', needs_data: needsData, shots })
   } finally {
     if (!opts.browser) await browser.close().catch(() => {})
   }

@@ -926,7 +926,12 @@ describe('jornada de usuário', () => {
       expect(JSON.parse(fs.readFileSync(path.join(dir, 'journey-r1.json'), 'utf8')).status).toBe('fail')
 
       fixed = true
-      expect((await runJourneys({ file, url, outDir: dir, tag: 'r2', stepTimeoutMs: 1500 })).status).toBe('pass')
+      const passed: any = await runJourneys({ file, url, outDir: dir, tag: 'r2', stepTimeoutMs: 1500 })
+      expect(passed.status).toBe('pass')
+      // o estado do fim de cada jornada vira print para os juízes (a captura parada só mostra a tela vazia)
+      expect(passed.shots).toHaveLength(1)
+      expect(passed.shots[0]).toMatchObject({ criterio: 'C1' })
+      expect(fs.existsSync(passed.shots[0].path)).toBe(true)
     } finally {
       server.close()
       fs.rmSync(dir, { recursive: true, force: true })
@@ -1013,6 +1018,32 @@ describe('jornada de usuário', () => {
       expect(captureSurface).not.toHaveBeenCalled()
       expect(judge).not.toHaveBeenCalled()
       expect(runJourneysDouble.mock.calls[0][0]).toMatchObject({ file: path.join(dir, 'artifacts', 'journeys', 'S1.json'), url: 'http://127.0.0.1:4173', tag: 'r1' })
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  // 26/09, S3 da missão de anexos: os juízes só viam a tela vazia e pediam "mostrar o composer com anexos" a cada
+  // passada, defeito que o maker não tinha como resolver. O fim de cada jornada que passou vai junto como captura.
+  test('juizes_recebem_o_print_do_fim_de_cada_jornada_que_passou', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ade-journey-fqe-'))
+    try {
+      const ok = { ok: true, results: {}, artifacts: {}, defects: [] }
+      const captures = [{ route: '/', width: 1280, theme: 'dark', path: 'x.png', sha256: 'x', inspection: ok }]
+      const judge = vi.fn().mockResolvedValue({ status: 'pass', final: 9, defects: [] })
+      await runFrontendQuality({
+        story: { id: 'S1', contract: { needs_ui: true } }, tree: 't', missionDir: dir,
+        config: { visual: { url: 'http://127.0.0.1:4173', themes: ['dark'] } },
+        deps: {
+          captureSurface: vi.fn().mockResolvedValue(captures),
+          runJourneys: vi.fn().mockResolvedValue({ status: 'pass', needs_data: [], shots: [{ criterio: 'C3.1', path: 'fim.png', sha256: 'y' }] }),
+          judge,
+        },
+      })
+      expect(judge.mock.calls[0][0].captures).toEqual([
+        { route: '/', width: 1280, theme: 'dark', path: 'x.png', sha256: 'x', inspection: ok },
+        { route: 'fim da jornada C3.1', width: 1280, theme: 'dark', path: 'fim.png', sha256: 'y' },
+      ])
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }

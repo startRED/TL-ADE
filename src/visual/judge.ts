@@ -317,6 +317,7 @@ export const RUBRIC_BASE = 5
  */
 const JUDGE_INSTRUCTIONS = [
   'Você é o juiz visual de uma interface. Julgue só o que se vê nas capturas listadas em "captures" (rota, largura, tema), não o código nem o que a tela poderia ter. Seja realista: nem generoso, nem punitivo por gosto pessoal.',
+  'Captura com rota "fim da jornada Cx" é a tela ao fim do fluxo do critério Cx (por exemplo, já com anexos ou itens criados): julgue esses estados por ela, não peça como defeito um estado que já aparece numa delas.',
   '',
   `ESCALA (igual para todo critério): 0-2 quebrado (conteúdo cortado, sobreposto ou ilegível); 3-4 problema que qualquer usuário nota; ${RUBRIC_BASE} funcional e correto, mas genérico, cara de modelo pronto; 6 correto com algum cuidado; 7 bom, poucos ajustes; 8 muito bom, decisões próprias e consistentes; 9-10 referência de mercado (raro).`,
   '',
