@@ -24,7 +24,7 @@ import { dispatchClaude } from './adapters/claude/index.ts'
 import { dispatchCodex } from './adapters/codex/index.ts'
 import { dispatchAgyUnit } from './adapters/agy/index.ts'
 import { runFrontendQuality } from './visual/evaluate.ts'
-import { adoptJourney, runJourneyCheck, type JourneyFailure } from './visual/journey.ts'
+import { adoptJourney, journeyFile, runJourneyCheck, validateJourney, type JourneyFailure } from './visual/journey.ts'
 import { createDesignToolServer } from './visual/design-server.ts'
 export { nextReady, runSequentialMission } from './engine/schedule.ts'
 
@@ -804,6 +804,14 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
   let lastJourneyFailure: JourneyFailure | null = null
   let journeySuspect = false
   let journeyClaim: string | null = null
+  const journeyHasNoSteps = () => {
+    try {
+      const v = validateJourney(JSON.parse(fs.readFileSync(journeyFile(missionDir, storyId), 'utf8')))
+      return v.ok && v.journeys.every((j) => j.needs_data === true)
+    } catch {
+      return false
+    }
+  }
   const journeyRewriteUsed = () => readEvents().some((e) => e.kind === 'decision' && ['journey_rewritten', 'journey_rewrite_failed'].includes(e.data?.decision) && (e.unit ?? e.data?.unit) === storyId)
   let previousFindingsDigest = null
   let previousFindings = []
@@ -1364,8 +1372,10 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
 
     // Portão do Frontend Quality Engine (FQE) entre gates/evals e Checker
     if (contract.needs_ui && visualEvals < maxVisualEvals) {
-      // o maker disse que o roteiro contradiz o critério depois do aviso de roteiro suspeito: a prova reescreve uma vez
-      if (journeyClaim && journeySuspect && lastJourneyFailure && !journeyRewriteUsed()) {
+      // a prova reescreve o roteiro uma vez: o maker disse que ele contradiz o critério depois do aviso de roteiro
+      // suspeito, ou o roteiro não tem passo nenhum (todos needs_data) e a jornada não conferiria nada
+      const noSteps = journeyHasNoSteps()
+      if (((journeyClaim && journeySuspect && lastJourneyFailure) || noSteps) && !journeyRewriteUsed()) {
         const writer = (await proofWritersFor())[0]
         const rewritten = writer
           ? await rewriteJourney({
@@ -1383,8 +1393,9 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
               workerEnv: deps.workerEnv,
               skills: roleSkillsSection('proof', contract?.skills, deps.eligibleSkills),
               now: () => deps.now?.() ?? Date.now(),
-              failure: lastJourneyFailure,
-              claim: journeyClaim,
+              failure: noSteps ? null : lastJourneyFailure,
+              claim: noSteps ? null : journeyClaim,
+              why: noSteps ? 'sem_passos' : 'contradiz_criterio',
             })
           : { kind: 'park' as const, reason: 'no_proof_writer' }
         const adopted = rewritten.kind === 'written' ? adoptJourney(worktreeDir, missionDir, storyId) : null
@@ -1392,7 +1403,7 @@ async function runStoryImpl(deps: any, input: any): Promise<{ status: 'committed
         await deps.journal.append({
           kind: 'decision',
           unit: storyId,
-          data: { decision: ok ? 'journey_rewritten' : 'journey_rewrite_failed', unit: storyId, round, claim: journeyClaim, reason: rewritten.kind === 'park' ? rewritten.reason : ok ? null : 'invalid_script' },
+          data: { decision: ok ? 'journey_rewritten' : 'journey_rewrite_failed', unit: storyId, round, reason_to_rewrite: noSteps ? 'sem_passos' : 'contradiz_criterio', claim: noSteps ? null : journeyClaim, reason: rewritten.kind === 'park' ? rewritten.reason : ok ? null : 'invalid_script' },
         })
         lastJourneyKey = null
         journeySuspect = false

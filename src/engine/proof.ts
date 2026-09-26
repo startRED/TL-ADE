@@ -108,22 +108,24 @@ export async function writeProof(opts: WriterOpts): Promise<{ kind: 'skip' } | {
  * respondeu que o roteiro contradiz o critério. A prova reescreve só `.ade/journey.json`, a partir dos critérios e da
  * tela atual; qualquer outra mudança desfaz a etapa.
  */
-export async function rewriteJourney(opts: Omit<WriterOpts, 'testCommand'> & { failure: unknown; claim: string }): Promise<{ kind: 'park'; reason: string } | { kind: 'written' }> {
+export async function rewriteJourney(opts: Omit<WriterOpts, 'testCommand'> & { failure: unknown; claim: string | null; why?: 'contradiz_criterio' | 'sem_passos' }): Promise<{ kind: 'park'; reason: string } | { kind: 'written' }> {
   const { storyId, contract } = opts
   const dispatch = await dispatchWriter({ ...opts, testCommand: [] }, {
     unit: `${storyId}:journey`,
     stepId: `${storyId}:journey:rewrite`,
     policy: [
       'Nesta chamada você só reescreve o roteiro de navegador (.ade/journey.json). Não mude nenhum outro arquivo.',
-      '- O roteiro atual quebrou duas vezes no mesmo passo e quem escreve o código diz que ele contradiz o critério. Releia os critérios e o código da tela atual e escreva o roteiro que confere o que o critério pede.',
+      opts.why === 'sem_passos'
+        ? '- No roteiro atual nenhum critério tem passos (todos needs_data), então a jornada não confere nada. O código da tela já existe: leia-o, veja o que aparece ao abrir a tela e escreva os passos de cada critério que dá para alcançar pela interface. needs_data só no critério que não dá.'
+        : '- O roteiro atual quebrou duas vezes no mesmo passo e quem escreve o código diz que ele contradiz o critério. Releia os critérios e o código da tela atual e escreva o roteiro que confere o que o critério pede.',
       JOURNEY_FORMAT,
     ].join('\n'),
     story: {
       tarefa: 'Reescrever o roteiro de navegador desta parte.',
       parte: contract.title ?? storyId,
       criterios: (contract.scenarios ?? []).map((s: any) => ({ id: s.id, dado: s.given, quando: s.when, entao: s.then })),
-      falha_do_roteiro: opts.failure,
-      alegacao_do_maker: opts.claim,
+      ...(opts.failure ? { falha_do_roteiro: opts.failure } : {}),
+      ...(opts.claim ? { alegacao_do_maker: opts.claim } : {}),
     },
   })
   if (dispatch === 'exhausted') return { kind: 'park', reason: 'budget_calls_exhausted' }

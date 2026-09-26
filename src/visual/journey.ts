@@ -41,7 +41,7 @@ export const JOURNEY_FORMAT = [
   'Roteiro de navegador em .ade/journey.json: {"journeys":[{"criterio":"C1","steps":[...]}]}, uma jornada por critério que se vê na tela.',
   'Passos: {"goto":"/rota"}, {"click":ALVO}, {"fill":ALVO,"value":"texto"}, {"press":"Enter"} ou {"press":"Enter","target":ALVO}, {"upload":ALVO,"files":["imagem.png"]} (ALVO é o campo de arquivo ou o botão que abre o seletor; amostras: imagem.png, texto.txt, documento.pdf), {"expect_text":"texto"}, {"expect_visible":ALVO}, {"expect_hidden":ALVO}, {"expect_url":"trecho"}.',
   'ALVO é o que o usuário vê: {"role":"button","name":"Enviar"}, {"label":"Nome"}, {"text":"Salvo"} ou {"testid":"x"}. Comece por goto.',
-  'A tela sobe vazia, sem dados. Se o critério depende de dados, crie-os primeiro pela própria interface; se não der, use {"criterio":"Cx","needs_data":true,"steps":[]}.',
+  'A tela sobe no estado inicial do app, sem dados criados pela jornada: leia o código da tela para saber o que aparece ao abri-la. Se o critério depende de dados, crie-os primeiro pela própria interface; só se não der, use {"criterio":"Cx","needs_data":true,"steps":[]}. Roteiro sem passo nenhum não confere nada e volta para ser reescrito.',
 ].join('\n')
 
 // Amostras do motor para o verbo upload: o roteiro nunca aponta caminho do disco

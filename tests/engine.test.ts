@@ -1219,6 +1219,27 @@ describe('jornada de usuário no motor', () => {
     expect(official.journeys[0].steps).toHaveLength(2)
   }, 120_000)
 
+  // 26/09, missão real de anexos: a prova marcou os cinco critérios da tela como needs_data, sem nenhum passo, e a jornada
+  // não conferiu nada; a tela subia com o campo do pedido à mostra. Roteiro sem passo nenhum volta à prova uma vez, antes
+  // da primeira passada visual, para ela escrever os passos lendo o código da tela.
+  test('roteiro_sem_nenhum_passo_volta_a_prova_antes_da_primeira_passada_visual', async () => {
+    const { fixture, base } = uiProofFixture()
+    const makerFile = path.join(fixture.scenarioDir, 'maker.json')
+    const actions = JSON.parse(fs.readFileSync(makerFile, 'utf8'))
+    actions[0].files['.ade/journey.json'] = JSON.stringify({ journeys: [{ criterio: 'C1', needs_data: true, steps: [] }] })
+    actions.push({ ...base, files: { '.ade/journey.json': JSON.stringify(JOURNEY) } })
+    fs.writeFileSync(makerFile, JSON.stringify(actions))
+    const fqe = vi.fn().mockResolvedValue({ status: 'pass' })
+    const result = await runStory({ ...fixture.deps, runFrontendQuality: fqe } as any, fixture.input)
+    expect(result.status).toBe('delivered')
+    const official = JSON.parse(fs.readFileSync(path.join(fixture.missionDir, 'artifacts', 'journeys', 'ADE-T1.json'), 'utf8'))
+    expect(official).toEqual(JOURNEY)
+    const { events } = readJournal(path.join(fixture.missionDir, 'journal.jsonl'))
+    expect(events.filter((e) => e.kind === 'decision' && (e.data as any).decision === 'journey_rewritten').map((e) => (e.data as any).reason_to_rewrite)).toEqual(['sem_passos'])
+    const texts = packTexts(fixture.missionDir)
+    expect(texts.some((t) => t.includes('nenhum critério tem passos'))).toBe(true)
+  }, 120_000)
+
   test('jornada_ainda_falhando_no_fim_das_passadas_vai_ao_revisor_como_achado_bloqueante', async () => {
     const { fixture } = uiProofFixture()
     fs.writeFileSync(path.join(fixture.repo.dir, '.ade', 'config.json'), JSON.stringify({ visual: { max_rounds: 1 } }))
